@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Babel Security</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+
+<body>
+  <div class="container">
+
+    <!-- PANTALLA 1 — CARGA -->
+    <div id="pantalla-carga" class="pantalla">
+      <div class="logo-babel">BABEL</div>
+      <div class="tagline">CIFRADO · TRADUCCIÓN · LOCAL 100%</div>
+      <div id="status-text" class="status-bar">EJECUTANDO ANÁLISIS DE ENTORNO...</div>
+      <div class="loader-container">
+        <div class="loader-bar"></div>
+      </div>
+    </div>
+
+    <!-- PANTALLA 2 — DECISIÓN -->
+    <div id="pantalla-decision" class="pantalla hidden">
+      <div class="logo-babel small">BABEL</div>
+      <h2 class="subtitulo-babel" id="ui-bienvenido-sistema">BIENVENIDO AL SISTEMA</h2>
+      <p class="descripcion">¿Es tu primera vez o ya tienes un búnker?</p>
+      <div class="login-box">
+        <button type="button" onclick="mostrarPantalla('login')" class="btn-oro" id="ui-acceder-bunker">ACCEDER A BÚNKER
+          EXISTENTE</button>
+        <div class="separador">— O —</div>
+        <button type="button" onclick="mostrarPantalla('configuracion')" class="btn-secundario-oro">CREAR NUEVO
+          BÚNKER</button>
+      </div>
+    </div>
+
+    <!-- PANTALLA 3 — CREAR BÚNKER -->
+    <div id="pantalla-configuracion" class="pantalla hidden">
+      <div class="logo-babel small">BABEL</div>
+      <h2 class="subtitulo-babel">CONFIGURAR NUEVO BÚNKER</h2>
+      <div class="login-box">
+        <div class="input-grupo">
+          <label class="input-label">NOMBRE DE USUARIO</label>
+          <input type="text" id="username" placeholder="Tu nombre" class="input-vip">
+        </div>
+        <div class="input-grupo">
+          <label class="input-label">LLAVE MAESTRA <span class="hint">(mín. 12 caracteres)</span></label>
+          <div class="input-con-ojo">
+            <input type="password" id="master-key" placeholder="••••••••••••" class="input-vip">
+            <button type="button" class="btn-ojo" onclick="toggleContraseña('master-key')" title="Ver">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="input-grupo">
+          <label class="input-label">CONFIRMAR LLAVE MAESTRA</label>
+          <input type="password" id="master-key-confirm" placeholder="••••••••••••" class="input-vip">
+        </div>
+        <div class="input-grupo">
+          <label class="input-label">CONTRASEÑA DE USUARIO <span class="hint">(mín. 8 caracteres)</span></label>
+          <div class="input-con-ojo">
+            <input type="password" id="user-pass" placeholder="••••••••" class="input-vip">
+            <button type="button" class="btn-ojo" onclick="toggleContraseña('user-pass')" title="Ver">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="input-grupo">
+          <label class="input-label">CONFIRMAR CONTRASEÑA</label>
+          <input type="password" id="user-pass-confirm" placeholder="••••••••" class="input-vip">
+        </div>
+        <div class="advertencia-bunker">
+          ⚠ ADVERTENCIA: Si pierdes tu llave maestra, no existe forma de recuperar el acceso. Guárdala en un lugar
+          seguro.
+        </div>
+        <button type="button" onclick="crearBunker()" class="btn-oro">CREAR BÚNKER CIFRADO</button>
+        <button type="button" onclick="volverAtras()" class="btn-link">← VOLVER ATRÁS</button>
+        <p id="response-msg" class="msg-error hidden"></p>
+      </div>
+    </div>
+
+    <!-- PANTALLA 4 — LOGIN -->
+    <div id="pantalla-login" class="pantalla hidden">
+      <div class="logo-babel small">BABEL</div>
+      <h2 class="subtitulo-babel" id="ui-autenticacion-requerida">AUTENTICACIÓN REQUERIDA</h2>
+      <div class="login-box">
+        <div class="input-grupo">
+          <label class="input-label">USUARIO</label>
+          <input type="text" id="login-user" placeholder="Tu nombre" class="input-vip">
+        </div>
+        <div class="input-grupo">
+          <label class="input-label">LLAVE MAESTRA</label>
+          <div class="input-con-ojo">
+            <input type="password" id="login-pass" placeholder="••••••••••••" class="input-vip">
+            <button type="button" class="btn-ojo" onclick="toggleContraseña('login-pass')" title="Ver">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="input-grupo">
+          <label class="input-label">CONTRASEÑA DE USUARIO</label>
+          <div class="input-con-ojo">
+            <input type="password" id="login-pass-usuario" oninput="(window.__babelPassSesion=this.value)"
+              placeholder="••••••••" class="input-vip">
+            <button type="button" class="btn-ojo" onclick="toggleContraseña('login-pass-usuario')" title="Ver">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <button type="button" onclick="intentarAcceso()" class="btn-oro">DESBLOQUEAR BÚNKER</button>
+        <button type="button" onclick="mostrarPantalla('decision')" class="btn-link">← VOLVER ATRÁS</button>
+        <!-- Enlace recuperación — discreto -->
+        <button type="button" onclick="irARecuperacion()" class="btn-link"
+          style="font-size:0.6rem;opacity:0.4;margin-top:4px;letter-spacing:1px;">
+          ¿Olvidaste tu llave maestra? → Recuperar con frase
+        </button>
+        <p id="login-msg" class="msg-error hidden"></p>
+      </div>
+    </div>
+
+    <!-- PANTALLA 5 — PANEL PRINCIPAL -->
+    <div id="pantalla-principal" class="pantalla hidden" style="position:relative;">
+      <!-- Badge NLLB — punto discreto esquina superior derecha -->
+      <div id="nllb-badge" title="Estado NLLB"
+        style="position:absolute;top:16px;right:16px;width:8px;height:8px;border-radius:50%;background:#f59e0b;opacity:0.7;transition:background 0.5s,opacity 0.5s;">
+      </div>
+      <div class="logo-babel small">BABEL</div>
+      <p class="descripcion" id="bienvenida-usuario">Bienvenido</p>
+      <div class="panel-botones">
+        <button type="button" onclick="irATraduccion()" class="btn-panel">
+          <span class="panel-icono">⟳</span>
+          <span class="panel-texto" id="pantalla-texto-traducir">TRADUCIR</span>
+        </button>
+        <button type="button" onclick="irAArchivos()" class="btn-panel">
+          <span class="panel-icono">◫</span>
+          <span class="panel-texto" id="pantalla-texto-archivos">ARCHIVOS</span>
+        </button>
+        <button type="button" onclick="mostrarPantalla('comunicacion')" class="btn-panel">
+          <span class="panel-icono">⇄</span>
+          <span class="panel-texto" id="pantalla-texto-p2p">P2P</span>
+        </button>
+      </div>
+      <button type="button" onclick="mostrarPantalla('ajustes')" class="btn-link"
+        style="margin-top:20px;letter-spacing:2px;" id="pantalla-texto-ajustes">⚙ AJUSTES</button>
+      <button type="button" onclick="cerrarSesion()" class="btn-link" style="margin-top:8px"
+        id="pantalla-texto-cerrar">CERRAR SESIÓN</button>
+      <!-- Ver frase desde dentro de la app -->
+      <button type="button" onclick="verFraseApp()" class="btn-link"
+        style="margin-top:6px;font-size:0.6rem;opacity:0.35;letter-spacing:1px;">
+        VER FRASE DE RECUPERACIÓN
+      </button>
+    </div>
+
+    <!-- PANTALLA 6 — TRADUCCIÓN CHAT -->
+    <div id="pantalla-traduccion" class="pantalla pantalla-chat hidden">
+
+      <div class="chat-header">
+        <div class="chat-header-izquierda">
+          <button type="button" onclick="volverAlPanel()" class="btn-link">← PANEL</button>
+          <button type="button" onclick="toggleSidebar()" class="btn-sidebar" id="btn-sidebar"
+            title="Configuración">☰</button>
+        </div>
+        <div class="chat-header-centro">
+          <span class="chat-titulo">BABEL</span>
+          <span class="chat-subtitulo">TRADUCCIÓN · LOCAL 100%</span>
+        </div>
+        <div class="chat-header-derecha">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <select id="selector-origen" class="selector-idioma" onchange="cambiarIdiomaDesdeSelectores()"
+              style="min-width:80px;">
+              <option value="es">ES</option>
+              <option value="en">EN</option>
+              <option value="fr">FR</option>
+              <option value="de">DE</option>
+              <option value="ar">AR</option>
+              <option value="ru">RU</option>
+              <option value="zh">ZH</option>
+            </select>
+            <span style="color:var(--dorado);font-size:0.8rem;">→</span>
+            <select id="selector-destino" class="selector-idioma" onchange="cambiarIdiomaDesdeSelectores()"
+              style="min-width:80px;">
+              <option value="en">EN</option>
+              <option value="es">ES</option>
+              <option value="fr">FR</option>
+              <option value="de">DE</option>
+              <option value="ar">AR</option>
+              <option value="ru">RU</option>
+              <option value="zh">ZH</option>
+            </select>
+          </div>
+          <button type="button" onclick="borrarChat()" class="btn-borrar-chat" id="ui-borrar-chat">BORRAR CHAT</button>
+        </div>
+      </div>
+
+      <div class="chat-layout">
+        <div id="chat-sidebar" class="chat-sidebar hidden">
+          <div class="sidebar-titulo" id="ui-configuracion">CONFIGURACIÓN</div>
+          <div class="sidebar-opcion">
+            <div class="sidebar-opcion-info">
+              <span class="sidebar-opcion-nombre" id="ui-borrar-al-salir">BORRAR AL SALIR</span>
+              <span class="sidebar-opcion-desc" id="ui-borrar-al-salir-desc">Limpia el chat al volver al panel</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-borrado" checked onchange="toggleBorradoAutomatico(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="sidebar-opcion sidebar-opcion-disabled">
+            <div class="sidebar-opcion-info">
+              <span class="sidebar-opcion-nombre" id="ui-email-auto">EMAIL AUTO</span>
+              <span class="sidebar-opcion-desc" id="ui-proximamente">Próximamente</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" disabled>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="sidebar-opcion">
+            <div class="sidebar-opcion-info">
+              <span class="sidebar-opcion-nombre" id="ui-diccionario">DICCIONARIO</span>
+              <span class="sidebar-opcion-desc" id="ui-vocabulario-activo">Vocabulario activo</span>
+            </div>
+            <select class="sidebar-select" id="tipo-diccionario" onchange="cambiarCategoriaDiccionario(this.value)">
+              <option value="todos">TODOS</option>
+              <option value="legal">LEGAL</option>
+              <option value="medico">MÉDICO</option>
+              <option value="financiero">FINANCIERO</option>
+              <option value="inmobiliario">INMOBILIARIO</option>
+              <option value="empresarial">EMPRESARIAL</option>
+            </select>
+          </div>
+          <div class="sidebar-version">BABEL v0.1.0 · LOCAL</div>
+        </div>
+
+        <div class="chat-area">
+          <div id="chat-mensajes" class="chat-mensajes">
+            <div id="chat-mensajes" class="chat-mensajes">
+              <div class="chat-burbuja babel">
+                <div class="burbuja-icono">B</div>
+                <div class="burbuja-contenido">
+                  <p class="burbuja-texto">Sistema activo. Escribe cualquier término o frase, o usa <strong>+</strong>
+                    para subir un documento PDF, DOCX o TXT.</p>
+                  <span class="burbuja-hora">BABEL · AES-256-GCM</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="chat-procesando" class="chat-procesando hidden">
+            <div class="procesando-puntos"><span></span><span></span><span></span></div>
+            <span class="procesando-texto">TRADUCIENDO</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-input-barra">
+        <button type="button" onclick="seleccionarArchivo()" class="btn-mas" title="Subir documento">+</button>
+        <input type="file" id="input-archivo" accept=".pdf,.docx,.txt" style="display:none"
+          onchange="manejarSeleccion(event)">
+        <textarea id="chat-input" class="chat-input" placeholder="Escribe un término o frase..."
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensaje();}"
+          autocomplete="off" rows="1"></textarea>
+        <button type="button" onclick="enviarMensaje()" class="btn-enviar" title="Traducir">⟳</button>
+      </div>
+
+    </div>
+
+
+    <!-- PANTALLA — ARCHIVOS GUARDADOS SIN TRADUCIR -->
+    <div id="pantalla-archivos-guardados" class="pantalla pantalla-archivos hidden">
+      <div class="archivos-header">
+        <button type="button" onclick="mostrarPantalla('principal')" class="btn-link" id="ui-volver-archivos">←
+          VOLVER</button>
+        <div class="chat-header-centro">
+          <span class="chat-titulo">BABEL</span>
+          <span id="ui-traducidos-guardados">TRADUCIDOS Y GUARDADOS</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button type="button" id="btn-ver-sel-g" onclick="verArchivoGuardado()" class="hidden"
+            style="font-family:'Rajdhani',sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+            onmouseleave="this.style.background='transparent'">◫ VER ARCHIVO</button>
+          <button type="button" id="btn-eliminar-sel-g" onclick="eliminarSeleccionadosGuardados()" class="hidden"
+            style="font-family:'Rajdhani',sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
+            onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
+          <button type="button" onclick="cargarArchivosGuardados()" class="btn-secundario-oro"
+            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px" id="ui-actualizar">↺
+            <button type="button" onclick="abrirCarpetaBabelGuardados()" class="btn-secundario-oro"
+              style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;opacity:0.7;"
+              title="Abrir carpeta Guardados en Finder" id="ui-finder">◫ FINDER</button>
+            <button type="button" onclick="exportarTodo()" class="btn-secundario-oro"
+              style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
+              title="Exportar todos los archivos a Descargas" id="ui-exportar-todo">↓ EXPORTAR TODO</button>
+            <button type="button" onclick="abrirImportarGuardado()" class="btn-secundario-oro"
+              style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;" id="ui-importar">+ IMPORTAR</button>
+            <input type="file" id="input-archivo-guardado" accept=".pdf,.docx,.txt" style="display:none"
+              onchange="manejarSeleccionGuardado(event)">
+        </div>
+      </div>
+
+      <div style="padding:12px 24px 20px;display:flex;gap:8px;">
+        <div
+          style="flex:1;display:flex;align-items:center;gap:10px;background:transparent;border:1px solid var(--borde);border-radius:2px;padding:10px 16px;transition:border-color 0.2s;">
+          <span style="color:var(--texto-secundario);font-size:1rem;opacity:0.5;flex-shrink:0;">⌕</span>
+          <input type="text" id="input-buscar-g" placeholder="BUSCAR ARCHIVO..."
+            oninput="filtrarArchivosGuardados(this.value)"
+            style="flex:1;background:transparent;border:none;outline:none;color:var(--texto-principal);font-family:'Rajdhani',sans-serif;font-size:0.72rem;letter-spacing:2px;min-width:0;">
+        </div>
+      </div>
+
+      <div class="archivos-layout">
+        <div class="buzones-panel">
+          <div class="buzones-header">
+            <span class="buzones-titulo" id="ui-buzones">BUZONES</span>
+            <button type="button" onclick="mostrarInputBuzonGuardado()" class="btn-buzon-nuevo"
+              title="Nuevo buzón">+</button>
+          </div>
+          <div id="input-buzon-nuevo-g" class="input-buzon-nuevo hidden">
+            <input type="text" id="nombre-buzon-input-g" class="input-buzon" placeholder="Nombre del buzón..."
+              maxlength="30">
+            <div class="input-buzon-botones">
+              <button type="button" onclick="confirmarBuzonGuardado()" class="btn-buzon-confirmar">✓</button>
+              <button type="button" onclick="cancelarBuzonGuardado()" class="btn-buzon-cancelar">✕</button>
+            </div>
+          </div>
+          <div id="lista-buzones-g" class="buzones-lista">
+            <div class="buzon-item activo" onclick="seleccionarBuzonGuardados('todos')">
+              <span class="buzon-icono">◫</span>
+              <span class="buzon-nombre">TODOS</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="archivos-divisor"></div>
+
+        <div class="archivos-columna" style="flex:1;">
+          <div class="archivos-columna-titulo">
+            <span id="ui-archivos-titulo">ARCHIVOS</span>
+            <span class="archivos-count" id="count-guardados">0 archivos</span>
+          </div>
+          <div id="lista-guardados" class="archivos-lista">
+            <div class="archivos-vacio">
+              <p id="ui-no-archivos">No hay archivos guardados</p>
+              <p class="archivos-vacio-sub" id="ui-arrastra">Arrastra documentos aquí para cifrarlos</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- PANTALLA 8 — P2P -->
+    <div id="pantalla-comunicacion" class="pantalla pantalla-p2p hidden">
+
+      <div class="archivos-header">
+        <button type="button" onclick="volverDeP2P()" class="btn-link">← PANEL</button>
+        <div class="chat-header-centro">
+          <span class="chat-titulo">BABEL</span>
+          <span id="p2p-subtitulo" class="chat-subtitulo">RED P2P · CIFRADO LOCAL</span>
+        </div>
+        <div style="width:120px"></div>
+      </div>
+
+      <div id="p2p-selector-inicial" class="p2p-selector-inicial">
+        <button type="button" class="p2p-btn-grande" onclick="cambiarModoP2P('chat')">
+          <span class="p2p-btn-grande-icono">◈</span>
+          <span class="p2p-btn-grande-label">CHAT</span>
+          <span class="p2p-btn-grande-desc">Mensajes cifrados en red local</span>
+        </button>
+        <button type="button" class="p2p-btn-grande" onclick="cambiarModoP2P('email')">
+          <span class="p2p-btn-grande-icono">✉</span>
+          <span class="p2p-btn-grande-label">EMAIL</span>
+          <span class="p2p-btn-grande-desc">Enviar archivos cifrados por correo</span>
+        </button>
+      </div>
+
+      <div id="panel-p2p-chat" class="p2p-panel hidden" style="flex-direction:column;padding:0;align-items:stretch;">
+
+        <!-- ESTADO DE CONEXIÓN -->
+        <div class="p2p-estado" style="padding:12px 24px;border-bottom:1px solid rgba(201,168,76,0.1);">
+          <div class="p2p-estado-dot" id="p2p-dot"></div>
+          <span id="p2p-estado-texto"
+            style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;letter-spacing:2px;color:var(--texto-secundario);">SIN
+            CONEXIÓN</span>
+        </div>
+
+        <!-- FASE 1: ACCIONES INICIALES -->
+        <div id="p2p-fase-inicio"
+          style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:20px;padding:32px 24px;">
+
+          <!-- MODO SERVIDOR -->
+          <div
+            style="width:100%;max-width:400px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.15);border-radius:3px;padding:20px 24px;">
+            <div
+              style="font-family:'Rajdhani',sans-serif;font-size:0.62rem;letter-spacing:3px;color:var(--dorado);margin-bottom:12px;">
+              MODO SERVIDOR — RECIBIR</div>
+            <button type="button" class="btn-oro" onclick="iniciarP2P()"
+              style="width:100%;font-size:0.7rem;padding:12px;">INICIAR SERVIDOR</button>
+            <div id="p2p-mi-info" style="display:none;margin-top:16px;">
+              <div
+                style="font-family:'Rajdhani',sans-serif;font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);margin-bottom:8px;">
+                COMPARTE CON EL OTRO BABEL:</div>
+              <div
+                style="background:rgba(0,0,0,0.3);border:1px solid rgba(201,168,76,0.2);border-radius:2px;padding:12px 16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <span
+                    style="font-family:'Rajdhani',sans-serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">TU
+                    IP</span>
+                  <span id="p2p-mi-ip"
+                    style="font-family:'Cormorant Garamond',serif;font-size:1rem;color:var(--dorado);letter-spacing:0.1em;">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- MODO CLIENTE -->
+          <div
+            style="width:100%;max-width:400px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.15);border-radius:3px;padding:20px 24px;">
+            <div
+              style="font-family:'Rajdhani',sans-serif;font-size:0.62rem;letter-spacing:3px;color:var(--dorado);margin-bottom:12px;">
+              MODO CLIENTE — CONECTAR</div>
+            <button type="button" class="btn-oro" onclick="buscarDispositivos()"
+              style="width:100%;font-size:0.7rem;padding:12px;">
+              ⊕ BUSCAR DISPOSITIVOS
+            </button>
+            <div id="p2p-lista-peers" style="display:none;margin-top:12px;display:flex;flex-direction:column;gap:6px;">
+            </div>
+            <div style="margin-top:12px;display:flex;gap:8px;">
+              <input type="text" id="p2p-ip-input" placeholder="O escribe IP manualmente..." class="input-vip"
+                style="flex:1;font-size:0.7rem;letter-spacing:2px;">
+              <button type="button" class="btn-secundario-oro" onclick="conectarP2P()"
+                style="font-size:0.7rem;padding:10px 20px;white-space:nowrap;">IR</button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- FASE 2: CARGANDO -->
+        <div id="p2p-fase-carga"
+          style="display:none;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:20px;">
+          <div style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;letter-spacing:4px;color:var(--dorado);">
+            INTERCONECTANDO</div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span
+              style="width:6px;height:6px;border-radius:50%;background:var(--dorado);animation:p2p-pulso 1.2s infinite 0s;display:inline-block;"></span>
+            <span
+              style="width:6px;height:6px;border-radius:50%;background:var(--dorado);animation:p2p-pulso 1.2s infinite 0.4s;display:inline-block;"></span>
+            <span
+              style="width:6px;height:6px;border-radius:50%;background:var(--dorado);animation:p2p-pulso 1.2s infinite 0.8s;display:inline-block;"></span>
+          </div>
+          <div
+            style="font-family:'Cormorant Garamond',serif;font-size:0.8rem;color:var(--texto-secundario);opacity:0.5;">
+            Estableciendo túnel mTLS cifrado...</div>
+        </div>
+
+        <!-- FASE 3: CHAT CONECTADO -->
+        <div id="p2p-fase-chat" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+          <div id="p2p-mensajes"
+            style="flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:10px;"></div>
+          <div
+            style="padding:12px 16px;border-top:1px solid rgba(201,168,76,0.1);display:flex;gap:8px;align-items:flex-end;">
+            <textarea id="p2p-input" placeholder="Mensaje cifrado..."
+              style="flex:1;background:transparent;border:1px solid var(--borde);border-radius:2px;color:var(--texto-principal);font-family:'Rajdhani',sans-serif;font-size:0.72rem;letter-spacing:1px;padding:10px 14px;resize:none;height:40px;outline:none;"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensajeP2P();}"></textarea>
+            <button type="button" onclick="enviarMensajeP2P()" class="btn-oro"
+              style="font-size:0.65rem;padding:10px 16px;height:40px;">ENVIAR</button>
+          </div>
+          <div style="padding:8px 16px 16px;display:flex;justify-content:center;">
+            <button type="button" onclick="destruirSesionP2P()"
+              style="background:transparent;border:1px solid rgba(255,80,80,0.3);color:rgba(255,80,80,0.6);font-family:'Rajdhani',sans-serif;font-size:0.58rem;letter-spacing:3px;padding:8px 20px;cursor:pointer;transition:all 0.2s;"
+              onmouseenter="this.style.borderColor='rgba(255,80,80,0.7)';this.style.color='rgba(255,80,80,0.9)'"
+              onmouseleave="this.style.borderColor='rgba(255,80,80,0.3)';this.style.color='rgba(255,80,80,0.6)'">
+              ⊗ DESTRUIR SESIÓN — BORRADO TOTAL
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <div id="panel-p2p-email" class="p2p-panel hidden"
+        style="padding:0;flex-direction:row;align-items:stretch;justify-content:flex-start;">
+        <div class="email-sidebar">
+          <div class="email-sidebar-header">
+            <span class="email-sidebar-titulo">BANDEJA</span>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select id="email-idioma" onchange="cambiarIdiomaEmail(this.value)"
+                style="background:transparent;border:1px solid var(--borde);color:var(--texto-secundario);font-family:'Rajdhani',sans-serif;font-size:0.6rem;letter-spacing:1px;padding:4px 6px;cursor:pointer;">
+                <option value="ninguno">SIN TRADUCIR</option>
+                <option value="es_en">ES → EN</option>
+                <option value="en_es">EN → ES</option>
+              </select>
+              <button type="button" onclick="abrirComponerEmail()" class="email-btn-nuevo"
+                title="Nuevo email">＋</button>
+            </div>
+          </div>
+          <div id="email-lista" class="email-lista">
+            <div class="email-vacio">
+              <p>Sin correos</p>
+              <p style="font-size:0.6rem;opacity:0.5;margin-top:4px;">Configura SMTP para recibir</p>
+            </div>
+          </div>
+          <button type="button" onclick="toggleConfigSmtp()" class="email-btn-config">⚙ CONFIGURAR SMTP/IMAP</button>
+        </div>
+
+        <div class="archivos-divisor"></div>
+
+        <div class="email-lector" id="email-lector">
+          <div id="email-lector-vacio" class="email-lector-vacio">
+            <span style="font-size:2rem;opacity:0.2;">✉</span>
+            <p
+              style="font-family:'Cormorant Garamond',serif;color:var(--texto-secundario);letter-spacing:2px;font-size:0.8rem;margin-top:12px;">
+              SELECCIONA UN CORREO</p>
+          </div>
+          <div id="email-compositor" class="hidden" style="display:flex;flex-direction:column;height:100%;">
+            <div class="email-compositor-header">
+              <span
+                style="font-family:'Cormorant Garamond',serif;color:var(--dorado);letter-spacing:3px;font-size:0.9rem;">NUEVO
+                MENSAJE</span>
+              <button type="button" onclick="cerrarCompositor()"
+                style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;font-size:1rem;">✕</button>
+            </div>
+            <div class="email-compositor-campos">
+              <div class="email-campo-fila">
+                <span class="email-campo-label">PARA</span>
+                <input type="email" id="comp-destinatario" placeholder="destinatario@despacho.com"
+                  class="email-campo-input">
+              </div>
+              <div class="email-campo-fila">
+                <span class="email-campo-label">ASUNTO</span>
+                <input type="text" id="comp-asunto" placeholder="Documento confidencial — Babel"
+                  class="email-campo-input">
+              </div>
+              <div class="email-campo-fila" style="border-bottom:none;">
+                <span class="email-campo-label">ARCHIVO</span>
+                <div id="comp-archivo-zona" onclick="seleccionarArchivoEmail()"
+                  style="flex:1;border:1px dashed var(--borde);border-radius:2px;padding:10px 14px;cursor:pointer;font-family:'Rajdhani',sans-serif;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);transition:border-color 0.2s;"
+                  onmouseenter="this.style.borderColor='var(--dorado)'"
+                  onmouseleave="this.style.borderColor='var(--borde)'">
+                  <span id="comp-archivo-nombre">◫ Adjuntar archivo</span>
+                </div>
+                <input type="file" id="input-archivo-email" style="display:none;"
+                  onchange="manejarSeleccionArchivoEmail(event)">
+              </div>
+            </div>
+            <textarea id="comp-cuerpo" placeholder="Escribe tu mensaje aquí..."
+              style="flex:1;background:transparent;border:none;border-top:1px solid var(--borde);color:var(--texto-principal);font-family:'Cormorant Garamond',serif;font-size:0.9rem;padding:16px;resize:none;outline:none;line-height:1.7;min-height:160px;"></textarea>
+            <div class="email-compositor-footer">
+              <div id="comp-estado"
+                style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);">
+              </div>
+              <button type="button" onclick="enviarEmail()" class="btn-oro"
+                style="font-size:0.7rem;padding:10px 24px;">ENVIAR CIFRADO ✉</button>
+            </div>
+          </div>
+          <div id="email-visor" class="hidden" style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+            <div class="email-visor-header">
+              <div>
+                <div id="visor-asunto"
+                  style="font-family:'Cormorant Garamond',serif;color:var(--dorado);font-size:1.1rem;letter-spacing:1px;">
+                </div>
+                <div id="visor-remitente"
+                  style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);margin-top:4px;">
+                </div>
+              </div>
+              <button type="button" onclick="cerrarVisorEmail()"
+                style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;">✕</button>
+            </div>
+            <div id="visor-cuerpo"
+              style="flex:1;padding:24px;overflow-y:auto;font-family:'Times New Roman',serif;font-size:0.95rem;color:var(--texto-principal);line-height:1.8;white-space:pre-wrap;">
+            </div>
+          </div>
+        </div>
+
+        <div id="panel-config-smtp" class="email-config-panel hidden">
+          <div class="email-config-header">
+            <span
+              style="font-family:'Rajdhani',sans-serif;font-size:0.7rem;letter-spacing:3px;color:var(--dorado);">CONFIGURACIÓN</span>
+            <button type="button" onclick="toggleConfigSmtp()"
+              style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;">✕</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:12px;padding:0 16px 16px;">
+            <div class="input-grupo">
+              <label class="input-label">SERVIDOR SMTP</label>
+              <input type="text" id="smtp-servidor" style="display:none;">
+            </div>
+            <div class="input-grupo">
+              <label class="input-label">SERVIDOR IMAP</label>
+              <input type="text" id="imap-servidor" style="display:none;">
+            </div>
+            <div class="input-grupo">
+              <label class="input-label">USUARIO</label>
+              <input type="text" id="smtp-usuario" placeholder="tu@email.com" class="input-vip"
+                style="font-size:0.75rem;" oninput="autorellenarSmtp(this.value)">
+            </div>
+          </div>
+          <div class="input-grupo">
+            <label class="input-label">CONTRASEÑA APP</label>
+            <div class="input-con-ojo">
+              <input type="password" id="smtp-password" placeholder="••••••••" class="input-vip"
+                style="font-size:0.75rem;">
+              <button type="button" class="btn-ojo" onclick="toggleContraseña('smtp-password')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <button type="button" onclick="guardarConfigSmtp()" class="btn-oro"
+            style="font-size:0.7rem;padding:10px;">GUARDAR Y CIFRAR</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- PANTALLA 9 — FRASE BIP39 (aparece justo tras crear el búnker) -->
+  <!-- ============================================================ -->
+  <div id="pantalla-frase" class="pantalla hidden">
+    <div class="logo-babel small">BABEL</div>
+    <h2 class="subtitulo-babel" id="ui-frase-recuperacion">FRASE DE RECUPERACIÓN</h2>
+    <div class="login-box" style="max-width:560px; text-align:center;">
+      <div class="advertencia-bunker" style="margin-bottom:20px;">
+        ⚠ Guarda estas 12 palabras en orden exacto y en papel. Son la única forma de recuperar tu búnker.
+      </div>
+      <div id="frase-grid" class="frase-bip39-grid"></div>
+      <button type="button" onclick="cerrarFrase()" class="btn-oro" style="margin-top:24px;width:100%;">
+        HE GUARDADO MI FRASE → IR AL LOGIN
+      </button>
+      <button onclick="imprimirFrase()" class="btn-oro"
+        style="margin-top:12px;width:100%;background:transparent;border:1px solid var(--dorado);color:var(--dorado);">
+        🖨️ IMPRIMIR EN PDF
+      </button>
+      <p id="frase-msg" class="msg-error hidden"></p>
+    </div>
+  </div>
+  <!-- ============================================================ -->
+  <!-- PANTALLA 10 — RECUPERAR CON FRASE BIP39                     -->
+  <!-- ============================================================ -->
+  <div id="pantalla-recuperacion" class="pantalla hidden">
+    <div class="logo-babel small">BABEL</div>
+    <h2 class="subtitulo-babel" id="ui-recuperar-bunker">RECUPERAR BÚNKER</h2>
+    <div class="login-box" style="max-width:520px;">
+      <p class="descripcion" style="font-size:0.75rem;margin-bottom:20px;opacity:0.7;text-align:center;">
+        Introduce tus 12 palabras en el mismo orden en que las guardaste.
+      </p>
+      <div class="recovery-input-grid">
+        <div class="recovery-input-item"><span class="recovery-numero">1</span><input type="text" id="rec-palabra-1"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">2</span><input type="text" id="rec-palabra-2"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">3</span><input type="text" id="rec-palabra-3"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">4</span><input type="text" id="rec-palabra-4"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">5</span><input type="text" id="rec-palabra-5"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">6</span><input type="text" id="rec-palabra-6"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">7</span><input type="text" id="rec-palabra-7"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">8</span><input type="text" id="rec-palabra-8"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">9</span><input type="text" id="rec-palabra-9"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">10</span><input type="text" id="rec-palabra-10"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">11</span><input type="text" id="rec-palabra-11"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        <div class="recovery-input-item"><span class="recovery-numero">12</span><input type="text" id="rec-palabra-12"
+            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+      </div>
+      <button type="button" onclick="intentarRecuperacion()" class="btn-oro" style="margin-top:20px;width:100%;">
+        VERIFICAR FRASE
+      </button>
+      <button type="button" onclick="mostrarPantalla('login')" class="btn-link">
+        ← VOLVER AL LOGIN
+      </button>
+
+    </div>
+  </div>
+
+
+
+
+
+  <!-- PANTALLA AJUSTES -->
+  <div id="pantalla-ajustes" class="pantalla hidden"
+    style="position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--fondo);z-index:100;padding:40px 20px;">
+    <div class="logo-babel small" style="text-align:center;width:100%;">BABEL</div>
+    <h2 class="subtitulo-babel" style="text-align:center;width:100%;" id="ui-ajustes-titulo">AJUSTES</h2>
+    <div style="width:100%;max-width:560px;display:flex;flex-direction:column;gap:0;">
+
+      <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+        <div class="ajuste-label" id="ui-tema">TEMA</div>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button type="button" id="tema-negro" onclick="cambiarTema('negro')"
+            style="flex:1;padding:16px 4px;border:1px solid #c5a059;background:#09090b;color:#c5a059;font-family:'Rajdhani',sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
+            NEGRO / DORADO
+          </button>
+          <button type="button" id="tema-blanco2" onclick="cambiarTema('blanco-dorado')"
+            style="flex:1;padding:16px 4px;border:1px solid #b8972e;background:#ffffff;color:#b8972e;font-family:'Rajdhani',sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
+            BLANCO / DORADO
+          </button>
+          <button type="button" id="tema-crema" onclick="cambiarTema('crema')"
+            style="flex:1;padding:16px 4px;border:1px solid #ffffff;background:#1a1a1a;color:#ffffff;font-family:'Rajdhani',sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
+            NEGRO / BLANCO
+          </button>
+          <button type="button" id="tema-blanco-negro" onclick="cambiarTema('blanco-negro')"
+            style="flex:1;padding:16px 4px;border:1px solid #1a1a1a;background:#ffffff;color:#1a1a1a;font-family:'Rajdhani',sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
+            BLANCO / NEGRO
+          </button>
+        </div>
+      </div>
+
+      <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+        <div class="ajuste-label" id="ui-idioma-interfaz">IDIOMA DE LA INTERFAZ</div>
+        <select id="selector-idioma-ui" class="input-vip" style="margin-top:12px;width:100%;"
+          onchange="cambiarIdiomaUI(this.value)">
+          <option value="es">Español</option>
+          <option value="en">English</option>
+          <option value="fr">Français</option>
+          <option value="ar">العربية</option>
+        </select>
+      </div>
+
+      <button type="button" onclick="mostrarPantalla('principal')" class="btn-link"
+        style="margin-top:28px;text-align:center;" id="ui-volver-panel">← VOLVER AL PANEL</button>
+    </div>
+  </div>
+
+  </div><!-- /container -->
+
+  <!-- ============================================================ -->
+  <!-- MODAL VISOR SIMPLE                                           -->
+  <!-- ============================================================ -->
+  <div id="modal-visor" class="hidden" style="
+    position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.85);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="background:var(--fondo-panel,#0d0d0d);border:1px solid var(--dorado,#c9a84c);
+      border-radius:4px;width:100%;max-width:720px;max-height:80vh;
+      display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:16px 24px;border-bottom:1px solid rgba(201,168,76,0.2);">
+        <span id="modal-visor-nombre" style="font-family:'Cormorant Garamond',serif;
+          color:var(--dorado,#c9a84c);font-size:0.85rem;letter-spacing:0.15em;"></span>
+        <button type="button" onclick="cerrarVisor()" style="background:transparent;border:none;
+          color:var(--dorado,#c9a84c);font-size:1.2rem;cursor:pointer;opacity:0.7;padding:0 4px;">✕</button>
+      </div>
+      <div id="modal-visor-contenido" style="padding:32px 40px;overflow-y:auto;
+  max-height:calc(80vh - 60px);font-family:'Times New Roman',Times,serif;
+  font-size:0.95rem;color:var(--texto-principal,#e8e0d0);line-height:1.9;
+  word-break:break-word;letter-spacing:0.02em;"></div>
+    </div>
+  </div>
+  <!-- ============================================================ -->
+  <!-- MODAL VISOR PARALELO                                         -->
+  <!-- ============================================================ -->
+  <div id="modal-paralelo" class="hidden" style="
+    position:fixed;inset:0;z-index:1001;background:rgba(0,0,0,0.9);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="max-width:95vw;max-height:95vh; background:var(--fondo-panel,#0d0d0d);border:1px solid
+      var(--dorado,#c9a84c); border-radius:4px;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:14px 24px;border-bottom:1px solid rgba(201,168,76,0.2);flex-shrink:0;">
+        <span style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;
+          letter-spacing:3px;color:var(--dorado);">VISOR DE ARCHIVOS</span>
+        <button type="button" onclick="cerrarVisorParalelo()" style="background:transparent;border:none;
+          color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
+      </div>
+      <div style="display:flex;flex:1;overflow:hidden;min-height:0;">
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+          <div id="par-titulo-1" style="padding:10px 24px;flex-shrink:0;
+            border-bottom:1px solid rgba(201,168,76,0.15);font-family:'Cormorant Garamond',serif;
+            font-size:0.8rem;color:var(--dorado);letter-spacing:0.12em;">—</div>
+          <div id="par-contenido-1" style="padding:28px 32px;overflow-y:auto;flex:1;
+            font-family:'Times New Roman',serif;font-size:0.93rem;
+            color:var(--texto-principal,#e8e0d0);line-height:1.9;
+            white-space:pre-wrap;word-break:break-word;"></div>
+        </div>
+        <div id="par-divisor" style="display:none;width:1px;flex-shrink:0;background:rgba(201,168,76,0.2);"></div>
+        <div id="par-panel-2" style="display:none;flex:1;flex-direction:column;min-width:0;">
+          <div id="par-titulo-2" style="padding:10px 24px;flex-shrink:0;
+            border-bottom:1px solid rgba(201,168,76,0.15);font-family:'Cormorant Garamond',serif;
+            font-size:0.8rem;color:var(--dorado);letter-spacing:0.12em;">—</div>
+          <div id="par-contenido-2" style="padding:28px 32px;overflow-y:auto;flex:1;
+            font-family:'Times New Roman',serif;font-size:0.93rem;
+            color:var(--texto-principal,#e8e0d0);line-height:1.9;
+            white-space:pre-wrap;word-break:break-word;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL VER FRASE — desde panel principal con sesión activa    -->
+  <!-- ============================================================ -->
+  <div id="modal-frase-app" class="hidden" style="
+    position:fixed;inset:0;z-index:1002;background:rgba(0,0,0,0.92);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="width:100%;max-width:480px;background:var(--fondo-panel,#0d0d0d);
+      border:1px solid var(--dorado);border-radius:4px;
+      display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:14px 24px;border-bottom:1px solid rgba(201,168,76,0.2);">
+        <span style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;
+          letter-spacing:3px;color:var(--dorado);">FRASE DE RECUPERACIÓN</span>
+        <button type="button" onclick="cerrarVerFrase()" style="background:transparent;border:none;
+          color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
+      </div>
+      <div style="padding:24px;">
+        <p style="font-family:'Rajdhani',sans-serif;font-size:0.62rem;letter-spacing:1px;
+          color:var(--texto-secundario);margin-bottom:16px;text-align:center;opacity:0.6;">
+          NO HAGAS CAPTURAS · GUÁRDALAS EN PAPEL
+        </p>
+        <div id="modal-frase-grid" class="frase-bip39-grid"></div>
+      </div>
+    </div>
+  </div>
+  <!-- MODAL TÉRMINOS DE USO — primera vez -->
+  <div id="modal-terminos" class="hidden" style="
+  position:fixed;inset:0;z-index:2000;
+  background:rgba(0,0,0,0.95);
+  display:flex;align-items:center;justify-content:center;
+  padding:24px;">
+    <div style="
+    width:100%;max-width:480px;
+    background:#0d0d0d;
+    border:1px solid var(--dorado,#c5a059);
+    border-radius:4px;
+    overflow:hidden;">
+
+      <!-- Cabecera -->
+      <div style="padding:24px 28px 16px;border-bottom:1px solid rgba(197,160,89,0.15);">
+        <div class="logo-babel small" style="margin-bottom:8px;">BABEL</div>
+        <p style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;
+        letter-spacing:3px;color:var(--texto-secundario,#a1a1aa);">
+          ACUERDO DE LICENCIA
+        </p>
+      </div>
+
+      <!-- Texto con scroll para que el checkbox siempre sea visible -->
+      <div style="padding:20px 28px;overflow-y:auto;max-height:240px;
+        scrollbar-width:thin;scrollbar-color:var(--dorado-oscuro) transparent;">
+
+        <p style="font-family:'Rajdhani',sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">1. NATURALEZA DEL SOFTWARE</p>
+        <p style="font-family:'Cormorant Garamond',serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:14px;">
+          Babel procesa todos tus documentos exclusivamente en tu dispositivo.
+          Ningún texto, archivo ni dato abandona tu ordenador. Babel Technologies S.L.
+          no tiene acceso a tus documentos, no los almacena y no los puede recuperar.
+        </p>
+
+        <p style="font-family:'Rajdhani',sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">2. TU RESPONSABILIDAD</p>
+        <p style="font-family:'Cormorant Garamond',serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:14px;">
+          Eres el único responsable de guardar tu llave maestra y tu frase de recuperación
+          de 12 palabras. Si las pierdes, el acceso a tus datos es matemáticamente imposible
+          de recuperar. Babel Technologies S.L. no dispone de ningún mecanismo de recuperación.
+        </p>
+
+        <p style="font-family:'Rajdhani',sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">3. LO QUE BABEL NO HACE</p>
+        <p style="font-family:'Cormorant Garamond',serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:14px;">
+          Babel no recopila datos de uso ni telemetría. No envía información a servidores
+          externos. No puede ser obligada a entregar datos que no existen en ningún servidor.
+        </p>
+
+        <p style="font-family:'Rajdhani',sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">4. LICENCIA</p>
+        <p style="font-family:'Cormorant Garamond',serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:14px;">
+          Licencia de uso personal e intransferible. Queda prohibida la redistribución,
+          ingeniería inversa o sublicencia sin autorización escrita de Babel Technologies S.L.
+        </p>
+
+        <p style="font-family:'Rajdhani',sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">5. LIMITACIÓN DE RESPONSABILIDAD</p>
+        <p style="font-family:'Cormorant Garamond',serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:14px;">
+          Babel Technologies S.L. no responde por pérdida de datos causada por fallo del
+          dispositivo, pérdida de credenciales o uso indebido. El cifrado AES-256-GCM cumple
+          los estándares técnicos del RGPD para tratamiento local de datos confidenciales.
+        </p>
+
+        <p style="font-family:'Rajdhani',sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">6. LEY APLICABLE</p>
+        <p style="font-family:'Cormorant Garamond',serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;">
+          Estos términos se rigen por la legislación española. Cualquier controversia
+          se somete a los juzgados de Marbella, con renuncia a cualquier otro fuero.
+        </p>
+      </div>
+
+      <!-- Checkbox y botón -->
+      <div style="padding:0 28px 24px;display:flex;flex-direction:column;gap:16px;">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;
+        font-family:'Rajdhani',sans-serif;font-size:0.7rem;letter-spacing:1px;
+        color:var(--texto-secundario,#a1a1aa);line-height:1.5;">
+          <input type="checkbox" id="terminos-checkbox" style="accent-color:var(--dorado);width:15px;height:15px;
+          cursor:pointer;flex-shrink:0;margin-top:2px;">
+          He leído y acepto los términos de uso y la política de privacidad de Babel Security.
+        </label>
+        <button type="button" onclick="aceptarTerminos()" class="btn-oro" style="width:100%;">
+          ACEPTAR Y CONTINUAR
+        </button>
+        <p style="font-family:'Rajdhani',sans-serif;font-size:0.58rem;letter-spacing:1px;
+        color:var(--texto-secundario);opacity:0.35;text-align:center;margin:0;">
+          BABEL TECHNOLOGIES S.L. · MARBELLA · v1.0
+        </p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MODAL RENOMBRAR BUZÓN -->
+  <div id="modal-renombrar" class="hidden" style="
+    position:fixed;inset:0;z-index:2000;
+    background:rgba(0,0,0,0.85);
+    display:flex;align-items:center;justify-content:center;">
+    <div style="
+      background:#0d0d0d;
+      border:1px solid var(--dorado,#c5a059);
+      border-radius:4px;
+      padding:24px;
+      min-width:280px;">
+      <p style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;
+        letter-spacing:3px;color:var(--dorado);margin-bottom:12px;">
+        RENOMBRAR BUZÓN
+      </p>
+      <input id="input-renombrar-buzon" type="text" style="width:100%;background:transparent;border:1px solid var(--borde);
+        color:var(--texto-principal);padding:8px;font-size:0.8rem;
+        border-radius:2px;outline:none;box-sizing:border-box;
+        font-family:'Rajdhani',sans-serif;letter-spacing:1px;" />
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+        <button type="button" onclick="cerrarModalRenombrar()" style="background:transparent;border:1px solid var(--borde);
+          color:var(--texto-secundario);padding:6px 14px;cursor:pointer;
+          font-size:0.7rem;border-radius:2px;font-family:'Rajdhani',sans-serif;
+          letter-spacing:1px;">CANCELAR</button>
+        <button type="button" onclick="confirmarRenombrar()" style="background:var(--dorado);border:none;color:#000;
+          padding:6px 14px;cursor:pointer;font-size:0.7rem;font-weight:700;
+          border-radius:2px;font-family:'Rajdhani',sans-serif;letter-spacing:1px;">
+          GUARDAR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL SOLICITUD P2P -->
+  <div id="modal-solicitud-p2p" class="hidden" style="
+    position:fixed;inset:0;z-index:3000;
+    background:rgba(0,0,0,0.9);
+    display:flex;align-items:center;justify-content:center;">
+    <div style="
+      background:#0d0d0d;
+      border:1px solid var(--dorado,#c5a059);
+      border-radius:4px;
+      padding:28px;
+      min-width:300px;
+      text-align:center;">
+      <p style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;
+        letter-spacing:3px;color:var(--dorado);margin-bottom:8px;">
+        SOLICITUD DE CONEXIÓN
+      </p>
+      <p id="solicitud-nombre" style="font-family:'Cormorant Garamond',serif;
+        font-size:1.1rem;color:var(--texto-principal);margin-bottom:20px;">—</p>
+      <p style="font-family:'Rajdhani',sans-serif;font-size:0.58rem;
+        letter-spacing:1px;color:var(--texto-secundario);margin-bottom:20px;">
+        quiere conectarse a tu Babel
+      </p>
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button type="button" onclick="rechazarSolicitudP2P()" style="background:transparent;border:1px solid rgba(255,80,80,0.4);
+          color:rgba(255,80,80,0.8);padding:8px 20px;cursor:pointer;
+          font-family:'Rajdhani',sans-serif;font-size:0.7rem;letter-spacing:2px;
+          border-radius:2px;">RECHAZAR</button>
+        <button type="button" onclick="aceptarSolicitudP2P()" style="background:var(--dorado);border:none;color:#000;
+          padding:8px 20px;cursor:pointer;font-family:'Rajdhani',sans-serif;
+          font-size:0.7rem;letter-spacing:2px;font-weight:700;border-radius:2px;">
+          ACEPTAR</button>
+      </div>
+    </div>
+  </div>
+  <div id="modal-renombrar-archivo" class="hidden" style="
+  position:fixed;inset:0;z-index:1100;background:rgba(0,0,0,0.7);
+  display:flex;align-items:center;justify-content:center;">
+    <div style="background:var(--fondo-panel,#0d0d0d);border:1px solid var(--dorado);
+    border-radius:4px;padding:28px 32px;width:100%;max-width:380px;">
+      <div style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;letter-spacing:3px;
+      color:var(--dorado);margin-bottom:16px;">RENOMBRAR ARCHIVO</div>
+      <input id="input-renombrar-archivo" type="text" style="width:100%;background:transparent;
+      border:1px solid var(--borde);color:var(--texto-principal);
+      font-family:'Rajdhani',sans-serif;font-size:0.8rem;padding:10px 12px;
+      letter-spacing:1px;box-sizing:border-box;margin-bottom:16px;"
+        onkeydown="if(event.key==='Enter')confirmarRenombrarArchivo();if(event.key==='Escape')cerrarModalRenombrarArchivo();">
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button type="button" onclick="cerrarModalRenombrarArchivo()" style="background:transparent;
+        border:1px solid var(--borde);color:var(--texto-secundario);font-family:'Rajdhani',sans-serif;
+        font-size:0.6rem;letter-spacing:2px;padding:8px 16px;cursor:pointer;">CANCELAR</button>
+        <button type="button" onclick="confirmarRenombrarArchivo()" style="background:var(--dorado);
+        border:none;color:#000;font-family:'Rajdhani',sans-serif;
+        font-size:0.6rem;letter-spacing:2px;padding:8px 16px;cursor:pointer;font-weight:700;">GUARDAR</button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+  <div
+    style="position:fixed;bottom:4px;right:8px;opacity:0.25;font-size:0.55rem;letter-spacing:1.5px;font-family:'Rajdhani',sans-serif;pointer-events:none;">
+    100% LOCAL · CERO SERVIDORES · CERO EMISIONES
+  </div>
+</body>
+
+
+</html>
