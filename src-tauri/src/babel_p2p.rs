@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
+
 
 // ============================================================
 // BABEL P2P - COMUNICACIÓN DIRECTA ENTRE INSTANCIAS v4
@@ -15,7 +15,7 @@
 // TLS: rustls 0.22 con StreamOwned (síncrono, sin tokio)
 
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-use rustls::{ClientConfig, RootCertStore, ServerConfig};
+use rustls::{ClientConfig, ServerConfig};
 use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 use zeroize::Zeroizing;
@@ -89,39 +89,6 @@ pub struct PeerDescubierto {
     pub puerto: u16,
     pub nombre: String,
 }
-/// Identidad de este Babel en la red local
-pub struct IdentidadLocal {
-    pub nombre: String,
-    pub ip: String,
-    pub puerto: u16,
-}
-
-impl IdentidadLocal {
-    pub fn obtener() -> Self {
-        let nombre = format!(
-            "Babel-{}",
-            hostname::get()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string()
-        );
-
-        // Obtiene la IP local sin mandar nada a internet
-        let ip = std::net::UdpSocket::bind("0.0.0.0:0")
-            .and_then(|s| {
-                s.connect("8.8.8.8:80")?;
-                s.local_addr()
-            })
-            .map(|a| a.ip().to_string())
-            .unwrap_or_else(|_| "desconocida".to_string());
-
-        Self {
-            nombre,
-            ip,
-            puerto: PUERTO_TRANSFERENCIA,
-        }
-    }
-}
 // ============================================================
 // CERTIFICADOS - Gestión de identidad mTLS
 // ============================================================
@@ -173,59 +140,6 @@ impl GestorCertificados {
         Ok((cert, clave.to_vec()))
     }
 
-    /// Añade el certificado de otro Babel a la lista de confianza.
-    pub fn añadir_peer(nombre: &str, cert_der: &[u8]) -> Result<(), String> {
-        // Validamos el nombre para evitar path traversal
-        if nombre.chars().any(|c| c == '/' || c == '\\' || c == '.') {
-            return Err("Nombre de peer invalido".to_string());
-        }
-        let ruta = peers_dir().join(format!("{}.der", nombre));
-        fs::write(&ruta, cert_der)
-            .map_err(|e| format!("Error guardando cert de {}: {}", nombre, e))?;
-        log::info!("[BABEL] Peer {} añadido a la lista de confianza.", nombre);
-        Ok(())
-    }
-
-    /// Carga todos los certificados de peers de confianza.
-    pub fn cargar_peers_confianza() -> Result<Vec<Vec<u8>>, String> {
-    let entradas =
-        fs::read_dir(peers_dir()).map_err(|e| format!("Error leyendo peers: {}", e))?;
-
-    let mut certs = Vec::new();
-    for entrada in entradas.flatten() {
-        let path = entrada.path();
-        let es_der = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e == "der")
-            .unwrap_or(false);
-        if !es_der {
-            continue;
-        }
-        match fs::read(&path) {
-            Ok(c) => certs.push(c),
-            Err(e) => log::error!("[P2P] Error leyendo cert: {}", e),
-        }
-    }
-    Ok(certs)
-}
-    /// Lista los nombres de peers de confianza.
-    pub fn listar_peers() -> Vec<String> {
-        fs::read_dir(peers_dir())
-            .ok()
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| {
-                let p = e.path();
-                if p.extension()?.to_str()? == "der" {
-                    p.file_stem()?.to_str().map(|s| s.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
 }
 
 
@@ -653,10 +567,6 @@ impl ClienteP2P {
         }
     }
 
-    pub fn buscar_en_red(&self) -> Result<Vec<PeerDescubierto>, String> {
-        DescubrimientoRed::buscar_peers(2000)
-    }
-
     pub fn enviar(&self, peer: &PeerDescubierto, ruta_archivo: &str) -> Result<(), String> {
         let datos = fs::read(ruta_archivo)
             .map_err(|e| format!("No se pudo leer {}: {}", ruta_archivo, e))?;
@@ -742,162 +652,3 @@ impl ClienteP2P {
     }
 }
 
-// ============================================================
-// TRANSFERENCIA - Menú de usuario
-// ============================================================
-
-/// Menú P2P - se llama desde ejecutar_sistema() con comando "p2p"
-pub fn menu_p2p(subclave_hex: &str) {
-    print!("  > ");
-    io::stdout().flush().ok();
-    let mut opcion = String::new();
-    io::stdin().read_line(&mut opcion).ok();
-
-    match opcion.trim() {
-        "1" => modo_recibir(subclave_hex),
-        "2" => modo_enviar(subclave_hex),
-        "3" => mostrar_peers(),
-        "4" => añadir_peer_interactivo(),
-        "0" => {}
-        _ => log::error!("[P2P] Opción no válida."),
-    }
-}
-
-fn modo_recibir(subclave_hex: &str) {
-    log::info!("[P2P] Iniciando servidor...");
-
-    if let Err(e) = GestorCertificados::generar_o_cargar() {
-        log::error!("[P2P] Error con certificados: {}", e);
-        return;
-    }
-
-    // Servidor de descubrimiento UDP en background
-    let hostname = hostname::get()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    DescubrimientoRed::iniciar_servidor(format!("Babel-{}", hostname));
-
-    let clave = subclave_hex.to_string();
-    thread::spawn(move || {
-        let servidor = ServidorP2P::nuevo(&clave);
-        if let Err(e) = servidor.iniciar() {
-            log::error!("[P2P] Error en servidor P2P: {}", e);
-        }
-    });
-
-    log::info!("[OK] Servidor P2P activo en background.");
-    log::info!("Archivos recibidos -> recibidos_p2p/");
-}
-
-fn modo_enviar(subclave_hex: &str) {
-    if let Err(e) = GestorCertificados::generar_o_cargar() {
-        log::error!("[P2P] Error con certificados: {}", e);
-        return;
-    }
-
-    let cliente = ClienteP2P::nuevo(subclave_hex);
-    log::info!("[P2P] Buscando Babel en la red...");
-
-    let peers = match cliente.buscar_en_red() {
-        Ok(p) => p,
-        Err(e) => {
-            log::error!("[P2P] Error: {}", e);
-            return;
-        }
-    };
-
-    let peers_final = if peers.is_empty() {
-        log::error!("[P2P] No se encontró ningún Babel automáticamente.");
-        print!("  ¿Introducir IP manualmente? (s/n): ");
-        io::stdout().flush().ok();
-        let mut resp = String::new();
-        io::stdin().read_line(&mut resp).ok();
-        if resp.trim().to_lowercase() != "s" {
-            return;
-        }
-
-        print!("  IP: ");
-        io::stdout().flush().ok();
-        let mut ip = String::new();
-        io::stdin().read_line(&mut ip).ok();
-
-        print!("  Nombre: ");
-        io::stdout().flush().ok();
-        let mut nombre = String::new();
-        io::stdin().read_line(&mut nombre).ok();
-
-        vec![DescubrimientoRed::peer_manual(ip.trim(), nombre.trim())]
-    } else {
-        peers
-    };
-
-    log::info!(" Babel disponibles:");
-    for (i, p) in peers_final.iter().enumerate() {
-        log::info!("[{}] {} - {}", i + 1, p.nombre, p.ip);
-    }
-    log::info!("[0] Cancelar");
-
-    print!("  Destinatario: ");
-    io::stdout().flush().ok();
-    let mut sel = String::new();
-    io::stdin().read_line(&mut sel).ok();
-
-    let idx: usize = match sel.trim().parse::<usize>() {
-        Ok(n) if n >= 1 && n <= peers_final.len() => n - 1,
-        Ok(0) => return,
-        _ => {
-            log::error!("[P2P] Selección inválida.");
-            return;
-        }
-    };
-
-    print!("  Ruta del .babel a enviar: ");
-    io::stdout().flush().ok();
-    let mut ruta = String::new();
-    io::stdin().read_line(&mut ruta).ok();
-    let ruta = ruta.trim();
-
-    if !Path::new(ruta).exists() {
-        log::error!("[P2P] Archivo no encontrado: {}", ruta);
-        return;
-    }
-
-    match cliente.enviar(&peers_final[idx], ruta) {
-        Ok(_) => log::info!("[OK] Enviado correctamente."),
-        Err(e) => log::error!("[P2P] Error: {}", e),
-    }
-}
-
-fn mostrar_peers() {
-    let peers: Vec<String> = vec![]; // GestorCertificados::listar_peers();
-    if peers.is_empty() {
-        log::info!(" No hay peers registrados. Usa [4] para añadir uno.");
-    } else {
-        log::info!(" Peers de confianza:");
-        for p in &peers {
-            log::info!("  - {}", p);
-        }
-    }
-}
-
-fn añadir_peer_interactivo() {
-    log::info!(" El otro Babel debe darte su babel_p2p/certificado.der");
-    print!("  Nombre del peer: ");
-    io::stdout().flush().ok();
-    let mut nombre = String::new();
-    io::stdin().read_line(&mut nombre).ok();
-
-    print!("  Ruta del certificado.der: ");
-    io::stdout().flush().ok();
-    let mut ruta = String::new();
-    io::stdin().read_line(&mut ruta).ok();
-
-    match fs::read(ruta.trim()) {
-        Ok(cert) => match GestorCertificados::añadir_peer(nombre.trim(), &cert) {
-            Ok(_) => log::info!("[OK] Peer {} añadido.", nombre.trim()),
-            Err(e) => log::error!("[P2P] Error: {}", e),
-        },
-        Err(e) => log::error!("[P2P] No se pudo leer el certificado: {}", e),
-    }
-}

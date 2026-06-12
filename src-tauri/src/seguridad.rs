@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
+
 
 // ============================================================
 // SISTEMA BABEL — NÚCLEO DE SEGURIDAD ELITE v10
@@ -14,9 +14,7 @@
 //   CAPA 6 — Integridad:    HMAC-SHA256 sobre archivos del búnker
 //   CAPA 7 — Auditoría:     Cada evento de seguridad → auditoria.babel cifrado
 
-use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
 use crate::babel_path;
 
 // --- Criptografía ---
@@ -30,13 +28,10 @@ use hmac::{Hmac, Mac};
 use num_cpus;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use sysinfo::{ProcessExt, System, SystemExt};
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::{Zeroize, Zeroizing};
 
-
-// Tipo alias para HMAC-SHA256 — más legible
-type HmacSha256 = Hmac<Sha256>;
 
 // ============================================================
 // ESTRUCTURAS PÚBLICAS
@@ -60,36 +55,6 @@ pub struct UsuarioBabel {
     pub creditos: u32,
 }
 
-/// Metadatos de una palabra en el diccionario
-#[derive(Serialize, Deserialize)]
-pub struct DatoPalabra {
-    pub trad: String,
-    pub cat: String,
-    pub genero: String,
-}
-
-/// Bóveda de documentos cifrados en memoria
-#[derive(Serialize, Deserialize)]
-pub struct BovedaFantasma {
-    pub documentos: HashMap<String, Vec<u8>>,
-    pub version: String,
-}
-
-impl BovedaFantasma {
-    pub fn nueva() -> Self {
-        Self {
-            documentos: HashMap::new(),
-            version: "1.0".to_string(),
-        }
-    }
-}
-
-/// Sesión activa del búnker — la clave maestra derivada se borra al hacer drop
-#[derive(Zeroize, ZeroizeOnDrop)]
-pub struct SesionBunker {
-    pub clave_maestra_derivada: Vec<u8>,
-}
-
 /// Resultado de un análisis de seguridad del entorno
 pub struct ResultadoSeguridad {
     /// El sistema es seguro para operar
@@ -98,18 +63,6 @@ pub struct ResultadoSeguridad {
     pub amenazas: Vec<String>,
     /// Advertencias que no bloquean pero deben registrarse
     pub advertencias: Vec<String>,
-}
-
-pub struct GestionUsuarios {
-    pub _lista: HashMap<String, UsuarioBabel>,
-}
-
-impl GestionUsuarios {
-    pub fn nuevo() -> Self {
-        Self {
-            _lista: HashMap::new(),
-        }
-    }
 }
 
 // ============================================================
@@ -228,7 +181,7 @@ pub fn descifrar_documento(paquete: Vec<u8>, clave_hex: &str) -> Result<String, 
         .decrypt(nonce, ciphertext)
         .map_err(|_| "Descifrado fallido — clave incorrecta o archivo manipulado".to_string())?;
 
-    let mut plaintext_z = Zeroizing::new(plaintext);
+    let plaintext_z = Zeroizing::new(plaintext);
     let resultado = String::from_utf8(plaintext_z.to_vec())
         .map_err(|_| "El contenido descifrado no es UTF-8 válido".to_string());
     resultado
@@ -263,93 +216,6 @@ pub fn verificar_password(password: &str, hash: &str) -> bool {
                 .is_ok()
         })
         .unwrap_or(false)
-}
-
-// ============================================================
-// CAPA 3 — INTEGRIDAD DE ARCHIVOS (HMAC-SHA256)
-// ============================================================
-
-/// Calcula el HMAC-SHA256 de un archivo en disco.
-///
-/// HMAC es diferente de un simple hash SHA256:
-///   - SHA256(archivo) → cualquiera puede calcularlo y falsificarlo
-///   - HMAC-SHA256(clave, archivo) → solo quien tenga la clave puede verificarlo
-///
-/// Usamos la subclave de auditoría como clave del HMAC, así solo Babel
-/// puede verificar que sus propios archivos no han sido tocados.
-pub fn calcular_hmac_archivo(ruta: &str, clave_hmac: &[u8]) -> Result<Vec<u8>, String> {
-    let contenido = fs::read(ruta).map_err(|e| format!("No se pudo leer '{}': {}", ruta, e))?;
-
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(clave_hmac)
-        .map_err(|_| "Clave HMAC inválida".to_string())?;
-
-    mac.update(&contenido);
-    Ok(mac.finalize().into_bytes().to_vec())
-}
-
-/// Verifica que un archivo del búnker no ha sido modificado externamente.
-///
-/// Compara el HMAC actual del archivo contra el HMAC guardado previamente.
-/// Si no coinciden → alguien tocó el archivo fuera de Babel.
-pub fn verificar_integridad_archivo(
-    ruta: &str,
-    hmac_esperado: &[u8],
-    clave_hmac: &[u8],
-) -> Result<bool, String> {
-    let contenido = fs::read(ruta).map_err(|e| format!("No se pudo leer '{}': {}", ruta, e))?;
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(clave_hmac)
-        .map_err(|_| "Clave HMAC inválida".to_string())?;
-    mac.update(&contenido);
-    // verify_slice usa subtle::ConstantTimeEq internamente — tiempo constante real.
-    Ok(mac.verify_slice(hmac_esperado).is_ok())
-}
-
-/// Escanea todos los archivos .babel del directorio actual y verifica su integridad.
-/// Devuelve la lista de archivos que han sido modificados externamente.
-pub fn escanear_integridad_bunker(
-    clave_hmac: &[u8],
-    hmacs_guardados: &HashMap<String, Vec<u8>>,
-) -> Result<Vec<String>, String> {
-    let mut archivos_comprometidos = Vec::new();
-
-    // Leemos el directorio actual buscando archivos .babel
-    let entradas =
-        fs::read_dir(".").map_err(|e| format!("No se pudo leer el directorio: {}", e))?;
-
-    for entrada in entradas.flatten() {
-        let path = entrada.path();
-
-        // Solo analizamos archivos con extensión .babel
-        let es_babel = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e == "babel")
-            .unwrap_or(false);
-
-        if !es_babel || !path.is_file() {
-            continue;
-        }
-
-        let nombre = path.to_string_lossy().to_string();
-
-        // Si tenemos un HMAC guardado para este archivo, verificamos
-        if let Some(hmac_esperado) = hmacs_guardados.get(&nombre) {
-            match verificar_integridad_archivo(&nombre, hmac_esperado, clave_hmac) {
-                Ok(true) => {} // Íntegro — todo bien
-                Ok(false) => {
-                    // El archivo fue modificado fuera de Babel
-                    archivos_comprometidos.push(nombre);
-                }
-                Err(e) => {
-                    // No se pudo verificar — lo tratamos como comprometido
-                    archivos_comprometidos.push(format!("{} (error: {})", nombre, e));
-                }
-            }
-        }
-        // Si no hay HMAC guardado es un archivo nuevo — se registrará en la próxima sesión
-    }
-
-    Ok(archivos_comprometidos)
 }
 
 // ============================================================
@@ -453,10 +319,10 @@ impl AntiKeylogger {
         let mut s = System::new_all();
         s.refresh_all();
 
-        let mut amenazas_reales: Vec<String> = Vec::new();
-        let mut advertencias: Vec<String> = Vec::new();
+        let amenazas_reales: Vec<String> = Vec::new();
+        let advertencias: Vec<String> = Vec::new();
 
-        for (pid, proceso) in s.processes() {
+        for (_pid, proceso) in s.processes() {
             let nombre = proceso.name().to_lowercase();
             // Si está en lista blanca, lo saltamos
             if Self::es_proceso_legitimo(&nombre) {
@@ -481,8 +347,7 @@ impl AntiKeylogger {
     /// sin privilegios de administrador. Root solo añade capacidad de escaneo
     /// de procesos privilegiados del kernel — informa pero no bloquea.
     pub fn analizar_entorno() -> ResultadoSeguridad {
-        #[cfg(debug_assertions)]
-        {
+        if cfg!(debug_assertions) {
             return ResultadoSeguridad {
                 seguro: true,
                 amenazas: vec![],
@@ -494,7 +359,7 @@ impl AntiKeylogger {
         let mut advertencias = Vec::new();
 
         // Escaneamos procesos sospechosos — funciona sin root
-        let (amenazas_proc, advertencias_proc) = Self::escanear_procesos();
+        let (amenazas_proc, _advertencias_proc) = Self::escanear_procesos();
         for proceso in &amenazas_proc {
             amenazas.push(format!("Proceso sospechoso: {}", proceso));
         }
@@ -518,12 +383,6 @@ impl AntiKeylogger {
             amenazas,
             advertencias,
         }
-    }
-
-    /// Función de compatibilidad con el código existente.
-    /// Devuelve true si el entorno está limpio (sin amenazas detectadas).
-    pub fn verificar_seguridad_teclado() -> bool {
-        Self::analizar_entorno().seguro
     }
 
     /// Análisis completo con registro en auditoría cifrada.
@@ -859,10 +718,6 @@ impl AntiSandbox {
         }
     }
 
-    /// Versión rápida — devuelve true si el entorno parece real.
-    pub fn entorno_es_real() -> bool {
-        Self::analizar_entorno().seguro
-    }
 }
 
 // ============================================================
@@ -907,66 +762,6 @@ pub fn registrar_evento_seguridad(evento: &str, clave_hex: &str) {
     escribir_evento_cifrado(evento, clave_hex, ".babel/auditoria.bck");
 }
 
-/// Lee y descifra todos los eventos de auditoría.
-/// Solo funciona con la subclave correcta — sin ella devuelve error.
-pub fn leer_auditoria(clave_hex: &str) -> Result<Vec<String>, String> {
-    let datos =
-        fs::read("auditoria.babel").map_err(|_| "No se encontró auditoria.babel".to_string())?;
-
-    let mut eventos = Vec::new();
-    let mut pos = 0usize;
-
-    // Leemos los eventos uno a uno usando las longitudes guardadas
-    while pos + 4 <= datos.len() {
-        // Leemos los 4 bytes de longitud
-        let len = u32::from_le_bytes([datos[pos], datos[pos + 1], datos[pos + 2], datos[pos + 3]])
-            as usize;
-        pos += 4;
-
-        if pos + len > datos.len() {
-            break;
-        }
-
-        let bloque = datos[pos..pos + len].to_vec();
-        pos += len;
-
-        // Intentamos descifrar el bloque
-        match descifrar_documento(bloque, clave_hex) {
-            Ok(texto) => eventos.push(texto),
-            Err(_) => eventos.push("[evento no descifrable]".to_string()),
-        }
-    }
-
-    Ok(eventos)
-}
-
-// ============================================================
-// UTILIDADES INTERNAS
-// ============================================================
-
-/// Calcula el SHA-256 de un archivo como huella digital rápida.
-/// Para verificación de integridad simple sin clave (no autentica — solo detecta cambios).
-pub fn sha256_archivo(ruta: &str) -> Result<String, String> {
-    let contenido = fs::read(ruta).map_err(|e| format!("No se pudo leer '{}': {}", ruta, e))?;
-
-    let mut hasher = Sha256::new();
-    hasher.update(&contenido);
-    Ok(hex::encode(hasher.finalize()))
-}
-
-/// Verifica que una ruta existe y es un archivo legible.
-/// Devuelve error descriptivo en lugar de crashear.
-pub fn verificar_ruta_accesible(ruta: &str) -> Result<(), String> {
-    let path = Path::new(ruta);
-    if !path.exists() {
-        return Err(format!("El archivo '{}' no existe", ruta));
-    }
-    if !path.is_file() {
-        return Err(format!("'{}' no es un archivo", ruta));
-    }
-    Ok(())
-}
-
 // ============================================================
 // CAPA 1B — RECUPERACIÓN CON FRASE BIP39
 // ============================================================
@@ -986,16 +781,6 @@ pub fn derivar_clave_recuperacion(palabras: &[String]) -> Result<Zeroizing<[u8; 
 
 // Clave fija derivada del sistema — nadie la conoce
 const BLOQUEO_SECRET: &[u8] = b"babel-bloqueo-interno-v1";
-
-pub fn escribir_bloqueo(ts: i64) -> Result<(), String> {
-    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(BLOQUEO_SECRET)
-        .map_err(|e| e.to_string())?;
-    mac.update(ts.to_string().as_bytes());
-    let firma = hex::encode(mac.finalize().into_bytes());
-    let contenido = format!("{}:{}", ts, firma);
-    fs::write(babel_path("bloqueo.tmp"), contenido)
-        .map_err(|e| e.to_string())
-}
 
 pub fn leer_bloqueo() -> Option<i64> {
     let contenido = fs::read_to_string(babel_path("bloqueo.tmp")).ok()?;

@@ -3,7 +3,7 @@
     windows_subsystem = "windows"
 )]
 
-#![allow(dead_code, unused_imports)]
+
 
 mod babel_p2p;
 mod bip39_words;
