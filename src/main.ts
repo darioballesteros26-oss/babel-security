@@ -333,7 +333,6 @@ async function crearBunker(): Promise<void> {
     await invoke<string>("crear_acceso_bunker", { maestra, usuario, pass });
 
     mostrarMensaje("response-msg", "GENERANDO FRASE DE RECUPERACIÓN...", false);
-    console.log("passUsuario:", pass);
     // Generar y mostrar la frase BIP39 antes de ir al login
     const palabras = await invoke<string[]>("generar_frase_recuperacion", { maestra, passUsuario: pass });
     limpiarCamposSensibles();
@@ -811,7 +810,6 @@ async function confirmarRenombrarArchivo(): Promise<void> {
   try {
     await invoke("renombrar_archivo", { ruta: _renombraArchivoRuta, nombreNuevo });
     await cargarArchivosGuardados();
-    await cargarArchivosGuardados();
     mostrarToast("Archivo renombrado", false);
   } catch (e) {
     mostrarToast("Error al renombrar", true);
@@ -1204,7 +1202,6 @@ async function confirmarRenombrar(): Promise<void> {
   try {
     if (esArchivo) {
       await invoke("renombrar_archivo", { ruta: _renombraArchivoRuta, nombreNuevo });
-      await cargarArchivosGuardados();
       await cargarArchivosGuardados();
     } else if (esGuardado) {
       await invoke("renombrar_buzon_guardado", { id: _renombraViejoG, nombreNuevo });

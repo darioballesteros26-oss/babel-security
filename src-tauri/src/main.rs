@@ -411,6 +411,9 @@ fn cambiar_categoria_diccionario(
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
 
     let idioma = sesion
         .idioma
@@ -523,6 +526,9 @@ fn traducir_texto(
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
 
     let dict = sesion
         .diccionario
@@ -554,6 +560,23 @@ fn guardar_documento_sin_traducir(
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+
+    let nombre_seguro = std::path::Path::new(&nombre_archivo)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("Nombre de archivo inválido")?
+        .to_string();
+    let ext = std::path::Path::new(&nombre_seguro)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    if !["pdf", "docx", "txt", "png", "jpg", "jpeg"].contains(&ext.as_str()) {
+        return Err(format!("Tipo de archivo no permitido: .{}", ext));
+    }
 
     let id_usuario = sesion
         .usuario

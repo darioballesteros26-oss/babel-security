@@ -464,7 +464,7 @@ impl ServidorP2P {
 
         // Si el archivo es un mensaje de texto - no lo guardamos en disco
         // lo metemos en el buffer de mensajes entrantes
-        if nombre_seguro == "mensaje.txt " {
+        if nombre_seguro == "mensaje.txt" {
             if let Ok(texto) = String::from_utf8(datos.to_vec()) {
                 if let Ok(mut msgs) = MENSAJES_ENTRANTES.lock() {
                     msgs.push(texto);
