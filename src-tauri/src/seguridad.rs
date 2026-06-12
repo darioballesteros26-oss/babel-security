@@ -1,5 +1,3 @@
-
-
 // ============================================================
 // SISTEMA BABEL — NÚCLEO DE SEGURIDAD ELITE v10
 // ============================================================
@@ -14,8 +12,8 @@
 //   CAPA 6 — Integridad:    HMAC-SHA256 sobre archivos del búnker
 //   CAPA 7 — Auditoría:     Cada evento de seguridad → auditoria.babel cifrado
 
-use std::fs;
 use crate::babel_path;
+use std::fs;
 
 // --- Criptografía ---
 use aes_gcm::aead::{Aead, KeyInit};
@@ -31,7 +29,6 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use sysinfo::{ProcessExt, System, SystemExt};
 use zeroize::{Zeroize, Zeroizing};
-
 
 // ============================================================
 // ESTRUCTURAS PÚBLICAS
@@ -185,7 +182,6 @@ pub fn descifrar_documento(paquete: Vec<u8>, clave_hex: &str) -> Result<String, 
     let resultado = String::from_utf8(plaintext_z.to_vec())
         .map_err(|_| "El contenido descifrado no es UTF-8 válido".to_string());
     resultado
-
 }
 
 // ============================================================
@@ -420,7 +416,8 @@ impl AntiKeylogger {
         if resultado.seguro {
             log::warn!("[OK] Entorno seguro. Babel operativo.");
         } else {
-            log::warn!("[BABEL]
+            log::warn!(
+                "[BABEL]
                  [ALERTA] {} amenaza(s) detectada(s). Ver auditoria.babel.",
                 resultado.amenazas.len()
             );
@@ -717,7 +714,6 @@ impl AntiSandbox {
             advertencias,
         }
     }
-
 }
 
 // ============================================================
@@ -778,18 +774,21 @@ pub fn derivar_clave_recuperacion(palabras: &[String]) -> Result<Zeroizing<[u8; 
     Ok(clave)
 }
 
-
 // Clave fija derivada del sistema — nadie la conoce
 const BLOQUEO_SECRET: &[u8] = b"babel-bloqueo-interno-v1";
 
 pub fn leer_bloqueo() -> Option<i64> {
     let contenido = fs::read_to_string(babel_path("bloqueo.tmp")).ok()?;
     let partes: Vec<&str> = contenido.trim().splitn(2, ':').collect();
-    if partes.len() != 2 { return None; }
+    if partes.len() != 2 {
+        return None;
+    }
     let ts: i64 = partes[0].parse().ok()?;
     let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(BLOQUEO_SECRET).ok()?;
     mac.update(ts.to_string().as_bytes());
     let firma_esperada = hex::encode(mac.finalize().into_bytes());
-    if firma_esperada != partes[1] { return None; }
+    if firma_esperada != partes[1] {
+        return None;
+    }
     Some(ts)
 }

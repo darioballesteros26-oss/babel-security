@@ -3,8 +3,6 @@
     windows_subsystem = "windows"
 )]
 
-
-
 mod babel_p2p;
 mod bip39_words;
 mod seguridad;
@@ -154,8 +152,7 @@ fn validar_ruta_en(ruta: &str, base: std::path::PathBuf) -> Result<(), String> {
     let canonical_ruta = std::path::Path::new(ruta)
         .canonicalize()
         .map_err(|_| "Ruta inválida.".to_string())?;
-    let canonical_base = base.canonicalize()
-        .map_err(|_| "Error base.".to_string())?;
+    let canonical_base = base.canonicalize().map_err(|_| "Error base.".to_string())?;
     if !canonical_ruta.starts_with(&canonical_base) {
         return Err("Ruta no autorizada.".into());
     }
@@ -200,7 +197,7 @@ fn verificar_entorno_seguro() -> Result<String, String> {
     // Licencia por hardware — vincula Babel al número de serie del Mac.
     // Primera vez: crea licencia.babel con el hash del serial.
     // Siguientes veces: verifica que el serial coincide. Si no, acceso denegado.
-    
+
     #[cfg(target_os = "macos")]
     let serial = std::process::Command::new("system_profiler")
         .args(["SPHardwareDataType"])
@@ -334,13 +331,13 @@ fn verificar_login(
 ) -> Result<bool, String> {
     // Comprobar si hay bloqueo activo
     if let Some(ts) = seguridad::leer_bloqueo() {
-    let restante = (ts + 600) - chrono::Local::now().timestamp();
-    if restante > 0 {
-        return Err(format!("Bloqueado. Espera {} segundos.", restante));
-    } else {
-        let _ = fs::remove_file(&babel_path("bloqueo.tmp"));
+        let restante = (ts + 600) - chrono::Local::now().timestamp();
+        if restante > 0 {
+            return Err(format!("Bloqueado. Espera {} segundos.", restante));
+        } else {
+            let _ = fs::remove_file(&babel_path("bloqueo.tmp"));
+        }
     }
-}
 
     let cifrado = fs::read(&babel_path("usuarios.babel"))
         .map_err(|_| "No se encontró el búnker.".to_string())?;
@@ -459,7 +456,7 @@ fn traducir_documento(
         .to_string();
     let ruta_temp = tmp_path(&nombre_solo);
     fs::write(&ruta_temp, &contenido).map_err(|e| format!("Error guardando temporal: {}", e))?;
-    let  contenido_limpio = Zeroizing::new(contenido);
+    let contenido_limpio = Zeroizing::new(contenido);
     drop(contenido_limpio);
 
     let id_usuario = sesion
@@ -473,11 +470,10 @@ fn traducir_documento(
         .unwrap_or_default()
         .as_secs();
 
-let nombre_base = std::path::Path::new(&nombre_archivo)
+    let nombre_base = std::path::Path::new(&nombre_archivo)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(&nombre_archivo);
-
 
     // El resultado va a ~/Babel/archivos/ — carpeta visible en Finder
     let nombre_resultado = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
@@ -573,13 +569,10 @@ fn guardar_documento_sin_traducir(
         .unwrap_or_default()
         .as_secs();
 
-let nombre_base = std::path::Path::new(&nombre_archivo)
+    let nombre_base = std::path::Path::new(&nombre_archivo)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(&nombre_archivo);
-
-
-
 
     let nombre_cifrado = format!("{}_{}_{}.babel", id_usuario, nombre_base, ts);
     let ruta_cifrada = guardados_path(&nombre_cifrado);
@@ -602,15 +595,24 @@ fn listar_archivos_guardados(
     buzon: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<Vec<MetadatosArchivo>, String> {
-    let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
-    let subclave_hex = sesion.subclave_hex.lock().map_err(|_| "Error".to_string())?.clone();
+    let id_usuario = sesion
+        .usuario
+        .lock()
+        .map_err(|_| "Error".to_string())?
+        .clone();
+    let subclave_hex = sesion
+        .subclave_hex
+        .lock()
+        .map_err(|_| "Error".to_string())?
+        .clone();
 
     let mut archivos = Vec::new();
 
     // — ARCHIVOS GUARDADOS —
     let carpeta_g = guardados_dir();
     let ruta_index_g = guardados_path(".buzon_index_guardados.babel");
-    let index_g: HashMap<String, String> = fs::read(&ruta_index_g).ok()
+    let index_g: HashMap<String, String> = fs::read(&ruta_index_g)
+        .ok()
         .and_then(|b| seguridad::descifrar_documento(b, &subclave_hex).ok())
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default();
@@ -622,18 +624,29 @@ fn listar_archivos_guardados(
     if let Ok(entries) = fs::read_dir(&carpeta_g) {
         for entry in entries.flatten() {
             let nombre = entry.file_name().to_string_lossy().to_string();
-if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') { continue; }
+            if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
+                continue;
+            }
 
-            let buzon_archivo = index_g.get(&nombre).cloned().unwrap_or_else(|| "todos".to_string());
-            if buzon != "todos" && buzon_archivo != buzon { continue; }
+            let buzon_archivo = index_g
+                .get(&nombre)
+                .cloned()
+                .unwrap_or_else(|| "todos".to_string());
+            if buzon != "todos" && buzon_archivo != buzon {
+                continue;
+            }
 
-            let nombre_limpio = nombre.trim_start_matches(&format!("{}_", id_usuario)).to_string();
+            let nombre_limpio = nombre
+                .trim_start_matches(&format!("{}_", id_usuario))
+                .to_string();
             let nombre_buzon = if buzon_archivo == "todos" || buzon_archivo.is_empty() {
                 "todos".to_string()
             } else {
-               nodos_g.iter()
-    .find(|n| n.id == buzon_archivo)
-    .map(|n| n.nombre.clone()).unwrap_or_else(|| "todos".to_string())
+                nodos_g
+                    .iter()
+                    .find(|n| n.id == buzon_archivo)
+                    .map(|n| n.nombre.clone())
+                    .unwrap_or_else(|| "todos".to_string())
             };
 
             archivos.push(MetadatosArchivo {
@@ -651,7 +664,8 @@ if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
     // — ARCHIVOS TRADUCIDOS —
     let carpeta_a = archivos_dir();
     let ruta_index_a = archivos_path(".buzon_index.babel");
-    let index_a: HashMap<String, String> = fs::read(&ruta_index_a).ok()
+    let index_a: HashMap<String, String> = fs::read(&ruta_index_a)
+        .ok()
         .and_then(|b| seguridad::descifrar_documento(b, &subclave_hex).ok())
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default();
@@ -663,10 +677,17 @@ if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
     if let Ok(entries) = fs::read_dir(&carpeta_a) {
         for entry in entries.flatten() {
             let nombre = entry.file_name().to_string_lossy().to_string();
-            if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') { continue; }
+            if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
+                continue;
+            }
 
-            let buzon_archivo = index_a.get(&nombre).cloned().unwrap_or_else(|| "todos".to_string());
-            if buzon != "todos" && buzon_archivo != buzon { continue; }
+            let buzon_archivo = index_a
+                .get(&nombre)
+                .cloned()
+                .unwrap_or_else(|| "todos".to_string());
+            if buzon != "todos" && buzon_archivo != buzon {
+                continue;
+            }
 
             let nombre_limpio = nombre
                 .trim_start_matches(&format!("{}_", id_usuario))
@@ -682,9 +703,12 @@ if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
             let nombre_buzon = if buzon_archivo == "todos" || buzon_archivo.is_empty() {
                 "todos".to_string()
             } else {
-               nodos_a.iter().chain(nodos_g.iter())
-    .find(|n| n.id == buzon_archivo)
-    .map(|n| n.nombre.clone()).unwrap_or_else(|| "todos".to_string())
+                nodos_a
+                    .iter()
+                    .chain(nodos_g.iter())
+                    .find(|n| n.id == buzon_archivo)
+                    .map(|n| n.nombre.clone())
+                    .unwrap_or_else(|| "todos".to_string())
             };
 
             archivos.push(MetadatosArchivo {
@@ -712,7 +736,6 @@ fn mover_archivo_guardado(
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
     validar_ruta_en(&ruta, guardados_dir())?;
-
 
     let subclave_hex = sesion
         .subclave_hex
@@ -812,13 +835,10 @@ fn traducir_documento_ruta(
         .unwrap_or_default()
         .as_secs();
 
-let nombre_base = std::path::Path::new(&nombre_archivo)
+    let nombre_base = std::path::Path::new(&nombre_archivo)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(&nombre_archivo);
-
-
-
 
     let dict = sesion
         .diccionario
@@ -937,7 +957,7 @@ fn listar_archivos(
         .unwrap_or_default();
 
     let mut archivos = Vec::new();
-// Cargar nodos de buzones para resolver ID → nombre en los metadatos
+    // Cargar nodos de buzones para resolver ID → nombre en los metadatos
     let nodos_buzon = cargar_nodos(
         std::path::Path::new(&archivos_path(".buzones.babel")),
         &subclave_hex,
@@ -1011,14 +1031,15 @@ fn listar_archivos(
                     .map(|i| i.clone())
                     .unwrap_or_else(|_| "es_en".to_string())
             },
-           buzon: if buzon_archivo == "todos" || buzon_archivo.is_empty() {
-        "todos".to_string()
-    } else {
-        nodos_buzon.iter()
-            .find(|n| n.id == buzon_archivo)
-            .map(|n| n.nombre.clone())
-            .unwrap_or_else(|| "todos".to_string())
-    },
+            buzon: if buzon_archivo == "todos" || buzon_archivo.is_empty() {
+                "todos".to_string()
+            } else {
+                nodos_buzon
+                    .iter()
+                    .find(|n| n.id == buzon_archivo)
+                    .map(|n| n.nombre.clone())
+                    .unwrap_or_else(|| "todos".to_string())
+            },
             es_traduccion: true,
         });
     }
@@ -1081,8 +1102,8 @@ fn guardar_nodos(
     subclave_hex: &str,
 ) -> Result<(), String> {
     let json = serde_json::to_string(nodos).map_err(|e| format!("Error: {}", e))?;
-    let cifrado = seguridad::blindar_documento(&json, subclave_hex)
-        .map_err(|e| format!("Error: {}", e))?;
+    let cifrado =
+        seguridad::blindar_documento(&json, subclave_hex).map_err(|e| format!("Error: {}", e))?;
     fs::write(ruta, cifrado).map_err(|e| format!("Error: {}", e))?;
     Ok(())
 }
@@ -1195,8 +1216,7 @@ fn exportar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
         return Err("No hay sesión activa.".into());
     }
     // Seguridad: solo permitimos exportar desde ~/Babel/archivos/
-    validar_ruta_en(&ruta, archivos_dir())
-    .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+    validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
     // Verificar que el archivo existe — ruta ya es absoluta, sin trucos
     if !Path::new(&ruta).exists() {
@@ -1328,19 +1348,31 @@ fn renombrar_archivo(
     nombre_nuevo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
-    validar_ruta_en(&ruta, archivos_dir())
-        .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+    validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
-    let subclave_hex = sesion.subclave_hex.lock()
-        .map_err(|_| "Error sesión.".to_string())?.clone();
-    let id_usuario = sesion.usuario.lock()
-        .map_err(|_| "Error sesión.".to_string())?.clone();
+    let subclave_hex = sesion
+        .subclave_hex
+        .lock()
+        .map_err(|_| "Error sesión.".to_string())?
+        .clone();
+    let id_usuario = sesion
+        .usuario
+        .lock()
+        .map_err(|_| "Error sesión.".to_string())?
+        .clone();
 
     let es_guardado = ruta.contains("/guardados/");
-    let dir = if es_guardado { guardados_dir() } else { archivos_dir() };
+    let dir = if es_guardado {
+        guardados_dir()
+    } else {
+        archivos_dir()
+    };
 
     let nombre_viejo = std::path::Path::new(&ruta)
-        .file_name().unwrap_or_default().to_string_lossy().to_string();
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
 
     // Nuevo nombre manteniendo prefijo de usuario y extensión
     let nombre_limpio = nombre_nuevo
@@ -1349,8 +1381,7 @@ fn renombrar_archivo(
     let nuevo_nombre_archivo = format!("{}_{}.babel", id_usuario, nombre_limpio);
     let nueva_ruta = dir.join(&nuevo_nombre_archivo);
 
-    fs::rename(&ruta, &nueva_ruta)
-        .map_err(|e| format!("Error renombrando: {}", e))?;
+    fs::rename(&ruta, &nueva_ruta).map_err(|e| format!("Error renombrando: {}", e))?;
 
     // Actualizar índice de buzones
     let ruta_index = if es_guardado {
@@ -1358,7 +1389,8 @@ fn renombrar_archivo(
     } else {
         archivos_path(".buzon_index.babel")
     };
-    let mut index: HashMap<String, String> = fs::read(&ruta_index).ok()
+    let mut index: HashMap<String, String> = fs::read(&ruta_index)
+        .ok()
         .and_then(|b| seguridad::descifrar_documento(b, &subclave_hex).ok())
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default();
@@ -1383,8 +1415,7 @@ fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
-    validar_ruta_en(&ruta, archivos_dir())
-    .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+    validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
     // Zeroize: sobreescribir con ceros antes de borrar
     // Así los bytes cifrados no quedan recuperables en disco
@@ -1405,10 +1436,7 @@ fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
 // COMANDO — Eliminar buzón del sistema de guardados
 // ============================================================
 #[tauri::command]
-fn eliminar_buzon_guardado(
-    id: String,
-    sesion: tauri::State<SesionActiva>,
-) -> Result<(), String> {
+fn eliminar_buzon_guardado(id: String, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
     let subclave_hex = sesion
         .subclave_hex
         .lock()
@@ -1483,18 +1511,15 @@ fn guardar_bytes_sin_traducir(
         return Err("Los archivos .babel ya están cifrados.".into());
     }
 
-   let ts: u64 = std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .unwrap_or_default()
-    .as_secs();
+    let ts: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
 
-let nombre_base = std::path::Path::new(&nombre_archivo)
+    let nombre_base = std::path::Path::new(&nombre_archivo)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(&nombre_archivo);
-
-
-
 
     let nombre_cifrado = format!("{}_{}_{}.babel", id_usuario, nombre_base, ts);
     let ruta_cifrada = guardados_path(&nombre_cifrado);
@@ -1549,7 +1574,12 @@ fn extraer_zip_html(raw_bytes: &[u8]) -> (String, String, String) {
     let mut imagenes_html = String::new();
 
     // Encabezados y pies
-    for nombre in &["word/header1.xml", "word/header2.xml", "word/footer1.xml", "word/footer2.xml"] {
+    for nombre in &[
+        "word/header1.xml",
+        "word/header2.xml",
+        "word/footer1.xml",
+        "word/footer2.xml",
+    ] {
         if let Ok(mut file) = zip.by_name(nombre) {
             let mut xml = String::new();
             if file.read_to_string(&mut xml).is_ok() {
@@ -1572,11 +1602,17 @@ fn extraer_zip_html(raw_bytes: &[u8]) -> (String, String, String) {
         if let Ok(mut file) = zip.by_index(i) {
             let name = file.name().to_string();
             if name.starts_with("word/media/") {
-                let mime = if name.ends_with(".png") { "image/png" }
-                    else if name.ends_with(".jpg") || name.ends_with(".jpeg") { "image/jpeg" }
-                    else if name.ends_with(".gif") { "image/gif" }
-                    else if name.ends_with(".webp") { "image/webp" }
-                    else { continue };
+                let mime = if name.ends_with(".png") {
+                    "image/png"
+                } else if name.ends_with(".jpg") || name.ends_with(".jpeg") {
+                    "image/jpeg"
+                } else if name.ends_with(".gif") {
+                    "image/gif"
+                } else if name.ends_with(".webp") {
+                    "image/webp"
+                } else {
+                    continue;
+                };
                 let mut buf = Vec::new();
                 if file.read_to_end(&mut buf).is_ok() {
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
@@ -1593,7 +1629,10 @@ fn extraer_zip_html(raw_bytes: &[u8]) -> (String, String, String) {
 }
 
 fn formato_header_footer(texto: &str, es_header: bool) -> String {
-    let escaped = texto.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let escaped = texto
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
     let borde = if es_header {
         "border-bottom:1px solid rgba(197,160,89,0.2);margin-bottom:16px;padding-bottom:10px;"
     } else {
@@ -1656,13 +1695,14 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
     }
 
     let texto_run = |run: &docx_rs::Run| -> String {
-        let bold   = run.run_property.bold.is_some();
+        let bold = run.run_property.bold.is_some();
         let italic = run.run_property.italic.is_some();
         let mut out = String::new();
         for rc in &run.children {
             match rc {
                 docx_rs::RunChild::Text(t) => {
-                    let escaped = t.text
+                    let escaped = t
+                        .text
                         .replace('&', "&amp;")
                         .replace('<', "&lt;")
                         .replace('>', "&gt;");
@@ -1711,9 +1751,7 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
                 html.push_str(&parrafo_a_html(para));
             }
             docx_rs::DocumentChild::Table(table) => {
-                html.push_str(
-                    "<table style='border-collapse:collapse;width:100%;margin:10px 0;'>",
-                );
+                html.push_str("<table style='border-collapse:collapse;width:100%;margin:10px 0;'>");
                 for row in &table.rows {
                     let docx_rs::TableChild::TableRow(tr) = row;
                     html.push_str("<tr>");
@@ -1752,8 +1790,7 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
 
 #[tauri::command]
 fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<String, String> {
-    validar_ruta_en(&ruta, archivos_dir())
-        .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+    validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
     let subclave_hex = sesion
         .subclave_hex
@@ -1766,16 +1803,15 @@ fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Strin
         .map_err(|e| format!("Error descifrando: {}", e))?;
 
     if let Ok(raw_bytes) = traductor::descomprimir_b64(&contenido) {
-
         // DOCX — magic bytes PK
         if raw_bytes.starts_with(b"PK") {
             return docx_a_html(&raw_bytes);
         }
         // PDF — magic bytes %PDF
         if raw_bytes.starts_with(b"%PDF") {
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
-    return Ok(format!("pdf:{}", b64));
-}
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
+            return Ok(format!("pdf:{}", b64));
+        }
 
         // Imágenes: PNG, JPEG, GIF, WEBP
         let mime = if raw_bytes.starts_with(b"\x89PNG") {
@@ -1833,8 +1869,8 @@ fn save_settings(settings: AppSettings, sesion: tauri::State<SesionActiva>) -> R
     let data = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
 
     if subclave_hex.is_empty() {
-    return Err("No hay sesión activa para cifrar los ajustes.".to_string());
-} else {
+        return Err("No hay sesión activa para cifrar los ajustes.".to_string());
+    } else {
         let cifrado = seguridad::blindar_documento(&data, &subclave_hex)
             .map_err(|e| format!("Error cifrando ajustes: {}", e))?;
         fs::write(&babel_path("settings.babel"), cifrado).map_err(|e| e.to_string())?;
@@ -1892,7 +1928,11 @@ fn generar_palabras_recuperacion() -> Vec<String> {
 // ============================================================
 
 #[tauri::command]
-fn generar_frase_recuperacion(maestra: String, pass_usuario: String, sesion: tauri::State<SesionActiva>) -> Result<Vec<String>, String> {
+fn generar_frase_recuperacion(
+    maestra: String,
+    pass_usuario: String,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<Vec<String>, String> {
     let subclave_hex = sesion
         .subclave_hex
         .lock()
@@ -1907,7 +1947,7 @@ fn generar_frase_recuperacion(maestra: String, pass_usuario: String, sesion: tau
     let recovery_key_hex = Zeroizing::new(hex::encode(recovery_key.as_ref()));
     let mut datos_recovery = serde_json::json!({"m": maestra, "p": pass_usuario}).to_string();
     let cifrado_recuperacion = seguridad::blindar_documento(&datos_recovery, &recovery_key_hex)
-    .map_err(|e| format!("Error cifrando recovery.babel: {}", e))?;
+        .map_err(|e| format!("Error cifrando recovery.babel: {}", e))?;
     datos_recovery.zeroize();
     fs::write(&babel_path("recovery.babel"), &cifrado_recuperacion)
         .map_err(|e| format!("Error guardando recovery.babel: {}", e))?;
@@ -1920,10 +1960,10 @@ fn generar_frase_recuperacion(maestra: String, pass_usuario: String, sesion: tau
         .map_err(|e| format!("Error cifrando mnemonic.babel: {}", e))?;
     fs::write(&babel_path("mnemonic.babel"), &cifrado_mnemonic)
         .map_err(|e| format!("Error guardando mnemonic.babel: {}", e))?;
-        let mut m = maestra;
-        m.zeroize();
-        let mut p = pass_usuario;
-        p.zeroize();
+    let mut m = maestra;
+    m.zeroize();
+    let mut p = pass_usuario;
+    p.zeroize();
     Ok(palabras)
 }
 
@@ -1932,7 +1972,10 @@ fn generar_frase_recuperacion(maestra: String, pass_usuario: String, sesion: tau
 // ============================================================
 
 #[tauri::command]
-fn recuperar_con_frase(palabras: Vec<String>, sesion: tauri::State<SesionActiva>) -> Result<(String, String), String> {
+fn recuperar_con_frase(
+    palabras: Vec<String>,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<(String, String), String> {
     // Comprobar bloqueo activo
     if let Some(ts) = seguridad::leer_bloqueo() {
         let restante = (ts + 600) - chrono::Local::now().timestamp();
@@ -1970,12 +2013,20 @@ fn recuperar_con_frase(palabras: Vec<String>, sesion: tauri::State<SesionActiva>
     };
 
     // Frase correcta — resetear contador
-    if let Ok(mut c) = sesion.contador.lock() { *c = 0; }
+    if let Ok(mut c) = sesion.contador.lock() {
+        *c = 0;
+    }
 
-    let json: serde_json::Value = serde_json::from_str(&datos)
-        .map_err(|_| "Formato de recovery invalido.".to_string())?;
-    let maestra = json["m"].as_str().ok_or("Falta maestra".to_string())?.to_string();
-    let pass = json["p"].as_str().ok_or("Falta pass".to_string())?.to_string();
+    let json: serde_json::Value =
+        serde_json::from_str(&datos).map_err(|_| "Formato de recovery invalido.".to_string())?;
+    let maestra = json["m"]
+        .as_str()
+        .ok_or("Falta maestra".to_string())?
+        .to_string();
+    let pass = json["p"]
+        .as_str()
+        .ok_or("Falta pass".to_string())?
+        .to_string();
 
     datos.zeroize();
     Ok((maestra, pass))
@@ -2036,9 +2087,11 @@ fn obtener_usuario_con_maestra(
         }
     };
     // Llave correcta — resetear contador
-    if let Ok(mut c) = sesion.contador.lock() { *c = 0; }
-    let usuario: seguridad::UsuarioBabel = serde_json::from_str(&json)
-        .map_err(|e| format!("Error leyendo usuario: {}", e))?;
+    if let Ok(mut c) = sesion.contador.lock() {
+        *c = 0;
+    }
+    let usuario: seguridad::UsuarioBabel =
+        serde_json::from_str(&json).map_err(|e| format!("Error leyendo usuario: {}", e))?;
     Ok(usuario.nombre)
 }
 
@@ -2085,7 +2138,6 @@ fn guardar_config_email_tauri(
         usuario,
         password,
         remitentes_autorizados: vec![],
-        
     };
 
     traductor::guardar_config_email(&creds, &subclave_hex);

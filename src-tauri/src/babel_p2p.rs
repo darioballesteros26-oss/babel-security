@@ -1,5 +1,3 @@
-
-
 // ============================================================
 // BABEL P2P - COMUNICACIÓN DIRECTA ENTRE INSTANCIAS v4
 // ============================================================
@@ -139,9 +137,7 @@ impl GestorCertificados {
         );
         Ok((cert, clave.to_vec()))
     }
-
 }
-
 
 // ============================================================
 // DESCUBRIMIENTO - Búsqueda de peers en red local por UDP
@@ -211,8 +207,11 @@ impl DescubrimientoRed {
                 Ok((n, origen)) => {
                     let respuesta = String::from_utf8_lossy(&buf[..n]);
                     if let Some(peer) = Self::parsear_respuesta(&respuesta, &origen) {
-                        log::warn!("[P2P] Encontrado: {} en {}:{}",
-                            peer.nombre, peer.ip, peer.puerto
+                        log::warn!(
+                            "[P2P] Encontrado: {} en {}:{}",
+                            peer.nombre,
+                            peer.ip,
+                            peer.puerto
                         );
                         peers.push(peer);
                     }
@@ -309,8 +308,11 @@ impl Cabecera {
         if buf.len() < TAMAÑO_CABECERA {
             return Err(format!("Cabecera incompleta: {} bytes ", buf.len()));
         }
-        let longitud_datos =
-            u64::from_le_bytes(buf[0..8].try_into().map_err(|_| "Error leyendo longitud ")?);
+        let longitud_datos = u64::from_le_bytes(
+            buf[0..8]
+                .try_into()
+                .map_err(|_| "Error leyendo longitud ")?,
+        );
         let nombre_raw = &buf[8..264];
         let fin = nombre_raw.iter().position(|&b| b == 0).unwrap_or(256);
         let nombre_archivo = String::from_utf8_lossy(&nombre_raw[..fin]).to_string();
@@ -377,10 +379,11 @@ pub fn recibir_archivo<S: Read + Write>(stream: &mut S) -> Result<(String, Vec<u
         return Err("Checksum invalido - datos corruptos en transito ".to_string());
     }
 
-    log::info!("[P2P] Recibido {} ({} bytes) - integro.", 
-    cabecera.nombre_archivo,
-    datos.len()
-);
+    log::info!(
+        "[P2P] Recibido {} ({} bytes) - integro.",
+        cabecera.nombre_archivo,
+        datos.len()
+    );
     Ok((cabecera.nombre_archivo, datos))
 }
 
@@ -651,4 +654,3 @@ impl ClienteP2P {
         Ok(())
     }
 }
-

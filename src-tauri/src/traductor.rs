@@ -1,8 +1,6 @@
-
-
 use base64;
-use tesseract::Tesseract;
 use base64::Engine;
+use tesseract::Tesseract;
 pub const ZSTD_MAGIC: &[u8] = b"BZ1:";
 
 pub fn comprimir_b64(data: &[u8]) -> String {
@@ -40,18 +38,15 @@ use mailparse;
 use mailparse::MailHeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use sha2;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
-use sha2;
-
 
 use crate::seguridad;
-use lettre::{
-    Message, Transport,
-};
+use lettre::{Message, Transport};
 pub fn enviar_archivo_descifrado(
     ruta: &str,
     destinatario: &str,
@@ -199,7 +194,7 @@ pub fn cargar_o_crear_salt() -> [u8; 32] {
             // Principal perdida - recuperamos desde backup
             log::warn!("[Babel] master.salt no encontrada - recuperando desde backup...");
             if let Err(e) = fs::write(&ruta_salt, s) {
-               log::error!("[Babel] No se pudo restaurar master.salt: {}", e);
+                log::error!("[Babel] No se pudo restaurar master.salt: {}", e);
             } else {
                 log::info!("[Babel] master.salt restaurada desde backup.");
             }
@@ -222,7 +217,7 @@ pub fn cargar_o_crear_salt() -> [u8; 32] {
         );
     }
     let _ = fs::write(&ruta_bck, nueva_salt);
-   log::info!("[Babel] master.salt generada correctamente.");
+    log::info!("[Babel] master.salt generada correctamente.");
     nueva_salt
 }
 
@@ -246,9 +241,10 @@ pub fn activar_bloqueo_disco() {
     let ts = chrono::Local::now().timestamp();
     let salt = cargar_o_crear_salt();
     use sha2::Digest;
-    let firma = format!("{:x}", sha2::Sha256::digest(
-        format!("{}:{}", ts, hex::encode(salt)).as_bytes()
-    ));
+    let firma = format!(
+        "{:x}",
+        sha2::Sha256::digest(format!("{}:{}", ts, hex::encode(salt)).as_bytes())
+    );
     let contenido = format!("{}:{}", ts, firma);
     let ruta = crate::babel_dir().join("bloqueo.tmp");
     let _ = fs::write(&ruta, contenido);
@@ -380,7 +376,10 @@ fn traducir_xml_directo(
                     } else {
                         let traducido = match traducir_con_nllb(texto, origen, destino) {
                             Ok(t) => t,
-                            Err(_) => { let (t, _) = motor_atomico(texto, dict, subclave_hex); t }
+                            Err(_) => {
+                                let (t, _) = motor_atomico(texto, dict, subclave_hex);
+                                t
+                            }
                         };
                         let traducido_escaped = traducido
                             .replace('&', "&amp;")
@@ -424,15 +423,17 @@ pub fn clonar_y_traducir(
     let cursor_text = std::io::Cursor::new(&raw_bytes);
     let mut zip_text = zip::ZipArchive::new(cursor_text)?;
     let mut xml_doc = String::new();
-    { let mut f = zip_text.by_name("word/document.xml")?; f.read_to_string(&mut xml_doc)?; }
+    {
+        let mut f = zip_text.by_name("word/document.xml")?;
+        f.read_to_string(&mut xml_doc)?;
+    }
 
     // Texto plano original para el visor
-   let b64_orig = comprimir_b64(&raw_bytes);
+    let b64_orig = comprimir_b64(&raw_bytes);
     if let Ok(cifrado_orig) = seguridad::blindar_documento(&b64_orig, subclave_hex) {
         let salida_orig = archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre));
         let _ = fs::write(&salida_orig, cifrado_orig);
     }
-    
 
     // Traducir document.xml
     let xml_traducido = traducir_xml_directo(&xml_doc, dict, subclave_hex, origen, destino);
@@ -460,7 +461,8 @@ pub fn clonar_y_traducir(
                 // Encabezados y pies — también traducir
                 let mut xml_hf = String::new();
                 file.read_to_string(&mut xml_hf)?;
-                let xml_hf_trad = traducir_xml_directo(&xml_hf, dict, subclave_hex, origen, destino);
+                let xml_hf_trad =
+                    traducir_xml_directo(&xml_hf, dict, subclave_hex, origen, destino);
                 zip_out.start_file(&name, opts_deflate)?;
                 zip_out.write_all(xml_hf_trad.as_bytes())?;
             } else {
@@ -477,7 +479,7 @@ pub fn clonar_y_traducir(
     let docx_bytes = buf_out.into_inner();
 
     // Cifrar y guardar
-   let b64 = comprimir_b64(&docx_bytes);
+    let b64 = comprimir_b64(&docx_bytes);
     let cifrado = seguridad::blindar_documento(&b64, subclave_hex)?;
     let salida = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
     fs::write(&salida, &cifrado)?;
@@ -493,13 +495,25 @@ fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
     let tmp_img = format!("{}.png", tmp_base.to_string_lossy());
 
     let ok = std::process::Command::new("/opt/homebrew/bin/pdftoppm")
-        .args(["-r", "300", "-f", &pagina.to_string(), "-l", &pagina.to_string(),
-               "-png", "-singlefile", ruta_pdf, &tmp_base.to_string_lossy()])
+        .args([
+            "-r",
+            "300",
+            "-f",
+            &pagina.to_string(),
+            "-l",
+            &pagina.to_string(),
+            "-png",
+            "-singlefile",
+            ruta_pdf,
+            &tmp_base.to_string_lossy(),
+        ])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
 
-    if !ok { return String::new(); }
+    if !ok {
+        return String::new();
+    }
 
     let resultado = match Tesseract::new(None, Some("spa+eng+fra+deu+ara+rus+chi_sim")) {
         Ok(t) => match t.set_image(&tmp_img) {
@@ -509,7 +523,9 @@ fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
         Err(_) => String::new(),
     };
 
-    let tam = std::fs::metadata(&tmp_img).map(|m| m.len() as usize).unwrap_or(0);
+    let tam = std::fs::metadata(&tmp_img)
+        .map(|m| m.len() as usize)
+        .unwrap_or(0);
     let _ = fs::write(&tmp_img, vec![0u8; tam]);
     let _ = fs::remove_file(&tmp_img);
     resultado
@@ -565,12 +581,17 @@ pub fn procesar_pdf(
                 .args([ruta, "-"])
                 .output()
                 .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-                .unwrap_or_default()
+                .unwrap_or_default(),
         );
-        if texto.trim().is_empty() { *texto = ocr_pagina_pdf(ruta, 1); }
+        if texto.trim().is_empty() {
+            *texto = ocr_pagina_pdf(ruta, 1);
+        }
         let (traducido, _) = traducir_inteligente(&texto, dict, subclave_hex, origen, destino);
         let cifrado = seguridad::blindar_documento(&traducido, subclave_hex)?;
-        fs::write(archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre)), cifrado)?;
+        fs::write(
+            archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre)),
+            cifrado,
+        )?;
         return Ok(());
     }
 
@@ -580,7 +601,7 @@ pub fn procesar_pdf(
         if let Ok(cifrado_orig) = seguridad::blindar_documento(&b64, subclave_hex) {
             let _ = fs::write(
                 archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre)),
-                cifrado_orig
+                cifrado_orig,
             );
         }
     }
@@ -597,10 +618,14 @@ pub fn procesar_pdf(
     // Renombrar _tmp → nombre final
     let salida_tmp = archivos_dir.join(format!("{}_{}_tmp.babel", id_usuario, nombre));
     let salida_final = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
-    if salida_tmp.exists() { let _ = fs::rename(&salida_tmp, &salida_final); }
+    if salida_tmp.exists() {
+        let _ = fs::rename(&salida_tmp, &salida_final);
+    }
     let orig_tmp = archivos_dir.join(format!("{}_{}_tmp__orig.babel", id_usuario, nombre));
     let orig_final = archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre));
-    if orig_tmp.exists() { let _ = fs::rename(&orig_tmp, &orig_final); }
+    if orig_tmp.exists() {
+        let _ = fs::rename(&orig_tmp, &orig_final);
+    }
 
     // PASO 4: convertir DOCX traducido → PDF con LibreOffice
     let ruta_docx_trad = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
@@ -611,10 +636,16 @@ pub fn procesar_pdf(
                 let docx_para_pdf = tmp_dir.join(format!("{}_trad.docx", nombre));
                 fs::write(&docx_para_pdf, &docx_bytes)?;
                 std::process::Command::new("/opt/homebrew/bin/soffice")
-                    .args(["--headless", "--convert-to", "pdf",
-                           "--outdir", &tmp_dir.to_string_lossy(),
-                           &docx_para_pdf.to_string_lossy()])
-                    .status().ok();
+                    .args([
+                        "--headless",
+                        "--convert-to",
+                        "pdf",
+                        "--outdir",
+                        &tmp_dir.to_string_lossy(),
+                        &docx_para_pdf.to_string_lossy(),
+                    ])
+                    .status()
+                    .ok();
 
                 let pdf_out = tmp_dir.join(format!("{}_trad.pdf", nombre));
                 if pdf_out.exists() {
