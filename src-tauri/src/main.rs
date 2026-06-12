@@ -96,7 +96,7 @@ impl SesionActiva {
 // Estas funciones siempre devuelven la misma ruta,
 // independientemente de desde dónde se ejecute el .app.
 
-fn babel_dir() -> std::path::PathBuf {
+pub fn babel_dir() -> std::path::PathBuf {
     let dir = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("Babel");
@@ -546,35 +546,6 @@ fn traducir_texto(
 // Cifra y guarda un archivo en ~/Babel/guardados/ sin traducirlo.
 // El contenido se convierte a base64 antes de cifrar con AES-256-GCM.
 // ============================================================
-const ZSTD_MAGIC: &[u8] = b"BZ1:";
-
-fn comprimir_b64(data: &[u8]) -> String {
-    let es_binario = data.starts_with(b"\x89PNG")
-        || data.starts_with(b"\xff\xd8\xff")
-        || data.starts_with(b"GIF")
-        || data.starts_with(b"%PDF")
-        || data.starts_with(b"PK"); // DOCX/ZIP ya comprimido
-    if es_binario {
-        return base64::engine::general_purpose::STANDARD.encode(data);
-    }
-    if let Ok(c) = zstd::encode_all(data, 3) {
-        let mut buf = ZSTD_MAGIC.to_vec();
-        buf.extend_from_slice(&c);
-        return base64::engine::general_purpose::STANDARD.encode(&buf);
-    }
-    base64::engine::general_purpose::STANDARD.encode(data)
-}
-
-fn descomprimir_b64(b64: &str) -> Result<Vec<u8>, String> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(b64)
-        .map_err(|e| e.to_string())?;
-    if bytes.starts_with(ZSTD_MAGIC) {
-        zstd::decode_all(&bytes[ZSTD_MAGIC.len()..]).map_err(|e| e.to_string())
-    } else {
-        Ok(bytes)
-    }
-}
 
 #[tauri::command]
 fn guardar_documento_sin_traducir(
@@ -613,7 +584,7 @@ let nombre_base = std::path::Path::new(&nombre_archivo)
     let nombre_cifrado = format!("{}_{}_{}.babel", id_usuario, nombre_base, ts);
     let ruta_cifrada = guardados_path(&nombre_cifrado);
 
-    let contenido_b64 = comprimir_b64(&contenido);
+    let contenido_b64 = traductor::comprimir_b64(&contenido);
     let cifrado = seguridad::blindar_documento(&contenido_b64, &subclave_hex)
         .map_err(|e| format!("Error cifrando: {}", e))?;
 
@@ -1528,7 +1499,7 @@ let nombre_base = std::path::Path::new(&nombre_archivo)
     let nombre_cifrado = format!("{}_{}_{}.babel", id_usuario, nombre_base, ts);
     let ruta_cifrada = guardados_path(&nombre_cifrado);
 
-    let contenido_b64 = comprimir_b64(&contenido);
+    let contenido_b64 = traductor::comprimir_b64(&contenido);
     let cifrado = seguridad::blindar_documento(&contenido_b64, &subclave_hex)
         .map_err(|e| format!("Error cifrando: {}", e))?;
 
@@ -1794,7 +1765,7 @@ fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Strin
     let contenido = seguridad::descifrar_documento(bytes, &subclave_hex)
         .map_err(|e| format!("Error descifrando: {}", e))?;
 
-    if let Ok(raw_bytes) = descomprimir_b64(&contenido) {
+    if let Ok(raw_bytes) = traductor::descomprimir_b64(&contenido) {
 
         // DOCX — magic bytes PK
         if raw_bytes.starts_with(b"PK") {

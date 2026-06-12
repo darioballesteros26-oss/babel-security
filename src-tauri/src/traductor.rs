@@ -3,9 +3,9 @@
 use base64;
 use tesseract::Tesseract;
 use base64::Engine;
-const ZSTD_MAGIC: &[u8] = b"BZ1:";
+pub const ZSTD_MAGIC: &[u8] = b"BZ1:";
 
-fn comprimir_b64(data: &[u8]) -> String {
+pub fn comprimir_b64(data: &[u8]) -> String {
     let es_binario = data.starts_with(b"\x89PNG")
         || data.starts_with(b"\xff\xd8\xff")
         || data.starts_with(b"GIF")
@@ -22,7 +22,7 @@ fn comprimir_b64(data: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(data)
 }
 
-fn descomprimir_b64(b64: &str) -> Result<Vec<u8>, String> {
+pub fn descomprimir_b64(b64: &str) -> Result<Vec<u8>, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
         .map_err(|e| e.to_string())?;
@@ -79,36 +79,14 @@ use crate::seguridad::escribir_bloqueo;
 /// Carpeta que Babel vigila para el modo watch.
 /// Rutas absolutas - funcionan igual en dev y en el .app compilado.
 fn carpeta_entrada() -> PathBuf {
-    babel_dir_local().join("tmp")
+    crate::babel_dir().join("tmp")
 }
 fn carpeta_salida() -> PathBuf {
-    babel_dir_local().join("archivos")
+    crate::babel_dir().join("archivos")
 }
 
 /// Extensiones que Babel acepta. Todo lo demás se ignora.
 const EXTENSIONES_VALIDAS: &[&str] = &["pdf", "docx"];
-
-// ============================================================
-// HELPER - Directorio de datos de Babel (~/Babel/)
-// ============================================================
-// Esta función existe tanto aquí como en main.rs porque traductor.rs
-// es un módulo separado y no puede llamar a funciones privadas de main.rs.
-// Ambas son idénticas a propósito: siempre devuelven ~/Babel/ y crean
-// la carpeta si no existe. Así todos los archivos van al mismo sitio,
-// tanto en modo dev como en el .app compilado.
-fn babel_dir_local() -> PathBuf {
-    let dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Babel");
-    let _ = fs::create_dir_all(&dir);
-    dir
-}
-
-/// Construye una ruta absoluta dentro de ~/Babel/.
-/// Ejemplo: babel_path_local("master.salt") → /Users/georgina/Babel/master.salt
-fn babel_path_local(nombre: &str) -> PathBuf {
-    babel_dir_local().join(nombre)
-}
 
 // ============================================================
 // MODO 1 - Procesar archivo pasado como argumento (drag al .exe)
@@ -433,7 +411,7 @@ impl EmailEntrante {
 /// Si se pierde sin backup, todos los datos cifrados son irrecuperables.
 pub fn cargar_o_crear_salt() -> [u8; 32] {
     // Rutas absolutas - funcionan igual en dev y en el .app compilado
-    let dir = babel_dir_local();
+    let dir = crate::babel_dir();
     let ruta_salt = dir.join("master.salt");
     let ruta_bck = dir.join("master.salt.bck");
 
@@ -501,13 +479,13 @@ pub fn activar_bloqueo_disco() {
         format!("{}:{}", ts, hex::encode(salt)).as_bytes()
     ));
     let contenido = format!("{}:{}", ts, firma);
-    let ruta = babel_path_local("bloqueo.tmp");
+    let ruta = crate::babel_dir().join("bloqueo.tmp");
     let _ = fs::write(&ruta, contenido);
 }
 
 /// Comprueba bloqueo verificando la firma. Sin firma válida, ignora el archivo.
 pub fn comprobar_bloqueo() {
-    let ruta_bloqueo = babel_path_local("bloqueo.tmp");
+    let ruta_bloqueo = crate::babel_dir().join("bloqueo.tmp");
     if let Ok(contenido) = fs::read_to_string(&ruta_bloqueo) {
         let partes: Vec<&str> = contenido.trim().splitn(2, ':').collect();
         if partes.len() != 2 { return; }
@@ -565,7 +543,7 @@ pub fn procesar_archivo_inteligente(
                 .file_stem()
                 .unwrap_or_default()
                 .to_string_lossy();
-            let archivos_dir = babel_dir_local().join("archivos");
+            let archivos_dir = crate::babel_dir().join("archivos");
             let _ = fs::create_dir_all(&archivos_dir);
 
             // Guardar original cifrado
@@ -1108,7 +1086,7 @@ pub fn clonar_y_traducir(
     use std::io::{Read, Write};
 
     let raw_bytes = fs::read(ruta)?;
-    let archivos_dir = babel_dir_local().join("archivos");
+    let archivos_dir = crate::babel_dir().join("archivos");
     let _ = fs::create_dir_all(&archivos_dir);
     let nombre = std::path::Path::new(ruta)
         .file_stem()
@@ -1182,7 +1160,7 @@ pub fn clonar_y_traducir(
 }
 
 fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
-    let tmp_dir = babel_dir_local().join("tmp");
+    let tmp_dir = crate::babel_dir().join("tmp");
     let _ = std::fs::create_dir_all(&tmp_dir);
     let tmp_base = tmp_dir.join(format!("ocr_{}", pagina));
     let tmp_img = format!("{}.png", tmp_base.to_string_lossy());
@@ -1235,9 +1213,9 @@ pub fn procesar_pdf(
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let archivos_dir = babel_dir_local().join("archivos");
+    let archivos_dir = crate::babel_dir().join("archivos");
     let _ = fs::create_dir_all(&archivos_dir);
-    let tmp_dir = babel_dir_local().join("tmp");
+    let tmp_dir = crate::babel_dir().join("tmp");
     let _ = fs::create_dir_all(&tmp_dir);
 
     // PASO 1: PDF → DOCX con pdf2docx
@@ -1348,8 +1326,8 @@ pub fn registrar_evento(evento: &str, subclave_hex: &str) {
     match seguridad::blindar_documento(&mensaje, subclave_hex) {
         Ok(cifrado) => {
             // Ruta absoluta para la auditoría - siempre en ~/Babel/
-            let ruta_auditoria = babel_path_local("auditoria.babel");
-            let ruta_backup = babel_path_local("auditoria_backup.babel");
+            let ruta_auditoria = crate::babel_dir().join("auditoria.babel");
+            let ruta_backup = crate::babel_dir().join("auditoria_backup.babel");
 
             let escribir = |ruta: &PathBuf| -> bool {
                 if let Ok(mut archivo) = fs::OpenOptions::new().append(true).create(true).open(ruta)
@@ -1557,14 +1535,14 @@ pub fn registrar_pendiente(palabra: &str, subclave_hex: &str) {
 pub fn guardar_config_email(creds: &CredencialesEmail, subclave_hex: &str) {
     if let Ok(json) = serde_json::to_string(&creds) {
         if let Ok(cifrado) = seguridad::blindar_documento(&json, subclave_hex) {
-            let _ = fs::write(babel_path_local("config.babel"), cifrado);
+            let _ = fs::write(crate::babel_dir().join("config.babel"), cifrado);
         }
     }
 }
 
 /// Carga y descifra las credenciales de email desde ~/Babel/config.babel
 pub fn cargar_config_email(subclave_hex: &str) -> Option<CredencialesEmail> {
-    let contenido = fs::read(babel_path_local("config.babel")).ok()?;
+    let contenido = fs::read(crate::babel_dir().join("config.babel")).ok()?;
     let descifrado = seguridad::descifrar_documento(contenido, subclave_hex).ok()?;
     serde_json::from_str(&descifrado).ok()
 }

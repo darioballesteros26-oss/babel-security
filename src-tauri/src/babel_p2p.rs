@@ -675,10 +675,9 @@ impl ClienteP2P {
         let stream = TcpStream::connect(format!("{}:{}", peer.ip, peer.puerto))
             .map_err(|e| format!("No se pudo conectar a {}: {}", peer.ip, e))?;
 
-        // ServerName para rustls - usamos la IP si el nombre no es DNS válido
-        let server_name = ServerName::try_from(peer.nombre.clone()).unwrap_or_else(|_| {
-            ServerName::try_from("localhost").expect("localhost siempre valido ")
-        });
+        let server_name = ServerName::try_from(peer.nombre.clone())
+            .or_else(|_| ServerName::try_from("localhost"))
+            .map_err(|e| format!("ServerName inválido para '{}': {}", peer.nombre, e))?;
 
         let conn = rustls::ClientConnection::new(config_arc, server_name)
             .map_err(|e| format!("Error conexión TLS: {}", e))?;
@@ -727,9 +726,9 @@ impl ClienteP2P {
         let stream = TcpStream::connect(format!("{}:{}", peer.ip, peer.puerto))
             .map_err(|e| format!("No se pudo conectar a {}: {}", peer.ip, e))?;
 
-        let server_name = ServerName::try_from(peer.nombre.clone()).unwrap_or_else(|_| {
-            ServerName::try_from("localhost").expect("localhost siempre valido ")
-        });
+        let server_name = ServerName::try_from(peer.nombre.clone())
+            .or_else(|_| ServerName::try_from("localhost"))
+            .map_err(|e| format!("ServerName inválido para '{}': {}", peer.nombre, e))?;
 
         let conn = rustls::ClientConnection::new(config_arc, server_name)
             .map_err(|e| format!("Error conexión TLS: {}", e))?;
