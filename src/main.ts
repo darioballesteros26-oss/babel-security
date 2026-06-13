@@ -374,6 +374,7 @@ async function intentarAcceso(): Promise<void> {
       if (bienvenida) bienvenida.textContent = `Bienvenido, ${usuario}`;
       mostrarPantalla("principal");
       activarTimerInactividad();
+      invoke<boolean>("tiene_config_email").then(ok => { _smtpConfigurado = ok; }).catch(() => {});
 
 
     } else {
@@ -623,6 +624,7 @@ async function cambiarIdioma(idioma: string): Promise<void> {
 // Variable global — buzón activo
 let buzonActivo: string = "todos";
 let buzonActivoGuardados: string = "todos";
+let _smtpConfigurado: boolean = false;
 // Tipo que refleja el struct Rust MetadatosArchivo
 interface MetadatosArchivo {
   nombre: string;
@@ -1694,8 +1696,7 @@ function cambiarModoP2P(modo: string): void {
     panelChat?.classList.add("hidden");
     panelEmail?.classList.remove("hidden");
     if (subtitulo) subtitulo.textContent = "EMAIL · CIFRADO LOCAL";
-    const smtpConfigurado = localStorage.getItem("babel_smtp_configurado");
-    if (!smtpConfigurado) {
+    if (!_smtpConfigurado) {
       setTimeout(() => toggleConfigSmtp(), 300);
     } else {
       cargarBandejaEmail();
@@ -2121,8 +2122,7 @@ let intervaloBandeja: number | null = null;
 function iniciarRecargaAutomatica(): void {
   if (intervaloBandeja) clearInterval(intervaloBandeja);
   intervaloBandeja = window.setInterval(() => {
-    const smtpConfigurado = localStorage.getItem("babel_smtp_configurado");
-    if (smtpConfigurado) cargarBandejaEmail();
+    if (_smtpConfigurado) cargarBandejaEmail();
   }, 5 * 60 * 1000); // 5 minutos
 }
 
@@ -2399,7 +2399,7 @@ async function guardarConfigSmtp(): Promise<void> {
       usuario,
       password,
     });
-    localStorage.setItem("babel_smtp_configurado", "1");
+    _smtpConfigurado = true;
     toggleConfigSmtp();
     mostrarToast("Configuración guardada y cifrada", false);
     // Cargar bandeja inmediatamente tras guardar config

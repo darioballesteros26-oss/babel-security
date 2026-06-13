@@ -2319,6 +2319,22 @@ fn obtener_email_completo_tauri(
 }
 
 // ============================================================
+// COMANDO — Comprobar si el email está configurado
+// ============================================================
+
+#[tauri::command]
+fn tiene_config_email(sesion: tauri::State<SesionActiva>) -> bool {
+    let subclave_hex = match sesion.subclave_hex.lock() {
+        Ok(s) => s.clone(),
+        Err(_) => return false,
+    };
+    if subclave_hex.is_empty() {
+        return false;
+    }
+    traductor::cargar_config_email(&subclave_hex).is_some()
+}
+
+// ============================================================
 // COMANDO 28 — Abrir carpeta Babel en Finder
 // ============================================================
 
@@ -2526,6 +2542,7 @@ fn main() {
             guardar_bytes_sin_traducir,
             obtener_usuario_con_maestra,
             renombrar_archivo,
+            tiene_config_email,
         ])
         .run(tauri::generate_context!())
         .expect("Error crítico al iniciar Babel");
