@@ -24,6 +24,7 @@ use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, ServerConfig};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use zeroize::Zeroizing;
 
@@ -64,6 +65,29 @@ fn recibidos_dir() -> PathBuf {
         .join("archivos");
     let _ = fs::create_dir_all(&dir);
     dir
+}
+
+fn ruta_peers_trusted() -> PathBuf {
+    p2p_dir().join("peers_trusted.json")
+}
+
+fn fingerprint_cert(cert_der: &CertificateDer) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(cert_der.as_ref());
+    hex::encode(hasher.finalize())
+}
+
+fn cargar_peers_trusted() -> HashMap<String, String> {
+    fs::read_to_string(ruta_peers_trusted())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn guardar_peers_trusted(peers: &HashMap<String, String>) {
+    if let Ok(json) = serde_json::to_string_pretty(peers) {
+        let _ = fs::write(ruta_peers_trusted(), json);
+    }
 }
 
 // Constantes del protocolo - estas no cambian, son números y textos fijos
@@ -508,23 +532,42 @@ impl ServidorP2P {
 }
 
 // ============================================================
-// VERIFICADOR PERMISIVO - Para red local sin intercambio de certs
+// VERIFICADOR CON PINNING - TOFU (Trust On First Use)
 // ============================================================
-// Acepta cualquier certificado en red local.
-// El contenido sigue cifrado con AES-256-GCM en la capa de aplicación.
+// Primera conexión a un peer: acepta y guarda el fingerprint SHA-256 del cert.
+// Conexiones siguientes: rechaza si el fingerprint cambió (MITM imposible).
 
 #[derive(Debug)]
-struct VerificadorPermisivo;
+struct VerificadorPinning {
+    peer_ip: String,
+}
 
-impl rustls::client::danger::ServerCertVerifier for VerificadorPermisivo {
+impl rustls::client::danger::ServerCertVerifier for VerificadorPinning {
     fn verify_server_cert(
         &self,
-        _end_entity: &CertificateDer,
+        end_entity: &CertificateDer,
         _intermediates: &[CertificateDer],
         _server_name: &ServerName,
         _ocsp_response: &[u8],
         _now: rustls::pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        let fp = fingerprint_cert(end_entity);
+        let mut peers = cargar_peers_trusted();
+        match peers.get(&self.peer_ip) {
+            Some(esperado) => {
+                if *esperado != fp {
+                    return Err(rustls::Error::General(format!(
+                        "Certificado de {} no coincide con el registrado. Posible MITM.",
+                        self.peer_ip
+                    )));
+                }
+            }
+            None => {
+                peers.insert(self.peer_ip.clone(), fp);
+                guardar_peers_trusted(&peers);
+                log::warn!("[P2P] Peer {} registrado (TOFU).", self.peer_ip);
+            }
+        }
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
@@ -582,7 +625,7 @@ impl ClienteP2P {
 
         log::warn!("[P2P] Conectando a {} ({})...", peer.nombre, peer.ip);
 
-        let config_tls = self.construir_config_cliente()?;
+        let config_tls = self.construir_config_cliente(&peer.ip)?;
         let config_arc = Arc::new(config_tls);
 
         let stream = TcpStream::connect(format!("{}:{}", peer.ip, peer.puerto))
@@ -616,12 +659,12 @@ impl ClienteP2P {
         Ok(())
     }
 
-    fn construir_config_cliente(&self) -> Result<ClientConfig, String> {
-        // Red local - aceptamos cualquier certificado autofirmado
-        // El contenido sigue cifrado con AES-256-GCM en capa de aplicación
+    fn construir_config_cliente(&self, peer_ip: &str) -> Result<ClientConfig, String> {
         let config = ClientConfig::builder()
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(VerificadorPermisivo))
+            .with_custom_certificate_verifier(Arc::new(VerificadorPinning {
+                peer_ip: peer_ip.to_string(),
+            }))
             .with_no_client_auth();
         Ok(config)
     }
@@ -633,7 +676,7 @@ impl ClienteP2P {
     ) -> Result<(), String> {
         log::warn!("[P2P] Conectando a {} ({})...", peer.nombre, peer.ip);
 
-        let config_tls = self.construir_config_cliente()?;
+        let config_tls = self.construir_config_cliente(&peer.ip)?;
         let config_arc = Arc::new(config_tls);
 
         let stream = TcpStream::connect(format!("{}:{}", peer.ip, peer.puerto))

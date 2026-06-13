@@ -315,20 +315,19 @@ impl AntiKeylogger {
         let mut s = System::new_all();
         s.refresh_all();
 
-        let amenazas_reales: Vec<String> = Vec::new();
+        let mut amenazas_reales: Vec<String> = Vec::new();
         let advertencias: Vec<String> = Vec::new();
 
         for (_pid, proceso) in s.processes() {
             let nombre = proceso.name().to_lowercase();
-            // Si está en lista blanca, lo saltamos
             if Self::es_proceso_legitimo(&nombre) {
                 continue;
             }
 
-            // Buscamos si el nombre del proceso contiene algún patrón sospechoso
             for patron in Self::lista_amenazas() {
                 if nombre.contains(patron) {
-                    break; // Un proceso solo se reporta una vez aunque coincida varios patrones
+                    amenazas_reales.push(nombre.clone());
+                    break;
                 }
             }
         }
@@ -750,32 +749,44 @@ fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
 /// Registra un evento de seguridad en auditoria.babel (principal) y su backup.
 /// Pública para que otros módulos puedan registrar eventos desde fuera.
 pub fn registrar_evento_seguridad(evento: &str, clave_hex: &str) {
-    escribir_evento_cifrado(evento, clave_hex, "auditoria.babel");
-    // Backup automático en ubicación separada
-    if let Err(_) = fs::create_dir_all(".babel") {
-        return;
-    }
-    escribir_evento_cifrado(evento, clave_hex, ".babel/auditoria.bck");
+    let ruta_principal = babel_path("auditoria.babel");
+    escribir_evento_cifrado(evento, clave_hex, &ruta_principal);
+    let ruta_bck = babel_path("auditoria.bck");
+    escribir_evento_cifrado(evento, clave_hex, &ruta_bck);
 }
 
 // ============================================================
 // CAPA 1B — RECUPERACIÓN CON FRASE BIP39
 // ============================================================
 
-/// Deriva una clave de 32 bytes a partir de las 12 palabras BIP39.
-/// No usa Argon2 porque la frase ya tiene 128 bits de entropía.
-/// Usa HKDF-SHA256 directamente con contexto "babel-recovery-v1".
 pub fn derivar_clave_recuperacion(palabras: &[String]) -> Result<Zeroizing<[u8; 32]>, String> {
     let frase = Zeroizing::new(palabras.join(" "));
-    let hk = Hkdf::<Sha256>::new(None, frase.as_bytes());
+    // Argon2id antes de HKDF: aunque BIP39 tiene 128 bits de entropía, sin Argon2
+    // un atacante con GPU puede probar millones de frases por segundo.
+    let salt_recovery = b"babel-recovery-salt-v1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+    let params = Params::new(65536, 3, 1, None)
+        .map_err(|e| format!("Argon2 parámetros inválidos: {}", e))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut ikm = Zeroizing::new([0u8; 32]);
+    argon2
+        .hash_password_into(frase.as_bytes(), salt_recovery, ikm.as_mut())
+        .map_err(|e| format!("Argon2 hash falló: {}", e))?;
+    let hk = Hkdf::<Sha256>::new(None, ikm.as_ref());
     let mut clave = Zeroizing::new([0u8; 32]);
     hk.expand(b"babel-recovery-v1", clave.as_mut())
         .map_err(|_| "HKDF: error derivando clave de recuperación".to_string())?;
     Ok(clave)
 }
 
-// Clave fija derivada del sistema — nadie la conoce
-const BLOQUEO_SECRET: &[u8] = b"babel-bloqueo-interno-v1";
+fn clave_hmac_bloqueo() -> Option<[u8; 32]> {
+    let bytes = fs::read(babel_path("master.salt")).ok()?;
+    if bytes.len() < 32 {
+        return None;
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&bytes[..32]);
+    Some(key)
+}
 
 pub fn leer_bloqueo() -> Option<i64> {
     let contenido = fs::read_to_string(babel_path("bloqueo.tmp")).ok()?;
@@ -784,7 +795,8 @@ pub fn leer_bloqueo() -> Option<i64> {
         return None;
     }
     let ts: i64 = partes[0].parse().ok()?;
-    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(BLOQUEO_SECRET).ok()?;
+    let secret = clave_hmac_bloqueo()?;
+    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(&secret).ok()?;
     mac.update(ts.to_string().as_bytes());
     let firma_esperada = hex::encode(mac.finalize().into_bytes());
     if firma_esperada != partes[1] {

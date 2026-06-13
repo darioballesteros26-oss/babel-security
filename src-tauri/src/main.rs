@@ -11,6 +11,7 @@ mod traductor;
 use base64::Engine;
 use chrono;
 use hex;
+use rand::RngCore;
 use seguridad::{NivelAcceso, UsuarioBabel};
 use serde;
 use serde_json;
@@ -309,12 +310,18 @@ fn crear_acceso_bunker(maestra: String, usuario: String, pass: String) -> Result
 // COMANDO 4 — Verificar login y guardar sesión
 // ============================================================
 
-// Helper: incrementa el contador de intentos fallidos y bloquea el disco tras 3 fallos
 fn incrementar_contador_y_bloquear(sesion: &tauri::State<SesionActiva>) -> Result<(), String> {
+    let ruta_intentos = babel_path("intentos.dat");
+    let disco: u32 = fs::read_to_string(&ruta_intentos)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
     if let Ok(mut c) = sesion.contador.lock() {
-        *c += 1;
+        *c = (*c).max(disco) + 1;
+        let _ = fs::write(&ruta_intentos, c.to_string());
         if *c >= 3 {
             *c = 0;
+            let _ = fs::remove_file(&ruta_intentos);
             traductor::activar_bloqueo_disco();
             return Err("Bloqueado 10 minutos por demasiados intentos fallidos.".into());
         }
@@ -380,10 +387,11 @@ fn verificar_login(
         *d = traductor::cargar_diccionario("es_en", &subclave_hex, "todos");
     }
 
-    // Login correcto — resetear contador
+    // Login correcto — resetear contador (en RAM y en disco)
     if let Ok(mut c) = sesion.contador.lock() {
         *c = 0;
     }
+    let _ = fs::remove_file(&babel_path("intentos.dat"));
 
     // Zeroize contraseñas ANTES de lanzar NLLB
     use zeroize::Zeroize;
@@ -1084,12 +1092,9 @@ struct BuzonNodo {
 }
 
 fn nuevo_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ns = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    format!("{:08x}{:04x}", ns, std::process::id() & 0xFFFF)
+    let mut bytes = [0u8; 8];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
 }
 
 fn cargar_nodos(ruta: &std::path::Path, subclave_hex: &str) -> Vec<BuzonNodo> {
@@ -2035,10 +2040,11 @@ fn recuperar_con_frase(
         }
     };
 
-    // Frase correcta — resetear contador
+    // Frase correcta — resetear contador (en RAM y en disco)
     if let Ok(mut c) = sesion.contador.lock() {
         *c = 0;
     }
+    let _ = fs::remove_file(&babel_path("intentos.dat"));
 
     let json: serde_json::Value =
         serde_json::from_str(&datos).map_err(|_| "Formato de recovery invalido.".to_string())?;
@@ -2109,10 +2115,11 @@ fn obtener_usuario_con_maestra(
             return Err("Llave maestra incorrecta.".to_string());
         }
     };
-    // Llave correcta — resetear contador
+    // Llave correcta — resetear contador (en RAM y en disco)
     if let Ok(mut c) = sesion.contador.lock() {
         *c = 0;
     }
+    let _ = fs::remove_file(&babel_path("intentos.dat"));
     let usuario: seguridad::UsuarioBabel =
         serde_json::from_str(&json).map_err(|e| format!("Error leyendo usuario: {}", e))?;
     Ok(usuario.nombre)

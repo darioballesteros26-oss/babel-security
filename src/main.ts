@@ -677,21 +677,21 @@ async function cargarArchivosGuardados(): Promise<void> {
         const kb = (g.trad.tamaño / 1024).toFixed(0);
         const idioma = g.trad.idioma.replace("_", "→").toUpperCase();
         return `
-<div class="archivo-card" data-ruta="${g.trad.ruta}" data-ruta-orig="${g.orig.ruta}" draggable="true" ondragstart="_rutaArrastrada='${g.trad.ruta}';_esGuardadoArrastrado=false;">
+<div class="archivo-card" data-ruta="${escapeHTML(g.trad.ruta)}" data-ruta-orig="${escapeHTML(g.orig.ruta)}" data-base="${escapeHTML(base)}" data-guardado="false" draggable="true">
   <div class="archivo-card-header">
-    <input type="checkbox" class="archivo-checkbox-g" onclick="actualizarSeleccionGuardados()" style="accent-color:var(--dorado);cursor:pointer;flex-shrink:0;width:16px;height:16px;">
+    <input type="checkbox" class="archivo-checkbox-g" data-action="seleccionar" style="accent-color:var(--dorado);cursor:pointer;flex-shrink:0;width:16px;height:16px;">
     <div class="archivo-card-info">
       <div class="archivo-card-nombre" style="display:flex;align-items:center;gap:8px;">${nombre}
-        <button type="button" style="background:none;border:none;color:var(--dorado);cursor:pointer;font-size:0.85rem;padding:0;opacity:0.7;" onclick="event.stopPropagation();iniciarRenombradoArchivo('${g.trad.ruta}','${base}')">✎</button>
+        <button type="button" data-action="renombrar" style="background:none;border:none;color:var(--dorado);cursor:pointer;font-size:0.85rem;padding:0;opacity:0.7;">✎</button>
       </div>
       <div class="archivo-card-meta">${kb} KB · <span style="color:var(--dorado);">${idioma} · TRAD</span> · AES-256</div>
     </div>
   </div>
   <div class="archivo-card-botones">
-    <button type="button" class="btn-archivo btn-archivo-ver" onclick="verComparacionRutas('${g.orig.ruta}','${g.trad.ruta}')">◫ VER COMPARACIÓN</button>
-    <button type="button" class="btn-archivo btn-archivo-exportar" onclick="exportarArchivo('${g.trad.ruta}')">EXPORTAR</button>
-    <button type="button" class="btn-archivo" onclick="moverArchivoGuardadoPopup('${g.trad.ruta}', event)" style="opacity:0.7;">MOVER</button>
-    <button type="button" class="btn-archivo" onclick="enviarArchivoDesdeArchivos('${g.trad.ruta}')" style="opacity:0.7;">✉</button>
+    <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver-comparacion">◫ VER COMPARACIÓN</button>
+    <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar">EXPORTAR</button>
+    <button type="button" class="btn-archivo" data-action="mover" style="opacity:0.7;">MOVER</button>
+    <button type="button" class="btn-archivo" data-action="enviar" style="opacity:0.7;">✉</button>
   </div>
 </div>`;
       }
@@ -699,24 +699,50 @@ async function cargarArchivosGuardados(): Promise<void> {
       const a = g.guardado ?? g.trad ?? g.orig!;
       const kb = (a.tamaño / 1024).toFixed(0);
       return `
-<div class="archivo-card" data-ruta="${a.ruta}" draggable="true" ondragstart="_rutaArrastrada='${a.ruta}';_esGuardadoArrastrado=true;">
+<div class="archivo-card" data-ruta="${escapeHTML(a.ruta)}" data-base="${escapeHTML(base)}" data-guardado="true" draggable="true">
   <div class="archivo-card-header">
-    <input type="checkbox" class="archivo-checkbox-g" onclick="actualizarSeleccionGuardados()" style="accent-color:var(--dorado);cursor:pointer;flex-shrink:0;width:16px;height:16px;">
+    <input type="checkbox" class="archivo-checkbox-g" data-action="seleccionar" style="accent-color:var(--dorado);cursor:pointer;flex-shrink:0;width:16px;height:16px;">
     <div class="archivo-card-info">
       <div class="archivo-card-nombre" style="display:flex;align-items:center;gap:8px;">${nombre}
-        <button type="button" style="background:none;border:none;color:var(--dorado);cursor:pointer;font-size:0.85rem;padding:0;opacity:0.7;" onclick="event.stopPropagation();iniciarRenombradoArchivo('${a.ruta}','${base}')">✎</button>
+        <button type="button" data-action="renombrar" style="background:none;border:none;color:var(--dorado);cursor:pointer;font-size:0.85rem;padding:0;opacity:0.7;">✎</button>
       </div>
       <div class="archivo-card-meta">${kb} KB · GUARDADO · AES-256</div>
     </div>
   </div>
   <div class="archivo-card-botones">
-    <button type="button" class="btn-archivo btn-archivo-ver" onclick="verArchivo('${a.ruta}')">VER</button>
-    <button type="button" class="btn-archivo btn-archivo-exportar" onclick="exportarArchivo('${a.ruta}')">EXPORTAR</button>
-    <button type="button" class="btn-archivo" onclick="moverArchivoGuardadoPopup('${a.ruta}', event)" style="opacity:0.7;">MOVER</button>
-    <button type="button" class="btn-archivo" onclick="enviarArchivoDesdeArchivos('${a.ruta}')" style="opacity:0.7;">✉</button>
+    <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver">VER</button>
+    <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar">EXPORTAR</button>
+    <button type="button" class="btn-archivo" data-action="mover" style="opacity:0.7;">MOVER</button>
+    <button type="button" class="btn-archivo" data-action="enviar" style="opacity:0.7;">✉</button>
   </div>
 </div>`;
     }).join("");
+
+    lista.onclick = (e: MouseEvent) => {
+      const btn = (e.target as HTMLElement).closest("[data-action]") as HTMLElement | null;
+      if (!btn) return;
+      const accion = btn.dataset.action;
+      if (accion === "seleccionar") { actualizarSeleccionGuardados(); return; }
+      const card = btn.closest(".archivo-card") as HTMLElement | null;
+      if (!card) return;
+      const ruta = card.dataset.ruta ?? "";
+      const rutaOrig = card.dataset.rutaOrig ?? "";
+      const base2 = card.dataset.base ?? "";
+      switch (accion) {
+        case "ver-comparacion": verComparacionRutas(rutaOrig, ruta); break;
+        case "ver": verArchivo(ruta); break;
+        case "exportar": exportarArchivo(ruta); break;
+        case "mover": moverArchivoGuardadoPopup(ruta, e); break;
+        case "enviar": enviarArchivoDesdeArchivos(ruta); break;
+        case "renombrar": e.stopPropagation(); iniciarRenombradoArchivo(ruta, base2); break;
+      }
+    };
+    lista.ondragstart = (e: DragEvent) => {
+      const card = (e.target as HTMLElement).closest(".archivo-card") as HTMLElement | null;
+      if (!card) return;
+      _rutaArrastrada = card.dataset.ruta ?? "";
+      _esGuardadoArrastrado = card.dataset.guardado === "true";
+    };
 
   } catch (error) {
     mostrarToast("Error cargando lista: " + String(error), true);
@@ -1443,7 +1469,8 @@ function renderizarEnContenedor(
   } else if (texto.startsWith("html:")) {
     contenedor.innerHTML = DOMPurify.sanitize(texto.slice(5), {
       ALLOWED_TAGS: ["p","div","br","span","b","i","u","strong","em","ul","ol","li","table","thead","tbody","tr","th","td","a","img","h1","h2","h3","h4","blockquote","pre","code"],
-      ALLOWED_ATTR: ["href","src","alt","title","style","class","width","height"],
+      ALLOWED_ATTR: ["href","src","alt","title","class","width","height"],
+      FORBID_ATTR: ["style"],
       ALLOW_DATA_ATTR: false,
       FORCE_BODY: true,
     });
@@ -2190,7 +2217,8 @@ function renderizarCuerpoEmail(contenedor: HTMLElement, cuerpo: string): void {
   if (esHTML) {
     contenedor.innerHTML = DOMPurify.sanitize(cuerpo, {
       ALLOWED_TAGS: ["p","div","br","span","b","i","u","strong","em","ul","ol","li","table","thead","tbody","tr","th","td","a","img","h1","h2","h3","h4","blockquote","pre","code"],
-      ALLOWED_ATTR: ["href","src","alt","title","style","class","width","height"],
+      ALLOWED_ATTR: ["href","src","alt","title","class","width","height"],
+      FORBID_ATTR: ["style"],
       ALLOW_DATA_ATTR: false,
       FORCE_BODY: true,
     });

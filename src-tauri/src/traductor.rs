@@ -722,15 +722,12 @@ pub fn registrar_evento(evento: &str, subclave_hex: &str) {
 // Regla: el .babel siempre gana. El .json es solo para inspección/edición.
 // Al arrancar: si existe .babel se carga cifrado.
 //              si solo existe .json se importa y se cifra automáticamente.
-const DIR_DICT: &str = "../diccionarios";
-
-fn ruta_dict(nombre: &str) -> String {
-    format!("{}/{}", DIR_DICT, nombre)
+fn ruta_dict(nombre: &str) -> PathBuf {
+    crate::babel_dir().join("diccionarios").join(nombre)
 }
 
-/// Asegura que el directorio de diccionarios existe.
 fn init_dir_dict() {
-    let _ = fs::create_dir_all(DIR_DICT);
+    let _ = fs::create_dir_all(crate::babel_dir().join("diccionarios"));
 }
 
 fn aplanar_categorias(
@@ -773,7 +770,7 @@ pub fn cargar_diccionario(
             }
             Err(_) => log::error!(
                 " [!] No se pudo descifrar {}. Clave incorrecta.",
-                ruta_cifrada
+                ruta_cifrada.display()
             ),
         }
     }
@@ -816,7 +813,7 @@ pub fn guardar_diccionario(nombre: &str, dict: &HashMap<String, String>, subclav
 }
 
 /// Escribe el diccionario como JSON legible y ordenado alfabéticamente.
-fn sincronizar_json_legible(ruta: &str, dict: &HashMap<String, String>) {
+fn sincronizar_json_legible(ruta: &std::path::Path, dict: &HashMap<String, String>) {
     let mut entradas: Vec<(&String, &String)> = dict.iter().collect();
     entradas.sort_by_key(|(k, _)| k.as_str());
 
@@ -1103,7 +1100,8 @@ pub fn obtener_email_completo(
 /// Incluye token de seguridad - Flask rechaza sin él.
 pub fn traducir_con_nllb(texto: &str, origen: &str, destino: &str) -> Result<String, String> {
     let url = "http://127.0.0.1:5002/traducir";
-    let token = String::new();
+    let token = std::env::var("BABEL_NLLB_TOKEN")
+        .map_err(|_| "BABEL_NLLB_TOKEN no configurado".to_string())?;
     let body = serde_json::json!({
         "texto": texto,
         "origen": origen,
