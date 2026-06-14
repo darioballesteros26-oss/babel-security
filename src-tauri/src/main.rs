@@ -2072,13 +2072,31 @@ fn recuperar_con_frase(
             .to_string()
     })?;
 
-    let mut datos = match seguridad::descifrar_documento(cifrado, &recovery_key_hex) {
-        Ok(d) => d,
-        Err(_) => {
-            incrementar_contador_y_bloquear(&sesion)?;
-            return Err("Frase incorrecta - no corresponde a este bunker.".to_string());
-        }
-    };
+    let mut datos =
+        match seguridad::descifrar_documento(cifrado.clone(), &recovery_key_hex) {
+            Ok(d) => d,
+            Err(_) => {
+                // Fallback: esquema pre-C1 (HKDF sin Argon2id) para recovery.babel antiguos
+                let key_v0 = seguridad::derivar_clave_recuperacion_v0(&palabras)
+                    .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
+                let key_v0_hex = Zeroizing::new(hex::encode(key_v0.as_ref()));
+                match seguridad::descifrar_documento(cifrado, &key_v0_hex) {
+                    Ok(d) => {
+                        // Migración automática: re-cifrar con esquema nuevo
+                        if let Ok(nuevo) = seguridad::blindar_documento(&d, &recovery_key_hex) {
+                            let _ = fs::write(babel_path("recovery.babel"), nuevo);
+                        }
+                        d
+                    }
+                    Err(_) => {
+                        incrementar_contador_y_bloquear(&sesion)?;
+                        return Err(
+                            "Frase incorrecta - no corresponde a este bunker.".to_string()
+                        );
+                    }
+                }
+            }
+        };
 
     // Frase correcta — resetear contador (en RAM y en disco)
     if let Ok(mut c) = sesion.contador.lock() {

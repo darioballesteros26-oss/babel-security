@@ -810,6 +810,19 @@ pub fn derivar_clave_recuperacion(palabras: &[String]) -> Result<Zeroizing<[u8; 
     Ok(clave)
 }
 
+/// Esquema anterior al fix C1: HKDF-SHA256 sin Argon2id.
+/// Solo se usa como fallback para migrar recovery.babel generados antes de C1.
+pub fn derivar_clave_recuperacion_v0(
+    palabras: &[String],
+) -> Result<Zeroizing<[u8; 32]>, String> {
+    let frase = Zeroizing::new(palabras.join(" "));
+    let hk = Hkdf::<Sha256>::new(None, frase.as_bytes());
+    let mut clave = Zeroizing::new([0u8; 32]);
+    hk.expand(b"babel-recovery-v1", clave.as_mut())
+        .map_err(|_| "HKDF v0: error derivando clave".to_string())?;
+    Ok(clave)
+}
+
 fn clave_hmac_bloqueo() -> Option<[u8; 32]> {
     let bytes = fs::read(babel_path("master.salt")).ok()?;
     if bytes.len() < 32 {

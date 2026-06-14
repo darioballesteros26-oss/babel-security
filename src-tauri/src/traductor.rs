@@ -395,9 +395,6 @@ fn traducir_xml_directo(
                             .replace('&', "&amp;")
                             .replace('<', "&lt;")
                             .replace('>', "&gt;");
-                        if !resultado.ends_with(' ') && !traducido_escaped.starts_with(' ') {
-                            resultado.push(' ');
-                        }
                         resultado.push_str(&traducido_escaped);
                     }
                     resto = &resto[k..];
@@ -467,14 +464,19 @@ pub fn clonar_y_traducir(
                 // Cuerpo principal — traducido
                 zip_out.start_file(&name, opts_deflate)?;
                 zip_out.write_all(xml_traducido.as_bytes())?;
-            } else if name.starts_with("word/header") || name.starts_with("word/footer") {
-                // Encabezados y pies — también traducir
-                let mut xml_hf = String::new();
-                file.read_to_string(&mut xml_hf)?;
-                let xml_hf_trad =
-                    traducir_xml_directo(&xml_hf, dict, subclave_hex, origen, destino);
+            } else if name.starts_with("word/header")
+                || name.starts_with("word/footer")
+                || name == "word/footnotes.xml"
+                || name == "word/endnotes.xml"
+                || name == "word/comments.xml"
+            {
+                // Encabezados, pies, notas al pie/al final y comentarios — traducir
+                let mut xml_sub = String::new();
+                file.read_to_string(&mut xml_sub)?;
+                let xml_sub_trad =
+                    traducir_xml_directo(&xml_sub, dict, subclave_hex, origen, destino);
                 zip_out.start_file(&name, opts_deflate)?;
-                zip_out.write_all(xml_hf_trad.as_bytes())?;
+                zip_out.write_all(xml_sub_trad.as_bytes())?;
             } else {
                 // Imágenes, estilos, fuentes, relaciones — copiar intacto
                 let es_xml = name.ends_with(".xml") || name.ends_with(".rels");
@@ -574,21 +576,41 @@ pub fn procesar_pdf(
     let tmp_dir = crate::babel_dir().join("tmp");
     let _ = fs::create_dir_all(&tmp_dir);
 
-    // PASO 1: PDF → DOCX con pdf2docx
+    // PASO 1: PDF → DOCX con pdf2docx (timeout 120 s)
     let ruta_docx_tmp = tmp_dir.join(format!("{}_tmp.docx", nombre));
-    let ok = std::process::Command::new("python3")
-        .args([
-            "-c",
-            "import sys; from pdf2docx import Converter; cv=Converter(sys.argv[1]); cv.convert(sys.argv[2]); cv.close()",
-            ruta,
-            ruta_docx_tmp.to_str().unwrap_or(""),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+    let ok = {
+        let mut child = std::process::Command::new("python3")
+            .args([
+                "-c",
+                "import sys; from pdf2docx import Converter; cv=Converter(sys.argv[1]); cv.convert(sys.argv[2]); cv.close()",
+                ruta,
+                ruta_docx_tmp.to_str().unwrap_or(""),
+            ])
+            .spawn()
+            .ok();
+        match child.as_mut() {
+            None => false,
+            Some(c) => {
+                let deadline = std::time::Instant::now()
+                    + std::time::Duration::from_secs(120);
+                loop {
+                    match c.try_wait() {
+                        Ok(Some(s)) => break s.success(),
+                        Ok(None) if std::time::Instant::now() < deadline => {
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                        }
+                        _ => {
+                            let _ = c.kill();
+                            break false;
+                        }
+                    }
+                }
+            }
+        }
+    };
 
     if !ok {
-        // Fallback: texto plano si falla la conversión
+        // Fallback: pdftotext → si vacío, OCR página a página (máx. 50)
         let mut texto = Zeroizing::new(
             std::process::Command::new("/opt/homebrew/bin/pdftotext")
                 .args([ruta, "-"])
@@ -597,9 +619,35 @@ pub fn procesar_pdf(
                 .unwrap_or_default(),
         );
         if texto.trim().is_empty() {
-            *texto = ocr_pagina_pdf(ruta, 1);
+            let mut ocr_total = String::new();
+            for pag in 1u32..=50 {
+                let pag_text = ocr_pagina_pdf(ruta, pag);
+                if pag_text.trim().is_empty() {
+                    break;
+                }
+                ocr_total.push_str(&pag_text);
+                ocr_total.push('\n');
+            }
+            *texto = ocr_total;
         }
-        let (traducido, _) = traducir_inteligente(&texto, dict, subclave_hex, origen, destino);
+        // Traducir párrafo a párrafo con NLLB (fallback a diccionario)
+        let parrafos: Vec<String> = texto.lines().map(String::from).collect();
+        let mut traducido = String::new();
+        for parrafo in &parrafos {
+            if parrafo.trim().is_empty() {
+                traducido.push('\n');
+                continue;
+            }
+            let t = match traducir_con_nllb(parrafo, origen, destino) {
+                Ok(t) => t,
+                Err(_) => {
+                    let (t, _) = motor_atomico(parrafo, dict, subclave_hex);
+                    t
+                }
+            };
+            traducido.push_str(&t);
+            traducido.push('\n');
+        }
         let cifrado = seguridad::blindar_documento(&traducido, subclave_hex)?;
         fs::write(
             archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre)),
@@ -608,20 +656,10 @@ pub fn procesar_pdf(
         return Ok(());
     }
 
-    // PASO 2: guardar original (DOCX original cifrado)
-    if let Ok(bytes_orig) = fs::read(&ruta_docx_tmp) {
-        let b64 = comprimir_b64(&bytes_orig);
-        if let Ok(cifrado_orig) = seguridad::blindar_documento(&b64, subclave_hex) {
-            let _ = fs::write(
-                archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre)),
-                cifrado_orig,
-            );
-        }
-    }
-
-    // PASO 3 & 4 — cleanup de ruta_docx_tmp garantizado aunque falle la traducción
+    // PASO 2 & 3 — cleanup de ruta_docx_tmp garantizado aunque falle la traducción
+    // (el original __orig lo guarda clonar_y_traducir internamente)
     let resultado = (|| -> Result<(), Box<dyn std::error::Error>> {
-        // PASO 3: traducir DOCX con el pipeline ZIP
+        // PASO 2: traducir DOCX con el pipeline ZIP (guarda también __orig)
         clonar_y_traducir(
             &ruta_docx_tmp.to_string_lossy(),
             dict,
@@ -630,7 +668,7 @@ pub fn procesar_pdf(
             origen,
             destino,
         )?;
-        // Renombrar _tmp → nombre final
+        // Renombrar _tmp → nombre final (clonar_y_traducir usa el stem del DOCX temporal)
         let salida_tmp = archivos_dir.join(format!("{}_{}_tmp.babel", id_usuario, nombre));
         let salida_final = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
         if salida_tmp.exists() {
@@ -644,7 +682,7 @@ pub fn procesar_pdf(
             let _ = fs::rename(&orig_tmp, &orig_final);
         }
 
-        // PASO 4: convertir DOCX traducido → PDF con LibreOffice
+        // PASO 3: DOCX traducido → PDF vía LibreOffice
         let ruta_docx_trad =
             archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
         if let Ok(bytes_cifrados) = fs::read(&ruta_docx_trad) {
@@ -652,7 +690,16 @@ pub fn procesar_pdf(
                 if let Ok(docx_bytes) = descomprimir_b64(&b64) {
                     let docx_para_pdf = tmp_dir.join(format!("{}_trad.docx", nombre));
                     let _ = fs::write(&docx_para_pdf, &docx_bytes);
-                    std::process::Command::new("/opt/homebrew/bin/soffice")
+                    let soffice = [
+                        "/opt/homebrew/bin/soffice",
+                        "/usr/local/bin/soffice",
+                        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+                    ]
+                    .iter()
+                    .find(|&&p| std::path::Path::new(p).exists())
+                    .copied()
+                    .unwrap_or("soffice");
+                    std::process::Command::new(soffice)
                         .args([
                             "--headless",
                             "--convert-to",
