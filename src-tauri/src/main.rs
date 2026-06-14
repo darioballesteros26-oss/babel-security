@@ -1999,16 +1999,8 @@ fn generar_palabras_recuperacion() -> Vec<String> {
 fn generar_frase_recuperacion(
     maestra: String,
     pass_usuario: String,
-    sesion: tauri::State<SesionActiva>,
+    _sesion: tauri::State<SesionActiva>,
 ) -> Result<Vec<String>, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
-    if subclave_hex.is_empty() {
-        return Err("No hay sesión activa.".into());
-    }
     let palabras = generar_palabras_recuperacion();
 
     let recovery_key = seguridad::derivar_clave_recuperacion(&palabras)?;

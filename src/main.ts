@@ -374,7 +374,7 @@ async function intentarAcceso(): Promise<void> {
       if (bienvenida) bienvenida.textContent = `Bienvenido, ${usuario}`;
       mostrarPantalla("principal");
       activarTimerInactividad();
-      invoke<boolean>("tiene_config_email").then(ok => { _smtpConfigurado = ok; }).catch(() => {});
+      invoke<boolean>("tiene_config_email").then(ok => { _smtpConfigurado = ok; }).catch(() => { });
 
 
     } else {
@@ -1471,8 +1471,8 @@ function renderizarEnContenedor(
   } else if (texto.startsWith("html:")) {
     // HTML generado por el backend Rust (docx_a_html) — confiable, se permite style
     contenedor.innerHTML = DOMPurify.sanitize(texto.slice(5), {
-      ALLOWED_TAGS: ["p","div","br","span","b","i","u","strong","em","ul","ol","li","table","thead","tbody","tr","th","td","a","img","h1","h2","h3","h4","blockquote","pre","code"],
-      ALLOWED_ATTR: ["href","src","alt","title","class","width","height","style"],
+      ALLOWED_TAGS: ["p", "div", "br", "span", "b", "i", "u", "strong", "em", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "a", "img", "h1", "h2", "h3", "h4", "blockquote", "pre", "code"],
+      ALLOWED_ATTR: ["href", "src", "alt", "title", "class", "width", "height", "style"],
       ALLOW_DATA_ATTR: false,
       FORCE_BODY: true,
     });
@@ -1588,8 +1588,13 @@ function cerrarVisorParalelo(): void {
   const modal = document.getElementById("modal-paralelo");
   const cont1 = document.getElementById("par-contenido-1");
   const cont2 = document.getElementById("par-contenido-2");
-  if (cont1) { cont1.textContent = "0".repeat(cont1.textContent?.length ?? 0); cont1.textContent = ""; }
-  if (cont2) { cont2.textContent = "0".repeat(cont2.textContent?.length ?? 0); cont2.textContent = ""; }
+  for (const cont of [cont1, cont2]) {
+    if (!cont) continue;
+    const prev = (cont as any)._blobUrl as string | undefined;
+    if (prev) URL.revokeObjectURL(prev);
+    (cont as any)._blobUrl = undefined;
+    cont.innerHTML = "";
+  }
   modal?.classList.add("hidden");
 }
 // ============================================================
@@ -1894,8 +1899,7 @@ async function enviarMensajeP2P(): Promise<void> {
   // Mostrar mensaje propio inmediatamente
   añadirMensajeP2P("yo", texto);
 
-  // Si hay traducción activa, traducir el mensaje enviado también
-  if (p2pTraduccionActiva && ipP2PConectada) {
+  if (ipP2PConectada) {
     try {
       await invoke("enviar_mensaje_p2p", {
         ip: ipP2PConectada,
@@ -2221,8 +2225,8 @@ function renderizarCuerpoEmail(contenedor: HTMLElement, cuerpo: string): void {
   const esHTML = /<(p|div|br|img|html|body|span|table)[^>]*>/i.test(cuerpo);
   if (esHTML) {
     contenedor.innerHTML = DOMPurify.sanitize(cuerpo, {
-      ALLOWED_TAGS: ["p","div","br","span","b","i","u","strong","em","ul","ol","li","table","thead","tbody","tr","th","td","a","img","h1","h2","h3","h4","blockquote","pre","code"],
-      ALLOWED_ATTR: ["href","src","alt","title","class","width","height"],
+      ALLOWED_TAGS: ["p", "div", "br", "span", "b", "i", "u", "strong", "em", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "a", "img", "h1", "h2", "h3", "h4", "blockquote", "pre", "code"],
+      ALLOWED_ATTR: ["href", "src", "alt", "title", "class", "width", "height"],
       FORBID_ATTR: ["style"],
       ALLOW_DATA_ATTR: false,
       FORCE_BODY: true,
@@ -2268,35 +2272,36 @@ async function seleccionarEmail(id: number): Promise<void> {
     if (visor) {
       visor.classList.remove("hidden");
       visor.innerHTML = `
-        <div class="email-visor-header">
-          <div style="flex:1;min-width:0;">
-            <div style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;
-              color:var(--texto-principal);letter-spacing:0.05em;margin-bottom:6px;">
+        <div class="email-visor-header" style="display: flex; justify-content: space-between; align-items: flex-start;"> 
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; color: var(--texto-principal); letter-spacing: 0.05em; margin-bottom: 6px;">
               ${escapeHTML(email.asunto)}
             </div>
-            <div style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;
-              letter-spacing:1px;color:var(--texto-secundario);">
+            
+            <div style="font-family: 'Rajdhani', sans-serif; font-size: 0.65rem; letter-spacing: 1px; color: var(--texto-secundario);">
               ${escapeHTML(email.remitente)} · ${formatearFechaEmail(email.fecha)}
             </div>
+
             ${email.adjuntos.length > 0 ? `
-              <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+              <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;">
                 ${email.adjuntos.map(a => `
-                  <span style="font-family:'Rajdhani',sans-serif;font-size:0.6rem;
-                    letter-spacing:1px;color:var(--dorado);border:1px solid var(--borde-dorado);
-                    padding:2px 8px;border-radius:2px;">◫ ${escapeHTML(a)}</span>
+                  <span style="font-family: 'Rajdhani', sans-serif; font-size: 0.6rem; letter-spacing: 1px; color: var(--dorado); border: 1px solid var(--borde-dorado); padding: 2px 8px; border-radius: 2px;">
+                    ◫ ${escapeHTML(a)}
+                  </span>
                 `).join("")}
-              </div>` : ""}
+              </div>
+            ` : ""}
           </div>
-          <button type="button" onclick="cerrarVisorEmail()"
-            style="background:transparent;border:none;color:var(--texto-secundario);
-            cursor:pointer;font-size:1rem;flex-shrink:0;padding:4px;">✕</button>
+
+          <button type="button" onclick="cerrarVisorEmail()" style="background: transparent; border: none; color: var(--texto-secundario); cursor: pointer; font-size: 1rem; flex-shrink: 0; padding: 4px;">
+            ✕
+          </button>
         </div>
-        <div id="email-visor-cuerpo" style="padding:24px 28px;overflow-y:auto;flex:1;
-          font-family:'Cormorant Garamond',serif;font-size:0.95rem;
-          color:var(--texto-principal);line-height:1.8;
-          word-break:break-word;letter-spacing:0.02em;"></div>
-        `
+
+        <div id="email-visor-cuerpo" style="padding: 24px 28px; overflow-y: auto; flex: 1; font-family: 'Cormorant Garamond', serif; font-size: 0.95rem; color: var(--texto-principal); line-height: 1.8; word-break: break-word; letter-spacing: 0.02em;">
+        </div>
       `;
+
       const cuerpoEl = visor.querySelector<HTMLElement>("#email-visor-cuerpo");
       if (cuerpoEl) renderizarCuerpoEmail(cuerpoEl, email.cuerpo);
     }
@@ -2348,7 +2353,7 @@ function manejarSeleccionArchivoEmail(event: Event): void {
   archivoEmailRuta = archivo.name;
   archivoEmailFile = archivo;
   const el = document.getElementById("comp-archivo-nombre");
-  if (el) el.textContent = `◫ ${archivo.name}`;
+  if (el) el.textContent = "◫ " + archivo.name;
 }
 
 // Muestra u oculta el panel de configuración SMTP/IMAP
@@ -2476,7 +2481,7 @@ async function enviarArchivoDesdeArchivos(ruta: string): Promise<void> {
   archivoEmailRuta = ruta;
   const nombre = ruta.split("/").pop() ?? ruta;
   const el = document.getElementById("comp-archivo-nombre");
-  if (el) el.textContent = `◫ ${nombre}`;
+  if (el) el.textContent = "◫ " + nombre;
 }
 // ============================================================
 // BIP39 — FRASE DE RECUPERACIÓN
@@ -2487,11 +2492,9 @@ function mostrarFrase(palabras: string[]): void {
   if (sidebar) sidebar.classList.add("hidden");
   const grid = document.getElementById("frase-grid");
   if (grid) {
-    grid.innerHTML = palabras.map((p, i) => `
-            <div class="palabra-bip39">
-                <span class="palabra-numero">${i + 1}</span>
-                <span class="palabra-texto">${p}</span>
-            </div>`).join("");
+    grid.innerHTML = palabras.map((p, i) => {
+      return `<div class="palabra-bip39"><span class="palabra-numero">${i + 1}</span><span class="palabra-texto">${p}</span></div>`;
+    }).join("");
   }
   mostrarPantalla("frase");
 }
@@ -2576,11 +2579,9 @@ async function verFraseApp(): Promise<void> {
     const modal = document.getElementById("modal-frase-app");
     const grid = document.getElementById("modal-frase-grid");
     if (!modal || !grid) return;
-    grid.innerHTML = palabras.map((p, i) => `
-      <div class="palabra-bip39">
-        <span class="palabra-numero">${i + 1}</span>
-        <span class="palabra-texto">${p}</span>
-      </div>`).join("");
+    grid.innerHTML = palabras.map((p, i) => {
+      return `<div class="palabra-bip39"><span class="palabra-numero">${i + 1}</span><span class="palabra-texto">${p}</span></div>`;
+    }).join("");
     modal.classList.remove("hidden");
   } catch (error) {
     mostrarToast("Error: " + String(error), true);
