@@ -2295,14 +2295,7 @@ async function seleccionarEmail(id: number): Promise<void> {
           font-family:'Cormorant Garamond',serif;font-size:0.95rem;
           color:var(--texto-principal);line-height:1.8;
           word-break:break-word;letter-spacing:0.02em;"></div>
-        ${email.adjuntos.filter(a => /\.(png|jpg|jpeg|gif|webp)$/i.test(a)).length > 0 ? `
-          <div style="padding:0 28px 20px;display:flex;flex-wrap:wrap;gap:8px;">
-            ${email.adjuntos.filter(a => /\.(png|jpg|jpeg|gif|webp)$/i.test(a)).map(a => `
-              <img src="babel-attachment://${escapeHTML(a)}" 
-                style="max-width:100%;max-height:300px;object-fit:contain;border-radius:4px;border:1px solid var(--borde);"
-                onerror="this.style.display='none'">
-            `).join("")}
-          </div>` : ""}
+        `
       `;
       const cuerpoEl = visor.querySelector<HTMLElement>("#email-visor-cuerpo");
       if (cuerpoEl) renderizarCuerpoEmail(cuerpoEl, email.cuerpo);

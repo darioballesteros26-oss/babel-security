@@ -35,9 +35,17 @@ fn borrar_seguro(ruta: &str) {
         }
         let tamaño = meta.len() as usize;
         if tamaño > 0 {
-            let _ = fs::write(ruta, vec![0u8; tamaño]);
-            let _ = fs::write(ruta, vec![0xFFu8; tamaño]);
-            let _ = fs::write(ruta, vec![0xAAu8; tamaño]);
+            // sync_all() llama a fsync() tras cada pasada para forzar escritura
+            // al dispositivo antes de la siguiente. En SSD el wear leveling sigue
+            // siendo una limitación del hardware, pero al menos cada pasada se
+            // compromete antes de continuar. El contenido ya va cifrado AES-256-GCM.
+            for patron in &[vec![0x00u8; tamaño], vec![0xFFu8; tamaño], vec![0xAAu8; tamaño]] {
+                if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(ruta) {
+                    use std::io::Write;
+                    let _ = f.write_all(patron);
+                    let _ = f.sync_all();
+                }
+            }
         }
     }
     let _ = fs::remove_file(ruta);

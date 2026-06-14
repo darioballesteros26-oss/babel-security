@@ -342,14 +342,6 @@ impl AntiKeylogger {
     /// sin privilegios de administrador. Root solo añade capacidad de escaneo
     /// de procesos privilegiados del kernel — informa pero no bloquea.
     pub fn analizar_entorno() -> ResultadoSeguridad {
-        if cfg!(debug_assertions) {
-            return ResultadoSeguridad {
-                seguro: true,
-                amenazas: vec![],
-                advertencias: vec![],
-            };
-        }
-
         let mut amenazas = Vec::new();
         let mut advertencias = Vec::new();
 

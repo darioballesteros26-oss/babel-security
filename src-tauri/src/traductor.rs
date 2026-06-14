@@ -1075,12 +1075,18 @@ pub fn obtener_email_completo(
                 .unwrap_or_default();
 
             if content_disposition.contains("attachment") {
-                let nombre = content_disposition
+                let nombre_raw = content_disposition
                     .split(';')
                     .find(|p| p.trim().starts_with("filename"))
                     .and_then(|p| p.split('=').nth(1))
                     .map(|n| n.trim().trim_matches('"').to_string())
                     .unwrap_or_else(|| "adjunto".to_string());
+                // Quitar cualquier componente de directorio para prevenir path traversal
+                let nombre = std::path::Path::new(&nombre_raw)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("adjunto")
+                    .to_string();
                 adjuntos.push(nombre);
             } else if content_type.contains("text/plain") && cuerpo.is_empty() {
                 cuerpo = parte.get_body().unwrap_or_default();
