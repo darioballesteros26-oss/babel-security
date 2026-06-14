@@ -1469,10 +1469,10 @@ function renderizarEnContenedor(
     img.style.cssText = `max-width:100%;max-height:${alturaVisor};object-fit:contain;border-radius:4px;display:block;margin:0 auto;`;
     contenedor.appendChild(img);
   } else if (texto.startsWith("html:")) {
+    // HTML generado por el backend Rust (docx_a_html) — confiable, se permite style
     contenedor.innerHTML = DOMPurify.sanitize(texto.slice(5), {
       ALLOWED_TAGS: ["p","div","br","span","b","i","u","strong","em","ul","ol","li","table","thead","tbody","tr","th","td","a","img","h1","h2","h3","h4","blockquote","pre","code"],
-      ALLOWED_ATTR: ["href","src","alt","title","class","width","height"],
-      FORBID_ATTR: ["style"],
+      ALLOWED_ATTR: ["href","src","alt","title","class","width","height","style"],
       ALLOW_DATA_ATTR: false,
       FORCE_BODY: true,
     });
