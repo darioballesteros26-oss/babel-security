@@ -1557,6 +1557,10 @@ fn guardar_bytes_sin_traducir(
         return Err("Los archivos .babel ya están cifrados.".into());
     }
 
+    if contenido.len() > 100 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 100 MB.".to_string());
+    }
+
     let ts: u64 = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1948,7 +1952,17 @@ fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, Stri
     }
 
     if let Ok(data) = fs::read_to_string(&babel_path("settings.json")) {
-        if let Ok(settings) = serde_json::from_str(&data) {
+        if let Ok(settings) = serde_json::from_str::<AppSettings>(&data) {
+            // Migrar a formato cifrado y eliminar plaintext
+            if !subclave_hex.is_empty() {
+                if let Ok(json) = serde_json::to_string(&settings) {
+                    if let Ok(cifrado) = seguridad::blindar_documento(&json, &subclave_hex) {
+                        if fs::write(babel_path("settings.babel"), cifrado).is_ok() {
+                            let _ = fs::remove_file(babel_path("settings.json"));
+                        }
+                    }
+                }
+            }
             return Ok(settings);
         }
     }
@@ -2310,8 +2324,20 @@ fn obtener_emails_tauri(
         "No hay configuración de email guardada. Configura SMTP primero.".to_string()
     })?;
 
-    traductor::obtener_emails(&creds.imap_dominio, &creds.usuario, &creds.password)
-        .map_err(|e| format!("Error obteniendo emails: {}", e))
+    let mut emails =
+        traductor::obtener_emails(&creds.imap_dominio, &creds.usuario, &creds.password)
+            .map_err(|e| format!("Error obteniendo emails: {}", e))?;
+
+    if !creds.remitentes_autorizados.is_empty() {
+        emails.retain(|e| {
+            creds
+                .remitentes_autorizados
+                .iter()
+                .any(|r| e.remitente.to_lowercase().contains(&r.to_lowercase()))
+        });
+    }
+
+    Ok(emails)
 }
 
 // ============================================================

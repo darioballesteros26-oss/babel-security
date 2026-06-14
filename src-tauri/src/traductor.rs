@@ -25,7 +25,19 @@ pub fn descomprimir_b64(b64: &str) -> Result<Vec<u8>, String> {
         .decode(b64)
         .map_err(|e| e.to_string())?;
     if bytes.starts_with(ZSTD_MAGIC) {
-        zstd::decode_all(&bytes[ZSTD_MAGIC.len()..]).map_err(|e| e.to_string())
+        use std::io::Read;
+        const MAX_DECOMP: u64 = 50 * 1024 * 1024;
+        let cursor = std::io::Cursor::new(&bytes[ZSTD_MAGIC.len()..]);
+        let decoder = zstd::Decoder::new(cursor).map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        decoder
+            .take(MAX_DECOMP + 1)
+            .read_to_end(&mut out)
+            .map_err(|e| e.to_string())?;
+        if out.len() as u64 > MAX_DECOMP {
+            return Err("Documento descomprimido supera el límite de 50 MB".to_string());
+        }
+        Ok(out)
     } else {
         Ok(bytes)
     }
@@ -38,7 +50,6 @@ use mailparse;
 use mailparse::MailHeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use sha2;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
@@ -255,18 +266,10 @@ fn leer_salt_abs(ruta: &PathBuf) -> Option<[u8; 32]> {
 // 1. INICIO DE SESIÓN (LOGIN)
 // ============================================================
 
-/// Guarda timestamp + firma SHA256(timestamp|salt) en bloqueo.tmp
+/// Guarda timestamp + firma HMAC-SHA256(timestamp) en bloqueo.tmp.
+/// Delega en seguridad::activar_bloqueo() para usar la misma clave que leer_bloqueo().
 pub fn activar_bloqueo_disco() {
-    let ts = chrono::Local::now().timestamp();
-    let salt = cargar_o_crear_salt();
-    use sha2::Digest;
-    let firma = format!(
-        "{:x}",
-        sha2::Sha256::digest(format!("{}:{}", ts, hex::encode(salt)).as_bytes())
-    );
-    let contenido = format!("{}:{}", ts, firma);
-    let ruta = crate::babel_dir().join("bloqueo.tmp");
-    let _ = fs::write(&ruta, contenido);
+    crate::seguridad::activar_bloqueo();
 }
 
 // detector de pdf y docx
@@ -508,9 +511,12 @@ pub fn clonar_y_traducir(
 }
 
 fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
+    use rand::RngCore;
     let tmp_dir = crate::babel_dir().join("tmp");
     let _ = std::fs::create_dir_all(&tmp_dir);
-    let tmp_base = tmp_dir.join(format!("ocr_{}", pagina));
+    let mut rand_bytes = [0u8; 4];
+    rand::thread_rng().fill_bytes(&mut rand_bytes);
+    let tmp_base = tmp_dir.join(format!("ocr_{}_{}", pagina, hex::encode(rand_bytes)));
     let tmp_img = format!("{}.png", tmp_base.to_string_lossy());
 
     let ok = std::process::Command::new("/opt/homebrew/bin/pdftoppm")
@@ -625,63 +631,72 @@ pub fn procesar_pdf(
         }
     }
 
-    // PASO 3: traducir DOCX con el pipeline ZIP
-    clonar_y_traducir(
-        &ruta_docx_tmp.to_string_lossy(),
-        dict,
-        subclave_hex,
-        id_usuario,
-        origen,
-        destino,
-    )?;
-    // Renombrar _tmp → nombre final
-    let salida_tmp = archivos_dir.join(format!("{}_{}_tmp.babel", id_usuario, nombre));
-    let salida_final = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
-    if salida_tmp.exists() {
-        let _ = fs::rename(&salida_tmp, &salida_final);
-    }
-    let orig_tmp = archivos_dir.join(format!("{}_{}_tmp__orig.babel", id_usuario, nombre));
-    let orig_final = archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre));
-    if orig_tmp.exists() {
-        let _ = fs::rename(&orig_tmp, &orig_final);
-    }
+    // PASO 3 & 4 — cleanup de ruta_docx_tmp garantizado aunque falle la traducción
+    let resultado = (|| -> Result<(), Box<dyn std::error::Error>> {
+        // PASO 3: traducir DOCX con el pipeline ZIP
+        clonar_y_traducir(
+            &ruta_docx_tmp.to_string_lossy(),
+            dict,
+            subclave_hex,
+            id_usuario,
+            origen,
+            destino,
+        )?;
+        // Renombrar _tmp → nombre final
+        let salida_tmp = archivos_dir.join(format!("{}_{}_tmp.babel", id_usuario, nombre));
+        let salida_final = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
+        if salida_tmp.exists() {
+            let _ = fs::rename(&salida_tmp, &salida_final);
+        }
+        let orig_tmp =
+            archivos_dir.join(format!("{}_{}_tmp__orig.babel", id_usuario, nombre));
+        let orig_final =
+            archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre));
+        if orig_tmp.exists() {
+            let _ = fs::rename(&orig_tmp, &orig_final);
+        }
 
-    // PASO 4: convertir DOCX traducido → PDF con LibreOffice
-    let ruta_docx_trad = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
-    // El DOCX traducido lo guarda clonar_y_traducir como babel — necesitamos descifrarlo
-    if let Ok(bytes_cifrados) = fs::read(&ruta_docx_trad) {
-        if let Ok(b64) = seguridad::descifrar_documento(bytes_cifrados, subclave_hex) {
-            if let Ok(docx_bytes) = descomprimir_b64(&b64) {
-                let docx_para_pdf = tmp_dir.join(format!("{}_trad.docx", nombre));
-                fs::write(&docx_para_pdf, &docx_bytes)?;
-                std::process::Command::new("/opt/homebrew/bin/soffice")
-                    .args([
-                        "--headless",
-                        "--convert-to",
-                        "pdf",
-                        "--outdir",
-                        &tmp_dir.to_string_lossy(),
-                        &docx_para_pdf.to_string_lossy(),
-                    ])
-                    .status()
-                    .ok();
+        // PASO 4: convertir DOCX traducido → PDF con LibreOffice
+        let ruta_docx_trad =
+            archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
+        if let Ok(bytes_cifrados) = fs::read(&ruta_docx_trad) {
+            if let Ok(b64) = seguridad::descifrar_documento(bytes_cifrados, subclave_hex) {
+                if let Ok(docx_bytes) = descomprimir_b64(&b64) {
+                    let docx_para_pdf = tmp_dir.join(format!("{}_trad.docx", nombre));
+                    let _ = fs::write(&docx_para_pdf, &docx_bytes);
+                    std::process::Command::new("/opt/homebrew/bin/soffice")
+                        .args([
+                            "--headless",
+                            "--convert-to",
+                            "pdf",
+                            "--outdir",
+                            &tmp_dir.to_string_lossy(),
+                            &docx_para_pdf.to_string_lossy(),
+                        ])
+                        .status()
+                        .ok();
 
-                let pdf_out = tmp_dir.join(format!("{}_trad.pdf", nombre));
-                if pdf_out.exists() {
-                    if let Ok(pdf_bytes) = fs::read(&pdf_out) {
-                        let b64_pdf = base64::engine::general_purpose::STANDARD.encode(&pdf_bytes);
-                        let cifrado_pdf = seguridad::blindar_documento(&b64_pdf, subclave_hex)?;
-                        fs::write(&ruta_docx_trad, cifrado_pdf)?;
+                    let pdf_out = tmp_dir.join(format!("{}_trad.pdf", nombre));
+                    if pdf_out.exists() {
+                        if let Ok(pdf_bytes) = fs::read(&pdf_out) {
+                            let b64_pdf = base64::engine::general_purpose::STANDARD
+                                .encode(&pdf_bytes);
+                            if let Ok(cifrado_pdf) =
+                                seguridad::blindar_documento(&b64_pdf, subclave_hex)
+                            {
+                                let _ = fs::write(&ruta_docx_trad, cifrado_pdf);
+                            }
+                        }
+                        borrar_seguro_local(&pdf_out.to_string_lossy());
                     }
-                    borrar_seguro_local(&pdf_out.to_string_lossy());
+                    borrar_seguro_local(&docx_para_pdf.to_string_lossy());
                 }
-                borrar_seguro_local(&docx_para_pdf.to_string_lossy());
             }
         }
-    }
-
-    // Limpiar temporal
+        Ok(())
+    })();
     borrar_seguro_local(&ruta_docx_tmp.to_string_lossy());
+    resultado?;
     registrar_evento(&format!("PDF procesado: {}", ruta), subclave_hex);
     Ok(())
 }

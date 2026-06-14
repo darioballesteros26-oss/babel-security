@@ -2398,6 +2398,7 @@ async function guardarConfigSmtp(): Promise<void> {
       password,
     });
     _smtpConfigurado = true;
+    (document.getElementById("smtp-password") as HTMLInputElement).value = "";
     toggleConfigSmtp();
     mostrarToast("Configuración guardada y cifrada", false);
     // Cargar bandeja inmediatamente tras guardar config

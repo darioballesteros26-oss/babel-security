@@ -836,3 +836,14 @@ pub fn leer_bloqueo() -> Option<i64> {
     }
     Some(ts)
 }
+
+pub fn activar_bloqueo() {
+    let ts = chrono::Local::now().timestamp();
+    if let Some(secret) = clave_hmac_bloqueo() {
+        if let Ok(mut mac) = <Hmac<Sha256> as KeyInit>::new_from_slice(&secret) {
+            mac.update(ts.to_string().as_bytes());
+            let firma = hex::encode(mac.finalize().into_bytes());
+            let _ = fs::write(babel_path("bloqueo.tmp"), format!("{}:{}", ts, firma));
+        }
+    }
+}
