@@ -753,23 +753,26 @@ impl AntiSandbox {
 /// Cada evento se añade al final del archivo — nunca se sobrescribe.
 /// El archivo es ilegible sin la subclave correcta.
 /// Función interna — los módulos externos usan registrar_evento_seguridad().
+const AUDIT_MAX_BYTES: u64 = 2 * 1024 * 1024; // 2 MB
+
 fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
+    // Rotar si supera el límite para evitar crecimiento ilimitado
+    if let Ok(meta) = fs::metadata(ruta) {
+        if meta.len() > AUDIT_MAX_BYTES {
+            let _ = fs::rename(ruta, format!("{}.old", ruta));
+        }
+    }
+
     match blindar_documento(evento, clave_hex) {
         Ok(cifrado) => {
-            // Usamos append para no perder eventos anteriores.
-            // Cada evento cifrado se separa por un delimitador de 4 bytes.
             use std::io::Write;
             if let Ok(mut f) = fs::OpenOptions::new().append(true).create(true).open(ruta) {
-                // Guardamos longitud (4 bytes little-endian) + datos cifrados
-                // Esto permite leer los eventos uno a uno al auditar
                 let len = (cifrado.len() as u32).to_le_bytes();
                 let _ = f.write_all(&len);
                 let _ = f.write_all(&cifrado);
             }
         }
         Err(e) => {
-            // Si no podemos cifrar el evento, lo escribimos en un log de errores
-            // en claro — mejor tener evidencia sin cifrar que no tener evidencia
             log::error!(" [!] Error registrando evento de seguridad: {}", e);
         }
     }

@@ -108,14 +108,23 @@ pub fn enviar_archivo_descifrado(
             (contenido.into_bytes(), nombre, "text/plain")
         };
 
+    let cuerpo_escapado = if cuerpo.is_empty() {
+        "Te envío el documento adjunto.".to_string()
+    } else {
+        cuerpo
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
     let cuerpo_html = format!(
-    "<html><body style='font-family:Arial,sans-serif;color:#222;'>\
-    <p>{}</p>\
-    <hr style='border:1px solid #eee;margin:20px 0;'>\
-    <p style='font-size:12px;color:#888;'>Enviado con Babel Security - traducción y cifrado 100% local.</p>\
-    </body></html>",
-    if cuerpo.is_empty() { "Te envío el documento adjunto.".to_string() } else { cuerpo.to_string() }
-);
+        "<html><body style='font-family:Arial,sans-serif;color:#222;'>\
+        <p>{}</p>\
+        <hr style='border:1px solid #eee;margin:20px 0;'>\
+        <p style='font-size:12px;color:#888;'>Enviado con Babel Security - traducción y cifrado 100% local.</p>\
+        </body></html>",
+        cuerpo_escapado
+    );
 
     let email = Message::builder()
         .from(smtp_usuario.parse()?)
@@ -906,8 +915,8 @@ pub fn obtener_emails(
 
     sesion.select("INBOX")?;
 
-    // Buscamos todos los emails y cogemos los últimos 20
-    let todos: Vec<u32> = sesion.search("ALL")?.into_iter().collect();
+    // UIDs permanentes — no cambian al borrar emails (a diferencia de seq numbers)
+    let todos: Vec<u32> = sesion.uid_search("ALL")?.into_iter().collect();
 
     let mut ids: Vec<u32> = todos;
     ids.sort_unstable();
@@ -918,19 +927,18 @@ pub fn obtener_emails(
         return Ok(vec![]);
     }
 
-    // Construimos el rango de IDs para el fetch
     let ids_str = ids
         .iter()
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join(",");
 
-    let fetch = sesion.fetch(&ids_str, "(ENVELOPE FLAGS)")?;
+    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS)")?;
 
     let mut emails: Vec<EmailResumen> = Vec::new();
 
     for msg in fetch.iter() {
-        let id = msg.message;
+        let id = msg.uid.unwrap_or(msg.message);
 
         let envelope = match msg.envelope() {
             Some(e) => e,
@@ -1026,7 +1034,7 @@ pub fn obtener_email_completo(
 
     sesion.select("INBOX")?;
 
-    let fetch = sesion.fetch(id.to_string(), "(RFC822)")?;
+    let fetch = sesion.uid_fetch(id.to_string(), "(RFC822)")?;
 
     let msg = fetch.iter().next().ok_or("Email no encontrado")?;
 
@@ -1136,8 +1144,14 @@ pub fn traducir_con_nllb(texto: &str, origen: &str, destino: &str) -> Result<Str
 
     json["traduccion"]
         .as_str()
-        .map(|s| s.to_string())
+        .map(|s| {
+            if s.len() > 50_000 {
+                return Err("Respuesta NLLB excede el límite de 50 000 caracteres".to_string());
+            }
+            Ok(s.to_string())
+        })
         .ok_or_else(|| "Respuesta NLLB inválida".to_string())
+        .and_then(|r| r)
 }
 
 /// Traduce usando NLLB. Si no está disponible, usa el diccionario.

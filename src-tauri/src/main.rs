@@ -269,6 +269,11 @@ fn crear_acceso_bunker(maestra: String, usuario: String, pass: String) -> Result
     if pass.len() < 8 {
         return Err("La contraseña debe tener al menos 8 caracteres.".into());
     }
+    let tiene_digito = pass.chars().any(|c| c.is_ascii_digit());
+    let tiene_especial = pass.chars().any(|c| !c.is_alphanumeric());
+    if !tiene_digito && !tiene_especial {
+        return Err("La contraseña debe incluir al menos un número o un carácter especial.".into());
+    }
     if usuario.trim().is_empty() {
         return Err("El nombre de usuario no puede estar vacío.".into());
     }
