@@ -25,19 +25,7 @@ pub fn descomprimir_b64(b64: &str) -> Result<Vec<u8>, String> {
         .decode(b64)
         .map_err(|e| e.to_string())?;
     if bytes.starts_with(ZSTD_MAGIC) {
-        use std::io::Read;
-        const MAX_DECOMP: u64 = 50 * 1024 * 1024;
-        let cursor = std::io::Cursor::new(&bytes[ZSTD_MAGIC.len()..]);
-        let decoder = zstd::Decoder::new(cursor).map_err(|e| e.to_string())?;
-        let mut out = Vec::new();
-        decoder
-            .take(MAX_DECOMP + 1)
-            .read_to_end(&mut out)
-            .map_err(|e| e.to_string())?;
-        if out.len() as u64 > MAX_DECOMP {
-            return Err("Documento descomprimido supera el límite de 50 MB".to_string());
-        }
-        Ok(out)
+        zstd::decode_all(&bytes[ZSTD_MAGIC.len()..]).map_err(|e| e.to_string())
     } else {
         Ok(bytes)
     }
@@ -681,10 +669,16 @@ pub fn procesar_pdf(
                         if let Ok(pdf_bytes) = fs::read(&pdf_out) {
                             let b64_pdf = base64::engine::general_purpose::STANDARD
                                 .encode(&pdf_bytes);
-                            if let Ok(cifrado_pdf) =
-                                seguridad::blindar_documento(&b64_pdf, subclave_hex)
-                            {
-                                let _ = fs::write(&ruta_docx_trad, cifrado_pdf);
+                            match seguridad::blindar_documento(&b64_pdf, subclave_hex) {
+                                Ok(cifrado_pdf) => {
+                                    let _ = fs::write(&ruta_docx_trad, cifrado_pdf);
+                                }
+                                Err(e) => {
+                                    registrar_evento(
+                                        &format!("AVISO: error cifrando PDF traducido: {}", e),
+                                        subclave_hex,
+                                    );
+                                }
                             }
                         }
                         borrar_seguro_local(&pdf_out.to_string_lossy());

@@ -2384,6 +2384,7 @@ async function guardarConfigSmtp(): Promise<void> {
   const imapServidor = (document.getElementById("imap-servidor") as HTMLInputElement)?.value.trim();
   const usuario = (document.getElementById("smtp-usuario") as HTMLInputElement)?.value.trim();
   const password = (document.getElementById("smtp-password") as HTMLInputElement)?.value;
+  const remitentes = (document.getElementById("smtp-remitentes") as HTMLInputElement)?.value.trim() ?? "";
 
   if (!servidor || !usuario || !password) {
     mostrarToast("Rellena todos los campos", true);
@@ -2396,6 +2397,7 @@ async function guardarConfigSmtp(): Promise<void> {
       imapDominio: imapServidor || servidor.replace("smtp.", "imap."),
       usuario,
       password,
+      remitentes,
     });
     _smtpConfigurado = true;
     (document.getElementById("smtp-password") as HTMLInputElement).value = "";

@@ -1953,12 +1953,20 @@ fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, Stri
 
     if let Ok(data) = fs::read_to_string(&babel_path("settings.json")) {
         if let Ok(settings) = serde_json::from_str::<AppSettings>(&data) {
-            // Migrar a formato cifrado y eliminar plaintext
             if !subclave_hex.is_empty() {
                 if let Ok(json) = serde_json::to_string(&settings) {
                     if let Ok(cifrado) = seguridad::blindar_documento(&json, &subclave_hex) {
                         if fs::write(babel_path("settings.babel"), cifrado).is_ok() {
                             let _ = fs::remove_file(babel_path("settings.json"));
+                            traductor::registrar_evento(
+                                "settings.json migrado a settings.babel cifrado",
+                                &subclave_hex,
+                            );
+                        } else {
+                            traductor::registrar_evento(
+                                "AVISO: migración settings.json fallida — no se pudo escribir settings.babel",
+                                &subclave_hex,
+                            );
                         }
                     }
                 }
@@ -2186,6 +2194,7 @@ fn guardar_config_email_tauri(
     imap_dominio: String,
     usuario: String,
     password: String,
+    remitentes: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
     let subclave_hex = sesion
@@ -2194,12 +2203,18 @@ fn guardar_config_email_tauri(
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
 
+    let remitentes_autorizados: Vec<String> = remitentes
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
     let creds = traductor::CredencialesEmail {
         smtp_servidor,
         imap_dominio,
         usuario,
         password,
-        remitentes_autorizados: vec![],
+        remitentes_autorizados,
     };
 
     traductor::guardar_config_email(&creds, &subclave_hex);
@@ -2368,16 +2383,31 @@ fn obtener_email_completo_tauri(
     let creds = traductor::cargar_config_email(&subclave_hex)
         .ok_or_else(|| "No hay configuración de email guardada.".to_string())?;
 
-    traductor::obtener_email_completo(&creds.imap_dominio, &creds.usuario, &creds.password, id)
-        .map(|e| EmailCompleto {
-            id: e.id,
-            remitente: e.remitente,
-            asunto: e.asunto,
-            fecha: e.fecha,
-            cuerpo: e.cuerpo,
-            adjuntos: e.adjuntos,
-        })
-        .map_err(|e| format!("Error obteniendo email: {}", e))
+    let email =
+        traductor::obtener_email_completo(&creds.imap_dominio, &creds.usuario, &creds.password, id)
+            .map_err(|e| format!("Error obteniendo email: {}", e))?;
+
+    if !creds.remitentes_autorizados.is_empty() {
+        let autorizado = creds
+            .remitentes_autorizados
+            .iter()
+            .any(|r| email.remitente.to_lowercase().contains(r.as_str()));
+        if !autorizado {
+            return Err(format!(
+                "Email bloqueado: remitente '{}' no está en la lista de autorizados.",
+                email.remitente
+            ));
+        }
+    }
+
+    Ok(EmailCompleto {
+        id: email.id,
+        remitente: email.remitente,
+        asunto: email.asunto,
+        fecha: email.fecha,
+        cuerpo: email.cuerpo,
+        adjuntos: email.adjuntos,
+    })
 }
 
 // ============================================================
