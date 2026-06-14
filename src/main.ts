@@ -1783,13 +1783,18 @@ async function buscarDispositivos(): Promise<void> {
       return;
     }
     lista.innerHTML = peers.map(p => `
-      <button type="button" onclick="seleccionarPeer('${escapeHTML(p.ip)}', '${escapeHTML(p.nombre)}')"
+      <button type="button" data-action="peer" data-ip="${escapeHTML(p.ip)}" data-nombre="${escapeHTML(p.nombre)}"
         style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);
         color:var(--texto-principal);padding:10px 14px;cursor:pointer;border-radius:2px;
         display:flex;justify-content:space-between;align-items:center;width:100%;">
         <span style="font-family:'Rajdhani',sans-serif;font-size:0.65rem;letter-spacing:1px;">${escapeHTML(p.nombre)}</span>
         <span style="font-family:'Rajdhani',sans-serif;font-size:0.58rem;color:var(--dorado);opacity:0.7;">${escapeHTML(p.ip)}</span>
       </button>`).join("");
+    lista.onclick = (e: MouseEvent) => {
+      const btn = (e.target as HTMLElement).closest("[data-action='peer']") as HTMLElement | null;
+      if (!btn) return;
+      seleccionarPeer(btn.dataset.ip ?? "", btn.dataset.nombre ?? "");
+    };
   } catch (e) {
     lista.innerHTML = `<div style="color:var(--error);font-size:0.6rem;text-align:center;">Error buscando dispositivos</div>`;
   }

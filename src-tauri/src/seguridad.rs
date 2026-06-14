@@ -353,14 +353,53 @@ impl AntiKeylogger {
         let mut amenazas = Vec::new();
         let mut advertencias = Vec::new();
 
-        // Escaneamos procesos sospechosos — funciona sin root
-        let (amenazas_proc, _advertencias_proc) = Self::escanear_procesos();
+        // 1. Procesos sospechosos por nombre
+        let (amenazas_proc, _) = Self::escanear_procesos();
         for proceso in &amenazas_proc {
             amenazas.push(format!("Proceso sospechoso: {}", proceso));
         }
 
-        // Informamos si no hay privilegios elevados — sin bloquear
-        // Root permite detectar keyloggers a nivel de kernel, pero no es obligatorio
+        // 2. Variables de entorno de inyección de biblioteca dinámica
+        // DYLD_INSERT_LIBRARIES / LD_PRELOAD inyectan código en cualquier proceso
+        for var in &["DYLD_INSERT_LIBRARIES", "DYLD_FORCE_FLAT_NAMESPACE", "LD_PRELOAD"] {
+            if let Ok(val) = std::env::var(var) {
+                if !val.is_empty() {
+                    amenazas.push(format!("Variable de inyección activa: {}={}", var, val));
+                }
+            }
+        }
+
+        // 3. LaunchAgents sospechosos (sin root — solo directorios accesibles)
+        let rutas_agents = [
+            std::path::PathBuf::from("/Library/LaunchAgents"),
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join("Library/LaunchAgents"),
+        ];
+        let patrones_agents = [
+            "keylog", "keylogger", "spy", "monitor", "sniff", "hook",
+            "stealth", "covert", "record", "capture",
+        ];
+        for directorio in &rutas_agents {
+            if let Ok(entradas) = fs::read_dir(directorio) {
+                for entry in entradas.flatten() {
+                    let nombre = entry
+                        .file_name()
+                        .to_string_lossy()
+                        .to_lowercase();
+                    for patron in &patrones_agents {
+                        if nombre.contains(patron) {
+                            amenazas.push(format!(
+                                "LaunchAgent sospechoso: {}",
+                                entry.file_name().to_string_lossy()
+                            ));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         if !is_root::is_root() {
             advertencias.push(
                 "Sin privilegios de administrador — keyloggers de kernel no detectables. \
@@ -369,8 +408,6 @@ impl AntiKeylogger {
             );
         }
 
-        // El sistema es seguro si no hay amenazas concretas.
-        // Las advertencias no bloquean — solo informan.
         let seguro = amenazas.is_empty();
 
         ResultadoSeguridad {
