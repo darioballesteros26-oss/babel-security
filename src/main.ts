@@ -2424,6 +2424,14 @@ async function enviarEmail(): Promise<void> {
     return;
   }
 
+  const confirmado = window.confirm(
+    "AVISO DE SEGURIDAD\n\n" +
+    "Vas a enviar este documento DESCIFRADO por email.\n" +
+    "El destinatario podrá leerlo sin necesitar Babel.\n\n" +
+    "¿Continuar?"
+  );
+  if (!confirmado) return;
+
   if (estado) estado.textContent = "Enviando...";
 
   try {

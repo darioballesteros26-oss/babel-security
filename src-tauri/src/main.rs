@@ -29,7 +29,10 @@ use zeroize::{Zeroize, Zeroizing};
 // no haya sobreescrito el sector todavía.
 // Úsalo siempre que el archivo haya existido en claro (sin cifrar).
 fn borrar_seguro(ruta: &str) {
-    if let Ok(meta) = fs::metadata(ruta) {
+    if let Ok(meta) = fs::symlink_metadata(ruta) {
+        if meta.file_type().is_symlink() {
+            return;
+        }
         let tamaño = meta.len() as usize;
         if tamaño > 0 {
             let _ = fs::write(ruta, vec![0u8; tamaño]);
@@ -1445,6 +1448,12 @@ fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
     }
     validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
+    let meta_sym = fs::symlink_metadata(&ruta)
+        .map_err(|e| format!("Error leyendo metadata: {}", e))?;
+    if meta_sym.file_type().is_symlink() {
+        return Err("No se puede eliminar un enlace simbólico.".into());
+    }
+
     // Zeroize: sobreescribir con ceros antes de borrar
     // Así los bytes cifrados no quedan recuperables en disco
     if let Ok(metadata) = fs::metadata(&ruta) {
@@ -2196,7 +2205,7 @@ fn enviar_archivo_cifrado_tauri(
         "No hay configuración de email guardada. Configura SMTP primero.".to_string()
     })?;
 
-    traductor::enviar_archivo_descifrado(
+    let resultado = traductor::enviar_archivo_descifrado(
         &ruta,
         &destinatario,
         &asunto,
@@ -2206,7 +2215,17 @@ fn enviar_archivo_cifrado_tauri(
         &creds.password,
         &subclave_hex,
     )
-    .map_err(|e| format!("Error enviando email: {}", e))
+    .map_err(|e| format!("Error enviando email: {}", e));
+
+    if resultado.is_ok() {
+        let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let evento = format!(
+            "[{}] AVISO: documento descifrado enviado por email a {}",
+            ts, destinatario
+        );
+        traductor::registrar_evento(&evento, &subclave_hex);
+    }
+    resultado
 }
 
 // ============================================================
@@ -2252,6 +2271,14 @@ fn enviar_bytes_cifrados_tauri(
     )
     .map_err(|e| format!("Error enviando email: {}", e));
 
+    if resultado.is_ok() {
+        let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let evento = format!(
+            "[{}] AVISO: documento descifrado enviado por email a {}",
+            ts, destinatario
+        );
+        traductor::registrar_evento(&evento, &subclave_hex);
+    }
     borrar_seguro(&ruta_temp);
     resultado
 }
