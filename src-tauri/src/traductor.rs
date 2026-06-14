@@ -176,7 +176,6 @@ pub struct CredencialesEmail {
 /// La sal NO es secreta: solo debe ser única e inmutable.
 /// Si se pierde sin backup, todos los datos cifrados son irrecuperables.
 pub fn cargar_o_crear_salt() -> [u8; 32] {
-    // Rutas absolutas - funcionan igual en dev y en el .app compilado
     let dir = crate::babel_dir();
     let ruta_salt = dir.join("master.salt");
     let ruta_bck = dir.join("master.salt.bck");
@@ -186,22 +185,21 @@ pub fn cargar_o_crear_salt() -> [u8; 32] {
 
     match (salt_principal, salt_backup) {
         (Some(s), _) => {
-            // Principal ok - sincronizamos el backup por si acaso
             let _ = fs::write(&ruta_bck, s);
+            salt_perms_600(&ruta_bck);
             return s;
         }
         (None, Some(s)) => {
-            // Principal perdida - recuperamos desde backup
             log::warn!("[Babel] master.salt no encontrada - recuperando desde backup...");
             if let Err(e) = fs::write(&ruta_salt, s) {
                 log::error!("[Babel] No se pudo restaurar master.salt: {}", e);
             } else {
+                salt_perms_600(&ruta_salt);
                 log::info!("[Babel] master.salt restaurada desde backup.");
             }
             return s;
         }
         (None, None) => {
-            // Primera ejecución o pérdida total
             log::warn!(
                 "[Babel] Primera ejecución - generando salt maestra en {:?}",
                 ruta_salt
@@ -215,11 +213,23 @@ pub fn cargar_o_crear_salt() -> [u8; 32] {
             "[Babel] ERROR CRÍTICO: no se pudo guardar master.salt: {}",
             e
         );
+    } else {
+        salt_perms_600(&ruta_salt);
     }
     let _ = fs::write(&ruta_bck, nueva_salt);
+    salt_perms_600(&ruta_bck);
     log::info!("[Babel] master.salt generada correctamente.");
     nueva_salt
 }
+
+#[cfg(unix)]
+fn salt_perms_600(ruta: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = fs::set_permissions(ruta, fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn salt_perms_600(_ruta: &std::path::Path) {}
 
 /// Lee y valida un archivo de salt desde una ruta absoluta (PathBuf).
 fn leer_salt_abs(ruta: &PathBuf) -> Option<[u8; 32]> {

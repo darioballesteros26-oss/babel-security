@@ -251,6 +251,10 @@ fn comprobar_estado_bunker() -> bool {
 
 #[tauri::command]
 fn crear_acceso_bunker(maestra: String, usuario: String, pass: String) -> Result<String, String> {
+    // Zeroizing garantiza borrado en cualquier salida, incluidos early returns
+    let pass = Zeroizing::new(pass);
+    let maestra = Zeroizing::new(maestra);
+
     if maestra.len() < 12 {
         return Err("La llave maestra debe tener al menos 12 caracteres.".into());
     }
@@ -287,21 +291,16 @@ fn crear_acceso_bunker(maestra: String, usuario: String, pass: String) -> Result
 
     let subclave_hex = Zeroizing::new(hex::encode(subclave.as_ref()));
 
-    let json =
-        serde_json::to_string(&nuevo_usuario).map_err(|e| format!("Error serializando: {}", e))?;
+    let mut json = Zeroizing::new(
+        serde_json::to_string(&nuevo_usuario).map_err(|e| format!("Error serializando: {}", e))?,
+    );
 
     let cifrado = seguridad::blindar_documento(&json, &subclave_hex)
         .map_err(|e| format!("Error cifrando: {}", e))?;
+    json.zeroize();
 
     fs::write(&babel_path("usuarios.babel"), &cifrado)
         .map_err(|e| format!("Error guardando: {}", e))?;
-
-    // Zeroize contraseñas en RAM antes de salir
-    use zeroize::Zeroize;
-    let mut pass_mut = pass;
-    pass_mut.zeroize();
-    let mut maestra_mut = maestra;
-    maestra_mut.zeroize();
 
     Ok(format!(
         "Búnker creado. Usuario '{}' blindado con AES-256-GCM.",
@@ -339,6 +338,9 @@ fn verificar_login(
     pass_usuario: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<bool, String> {
+    let pass = Zeroizing::new(pass);
+    let pass_usuario = Zeroizing::new(pass_usuario);
+
     // Comprobar si hay bloqueo activo
     if let Some(ts) = seguridad::leer_bloqueo() {
         let restante = (ts + 600) - chrono::Local::now().timestamp();
@@ -396,14 +398,8 @@ fn verificar_login(
     }
     let _ = fs::remove_file(&babel_path("intentos.dat"));
 
-    // Zeroize contraseñas ANTES de lanzar NLLB
-    use zeroize::Zeroize;
-    let mut pass_mut = pass;
-    pass_mut.zeroize();
-    let mut pass_usuario_mut = pass_usuario;
-    pass_usuario_mut.zeroize();
-    let mut json_mut = json;
-    json_mut.zeroize();
+    let mut json = Zeroizing::new(json);
+    json.zeroize();
 
     Ok(true)
 }
