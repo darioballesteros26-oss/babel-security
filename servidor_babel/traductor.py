@@ -1,21 +1,27 @@
-import ctranslate2
-from transformers import MarianTokenizer
+from transformers import MarianMTModel, MarianTokenizer
+import torch
 import os
 
 PARES = ["es-en", "en-es", "es-fr", "fr-es", "es-ar", "ar-es"]
-DIR_MODELOS = os.path.join(os.path.dirname(__file__), "modelos")
 
 _modelos: dict = {}
 _tokenizers: dict = {}
+_device = "mps" if torch.backends.mps.is_available() else "cpu"
 
 
 def cargar_modelos():
+    print(f"[MARIAN] Dispositivo: {_device}")
     for par in PARES:
-        ruta = os.path.join(DIR_MODELOS, f"ct2-{par}")
         nombre_hf = f"Helsinki-NLP/opus-mt-{par}"
         print(f"[MARIAN] Cargando {par}...")
-        _modelos[par] = ctranslate2.Translator(ruta, device="cpu", inter_threads=2)
-        _tokenizers[par] = MarianTokenizer.from_pretrained(nombre_hf)
+        tokenizer = MarianTokenizer.from_pretrained(nombre_hf)
+        model = MarianMTModel.from_pretrained(nombre_hf)
+        if _device == "mps":
+            model = model.half()  # float16 en Metal — mitad de RAM, misma calidad
+        model = model.to(_device)
+        model.eval()
+        _modelos[par] = model
+        _tokenizers[par] = tokenizer
     print("[MARIAN] Todos los modelos listos.")
 
 
@@ -24,21 +30,17 @@ def traducir(texto: str, par: str) -> str:
         raise ValueError(f"Par no soportado: {par}")
 
     tokenizer = _tokenizers[par]
-    translator = _modelos[par]
+    model = _modelos[par]
 
-    ids = tokenizer.encode(texto, add_special_tokens=True)
-    tokens = tokenizer.convert_ids_to_tokens(ids)
+    inputs = tokenizer(
+        [texto],
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=512,
+    ).to(_device)
 
-    max_len = min(max(len(tokens) * 2, 128), 512)
+    with torch.no_grad():
+        ids = model.generate(**inputs, num_beams=2, max_new_tokens=512)
 
-    results = translator.translate_batch(
-        [tokens],
-        max_decoding_length=max_len,
-        beam_size=2,
-    )
-
-    output_tokens = results[0].hypotheses[0]
-    return tokenizer.decode(
-        tokenizer.convert_tokens_to_ids(output_tokens),
-        skip_special_tokens=True,
-    )
+    return tokenizer.decode(ids[0], skip_special_tokens=True)
