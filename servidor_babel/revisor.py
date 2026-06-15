@@ -29,6 +29,10 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
     if _llm is None:
         return traduccion
 
+    # Qwen 0.5B entra en bucles con frases muy cortas — no hay contexto que revisar
+    if len(original.split()) < 8:
+        return traduccion
+
     lang_orig, lang_dest = par.split("-")
     nombre_orig = LANG_NAMES.get(lang_orig, lang_orig)
     nombre_dest = LANG_NAMES.get(lang_dest, lang_dest)
@@ -60,10 +64,16 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
     with _lock:
         out = _llm.create_chat_completion(
             messages,
-            max_tokens=512,
+            max_tokens=min(len(traduccion.split()) * 3, 256),
             temperature=0.1,
+            repeat_penalty=1.3,
             stop=["Source:", "Context:"],
         )
 
     revisada = out["choices"][0]["message"]["content"].strip()
-    return revisada if revisada else traduccion
+
+    # Descartar si Qwen repite o alucina (más del doble de tokens que la traducción base)
+    if not revisada or len(revisada) > len(traduccion) * 2:
+        return traduccion
+
+    return revisada

@@ -40,7 +40,21 @@ def traducir(texto: str, par: str) -> str:
         max_length=512,
     ).to(_device)
 
+    n_src = inputs["input_ids"].shape[1]
     with torch.no_grad():
-        ids = model.generate(**inputs, num_beams=2, max_new_tokens=512)
+        ids = model.generate(
+            **inputs,
+            num_beams=4,
+            max_new_tokens=min(n_src * 3, 512),
+            no_repeat_ngram_size=2,
+            early_stopping=True,
+        )
 
-    return tokenizer.decode(ids[0], skip_special_tokens=True)
+    resultado = tokenizer.decode(ids[0], skip_special_tokens=True)
+
+    # Detectar bucle de repetición: si alguna palabra aparece más de 3 veces
+    palabras = [p for p in resultado.lower().split() if p.isalpha()]
+    if palabras and max(palabras.count(p) for p in set(palabras)) > 3:
+        raise RuntimeError("Repetición detectada — usando fallback")
+
+    return resultado
