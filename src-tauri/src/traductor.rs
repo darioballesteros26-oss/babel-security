@@ -266,21 +266,20 @@ pub fn procesar_archivo_inteligente(
     dict: &HashMap<String, String>,
     subclave_hex: &str,
     id_usuario: &str,
-    origen: &str,
-    destino: &str,
+    par: &str,
 ) {
     let ruta_limpia = ruta.trim();
 
     if ruta_limpia.ends_with(".docx") {
         log::warn!("Detectado documento Word. Iniciando Preservador...");
         if let Err(e) =
-            clonar_y_traducir(ruta_limpia, dict, subclave_hex, id_usuario, origen, destino)
+            clonar_y_traducir(ruta_limpia, dict, subclave_hex, id_usuario, par)
         {
             log::warn!("Error en Word: {}", e);
         }
     } else if ruta_limpia.ends_with(".pdf") {
         log::warn!("Detectado archivo PDF. Iniciando Extractor...");
-        if let Err(e) = procesar_pdf(ruta_limpia, dict, subclave_hex, id_usuario, origen, destino) {
+        if let Err(e) = procesar_pdf(ruta_limpia, dict, subclave_hex, id_usuario, par) {
             log::warn!("Error en PDF: {}", e);
         }
     } else if ruta_limpia.ends_with(".txt") {
@@ -307,11 +306,11 @@ pub fn procesar_archivo_inteligente(
                     traducido_final.push('\n');
                     continue;
                 }
-                let traducido = match traducir_con_nllb(parrafo, origen, destino) {
+                let traducido = match traducir_con_marian(parrafo, par) {
                     Ok(t) => t,
                     Err(_) => {
                         let (t, _) =
-                            traducir_inteligente(parrafo, dict, subclave_hex, origen, destino);
+                            traducir_inteligente(parrafo, dict, subclave_hex, par);
                         t
                     }
                 };
@@ -361,8 +360,7 @@ fn traducir_xml_directo(
     xml: &str,
     dict: &HashMap<String, String>,
     subclave_hex: &str,
-    origen: &str,
-    destino: &str,
+    par: &str,
 ) -> String {
     let mut resultado = String::with_capacity(xml.len() * 2);
     let mut resto = xml;
@@ -384,7 +382,7 @@ fn traducir_xml_directo(
                     if texto.trim().is_empty() {
                         resultado.push_str(texto);
                     } else {
-                        let traducido = match traducir_con_nllb(texto, origen, destino) {
+                        let traducido = match traducir_con_marian(texto, par) {
                             Ok(t) => t,
                             Err(_) => {
                                 let (t, _) = motor_atomico(texto, dict, subclave_hex);
@@ -413,8 +411,7 @@ pub fn clonar_y_traducir(
     dict: &HashMap<String, String>,
     subclave_hex: &str,
     id_usuario: &str,
-    origen: &str,
-    destino: &str,
+    par: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::{Read, Write};
 
@@ -443,7 +440,7 @@ pub fn clonar_y_traducir(
     }
 
     // Traducir document.xml
-    let xml_traducido = traducir_xml_directo(&xml_doc, dict, subclave_hex, origen, destino);
+    let xml_traducido = traducir_xml_directo(&xml_doc, dict, subclave_hex, par);
 
     // Reempaquetar ZIP preservando TODO — imágenes, estilos, fuentes, relaciones
     let mut buf_out = std::io::Cursor::new(Vec::new());
@@ -474,7 +471,7 @@ pub fn clonar_y_traducir(
                 let mut xml_sub = String::new();
                 file.read_to_string(&mut xml_sub)?;
                 let xml_sub_trad =
-                    traducir_xml_directo(&xml_sub, dict, subclave_hex, origen, destino);
+                    traducir_xml_directo(&xml_sub, dict, subclave_hex, par);
                 zip_out.start_file(&name, opts_deflate)?;
                 zip_out.write_all(xml_sub_trad.as_bytes())?;
             } else {
@@ -563,8 +560,7 @@ pub fn procesar_pdf(
     dict: &HashMap<String, String>,
     subclave_hex: &str,
     id_usuario: &str,
-    origen: &str,
-    destino: &str,
+    par: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let nombre = std::path::Path::new(ruta)
         .file_stem()
@@ -638,7 +634,7 @@ pub fn procesar_pdf(
                 traducido.push('\n');
                 continue;
             }
-            let t = match traducir_con_nllb(parrafo, origen, destino) {
+            let t = match traducir_con_marian(parrafo, par) {
                 Ok(t) => t,
                 Err(_) => {
                     let (t, _) = motor_atomico(parrafo, dict, subclave_hex);
@@ -665,8 +661,7 @@ pub fn procesar_pdf(
             dict,
             subclave_hex,
             id_usuario,
-            origen,
-            destino,
+            par,
         )?;
         // Renombrar _tmp → nombre final (clonar_y_traducir usa el stem del DOCX temporal)
         let salida_tmp = archivos_dir.join(format!("{}_{}_tmp.babel", id_usuario, nombre));
@@ -1173,52 +1168,50 @@ pub fn obtener_email_completo(
 }
 
 // ============================================================
-// NLLB - TRADUCCIÓN NEURONAL VÍA SERVIDOR PYTHON
+// MARIAN - TRADUCCIÓN NEURONAL VÍA SERVIDOR PYTHON
 // ============================================================
 
-/// Llama al servidor Python NLLB en localhost:5000.
-/// Incluye token de seguridad - Flask rechaza sin él.
-pub fn traducir_con_nllb(texto: &str, origen: &str, destino: &str) -> Result<String, String> {
+/// Llama al servidor Python MarianMT en localhost:5002.
+/// Incluye token de seguridad — Flask rechaza sin él.
+pub fn traducir_con_marian(texto: &str, par: &str) -> Result<String, String> {
     let url = "http://127.0.0.1:5002/traducir";
     let token = std::env::var("BABEL_NLLB_TOKEN")
         .map_err(|_| "BABEL_NLLB_TOKEN no configurado".to_string())?;
     let body = serde_json::json!({
         "texto": texto,
-        "origen": origen,
-        "destino": destino
+        "par": par
     });
 
     let respuesta = ureq::post(url)
         .set("Content-Type", "application/json")
         .set("X-Babel-Token", &token)
         .send_json(&body)
-        .map_err(|e| format!("Servidor NLLB no disponible: {}", e))?;
+        .map_err(|e| format!("Servidor de traducción no disponible: {}", e))?;
 
     let json: serde_json::Value = respuesta
         .into_json()
-        .map_err(|e| format!("Error leyendo respuesta NLLB: {}", e))?;
+        .map_err(|e| format!("Error leyendo respuesta: {}", e))?;
 
     json["traduccion"]
         .as_str()
         .map(|s| {
             if s.len() > 50_000 {
-                return Err("Respuesta NLLB excede el límite de 50 000 caracteres".to_string());
+                return Err("Respuesta excede el límite de 50 000 caracteres".to_string());
             }
             Ok(s.to_string())
         })
-        .ok_or_else(|| "Respuesta NLLB inválida".to_string())
+        .ok_or_else(|| "Respuesta inválida del servidor".to_string())
         .and_then(|r| r)
 }
 
-/// Traduce usando NLLB. Si no está disponible, usa el diccionario.
+/// Traduce con MarianMT. Si no está disponible, usa el diccionario.
 pub fn traducir_inteligente(
     texto: &str,
     dict: &std::collections::HashMap<String, String>,
     subclave_hex: &str,
-    origen: &str,
-    destino: &str,
+    par: &str,
 ) -> (String, usize) {
-    match traducir_con_nllb(texto, origen, destino) {
+    match traducir_con_marian(texto, par) {
         Ok(traduccion) => (traduccion, 0),
         Err(_) => motor_atomico(texto, dict, subclave_hex),
     }

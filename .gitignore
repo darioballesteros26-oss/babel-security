@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Modelos de traducción (binarios grandes, no van al repo)
+servidor_babel/modelos/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

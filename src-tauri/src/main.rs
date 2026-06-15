@@ -513,15 +513,14 @@ fn traducir_documento(
         .map_err(|_| "Error leyendo idioma.".to_string())?
         .clone();
 
-    let (origen_doc, destino_doc) = idioma_a_nllb(&idioma_doc);
+    let par_doc = idioma_a_par(&idioma_doc);
 
     traductor::procesar_archivo_inteligente(
         &ruta_temp,
         &dict,
         &subclave_hex,
         &id_usuario,
-        origen_doc,
-        destino_doc,
+        par_doc,
     );
 
     // Borrado seguro: sobreescribe con ceros antes de eliminar
@@ -556,10 +555,10 @@ fn traducir_texto(
         .map_err(|_| "Error leyendo diccionario.".to_string())?
         .clone();
 
-    let (origen, destino) = idioma_a_nllb(&idioma);
+    let par = idioma_a_par(&idioma);
 
     let (resultado, sin_traducir) =
-        traductor::traducir_inteligente(&texto, &dict, &subclave_hex, origen, destino);
+        traductor::traducir_inteligente(&texto, &dict, &subclave_hex, par);
     Ok((resultado, sin_traducir))
 }
 
@@ -895,7 +894,7 @@ fn traducir_documento_ruta(
         .map_err(|_| "Error leyendo idioma.".to_string())?
         .clone();
 
-    let (origen, destino) = idioma_a_nllb(&idioma);
+    let par = idioma_a_par(&idioma);
 
     // Procesamos desde la ruta original — sin crear ningún temporal
     traductor::procesar_archivo_inteligente(
@@ -903,8 +902,7 @@ fn traducir_documento_ruta(
         &dict,
         &subclave_hex,
         &id_usuario,
-        origen,
-        destino,
+        par,
     );
 
     let ruta_real = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
@@ -2556,28 +2554,18 @@ fn obtener_mensajes_p2p(_sesion: tauri::State<SesionActiva>) -> Result<Vec<Strin
     Ok(mensajes)
 }
 // ============================================================
-// HELPER — Convierte código de idioma a códigos NLLB
+// HELPER — Convierte código de idioma al par MarianMT
 // ============================================================
 // Centralizado aquí para no duplicar el match en cada comando.
 
-fn idioma_a_nllb(idioma: &str) -> (&'static str, &'static str) {
+fn idioma_a_par(idioma: &str) -> &'static str {
     match idioma {
-        "en_es" => ("eng_Latn", "spa_Latn"),
-        "es_fr" => ("spa_Latn", "fra_Latn"),
-        "fr_es" => ("fra_Latn", "spa_Latn"),
-        "es_de" => ("spa_Latn", "deu_Latn"),
-        "de_es" => ("deu_Latn", "spa_Latn"),
-        "es_ar" => ("spa_Latn", "arb_Arab"),
-        "ar_es" => ("arb_Arab", "spa_Latn"),
-        "es_ru" => ("spa_Latn", "rus_Cyrl"),
-        "ru_es" => ("rus_Cyrl", "spa_Latn"),
-        "es_zh" => ("spa_Latn", "zho_Hans"),
-        "zh_es" => ("zho_Hans", "spa_Latn"),
-        "en_fr" => ("eng_Latn", "fra_Latn"),
-        "fr_en" => ("fra_Latn", "eng_Latn"),
-        "en_de" => ("eng_Latn", "deu_Latn"),
-        "de_en" => ("deu_Latn", "eng_Latn"),
-        _ => ("spa_Latn", "eng_Latn"),
+        "en_es" => "en-es",
+        "es_fr" => "es-fr",
+        "fr_es" => "fr-es",
+        "es_ar" => "es-ar",
+        "ar_es" => "ar-es",
+        _ => "es-en",
     }
 }
 
