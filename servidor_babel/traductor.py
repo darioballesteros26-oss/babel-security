@@ -52,9 +52,19 @@ def traducir(texto: str, par: str) -> str:
 
     resultado = tokenizer.decode(ids[0], skip_special_tokens=True)
 
-    # Detectar bucle de repetición: si alguna palabra aparece más de 3 veces
+    # Saltar si el texto tiene menos de 4 letras en total (números, símbolos, precios)
+    if sum(c.isalpha() for c in texto) < 4:
+        raise RuntimeError("Sin suficientes letras — usando fallback")
+
+    # Detectar bucle de repetición: si alguna palabra aparece más de 2 veces
     palabras = [p for p in resultado.lower().split() if p.isalpha()]
-    if palabras and max(palabras.count(p) for p in set(palabras)) > 3:
+    if palabras and max(palabras.count(p) for p in set(palabras)) > 2:
         raise RuntimeError("Repetición detectada — usando fallback")
+
+    # Detectar garble fonético: si 3+ tokens comparten el mismo prefijo de 2 letras
+    prefijos = [''.join(c for c in w.lower() if c.isalpha())[:2]
+                for w in resultado.split() if sum(c.isalpha() for c in w) >= 2]
+    if len(prefijos) >= 3 and len(set(prefijos)) <= 1:
+        raise RuntimeError("Garble detectado — usando fallback")
 
     return resultado
