@@ -4,6 +4,7 @@ Ejecutar una sola vez antes de arrancar server.py.
 """
 
 import os
+import shutil
 import sys
 
 PARES = ["es-en", "en-es", "es-fr", "fr-es", "es-ar", "ar-es"]
@@ -50,7 +51,7 @@ def descargar_qwen():
         filename="qwen2.5-0.5b-instruct-q4_k_m.gguf",
         local_dir=DIR_MODELOS,
     )
-    os.replace(descargado, ruta_destino)
+    shutil.move(descargado, ruta_destino)
     print(f"  [Listo] Qwen → {ruta_destino}")
 
 

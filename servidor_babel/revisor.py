@@ -62,7 +62,7 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
             messages,
             max_tokens=512,
             temperature=0.1,
-            stop=["Source:", "Context:", "\n\n"],
+            stop=["Source:", "Context:"],
         )
 
     revisada = out["choices"][0]["message"]["content"].strip()
