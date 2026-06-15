@@ -364,45 +364,155 @@ fn traducir_xml_directo(
 ) -> String {
     let mut resultado = String::with_capacity(xml.len() * 2);
     let mut resto = xml;
-    while !resto.is_empty() {
-        if let Some(pos) = resto.find("<w:t") {
-            let after = &resto[pos + 4..];
-            if !after.starts_with('>') && !after.starts_with(' ') {
-                resultado.push_str(&resto[..pos + 4]);
-                resto = &resto[pos + 4..];
-                continue;
-            }
-            resultado.push_str(&resto[..pos]);
-            resto = &resto[pos..];
-            if let Some(j) = resto.find('>') {
-                resultado.push_str(&resto[..j + 1]);
-                resto = &resto[j + 1..];
-                if let Some(k) = resto.find("</w:t>") {
-                    let texto = &resto[..k];
-                    if texto.trim().is_empty() {
-                        resultado.push_str(texto);
-                    } else {
-                        let traducido = match traducir_con_marian(texto, par) {
-                            Ok(t) => t,
-                            Err(_) => {
-                                let (t, _) = motor_atomico(texto, dict, subclave_hex);
-                                t
-                            }
-                        };
-                        let traducido_escaped = traducido
-                            .replace('&', "&amp;")
-                            .replace('<', "&lt;")
-                            .replace('>', "&gt;");
-                        resultado.push_str(&traducido_escaped);
-                    }
-                    resto = &resto[k..];
-                }
-            }
-        } else {
+
+    loop {
+        // Buscar el próximo <w:p> o <w:p ...> (no <w:pPr>, <w:pStyle>, etc.)
+        let Some(pos) = encontrar_wp(resto) else {
             resultado.push_str(resto);
             break;
+        };
+
+        resultado.push_str(&resto[..pos]);
+        let desde_p = &resto[pos..];
+
+        // Detectar párrafo vacío auto-cerrado <w:p ... />
+        let tag_end = match desde_p.find('>') {
+            Some(j) => j,
+            None => { resultado.push_str(desde_p); break; }
+        };
+        if desde_p[..tag_end + 1].ends_with("/>") {
+            resultado.push_str(&desde_p[..tag_end + 1]);
+            resto = &desde_p[tag_end + 1..];
+            continue;
         }
+
+        // Encontrar el cierre del párrafo
+        let Some(fin_rel) = desde_p.find("</w:p>") else {
+            resultado.push_str(desde_p);
+            break;
+        };
+        let parrafo_xml = &desde_p[..fin_rel + 6];
+        resultado.push_str(&traducir_parrafo_xml(parrafo_xml, dict, subclave_hex, par));
+        resto = &desde_p[fin_rel + 6..];
     }
+
+    resultado
+}
+
+/// Devuelve la posición del próximo <w:p> o <w:p ...> real (no <w:pPr> etc.)
+fn encontrar_wp(xml: &str) -> Option<usize> {
+    let mut desde = 0;
+    loop {
+        let rel = xml[desde..].find("<w:p")?;
+        let pos = desde + rel;
+        let after = xml.get(pos + 4..pos + 5).unwrap_or("");
+        if after == ">" || after == " " || after == "/" {
+            return Some(pos);
+        }
+        desde = pos + 4;
+    }
+}
+
+/// Traduce un párrafo completo: extrae todo el texto, lo traduce como unidad
+/// y pone el resultado en el primer <w:t>, vaciando los demás.
+fn traducir_parrafo_xml(
+    parrafo: &str,
+    dict: &HashMap<String, String>,
+    subclave_hex: &str,
+    par: &str,
+) -> String {
+    let texto = extraer_texto_wt(parrafo);
+    if texto.trim().is_empty() {
+        return parrafo.to_string();
+    }
+
+    let traducido = match traducir_con_marian(&texto, par) {
+        Ok(t) => t,
+        Err(_) => motor_atomico(&texto, dict, subclave_hex).0,
+    };
+
+    reconstruir_parrafo(parrafo, &traducido)
+}
+
+/// Concatena el contenido de todos los <w:t> del fragmento XML dado.
+fn extraer_texto_wt(xml: &str) -> String {
+    let mut texto = String::new();
+    let mut resto = xml;
+    loop {
+        let Some(pos) = resto.find("<w:t") else { break };
+        let after = resto.get(pos + 4..pos + 5).unwrap_or("");
+        if after != ">" && after != " " {
+            resto = &resto[pos + 4..];
+            continue;
+        }
+        let Some(j) = resto[pos..].find('>') else { break };
+        let contenido_ini = pos + j + 1;
+        let Some(k) = resto[contenido_ini..].find("</w:t>") else { break };
+        let t = &resto[contenido_ini..contenido_ini + k];
+        let t_dec = t.replace("&amp;", "&").replace("&lt;", "<")
+                     .replace("&gt;", ">").replace("&apos;", "'").replace("&quot;", "\"");
+        texto.push_str(&t_dec);
+        resto = &resto[contenido_ini + k + 6..];
+    }
+    texto
+}
+
+/// Reescribe el XML del párrafo: pone `traduccion` en el primer <w:t>
+/// con texto y vacía los demás, conservando el formato/estilo intacto.
+fn reconstruir_parrafo(parrafo: &str, traduccion: &str) -> String {
+    let esc = traduccion.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let mut resultado = String::with_capacity(parrafo.len() + esc.len());
+    let mut resto = parrafo;
+    let mut puesto = false;
+
+    loop {
+        let Some(pos) = resto.find("<w:t") else {
+            resultado.push_str(resto);
+            break;
+        };
+        let after = resto.get(pos + 4..pos + 5).unwrap_or("");
+        if after != ">" && after != " " {
+            resultado.push_str(&resto[..pos + 4]);
+            resto = &resto[pos + 4..];
+            continue;
+        }
+
+        resultado.push_str(&resto[..pos]);
+        let desde_tag = &resto[pos..];
+        let Some(j) = desde_tag.find('>') else {
+            resultado.push_str(desde_tag);
+            break;
+        };
+        let tag = &desde_tag[..j + 1];
+        let tras_tag = &desde_tag[j + 1..];
+        let Some(k) = tras_tag.find("</w:t>") else {
+            resultado.push_str(desde_tag);
+            break;
+        };
+        let contenido = &tras_tag[..k];
+        let contenido_dec = contenido.replace("&amp;", "&").replace("&lt;", "<")
+                                     .replace("&gt;", ">").replace("&apos;", "'").replace("&quot;", "\"");
+
+        if !contenido_dec.trim().is_empty() && !puesto {
+            // Primer <w:t> con texto: escribir la traducción completa
+            resultado.push_str("<w:t xml:space=\"preserve\">");
+            resultado.push_str(&esc);
+            resultado.push_str("</w:t>");
+            puesto = true;
+        } else if !contenido_dec.trim().is_empty() {
+            // Resto de <w:t> con texto: vaciar (ya pusimos la traducción)
+            resultado.push_str(tag);
+            resultado.push_str("</w:t>");
+        } else {
+            // Espacios / vacíos: conservar tal cual
+            resultado.push_str(tag);
+            resultado.push_str(contenido);
+            resultado.push_str("</w:t>");
+        }
+
+        resto = &tras_tag[k + 6..];
+    }
+
     resultado
 }
 
