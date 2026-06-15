@@ -4,5 +4,9 @@
 <dict>
     <key>com.apple.security.app-sandbox</key>
     <false/>
+    <!-- Full Disk Access: necesario para leer TCC.db y detectar apps con Input Monitoring -->
+    <!-- El usuario debe conceder FDA en Ajustes > Privacidad > Acceso Completo al Disco -->
+    <key>com.apple.security.files.all</key>
+    <true/>
 </dict>
 </plist>
