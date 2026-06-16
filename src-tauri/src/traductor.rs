@@ -1025,8 +1025,8 @@ pub fn guardar_config_email(creds: &CredencialesEmail, subclave_hex: &str) {
 /// Carga y descifra las credenciales de email desde ~/Babel/config.babel
 pub fn cargar_config_email(subclave_hex: &str) -> Option<CredencialesEmail> {
     let contenido = fs::read(crate::babel_dir().join("config.babel")).ok()?;
-    let descifrado = seguridad::descifrar_documento(contenido, subclave_hex).ok()?;
-    serde_json::from_str(&descifrado).ok()
+    let descifrado = Zeroizing::new(seguridad::descifrar_documento(contenido, subclave_hex).ok()?);
+    serde_json::from_str(descifrado.as_str()).ok()
 }
 
 // ============================================================
