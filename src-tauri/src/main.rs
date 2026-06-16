@@ -520,7 +520,7 @@ fn traducir_documento(
             &subclave_hex,
             &id_usuario,
             par_doc,
-        );
+        )?;
 
         Ok(nombre_resultado)
     })();
@@ -915,7 +915,7 @@ fn traducir_documento_ruta(
         &subclave_hex,
         &id_usuario,
         par,
-    );
+    )?;
 
     let ruta_real = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
     Ok(ruta_real)

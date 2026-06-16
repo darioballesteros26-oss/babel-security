@@ -271,63 +271,63 @@ pub fn procesar_archivo_inteligente(
     subclave_hex: &str,
     id_usuario: &str,
     par: &str,
-) {
+) -> Result<(), String> {
     let ruta_limpia = ruta.trim();
 
     if ruta_limpia.ends_with(".docx") {
         log::warn!("Detectado documento Word. Iniciando Preservador...");
-        if let Err(e) =
-            clonar_y_traducir(ruta_limpia, dict, subclave_hex, id_usuario, par)
-        {
-            log::warn!("Error en Word: {}", e);
-        }
+        clonar_y_traducir(ruta_limpia, dict, subclave_hex, id_usuario, par)
+            .map_err(|e| format!("Error en Word: {}", e))?;
     } else if ruta_limpia.ends_with(".pdf") {
         log::warn!("Detectado archivo PDF. Iniciando Extractor...");
-        if let Err(e) = procesar_pdf(ruta_limpia, dict, subclave_hex, id_usuario, par) {
-            log::warn!("Error en PDF: {}", e);
-        }
+        procesar_pdf(ruta_limpia, dict, subclave_hex, id_usuario, par)
+            .map_err(|e| format!("Error en PDF: {}", e))?;
     } else if ruta_limpia.ends_with(".txt") {
-        if let Ok(texto) = fs::read_to_string(ruta_limpia) {
-            let nombre = std::path::Path::new(ruta_limpia)
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy();
-            let archivos_dir = crate::babel_dir().join("archivos");
-            let _ = fs::create_dir_all(&archivos_dir);
+        let texto = fs::read_to_string(ruta_limpia)
+            .map_err(|e| format!("Error leyendo TXT: {}", e))?;
+        let nombre = std::path::Path::new(ruta_limpia)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let archivos_dir = crate::babel_dir().join("archivos");
+        let _ = fs::create_dir_all(&archivos_dir);
 
-            // Guardar original cifrado
-            if let Ok(cifrado_orig) = seguridad::blindar_documento(&texto, subclave_hex) {
-                let salida_orig =
-                    archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre));
-                let _ = fs::write(&salida_orig, cifrado_orig);
-            }
+        // Guardar original cifrado
+        if let Ok(cifrado_orig) = seguridad::blindar_documento(&texto, subclave_hex) {
+            let salida_orig =
+                archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre));
+            let _ = fs::write(&salida_orig, cifrado_orig);
+        }
 
-            // Traducir párrafo a párrafo para evitar bucles en NLLB
-            let parrafos: Vec<&str> = texto.split('\n').collect();
-            let mut traducido_final = String::new();
-            for parrafo in &parrafos {
-                if parrafo.trim().is_empty() {
-                    traducido_final.push('\n');
-                    continue;
-                }
-                let traducido = match traducir_con_marian(parrafo, par) {
-                    Ok(t) => t,
-                    Err(_) => {
-                        let (t, _) =
-                            traducir_inteligente(parrafo, dict, subclave_hex, par);
-                        t
-                    }
-                };
-                traducido_final.push_str(&traducido);
+        // Traducir párrafo a párrafo para evitar bucles en NLLB
+        let parrafos: Vec<&str> = texto.split('\n').collect();
+        let mut traducido_final = String::new();
+        for parrafo in &parrafos {
+            if parrafo.trim().is_empty() {
                 traducido_final.push('\n');
+                continue;
             }
-            // Guardar traducción cifrada
-            if let Ok(cifrado) = seguridad::blindar_documento(&traducido_final, subclave_hex) {
-                let salida = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
-                let _ = fs::write(&salida, cifrado);
-            }
-        } // cierra if let Ok(texto)
-    } // cierra else if .txt
+            let traducido = match traducir_con_marian(parrafo, par) {
+                Ok(t) => t,
+                Err(_) => {
+                    let (t, _) =
+                        traducir_inteligente(parrafo, dict, subclave_hex, par);
+                    t
+                }
+            };
+            traducido_final.push_str(&traducido);
+            traducido_final.push('\n');
+        }
+        // Guardar traducción cifrada
+        if let Ok(cifrado) = seguridad::blindar_documento(&traducido_final, subclave_hex) {
+            let salida = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
+            let _ = fs::write(&salida, cifrado);
+        }
+    } else {
+        return Err(format!("Formato no soportado: {}", ruta_limpia));
+    }
+
+    Ok(())
 }
 // =============================================================
 // 5. MOTOR Y UTILIDADES
@@ -1048,7 +1048,7 @@ pub struct EmailResumen {
 
 /// Rechaza cualquier campo IMAP que contenga \r o \n — previene inyección de comandos.
 fn validar_campo_imap(valor: &str, campo: &str) -> Result<(), Box<dyn std::error::Error>> {
-    if valor.contains('\r') || valor.contains('\n') {
+    if valor.contains('\r') || valor.contains('\n') || valor.contains('\0') {
         return Err(format!("Campo IMAP inválido (contiene salto de línea): {}", campo).into());
     }
     Ok(())

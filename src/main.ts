@@ -645,7 +645,8 @@ async function cargarArchivosGuardados(): Promise<void> {
     const count = document.getElementById("count-guardados");
     if (!lista) return;
 
-    if (count) count.textContent = `${archivos.length} archivo${archivos.length !== 1 ? "s" : ""}`;
+    const totalStr = archivos.length >= 1000 ? "1000+" : String(archivos.length);
+    if (count) count.textContent = `${totalStr} archivo${archivos.length !== 1 ? "s" : ""}${archivos.length >= 1000 ? " (lista truncada)" : ""}`;
 
     if (archivos.length === 0) {
       lista.innerHTML = `<div class="archivos-vacio">
