@@ -21,6 +21,8 @@ use std::path::Path;
 use std::sync::Mutex;
 use zeroize::{Zeroize, Zeroizing};
 
+const MAX_ARCHIVOS: usize = 1000;
+
 // ============================================================
 // HELPER — Borrado seguro de archivos temporales
 // ============================================================
@@ -479,55 +481,55 @@ fn traducir_documento(
         .to_string();
     let ruta_temp = tmp_path(&nombre_solo);
     fs::write(&ruta_temp, &contenido).map_err(|e| format!("Error guardando temporal: {}", e))?;
-    let contenido_limpio = Zeroizing::new(contenido);
-    drop(contenido_limpio);
+    drop(Zeroizing::new(contenido));
 
-    let id_usuario = sesion
-        .usuario
-        .lock()
-        .map_err(|_| "Error".to_string())?
-        .clone();
+    // Toda la lógica posterior se envuelve en closure para garantizar que
+    // borrar_seguro se ejecute incluso si un mutex falla (early return).
+    let resultado = (|| -> Result<String, String> {
+        let id_usuario = sesion
+            .usuario
+            .lock()
+            .map_err(|_| "Error".to_string())?
+            .clone();
 
-    let _ts: u64 = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+        let nombre_base = std::path::Path::new(&nombre_archivo)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&nombre_archivo);
 
-    let nombre_base = std::path::Path::new(&nombre_archivo)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&nombre_archivo);
+        // El resultado va a ~/Babel/archivos/ — carpeta visible en Finder
+        let nombre_resultado = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
 
-    // El resultado va a ~/Babel/archivos/ — carpeta visible en Finder
-    let nombre_resultado = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
+        let dict = sesion
+            .diccionario
+            .lock()
+            .map_err(|_| "Error leyendo diccionario.".to_string())?
+            .clone();
 
-    let dict = sesion
-        .diccionario
-        .lock()
-        .map_err(|_| "Error leyendo diccionario.".to_string())?
-        .clone();
+        let idioma_doc = sesion
+            .idioma
+            .lock()
+            .map_err(|_| "Error leyendo idioma.".to_string())?
+            .clone();
 
-    let idioma_doc = sesion
-        .idioma
-        .lock()
-        .map_err(|_| "Error leyendo idioma.".to_string())?
-        .clone();
+        let par_doc = idioma_a_par(&idioma_doc);
 
-    let par_doc = idioma_a_par(&idioma_doc);
+        traductor::procesar_archivo_inteligente(
+            &ruta_temp,
+            &dict,
+            &subclave_hex,
+            &id_usuario,
+            par_doc,
+        );
 
-    traductor::procesar_archivo_inteligente(
-        &ruta_temp,
-        &dict,
-        &subclave_hex,
-        &id_usuario,
-        par_doc,
-    );
+        Ok(nombre_resultado)
+    })();
 
-    // Borrado seguro: sobreescribe con ceros antes de eliminar
-    // El temporal estuvo en claro en disco — no basta con remove_file
+    // Borrado seguro: sobreescribe con ceros antes de eliminar.
+    // Se ejecuta siempre, tanto en éxito como en error.
     borrar_seguro(&ruta_temp);
 
-    Ok(nombre_resultado)
+    resultado
 }
 // ============================================================
 // COMANDO 5b — Traducir texto plano (chat de traducción)
@@ -669,6 +671,9 @@ fn listar_archivos_guardados(
 
     if let Ok(entries) = fs::read_dir(&carpeta_g) {
         for entry in entries.flatten() {
+            if archivos.len() >= MAX_ARCHIVOS {
+                break;
+            }
             let nombre = entry.file_name().to_string_lossy().to_string();
             if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
                 continue;
@@ -722,6 +727,9 @@ fn listar_archivos_guardados(
 
     if let Ok(entries) = fs::read_dir(&carpeta_a) {
         for entry in entries.flatten() {
+            if archivos.len() >= MAX_ARCHIVOS {
+                break;
+            }
             let nombre = entry.file_name().to_string_lossy().to_string();
             if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
                 continue;
@@ -1010,6 +1018,9 @@ fn listar_archivos(
     let entradas = fs::read_dir(&carpeta).map_err(|e| format!("Error leyendo archivos: {}", e))?;
 
     for entrada in entradas.flatten() {
+        if archivos.len() >= MAX_ARCHIVOS {
+            break;
+        }
         let path = entrada.path();
         if !path.is_file() {
             continue;

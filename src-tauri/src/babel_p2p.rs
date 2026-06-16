@@ -77,6 +77,16 @@ fn fingerprint_cert(cert_der: &CertificateDer) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Oculta los dos últimos octetos de una IPv4 en logs de sistema para no filtrar red interna.
+fn redactar_ip(ip: &str) -> String {
+    let partes: Vec<&str> = ip.splitn(5, '.').collect();
+    if partes.len() >= 2 {
+        format!("{}.*.*", partes[0..2].join("."))
+    } else {
+        "?.?.*.*".to_string()
+    }
+}
+
 fn cargar_peers_trusted() -> HashMap<String, String> {
     fs::read_to_string(ruta_peers_trusted())
         .ok()
@@ -239,7 +249,7 @@ impl DescubrimientoRed {
                         log::warn!(
                             "[P2P] Encontrado: {} en {}:{}",
                             peer.nombre,
-                            peer.ip,
+                            redactar_ip(&peer.ip),
                             peer.puerto
                         );
                         peers.push(peer);
@@ -456,7 +466,7 @@ impl ServidorP2P {
                 .peer_addr()
                 .map(|a| a.to_string())
                 .unwrap_or("?".to_string());
-            log::warn!("[P2P] Conexión desde {}", ip);
+            log::warn!("[P2P] Conexión desde {}", redactar_ip(&ip));
 
             // Negociamos TLS con rustls síncrono
             let conn = match rustls::ServerConnection::new(config_arc.clone()) {
@@ -472,7 +482,7 @@ impl ServidorP2P {
             match recibir_archivo(&mut tls_stream) {
                 Ok((nombre, datos)) => self.guardar_archivo(&nombre, &datos, &ip),
                 Err(e) => {
-                    log::error!("[P2P] Error recibiendo de {}: {}", ip, e);
+                    log::error!("[P2P] Error recibiendo de {}: {}", redactar_ip(&ip), e);
                     crate::seguridad::registrar_evento_seguridad(
                         &format!("Error P2P de {}: {}", ip, e),
                         &self.subclave_hex,
@@ -628,7 +638,7 @@ impl ClienteP2P {
             .unwrap_or("archivo.babel ")
             .to_string();
 
-        log::warn!("[P2P] Conectando a {} ({})...", peer.nombre, peer.ip);
+        log::warn!("[P2P] Conectando a {} ({})...", peer.nombre, redactar_ip(&peer.ip));
 
         let config_tls = self.construir_config_cliente(&peer.ip)?;
         let config_arc = Arc::new(config_tls);
@@ -679,7 +689,7 @@ impl ClienteP2P {
         nombre: &str,
         datos: &[u8],
     ) -> Result<(), String> {
-        log::warn!("[P2P] Conectando a {} ({})...", peer.nombre, peer.ip);
+        log::warn!("[P2P] Conectando a {} ({})...", peer.nombre, redactar_ip(&peer.ip));
 
         let config_tls = self.construir_config_cliente(&peer.ip)?;
         let config_arc = Arc::new(config_tls);

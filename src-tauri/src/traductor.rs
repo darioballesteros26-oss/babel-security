@@ -42,6 +42,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::seguridad;
@@ -56,6 +57,9 @@ pub fn enviar_archivo_descifrado(
     smtp_password: &str,
     subclave_hex: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    validar_campo_imap(smtp_servidor, "smtp_servidor")?;
+    validar_campo_imap(smtp_usuario, "smtp_usuario")?;
+    validar_campo_imap(smtp_password, "smtp_password")?;
     // Descifrar el archivo
     let bytes_cifrados = fs::read(ruta)?;
     let contenido = seguridad::descifrar_documento(bytes_cifrados, subclave_hex)
@@ -1025,8 +1029,8 @@ pub fn guardar_config_email(creds: &CredencialesEmail, subclave_hex: &str) {
 /// Carga y descifra las credenciales de email desde ~/Babel/config.babel
 pub fn cargar_config_email(subclave_hex: &str) -> Option<CredencialesEmail> {
     let contenido = fs::read(crate::babel_dir().join("config.babel")).ok()?;
-    let descifrado = seguridad::descifrar_documento(contenido, subclave_hex).ok()?;
-    serde_json::from_str(&descifrado).ok()
+    let descifrado = Zeroizing::new(seguridad::descifrar_documento(contenido, subclave_hex).ok()?);
+    serde_json::from_str(descifrado.as_str()).ok()
 }
 
 // ============================================================
@@ -1042,6 +1046,14 @@ pub struct EmailResumen {
     pub tiene_adjunto: bool,
 }
 
+/// Rechaza cualquier campo IMAP que contenga \r o \n — previene inyección de comandos.
+fn validar_campo_imap(valor: &str, campo: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if valor.contains('\r') || valor.contains('\n') {
+        return Err(format!("Campo IMAP inválido (contiene salto de línea): {}", campo).into());
+    }
+    Ok(())
+}
+
 /// Conecta por IMAP y devuelve los últimos 20 emails de la bandeja.
 /// Usa ENVELOPE para no descargar el cuerpo - solo metadatos.
 pub fn obtener_emails(
@@ -1049,6 +1061,10 @@ pub fn obtener_emails(
     usuario: &str,
     password: &str,
 ) -> Result<Vec<EmailResumen>, Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    validar_campo_imap(password, "password")?;
+
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
@@ -1168,6 +1184,10 @@ pub fn obtener_email_completo(
     password: &str,
     id: u32,
 ) -> Result<EmailCompletoRust, Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    validar_campo_imap(password, "password")?;
+
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
@@ -1262,6 +1282,17 @@ pub fn obtener_email_completo(
 // MARIAN - TRADUCCIÓN NEURONAL VÍA SERVIDOR PYTHON
 // ============================================================
 
+static UREQ_AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+
+fn agente_http() -> &'static ureq::Agent {
+    UREQ_AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(3))
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+    })
+}
+
 /// Llama al servidor Python MarianMT en localhost:5002.
 /// Incluye token de seguridad — Flask rechaza sin él.
 pub fn traducir_con_marian(texto: &str, par: &str) -> Result<String, String> {
@@ -1273,7 +1304,8 @@ pub fn traducir_con_marian(texto: &str, par: &str) -> Result<String, String> {
         "par": par
     });
 
-    let respuesta = ureq::post(url)
+    let respuesta = agente_http()
+        .post(url)
         .set("Content-Type", "application/json")
         .set("X-Babel-Token", &token)
         .send_json(&body)

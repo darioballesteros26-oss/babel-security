@@ -24,7 +24,7 @@ use dirs;
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use num_cpus;
-use rand::RngCore;
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use sysinfo::{PidExt, ProcessExt, System, SystemExt};
@@ -108,7 +108,7 @@ pub fn derivar_subclave(
 /// Solo se llama una vez al crear el búnker. No es secreta pero debe ser única.
 pub fn generar_salt_maestra() -> [u8; 32] {
     let mut salt = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut salt);
+    OsRng.fill_bytes(&mut salt);
     salt
 }
 
@@ -131,10 +131,14 @@ pub fn blindar_documento(texto: &str, clave_hex: &str) -> Result<Vec<u8>, String
     let cipher = Aes256Gcm::new(key);
     clave_bytes.zeroize(); // borrado inmediato — ya no necesitamos los bytes en claro
 
-    // Nonce aleatorio de 12 bytes — nunca se reutiliza gracias a la aleatoriedad.
+    // Nonce aleatorio de 12 bytes via OsRng (entropía del OS, sin estado thread-local).
     // Reutilizar un nonce con AES-GCM destruye completamente la seguridad.
     let mut nonce_bytes = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    OsRng.fill_bytes(&mut nonce_bytes);
+    // Un nonce todo-ceros indica fallo catastrófico del RNG — abortamos.
+    if nonce_bytes == [0u8; 12] {
+        return Err("Fallo del generador de entropía del sistema".to_string());
+    }
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
