@@ -1042,6 +1042,14 @@ pub struct EmailResumen {
     pub tiene_adjunto: bool,
 }
 
+/// Rechaza cualquier campo IMAP que contenga \r o \n — previene inyección de comandos.
+fn validar_campo_imap(valor: &str, campo: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if valor.contains('\r') || valor.contains('\n') {
+        return Err(format!("Campo IMAP inválido (contiene salto de línea): {}", campo).into());
+    }
+    Ok(())
+}
+
 /// Conecta por IMAP y devuelve los últimos 20 emails de la bandeja.
 /// Usa ENVELOPE para no descargar el cuerpo - solo metadatos.
 pub fn obtener_emails(
@@ -1049,6 +1057,10 @@ pub fn obtener_emails(
     usuario: &str,
     password: &str,
 ) -> Result<Vec<EmailResumen>, Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    validar_campo_imap(password, "password")?;
+
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
@@ -1168,6 +1180,10 @@ pub fn obtener_email_completo(
     password: &str,
     id: u32,
 ) -> Result<EmailCompletoRust, Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    validar_campo_imap(password, "password")?;
+
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
@@ -1273,7 +1289,12 @@ pub fn traducir_con_marian(texto: &str, par: &str) -> Result<String, String> {
         "par": par
     });
 
-    let respuesta = ureq::post(url)
+    let agente = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(60))
+        .build();
+    let respuesta = agente
+        .post(url)
         .set("Content-Type", "application/json")
         .set("X-Babel-Token", &token)
         .send_json(&body)
