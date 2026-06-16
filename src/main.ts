@@ -1,9 +1,10 @@
 import "./styles.css";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { openPath } from "@tauri-apps/plugin-opener";
 import DOMPurify from "dompurify";
 
-type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos";
+type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos" | "nombre";
 // VARIABLES DE SESIÓN — nunca van a window, se zeroizan al cerrar
 // ============================================================
 let _sesionPass = "";
@@ -120,7 +121,7 @@ function limpiarCampo(id: string): void {
 
 function limpiarCamposSensibles(): void {
   ["master-key", "master-key-confirm", "user-pass", "user-pass-confirm",
-    "login-pass", "login-pass-usuario", "login-user"].forEach(limpiarCampo);
+    "login-pass", "login-pass-usuario"].forEach(limpiarCampo);
 }
 
 // ============================================================
@@ -317,11 +318,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 async function crearBunker(): Promise<void> {
   const maestra = (document.getElementById("master-key") as HTMLInputElement)?.value ?? "";
   const maestraC = (document.getElementById("master-key-confirm") as HTMLInputElement)?.value ?? "";
-  const usuario = (document.getElementById("username") as HTMLInputElement)?.value ?? "";
   const pass = (document.getElementById("user-pass") as HTMLInputElement)?.value ?? "";
   const passC = (document.getElementById("user-pass-confirm") as HTMLInputElement)?.value ?? "";
 
-  if (!maestra || !usuario || !pass) { mostrarMensaje("response-msg", "TODOS LOS CAMPOS SON OBLIGATORIOS", true); return; }
+  if (!maestra || !pass) { mostrarMensaje("response-msg", "TODOS LOS CAMPOS SON OBLIGATORIOS", true); return; }
   if (maestra !== maestraC) { mostrarMensaje("response-msg", "LAS LLAVES MAESTRAS NO COINCIDEN", true); return; }
   if (pass !== passC) { mostrarMensaje("response-msg", "LAS CONTRASEÑAS NO COINCIDEN", true); return; }
   if (maestra.length < 12) { mostrarMensaje("response-msg", "LA LLAVE MAESTRA NECESITA AL MENOS 12 CARACTERES", true); return; }
@@ -330,7 +330,7 @@ async function crearBunker(): Promise<void> {
   mostrarMensaje("response-msg", "CIFRANDO BÚNKER CON AES-256-GCM...", false);
 
   try {
-    await invoke<string>("crear_acceso_bunker", { maestra, usuario, pass });
+    await invoke<string>("crear_acceso_bunker", { maestra, usuario: "babel", pass });
 
     mostrarMensaje("response-msg", "GENERANDO FRASE DE RECUPERACIÓN...", false);
     // Generar y mostrar la frase BIP39 antes de ir al login
@@ -347,11 +347,10 @@ async function crearBunker(): Promise<void> {
 // ============================================================
 
 async function intentarAcceso(): Promise<void> {
-  const usuario = (document.getElementById("login-user") as HTMLInputElement)?.value ?? "";
   const llaveMaestra = (document.getElementById("login-pass") as HTMLInputElement)?.value ?? "";
   const passUsuario = (document.getElementById("login-pass-usuario") as HTMLInputElement)?.value ?? "";
 
-  if (!usuario || !llaveMaestra || !passUsuario) {
+  if (!llaveMaestra || !passUsuario) {
     mostrarMensaje("login-msg", "TODOS LOS CAMPOS SON OBLIGATORIOS", true);
     return;
   }
@@ -359,23 +358,29 @@ async function intentarAcceso(): Promise<void> {
 
   try {
     const ok = await invoke<boolean>("verificar_login", {
-      usuario,
       pass: llaveMaestra,
       passUsuario
     });
 
     if (ok) {
-      // Guardar credenciales en variables locales — nunca en window
       _sesionPass = passUsuario;
       _sesionMaestra = llaveMaestra;
-      _sesionUsuario = usuario;
       limpiarCamposSensibles();
+
+      const nombreGuardado = localStorage.getItem("babel-nombre-display");
+      const nombre = nombreGuardado ?? "";
+      _sesionUsuario = nombre;
       const bienvenida = document.getElementById("bienvenida-usuario");
-      if (bienvenida) bienvenida.textContent = `Bienvenido, ${usuario}`;
-      mostrarPantalla("principal");
+      if (bienvenida) bienvenida.textContent = nombre ? `Bienvenido, ${nombre}` : "Bienvenido";
+
       activarTimerInactividad();
       invoke<boolean>("tiene_config_email").then(ok => { _smtpConfigurado = ok; }).catch(() => { });
 
+      if (nombreGuardado === null) {
+        mostrarPantalla("nombre");
+      } else {
+        mostrarPantalla("principal");
+      }
 
     } else {
       mostrarMensaje("login-msg", "CREDENCIALES INCORRECTAS", true);
@@ -2516,8 +2521,60 @@ function irARecuperacion(): void {
   mostrarPantalla("recuperacion");
 }
 
-function imprimirFrase(): void {
-  window.print();
+async function imprimirFrase(): Promise<void> {
+  const grid = document.getElementById("frase-grid");
+  if (!grid) return;
+
+  const palabras = Array.from(grid.querySelectorAll(".palabra-bip39")).map((el, i) => {
+    const texto = (el.querySelector(".palabra-texto") as HTMLElement)?.textContent?.trim() ?? "";
+    return `<div class="palabra"><span class="num">${i + 1}</span><span class="txt">${texto}</span></div>`;
+  });
+
+  const fechaHoy = new Date().toLocaleDateString("es-ES", { year: "numeric", month: "long", day: "numeric" });
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Babel Security — Frase de Recuperación</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; background: #fff; color: #1a1a1a; padding: 48px 56px; }
+  header { text-align: center; border-bottom: 2px solid #1a1a1a; padding-bottom: 20px; margin-bottom: 32px; }
+  h1 { font-size: 22px; letter-spacing: 6px; font-weight: 400; margin-bottom: 6px; }
+  .subtitle { font-size: 10px; letter-spacing: 3px; color: #555; text-transform: uppercase; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 40px; }
+  .palabra { display: flex; align-items: center; gap: 12px; border: 1px solid #ccc; padding: 12px 16px; }
+  .num { font-size: 10px; color: #999; min-width: 16px; text-align: right; font-family: 'Courier New', monospace; }
+  .txt { font-size: 15px; letter-spacing: 0.5px; }
+  footer { border-top: 1px solid #ccc; padding-top: 16px; display: flex; justify-content: space-between; }
+  .aviso { font-size: 9px; letter-spacing: 1.5px; color: #888; text-transform: uppercase; }
+  @media print { body { padding: 32px 40px; } }
+</style>
+</head>
+<body>
+  <header>
+    <h1>BABEL SECURITY</h1>
+    <p class="subtitle">Frase de recuperación BIP39 &mdash; Documento confidencial</p>
+  </header>
+  <div class="grid">${palabras.join("")}</div>
+  <footer>
+    <span class="aviso">⚠ Guarda este documento bajo llave &mdash; No compartas con nadie</span>
+    <span class="aviso">${fechaHoy}</span>
+  </footer>
+</body>
+</html>`;
+
+  try {
+    const ruta = await invoke<string>("guardar_html_frase", { html });
+    await openPath(ruta);
+  } catch (e) {
+    const msg = document.getElementById("frase-msg");
+    if (msg) {
+      msg.textContent = "Error al abrir el documento de impresión.";
+      msg.classList.remove("hidden");
+    }
+  }
 }
 
 // Intenta recuperar el búnker con las 12 palabras introducidas
@@ -2538,16 +2595,12 @@ async function intentarRecuperacion(): Promise<void> {
   try {
     const [maestra, passUsuario] = await invoke<[string, string]>("recuperar_con_frase", { palabras });
 
-    // Rellenar los campos del login con la llave maestra recuperada
+    // Rellenar los campos del login con las credenciales recuperadas
     const campoPass = document.getElementById("login-pass-usuario") as HTMLInputElement;
     if (campoPass) campoPass.value = passUsuario;
     const campoMaestra = document.getElementById("login-pass") as HTMLInputElement;
     if (campoMaestra) campoMaestra.value = maestra;
-    const usuario = await invoke<string>("obtener_usuario_con_maestra", { maestra });
-    const campoUsuario = document.getElementById("login-user") as HTMLInputElement;
-    if (campoUsuario) campoUsuario.value = usuario;
 
-    // Mostrar la llave maestra al usuario por 8 segundos para que la vea
     mostrarMensaje("recovery-msg", `✓ LLAVE MAESTRA RECUPERADA — SE HA RELLENADO EL LOGIN`, false);
 
     // Limpiar campos de recuperación
@@ -2959,6 +3012,18 @@ function cargarAjustesGuardados(): void {
 (window as any).guardarAjustesTraduccion = guardarAjustesTraduccion;
 (window as any).toggleTraduccionP2P = toggleTraduccionP2P;
 (window as any).simularMensajeEntrante = simularMensajeEntrante;
+(window as any).guardarNombreDisplay = guardarNombreDisplay;
+
+function guardarNombreDisplay(): void {
+  const input = document.getElementById("input-nombre-display") as HTMLInputElement;
+  const nombre = input?.value.trim() ?? "";
+  // Guardar siempre (aunque esté vacío) para no volver a preguntar en futuros logins
+  localStorage.setItem("babel-nombre-display", nombre);
+  _sesionUsuario = nombre;
+  const bienvenida = document.getElementById("bienvenida-usuario");
+  if (bienvenida) bienvenida.textContent = nombre ? `Bienvenido, ${nombre}` : "Bienvenido";
+  mostrarPantalla("principal");
+}
 
 // Cargar ajustes al arrancar
 document.addEventListener("DOMContentLoaded", cargarAjustesGuardados);

@@ -348,7 +348,6 @@ fn incrementar_contador_y_bloquear(sesion: &tauri::State<SesionActiva>) -> Resul
 
 #[tauri::command]
 fn verificar_login(
-    usuario: String,
     pass: String,
     pass_usuario: String,
     sesion: tauri::State<SesionActiva>,
@@ -385,11 +384,6 @@ fn verificar_login(
 
     let usuario_guardado: UsuarioBabel =
         serde_json::from_str(&json).map_err(|_| "Búnker corrupto.".to_string())?;
-
-    if usuario_guardado.nombre.to_lowercase() != usuario.trim().to_lowercase() {
-        incrementar_contador_y_bloquear(&sesion)?;
-        return Ok(false);
-    }
 
     let pass_ok = seguridad::verificar_password(&pass_usuario, &usuario_guardado.password_hash);
     if !pass_ok {
@@ -2589,6 +2583,18 @@ fn idioma_a_par(idioma: &str) -> &'static str {
 }
 
 // ============================================================
+// COMANDO — Guardar HTML de frase BIP39 en tmp para imprimir
+// ============================================================
+
+#[tauri::command]
+fn guardar_html_frase(html: String) -> Result<String, String> {
+    let ruta = tmp_path("frase_recuperacion.html");
+    std::fs::write(&ruta, html.as_bytes())
+        .map_err(|e| format!("Error al guardar HTML: {}", e))?;
+    Ok(ruta)
+}
+
+// ============================================================
 // PUNTO DE ENTRADA — Arranca Tauri, registra todos los comandos
 // y gestiona el estado global de sesión (SesionActiva).
 // ============================================================
@@ -2652,6 +2658,7 @@ fn main() {
             obtener_usuario_con_maestra,
             renombrar_archivo,
             tiene_config_email,
+            guardar_html_frase,
         ])
         .run(tauri::generate_context!())
         .expect("Error crítico al iniciar Babel");
