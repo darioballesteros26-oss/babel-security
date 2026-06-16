@@ -21,6 +21,8 @@ use std::path::Path;
 use std::sync::Mutex;
 use zeroize::{Zeroize, Zeroizing};
 
+const MAX_ARCHIVOS: usize = 1000;
+
 // ============================================================
 // HELPER — Borrado seguro de archivos temporales
 // ============================================================
@@ -667,7 +669,6 @@ fn listar_archivos_guardados(
         &subclave_hex,
     );
 
-    const MAX_ARCHIVOS: usize = 1000;
     if let Ok(entries) = fs::read_dir(&carpeta_g) {
         for entry in entries.flatten() {
             if archivos.len() >= MAX_ARCHIVOS {
@@ -1016,7 +1017,6 @@ fn listar_archivos(
     );
     let entradas = fs::read_dir(&carpeta).map_err(|e| format!("Error leyendo archivos: {}", e))?;
 
-    const MAX_ARCHIVOS: usize = 1000;
     for entrada in entradas.flatten() {
         if archivos.len() >= MAX_ARCHIVOS {
             break;

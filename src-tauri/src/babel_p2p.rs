@@ -482,7 +482,7 @@ impl ServidorP2P {
             match recibir_archivo(&mut tls_stream) {
                 Ok((nombre, datos)) => self.guardar_archivo(&nombre, &datos, &ip),
                 Err(e) => {
-                    log::error!("[P2P] Error recibiendo de {}: {}", ip, e);
+                    log::error!("[P2P] Error recibiendo de {}: {}", redactar_ip(&ip), e);
                     crate::seguridad::registrar_evento_seguridad(
                         &format!("Error P2P de {}: {}", ip, e),
                         &self.subclave_hex,

@@ -108,7 +108,7 @@ pub fn derivar_subclave(
 /// Solo se llama una vez al crear el búnker. No es secreta pero debe ser única.
 pub fn generar_salt_maestra() -> [u8; 32] {
     let mut salt = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut salt);
+    OsRng.fill_bytes(&mut salt);
     salt
 }
 

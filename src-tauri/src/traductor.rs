@@ -42,6 +42,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::seguridad;
@@ -56,6 +57,9 @@ pub fn enviar_archivo_descifrado(
     smtp_password: &str,
     subclave_hex: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    validar_campo_imap(smtp_servidor, "smtp_servidor")?;
+    validar_campo_imap(smtp_usuario, "smtp_usuario")?;
+    validar_campo_imap(smtp_password, "smtp_password")?;
     // Descifrar el archivo
     let bytes_cifrados = fs::read(ruta)?;
     let contenido = seguridad::descifrar_documento(bytes_cifrados, subclave_hex)
@@ -1278,6 +1282,17 @@ pub fn obtener_email_completo(
 // MARIAN - TRADUCCIÓN NEURONAL VÍA SERVIDOR PYTHON
 // ============================================================
 
+static UREQ_AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+
+fn agente_http() -> &'static ureq::Agent {
+    UREQ_AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(3))
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+    })
+}
+
 /// Llama al servidor Python MarianMT en localhost:5002.
 /// Incluye token de seguridad — Flask rechaza sin él.
 pub fn traducir_con_marian(texto: &str, par: &str) -> Result<String, String> {
@@ -1289,11 +1304,7 @@ pub fn traducir_con_marian(texto: &str, par: &str) -> Result<String, String> {
         "par": par
     });
 
-    let agente = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(3))
-        .timeout(std::time::Duration::from_secs(60))
-        .build();
-    let respuesta = agente
+    let respuesta = agente_http()
         .post(url)
         .set("Content-Type", "application/json")
         .set("X-Babel-Token", &token)
