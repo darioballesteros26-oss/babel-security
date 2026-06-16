@@ -667,8 +667,12 @@ fn listar_archivos_guardados(
         &subclave_hex,
     );
 
+    const MAX_ARCHIVOS: usize = 1000;
     if let Ok(entries) = fs::read_dir(&carpeta_g) {
         for entry in entries.flatten() {
+            if archivos.len() >= MAX_ARCHIVOS {
+                break;
+            }
             let nombre = entry.file_name().to_string_lossy().to_string();
             if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
                 continue;
@@ -722,6 +726,9 @@ fn listar_archivos_guardados(
 
     if let Ok(entries) = fs::read_dir(&carpeta_a) {
         for entry in entries.flatten() {
+            if archivos.len() >= MAX_ARCHIVOS {
+                break;
+            }
             let nombre = entry.file_name().to_string_lossy().to_string();
             if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
                 continue;
@@ -1009,7 +1016,11 @@ fn listar_archivos(
     );
     let entradas = fs::read_dir(&carpeta).map_err(|e| format!("Error leyendo archivos: {}", e))?;
 
+    const MAX_ARCHIVOS: usize = 1000;
     for entrada in entradas.flatten() {
+        if archivos.len() >= MAX_ARCHIVOS {
+            break;
+        }
         let path = entrada.path();
         if !path.is_file() {
             continue;
