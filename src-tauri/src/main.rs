@@ -603,6 +603,10 @@ fn guardar_documento_sin_traducir(
         .map_err(|_| "Error".to_string())?
         .clone();
 
+    if ruta_completa.contains("..") {
+        return Err("Ruta no autorizada.".into());
+    }
+
     let contenido =
         fs::read(&ruta_completa).map_err(|e| format!("Error leyendo archivo: {}", e))?;
 
@@ -2238,9 +2242,11 @@ fn enviar_archivo_cifrado_tauri(
     ruta: String,
     destinatario: String,
     asunto: String,
-    cuerpo: String, // ← añade
+    cuerpo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
+    validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+
     let subclave_hex = sesion
         .subclave_hex
         .lock()
@@ -2510,6 +2516,8 @@ fn enviar_archivo_p2p(
     ruta: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
+    validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+
     let subclave_hex = sesion
         .subclave_hex
         .lock()

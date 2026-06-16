@@ -975,10 +975,8 @@ pub fn cargar_diccionario(
 pub fn guardar_diccionario(nombre: &str, dict: &HashMap<String, String>, subclave_hex: &str) {
     init_dir_dict();
     let ruta_cifrada = ruta_dict(&format!("{}.babel", nombre));
-    let ruta_json = ruta_dict(&format!("{}.json", nombre));
 
     if let Ok(json) = serde_json::to_string_pretty(dict) {
-        // Guardamos versión cifrada (.babel)
         match seguridad::blindar_documento(&json, subclave_hex) {
             Ok(cifrado) => {
                 if let Err(e) = fs::write(&ruta_cifrada, cifrado) {
@@ -987,23 +985,6 @@ pub fn guardar_diccionario(nombre: &str, dict: &HashMap<String, String>, subclav
             }
             Err(e) => log::warn!("[!] Error cifrando diccionario: {}", e),
         }
-        // Sincronizamos versión legible (.json)
-        sincronizar_json_legible(&ruta_json, dict);
-    }
-}
-
-/// Escribe el diccionario como JSON legible y ordenado alfabéticamente.
-fn sincronizar_json_legible(ruta: &std::path::Path, dict: &HashMap<String, String>) {
-    let mut entradas: Vec<(&String, &String)> = dict.iter().collect();
-    entradas.sort_by_key(|(k, _)| k.as_str());
-
-    let mapa_ordenado: serde_json::Map<String, serde_json::Value> = entradas
-        .into_iter()
-        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-        .collect();
-
-    if let Ok(json) = serde_json::to_string_pretty(&mapa_ordenado) {
-        let _ = fs::write(ruta, json);
     }
 }
 

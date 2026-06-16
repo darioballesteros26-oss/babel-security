@@ -145,6 +145,11 @@ impl GestorCertificados {
 
         fs::write(ruta_cert(), &cert_der).map_err(|e| format!("Error guardando cert: {}", e))?;
         fs::write(ruta_clave(), &clave_der).map_err(|e| format!("Error guardando clave: {}", e))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600));
+        }
 
         log::info!("[OK] Certificado generado en {:?}", ruta_cert());
         log::info!("[P2P] Comparte {:?} con otros Babel.", ruta_cert());

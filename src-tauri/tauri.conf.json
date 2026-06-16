@@ -20,8 +20,7 @@
       }
     ],
     "security": {
-      "csp": null,
-      "dangerousDisableAssetCspModification": true
+      "csp": "default-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:5002; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; frame-src blob:"
     }
   },
   "bundle": {
