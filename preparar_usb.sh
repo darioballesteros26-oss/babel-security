@@ -309,6 +309,7 @@ if [[ $CACHE_VALID -eq 1 ]]; then
   echo "  ✓ Caché hit — copiando Python+paquetes (sin internet)..."
   rm -rf "$RESOURCES/python"
   rsync -a "$PY_CACHE_ENV/" "$RESOURCES/python/"
+  find "$RESOURCES/python" -name '._*' -delete 2>/dev/null || true
   echo "  ✓ Python copiado desde caché"
 else
   # Caché MISS: descargar, extraer e instalar paquetes una vez
@@ -355,6 +356,7 @@ print(hits[0] if hits else '')
 
   echo "  Copiando entorno Python al USB..."
   rsync -a "$PY_CACHE_ENV/" "$RESOURCES/python/"
+  find "$RESOURCES/python" -name '._*' -delete 2>/dev/null || true
   echo "  ✓ (próxima vez será instantáneo desde caché)"
 fi
 
