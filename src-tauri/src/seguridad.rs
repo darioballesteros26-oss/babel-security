@@ -947,7 +947,7 @@ impl AntiKeylogger {
         amenazas.extend(amenazas_tcc);
         advertencias.extend(avisos_tcc);
 
-        if !is_root::is_root() {
+        if uzers::get_current_uid() != 0 {
             advertencias.push(
                 "Sin privilegios de administrador — keyloggers de kernel no detectables. \
                  El cifrado AES-256-GCM opera con seguridad total de todas formas."

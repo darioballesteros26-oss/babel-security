@@ -41,7 +41,7 @@ hostname     = "0.3"
 num_cpus     = "1.16"
 dirs         = "5.0"
 sysinfo      = "0.29"
-is-root      = "0.1"
+uzers        = "0.12"
 tokio        = { version = "1", features = ["full"] }
 lettre = { version = "0.11", features = ["smtp-transport", "builder", "tokio1-native-tls"] }
 ureq = { version = "2.9", features = ["json"] }
