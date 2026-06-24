@@ -1059,9 +1059,9 @@ pub struct EmailResumen {
 }
 
 /// Rechaza cualquier campo IMAP que contenga \r o \n — previene inyección de comandos.
-fn validar_campo_imap(valor: &str, campo: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn validar_campo_imap(valor: &str, _campo: &str) -> Result<(), Box<dyn std::error::Error>> {
     if valor.contains('\r') || valor.contains('\n') || valor.contains('\0') {
-        return Err(format!("Campo IMAP inválido (contiene salto de línea): {}", campo).into());
+        return Err("Parámetro de conexión inválido.".into());
     }
     Ok(())
 }
@@ -1081,7 +1081,7 @@ pub fn obtener_emails(
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
 
-    let mut sesion = cliente.login(usuario, password).map_err(|e| e.0)?;
+    let mut sesion = cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?;
 
     sesion.select("INBOX")?;
 
@@ -1204,7 +1204,7 @@ pub fn obtener_email_completo(
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
 
-    let mut sesion = cliente.login(usuario, password).map_err(|e| e.0)?;
+    let mut sesion = cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?;
 
     sesion.select("INBOX")?;
 

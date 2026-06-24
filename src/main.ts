@@ -1409,7 +1409,7 @@ function resetearTimerInactividad(): void {
   if (timerInactividad) clearTimeout(timerInactividad);
   timerInactividad = setTimeout(() => {
     cerrarSesion();
-  }, 20 * 60 * 1000);
+  }, 15 * 60 * 1000); // 15 minutos de inactividad
 }
 
 function activarTimerInactividad(): void {
@@ -2491,7 +2491,7 @@ function mostrarFrase(palabras: string[]): void {
   const grid = document.getElementById("frase-grid");
   if (grid) {
     grid.innerHTML = palabras.map((p, i) => {
-      return `<div class="palabra-bip39"><span class="palabra-numero">${i + 1}</span><span class="palabra-texto">${p}</span></div>`;
+      return `<div class="palabra-bip39"><span class="palabra-numero">${i + 1}</span><span class="palabra-texto">${escapeHTML(p)}</span></div>`;
     }).join("");
   }
   mostrarPantalla("frase");
@@ -2519,7 +2519,7 @@ async function imprimirFrase(): Promise<void> {
 
   const palabras = Array.from(grid.querySelectorAll(".palabra-bip39")).map((el, i) => {
     const texto = (el.querySelector(".palabra-texto") as HTMLElement)?.textContent?.trim() ?? "";
-    return `<div class="palabra"><span class="num">${i + 1}</span><span class="txt">${texto}</span></div>`;
+    return `<div class="palabra"><span class="num">${i + 1}</span><span class="txt">${escapeHTML(texto)}</span></div>`;
   });
 
   const fechaHoy = new Date().toLocaleDateString("es-ES", { year: "numeric", month: "long", day: "numeric" });
@@ -2628,7 +2628,7 @@ async function verFraseApp(): Promise<void> {
     const grid = document.getElementById("modal-frase-grid");
     if (!modal || !grid) return;
     grid.innerHTML = palabras.map((p, i) => {
-      return `<div class="palabra-bip39"><span class="palabra-numero">${i + 1}</span><span class="palabra-texto">${p}</span></div>`;
+      return `<div class="palabra-bip39"><span class="palabra-numero">${i + 1}</span><span class="palabra-texto">${escapeHTML(p)}</span></div>`;
     }).join("");
     modal.classList.remove("hidden");
   } catch (error) {

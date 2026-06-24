@@ -19,6 +19,7 @@ use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -576,6 +577,7 @@ impl ServidorP2P {
 
         let config_tls = self.construir_config_servidor()?;
         let config_arc = Arc::new(config_tls);
+        let conexiones_activas = Arc::new(AtomicUsize::new(0));
 
         let listener = TcpListener::bind(format!("0.0.0.0:{}", PUERTO_TRANSFERENCIA))
             .map_err(|e| format!("No se pudo abrir puerto {}: {}", PUERTO_TRANSFERENCIA, e))?;
@@ -591,6 +593,12 @@ impl ServidorP2P {
                 }
             };
 
+            // Rechazar si ya hay demasiadas conexiones simultáneas
+            if conexiones_activas.load(Ordering::Relaxed) >= 10 {
+                log::warn!("[P2P] Límite de conexiones alcanzado, rechazando.");
+                continue;
+            }
+
             let ip = stream
                 .peer_addr()
                 .map(|a| a.to_string())
@@ -600,6 +608,8 @@ impl ServidorP2P {
             let config_clone = config_arc.clone();
             let subclave = self.subclave_hex.clone();
             let usuario = self.id_usuario.clone();
+            let contador = conexiones_activas.clone();
+            contador.fetch_add(1, Ordering::Relaxed);
 
             // Cada conexión en su propio hilo — evita que un peer lento bloquee el servidor
             thread::spawn(move || {
@@ -607,6 +617,7 @@ impl ServidorP2P {
                     Ok(c) => c,
                     Err(e) => {
                         log::error!("[P2P] Error TLS: {}", e);
+                        contador.fetch_sub(1, Ordering::Relaxed);
                         return;
                     }
                 };
@@ -622,6 +633,7 @@ impl ServidorP2P {
                         );
                     }
                 }
+                contador.fetch_sub(1, Ordering::Relaxed);
             });
         }
         Ok(())
@@ -638,6 +650,11 @@ impl ServidorP2P {
 
         // Mensajes de texto — no se guardan en disco, van al buffer en RAM
         if nombre_seguro == "mensaje.txt" {
+            // Límite de 64 KB por mensaje para evitar saturación de RAM
+            if datos.len() > 64 * 1024 {
+                log::warn!("[P2P] Mensaje demasiado grande ({} bytes), descartado.", datos.len());
+                return;
+            }
             if let Ok(texto) = String::from_utf8(datos.to_vec()) {
                 if let Ok(mut msgs) = MENSAJES_ENTRANTES.lock() {
                     if msgs.len() < MAX_MENSAJES {

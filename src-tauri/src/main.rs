@@ -180,17 +180,18 @@ fn validar_ruta_en(ruta: &str, base: std::path::PathBuf) -> Result<(), String> {
 fn verificar_entorno_seguro() -> Result<String, String> {
     let sandbox = seguridad::AntiSandbox::analizar_entorno();
     if !sandbox.seguro {
+        // E-3: no filtrar nombres de procesos — solo el recuento
         return Err(format!(
-            "Entorno comprometido: {}",
-            sandbox.amenazas.join(", ")
+            "Entorno comprometido: {} amenaza(s) detectada(s)",
+            sandbox.amenazas.len()
         ));
     }
 
     if let Ok(keylogger) = seguridad::AntiKeylogger::blindaje_total(None) {
         if !keylogger.amenazas.is_empty() {
             return Err(format!(
-                "Procesos sospechosos: {}",
-                keylogger.amenazas.join(", ")
+                "Procesos sospechosos: {} proceso(s) detectado(s)",
+                keylogger.amenazas.len()
             ));
         }
     }
@@ -599,12 +600,22 @@ fn guardar_documento_sin_traducir(
         .map_err(|_| "Error".to_string())?
         .clone();
 
-    if ruta_completa.contains("..") {
+    // R-1: canonicalizar antes de comprobar — evita symlinks y variantes sin ".."
+    let ruta_canon = std::fs::canonicalize(&ruta_completa)
+        .map_err(|_| "Ruta no accesible o inválida.".to_string())?;
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    if !ruta_canon.starts_with(&home) {
         return Err("Ruta no autorizada.".into());
     }
 
+    // S-1: límite de tamaño antes de leer en memoria
+    let meta = std::fs::metadata(&ruta_canon).map_err(|e| format!("Error accediendo archivo: {}", e))?;
+    if meta.len() > 100 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 100 MB.".into());
+    }
+
     let contenido =
-        fs::read(&ruta_completa).map_err(|e| format!("Error leyendo archivo: {}", e))?;
+        fs::read(&ruta_canon).map_err(|e| format!("Error leyendo archivo: {}", e))?;
 
     let ts: u64 = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -802,6 +813,7 @@ fn mover_archivo_guardado(
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta_index = guardados_path(".buzon_index_guardados.babel");
 
@@ -877,6 +889,12 @@ fn traducir_documento_ruta(
         return Err(format!("Tipo de archivo no permitido: .{}", ext));
     }
 
+    // R-2: límite de tamaño antes de procesar
+    let meta = std::fs::metadata(&ruta).map_err(|e| format!("Error accediendo archivo: {}", e))?;
+    if meta.len() > 100 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 100 MB.".into());
+    }
+
     let id_usuario = sesion
         .usuario
         .lock()
@@ -936,6 +954,12 @@ fn leer_resultado(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Ve
     }
     // Seguridad: solo permitimos leer desde ~/Babel/archivos/
     validar_ruta_en(&ruta, archivos_dir())?;
+
+    // R-3: comprobar tamaño antes de leer en memoria
+    let meta = fs::metadata(&ruta).map_err(|e| format!("Error accediendo archivo: {}", e))?;
+    if meta.len() > 100 * 1024 * 1024 {
+        return Err("Archivo supera el límite de 100 MB.".into());
+    }
 
     fs::read(&ruta).map_err(|e| format!("Error leyendo resultado: {}", e))
 }
@@ -1199,6 +1223,7 @@ fn crear_buzon(
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = archivos_path(".buzones.babel");
     let mut nodos = cargar_nodos(std::path::Path::new(&ruta), &subclave_hex);
@@ -1242,6 +1267,7 @@ fn crear_buzon_guardado(
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = guardados_path(".buzones_guardados.babel");
     let mut nodos = cargar_nodos(std::path::Path::new(&ruta), &subclave_hex);
@@ -1337,6 +1363,7 @@ fn mover_archivo(
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta_index = archivos_path(".buzon_index.babel");
 
@@ -1374,6 +1401,7 @@ fn eliminar_buzon(id: String, sesion: tauri::State<SesionActiva>) -> Result<(), 
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = archivos_path(".buzones.babel");
     let mut nodos = cargar_nodos(std::path::Path::new(&ruta), &subclave_hex);
@@ -1397,6 +1425,7 @@ fn renombrar_buzon(
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = archivos_path(".buzones.babel");
     let mut nodos = cargar_nodos(std::path::Path::new(&ruta), &subclave_hex);
@@ -1514,6 +1543,7 @@ fn eliminar_buzon_guardado(id: String, sesion: tauri::State<SesionActiva>) -> Re
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = guardados_path(".buzones_guardados.babel");
     let mut nodos = cargar_nodos(std::path::Path::new(&ruta), &subclave_hex);
@@ -1548,6 +1578,7 @@ fn renombrar_buzon_guardado(
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = guardados_path(".buzones_guardados.babel");
     let mut nodos = cargar_nodos(std::path::Path::new(&ruta), &subclave_hex);
@@ -2036,8 +2067,12 @@ fn generar_palabras_recuperacion() -> Vec<String> {
 fn generar_frase_recuperacion(
     maestra: String,
     pass_usuario: String,
-    _sesion: tauri::State<SesionActiva>,
+    sesion: tauri::State<SesionActiva>,
 ) -> Result<Vec<String>, String> {
+    // B-3: solo permitir si hay sesión activa
+    let subclave = sesion.subclave_hex.lock().map_err(|_| "Error sesión".to_string())?.clone();
+    if subclave.is_empty() { return Err("No hay sesión activa.".into()); }
+
     let palabras = generar_palabras_recuperacion();
 
     let recovery_key = seguridad::derivar_clave_recuperacion(&palabras)?;
@@ -2087,10 +2122,10 @@ fn recuperar_con_frase(
         return Err("La frase debe tener exactamente 12 palabras.".into());
     }
 
-    for p in &palabras {
-        if !bip39_words::WORDLIST.contains(&p.as_str()) {
-            return Err(format!("Palabra inválida: '{}'", p));
-        }
+    // B-1: validar todas las palabras sin early-return para evitar timing attack
+    let todas_validas = palabras.iter().all(|p| bip39_words::WORDLIST.contains(&p.as_str()));
+    if !todas_validas {
+        return Err("Una o más palabras no pertenecen al diccionario BIP39.".into());
     }
 
     let recovery_key = seguridad::derivar_clave_recuperacion(&palabras)?;
@@ -2564,6 +2599,8 @@ fn enviar_archivo_p2p(
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
 
+    // P-1: validar que la IP sea una IPv4 bien formada antes de conectar
+    ip.parse::<std::net::Ipv4Addr>().map_err(|_| "IP de destino inválida".to_string())?;
     let peer = babel_p2p::DescubrimientoRed::peer_manual(&ip, "Babel-Remoto");
     let cliente = babel_p2p::ClienteP2P::nuevo(&subclave_hex);
     cliente.enviar(&peer, &ruta)
@@ -2583,6 +2620,8 @@ fn enviar_mensaje_p2p(
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
 
+    // P-1: validar que la IP sea una IPv4 bien formada antes de conectar
+    ip.parse::<std::net::Ipv4Addr>().map_err(|_| "IP de destino inválida".to_string())?;
     // Convertimos el mensaje a bytes y lo enviamos como si fuera un archivo
     let datos = mensaje.as_bytes().to_vec();
     let peer = babel_p2p::DescubrimientoRed::peer_manual(&ip, "Babel-Remoto");
@@ -2593,7 +2632,12 @@ fn enviar_mensaje_p2p(
 // Obtener mensajes de texto recibidos por P2P
 //=============================================================
 #[tauri::command]
-fn obtener_mensajes_p2p(_sesion: tauri::State<SesionActiva>) -> Result<Vec<String>, String> {
+fn obtener_mensajes_p2p(sesion: tauri::State<SesionActiva>) -> Result<Vec<String>, String> {
+    // C-2: verificar sesión activa
+    let subclave = sesion.subclave_hex.lock().map_err(|_| "Error sesión".to_string())?.clone();
+    if subclave.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
     let mensajes = crate::babel_p2p::MENSAJES_ENTRANTES
         .lock()
         .map_err(|_| "Error leyendo mensajes".to_string())?
@@ -2623,6 +2667,14 @@ fn idioma_a_par(idioma: &str) -> &'static str {
 
 #[tauri::command]
 fn guardar_html_frase(html: String) -> Result<String, String> {
+    // X-3: rechazar HTML con scripts o tamaño excesivo
+    if html.len() > 1_048_576 {
+        return Err("HTML de frase demasiado grande.".into());
+    }
+    let lower = html.to_lowercase();
+    if lower.contains("<script") || lower.contains("javascript:") || lower.contains("onerror") {
+        return Err("HTML de frase contiene contenido no permitido.".into());
+    }
     let ruta = tmp_path("frase_recuperacion.html");
     std::fs::write(&ruta, html.as_bytes())
         .map_err(|e| format!("Error al guardar HTML: {}", e))?;
