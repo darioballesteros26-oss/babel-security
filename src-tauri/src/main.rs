@@ -2067,12 +2067,10 @@ fn generar_palabras_recuperacion() -> Vec<String> {
 fn generar_frase_recuperacion(
     maestra: String,
     pass_usuario: String,
-    sesion: tauri::State<SesionActiva>,
+    _sesion: tauri::State<SesionActiva>,
 ) -> Result<Vec<String>, String> {
-    // B-3: solo permitir si hay sesión activa
-    let subclave = sesion.subclave_hex.lock().map_err(|_| "Error sesión".to_string())?.clone();
-    if subclave.is_empty() { return Err("No hay sesión activa.".into()); }
-
+    // No se exige sesión: este comando se llama justo después de crear el búnker,
+    // antes de que haya login. La seguridad viene de requerir la maestra válida.
     let palabras = generar_palabras_recuperacion();
 
     let recovery_key = seguridad::derivar_clave_recuperacion(&palabras)?;
