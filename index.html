@@ -72,7 +72,8 @@
         </div>
         <div class="input-grupo">
           <label class="input-label">CONFIRMAR CONTRASEÑA</label>
-          <input type="password" id="user-pass-confirm" placeholder="••••••••" class="input-vip">
+          <input type="password" id="user-pass-confirm" placeholder="••••••••" class="input-vip"
+            onkeydown="if(event.key==='Enter')crearBunker()">
         </div>
         <div class="advertencia-bunker">
           ⚠ ADVERTENCIA: Si pierdes tu llave maestra, no existe forma de recuperar el acceso. Guárdala en un lugar
@@ -92,7 +93,8 @@
         <div class="input-grupo">
           <label class="input-label">LLAVE MAESTRA</label>
           <div class="input-con-ojo">
-            <input type="password" id="login-pass" placeholder="••••••••••••" class="input-vip">
+            <input type="password" id="login-pass" placeholder="••••••••••••" class="input-vip"
+              onkeydown="if(event.key==='Enter')document.getElementById('login-pass-usuario').focus()">
             <button type="button" class="btn-ojo" onclick="toggleContraseña('login-pass')" title="Ver">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
                 stroke-linecap="round" stroke-linejoin="round">
@@ -106,7 +108,8 @@
           <label class="input-label">CONTRASEÑA DE USUARIO</label>
           <div class="input-con-ojo">
             <input type="password" id="login-pass-usuario" oninput="(window.__babelPassSesion=this.value)"
-              placeholder="••••••••" class="input-vip">
+              placeholder="••••••••" class="input-vip"
+              onkeydown="if(event.key==='Enter')intentarAcceso()">
             <button type="button" class="btn-ojo" onclick="toggleContraseña('login-pass-usuario')" title="Ver">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
                 stroke-linecap="round" stroke-linejoin="round">
@@ -993,7 +996,8 @@
       <input id="input-renombrar-buzon" type="text" style="width:100%;background:transparent;border:1px solid var(--borde);
         color:var(--texto-principal);padding:8px;font-size:0.8rem;
         border-radius:2px;outline:none;box-sizing:border-box;
-        font-family:'Rajdhani',sans-serif;letter-spacing:1px;" />
+        font-family:'Rajdhani',sans-serif;letter-spacing:1px;"
+        onkeydown="if(event.key==='Enter')confirmarRenombrar();else if(event.key==='Escape')cerrarModalRenombrar()" />
       <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
         <button type="button" onclick="cerrarModalRenombrar()" style="background:transparent;border:1px solid var(--borde);
           color:var(--texto-secundario);padding:6px 14px;cursor:pointer;

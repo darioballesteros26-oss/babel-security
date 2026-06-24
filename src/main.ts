@@ -3030,3 +3030,52 @@ function guardarNombreDisplay(): void {
 // Cargar ajustes al arrancar
 document.addEventListener("DOMContentLoaded", cargarAjustesGuardados);
 document.addEventListener("DOMContentLoaded", cargarAjustesTraduccion);
+
+// ============================================================
+// UX GLOBAL — Escape cierra modales, Enter navega recovery, paste BIP39
+// ============================================================
+document.addEventListener("DOMContentLoaded", () => {
+  // Escape cierra cualquier modal visible
+  document.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    const modales = [
+      "modal-visor", "modal-paralelo", "modal-frase-app",
+      "modal-renombrar", "modal-solicitud-p2p", "modal-renombrar-archivo",
+    ];
+    for (const id of modales) {
+      const el = document.getElementById(id);
+      if (el && !el.classList.contains("hidden")) {
+        el.classList.add("hidden");
+        return;
+      }
+    }
+  });
+
+  // Recovery BIP39: Enter avanza al siguiente campo; en el 12 verifica
+  for (let i = 1; i <= 12; i++) {
+    const input = document.getElementById(`rec-palabra-${i}`) as HTMLInputElement | null;
+    if (!input) continue;
+    const siguiente = i < 12 ? document.getElementById(`rec-palabra-${i + 1}`) as HTMLInputElement : null;
+    input.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (siguiente) siguiente.focus();
+        else intentarRecuperacion();
+      }
+    });
+    // Pegar 12 palabras en el primer campo las distribuye automáticamente
+    if (i === 1) {
+      input.addEventListener("paste", (e: ClipboardEvent) => {
+        const texto = e.clipboardData?.getData("text") ?? "";
+        const partes = texto.trim().split(/\s+/);
+        if (partes.length < 12) return;
+        e.preventDefault();
+        for (let j = 0; j < 12; j++) {
+          const campo = document.getElementById(`rec-palabra-${j + 1}`) as HTMLInputElement | null;
+          if (campo) campo.value = partes[j].toLowerCase();
+        }
+        (document.getElementById("rec-palabra-12") as HTMLInputElement | null)?.focus();
+      });
+    }
+  }
+});
