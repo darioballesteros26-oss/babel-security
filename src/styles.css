@@ -57,6 +57,7 @@ body {
   justify-content: center;
   flex: 1;
   padding: 40px 20px;
+  overflow-y: auto;
   animation: aparecer 0.6s ease-out;
 }
 
