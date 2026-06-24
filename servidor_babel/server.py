@@ -11,7 +11,12 @@ import revisor
 
 app = Flask(__name__)
 # Solo orígenes legítimos: Tauri en producción y localhost en desarrollo
-CORS(app, origins=["tauri://localhost", "http://tauri.localhost", "http://localhost:1420", "http://127.0.0.1:1420"])
+CORS(app, origins=[
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "http://localhost:1420",
+    "http://127.0.0.1:1420",
+])
 
 BABEL_TOKEN = os.environ.get("BABEL_NLLB_TOKEN", "")
 MAX_INPUT_CHARS = 10_000
@@ -44,8 +49,11 @@ def traducir_endpoint():
         return jsonify({"traduccion": traduccion_final, "revisada": True})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        # Traducción degradada — Rust usará el diccionario como fallback
+        return jsonify({"error": str(e)}), 503
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Error interno: {e}"}), 500
 
 
 if __name__ == "__main__":

@@ -7,7 +7,11 @@ import os
 import shutil
 import sys
 
-PARES = ["es-en", "en-es", "es-fr", "fr-es", "es-ar", "ar-es"]
+# Pares principales + auxiliares para cadenas de rescate fr→en→es y es→en→ar
+PARES = [
+    "es-en", "en-es", "es-fr", "fr-es", "es-ar", "ar-es",
+    "fr-en",  # auxiliar para cadena fr→en→es si el directo fr-es falla
+]
 DIR_BASE = os.path.dirname(os.path.abspath(__file__))
 DIR_MODELOS = os.path.join(DIR_BASE, "modelos")
 
@@ -22,9 +26,12 @@ def descargar_marian():
     for par in PARES:
         nombre_hf = f"Helsinki-NLP/opus-mt-{par}"
         print(f"  [Descargando] {nombre_hf} ...")
-        MarianTokenizer.from_pretrained(nombre_hf)
-        MarianMTModel.from_pretrained(nombre_hf)
-        print(f"  [Listo] {par}")
+        try:
+            MarianTokenizer.from_pretrained(nombre_hf)
+            MarianMTModel.from_pretrained(nombre_hf)
+            print(f"  [Listo] {par}")
+        except Exception as e:
+            print(f"  [Error] {par}: {e}")
 
 
 def descargar_qwen():
