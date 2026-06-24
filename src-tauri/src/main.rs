@@ -819,18 +819,11 @@ fn mover_archivo_guardado(
 #[tauri::command]
 fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
     sesion.limpiar();
-    // Borrar temporales en claro que pudieran haber quedado
+    // Borrar temporales en claro con 3 pasadas (0x00, 0xFF, 0xAA) + fsync antes de eliminar
     let tmp = babel_dir().join("tmp");
     if let Ok(entradas) = fs::read_dir(&tmp) {
         for entrada in entradas.flatten() {
-            let ruta = entrada.path();
-            if let Ok(meta) = fs::metadata(&ruta) {
-                let tamaño = meta.len() as usize;
-                if tamaño > 0 {
-                    let _ = fs::write(&ruta, vec![0u8; tamaño]);
-                }
-            }
-            let _ = fs::remove_file(&ruta);
+            borrar_seguro(&entrada.path().to_string_lossy());
         }
     }
     // Matar Flask
@@ -1111,8 +1104,9 @@ struct BuzonNodo {
 }
 
 fn nuevo_id() -> String {
+    use rand::rngs::OsRng;
     let mut bytes = [0u8; 8];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    OsRng.fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
 
@@ -1990,11 +1984,22 @@ fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, Stri
 // ============================================================
 
 fn generar_palabras_recuperacion() -> Vec<String> {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
+    use rand::rngs::OsRng;
+    use rand::RngCore;
     let lista = bip39_words::WORDLIST;
+    let n = lista.len() as u64;
     (0..12)
-        .map(|_| lista[rng.gen_range(0..lista.len())].to_string())
+        .map(|_| {
+            // Rechazo uniforme: evita sesgo al truncar módulo sobre rango no potencia-de-2
+            let tope = (u64::MAX / n) * n;
+            let idx = loop {
+                let mut buf = [0u8; 8];
+                OsRng.fill_bytes(&mut buf);
+                let v = u64::from_le_bytes(buf);
+                if v < tope { break (v % n) as usize; }
+            };
+            lista[idx].to_string()
+        })
         .collect()
 }
 
@@ -2594,6 +2599,13 @@ fn guardar_html_frase(html: String) -> Result<String, String> {
     Ok(ruta)
 }
 
+// Borra el HTML de frase BIP39 de forma segura tras imprimir.
+// El frontend lo llama 5 segundos después de openPath para dar tiempo a Safari.
+#[tauri::command]
+fn borrar_html_frase() {
+    borrar_seguro(&tmp_path("frase_recuperacion.html"));
+}
+
 // ============================================================
 // PUNTO DE ENTRADA — Arranca Tauri, registra todos los comandos
 // y gestiona el estado global de sesión (SesionActiva).
@@ -2659,6 +2671,7 @@ fn main() {
             renombrar_archivo,
             tiene_config_email,
             guardar_html_frase,
+            borrar_html_frase,
         ])
         .run(tauri::generate_context!())
         .expect("Error crítico al iniciar Babel");

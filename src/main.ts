@@ -2568,6 +2568,8 @@ async function imprimirFrase(): Promise<void> {
   try {
     const ruta = await invoke<string>("guardar_html_frase", { html });
     await openPath(ruta);
+    // Borrar el HTML con frase BIP39 tras 5s — tiempo suficiente para que Safari lo cargue
+    setTimeout(() => invoke("borrar_html_frase").catch(() => {}), 5000);
   } catch (e) {
     const msg = document.getElementById("frase-msg");
     if (msg) {

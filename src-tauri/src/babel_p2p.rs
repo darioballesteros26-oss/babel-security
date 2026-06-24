@@ -1,16 +1,18 @@
 // ============================================================
-// BABEL P2P - COMUNICACIÓN DIRECTA ENTRE INSTANCIAS v4
+// BABEL P2P - COMUNICACIÓN DIRECTA ENTRE INSTANCIAS v5
 // ============================================================
 //
 // Módulo único que incluye todo el sistema P2P:
 //   - Certificados mTLS (generación y gestión)
 //   - Descubrimiento en red local por UDP broadcast
 //   - Protocolo de transferencia con cabecera fija
-//   - Servidor TLS (recibe archivos)
-//   - Cliente TLS (envía archivos)
-//   - Menú de usuario
+//   - Servidor TLS con mTLS (requiere cert del cliente)
+//   - Cliente TLS (presenta su cert + verifica pinning)
+//   - Cifrado/descifrado en tránsito: archivos se descifran
+//     antes de enviar y se re-cifran con la clave del receptor
 //
 // TLS: rustls 0.22 con StreamOwned (síncrono, sin tokio)
+// mTLS: cliente presenta certificado — servidor lo valida
 
 use std::fs;
 use std::io::{Read, Write};
@@ -28,10 +30,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use zeroize::Zeroizing;
 
-// Buffer global de mensajes entrantes
-// Cuando llega un mensaje de texto, se guarda aquí
-// main.rs lo lee y lo manda al frontend
+// Buffer global de mensajes entrantes. Limitado a MAX_MENSAJES para evitar OOM.
 pub static MENSAJES_ENTRANTES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+const MAX_MENSAJES: usize = 1000;
 
 // ============================================================
 // CONSTANTES
@@ -68,7 +69,7 @@ fn recibidos_dir() -> PathBuf {
 }
 
 fn ruta_peers_trusted() -> PathBuf {
-    p2p_dir().join("peers_trusted.json")
+    p2p_dir().join("peers_trusted.babel")
 }
 
 fn fingerprint_cert(cert_der: &CertificateDer) -> String {
@@ -77,7 +78,7 @@ fn fingerprint_cert(cert_der: &CertificateDer) -> String {
     hex::encode(hasher.finalize())
 }
 
-/// Oculta los dos últimos octetos de una IPv4 en logs de sistema para no filtrar red interna.
+/// Oculta los dos últimos octetos de una IPv4 en logs.
 fn redactar_ip(ip: &str) -> String {
     let partes: Vec<&str> = ip.splitn(5, '.').collect();
     if partes.len() >= 2 {
@@ -87,20 +88,38 @@ fn redactar_ip(ip: &str) -> String {
     }
 }
 
-fn cargar_peers_trusted() -> HashMap<String, String> {
-    fs::read_to_string(ruta_peers_trusted())
+// ============================================================
+// peers_trusted — cifrado con AES-256-GCM
+// ============================================================
+// El archivo peers_trusted.babel contiene las IPs históricas y
+// fingerprints de certificados. Cifrarlo evita revelar con quién
+// se ha comunicado este Babel si alguien accede al disco.
+
+fn cargar_peers_trusted(subclave_hex: &str) -> HashMap<String, String> {
+    if subclave_hex.is_empty() {
+        return HashMap::new();
+    }
+    fs::read(ruta_peers_trusted())
         .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|bytes| crate::seguridad::descifrar_documento(bytes, subclave_hex).ok())
+        .and_then(|json| serde_json::from_str(&json).ok())
         .unwrap_or_default()
 }
 
-fn guardar_peers_trusted(peers: &HashMap<String, String>) {
-    if let Ok(json) = serde_json::to_string_pretty(peers) {
-        let _ = fs::write(ruta_peers_trusted(), json);
+fn guardar_peers_trusted(peers: &HashMap<String, String>, subclave_hex: &str) {
+    if subclave_hex.is_empty() {
+        return;
+    }
+    if let Ok(json) = serde_json::to_string(peers) {
+        if let Ok(cifrado) = crate::seguridad::blindar_documento(&json, subclave_hex) {
+            let _ = fs::write(ruta_peers_trusted(), cifrado);
+        }
     }
 }
 
-// Constantes del protocolo - estas no cambian, son números y textos fijos
+// ============================================================
+// CONSTANTES DE PROTOCOLO
+// ============================================================
 pub const PUERTO_DESCUBRIMIENTO: u16 = 47823;
 pub const PUERTO_TRANSFERENCIA: u16 = 47824;
 pub const TAMAÑO_CABECERA: usize = 304;
@@ -121,20 +140,14 @@ pub struct PeerDescubierto {
     pub puerto: u16,
     pub nombre: String,
 }
+
 // ============================================================
 // CERTIFICADOS - Gestión de identidad mTLS
 // ============================================================
-//
-// Cada Babel tiene un par:
-//   certificado.der  - público, se comparte con otros Babel
-//   clave_privada.der - secreto, nunca sale de esta máquina
 
 pub struct GestorCertificados;
 
 impl GestorCertificados {
-    /// Genera o carga el certificado de este Babel.
-    /// La primera vez genera uno nuevo autofirmado.
-    /// Las siguientes veces carga el existente.
     pub fn generar_o_cargar() -> Result<(Vec<u8>, Vec<u8>), String> {
         let _ = fs::create_dir_all(p2p_dir());
         let _ = fs::create_dir_all(peers_dir());
@@ -162,13 +175,11 @@ impl GestorCertificados {
         }
 
         log::info!("[OK] Certificado generado en {:?}", ruta_cert());
-        log::info!("[P2P] Comparte {:?} con otros Babel.", ruta_cert());
         log::error!("[P2P]  NUNCA compartas {:?}.", ruta_clave());
 
         Ok((cert_der, clave_der))
     }
 
-    /// Carga el certificado existente desde disco.
     fn cargar() -> Result<(Vec<u8>, Vec<u8>), String> {
         let cert = fs::read(ruta_cert()).map_err(|e| format!("Error leyendo cert: {}", e))?;
         let clave = Zeroizing::new(
@@ -181,16 +192,10 @@ impl GestorCertificados {
 // ============================================================
 // DESCUBRIMIENTO - Búsqueda de peers en red local por UDP
 // ============================================================
-//
-// Babel envía un broadcast UDP a toda la red.
-// Cualquier Babel que escuche responde con su IP y puerto.
-// En menos de 2 segundos sabes quién está disponible.
 
 pub struct DescubrimientoRed;
 
 impl DescubrimientoRed {
-    /// Inicia el servidor de descubrimiento en un hilo background.
-    /// Cuando llega un anuncio, responde con nuestra IP y puerto.
     pub fn iniciar_servidor(nombre: String) {
         thread::spawn(move || {
             let socket = match UdpSocket::bind(format!("0.0.0.0:{}", PUERTO_DESCUBRIMIENTO)) {
@@ -217,8 +222,6 @@ impl DescubrimientoRed {
         });
     }
 
-    /// Busca otros Babel en la red local.
-    /// Espera `timeout_ms` milisegundos recogiendo respuestas.
     pub fn buscar_peers(timeout_ms: u64) -> Result<Vec<PeerDescubierto>, String> {
         let socket =
             UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Error socket búsqueda: {}", e))?;
@@ -291,7 +294,6 @@ impl DescubrimientoRed {
         })
     }
 
-    /// Crea un peer manualmente por IP (cuando el broadcast no funciona).
     pub fn peer_manual(ip: &str, nombre: &str) -> PeerDescubierto {
         PeerDescubierto {
             ip: ip.to_string(),
@@ -302,15 +304,8 @@ impl DescubrimientoRed {
 }
 
 // ============================================================
-// PROTOCOLO - Formato de paquetes
+// PROTOCOLO - Formato de paquetes (sin cambios)
 // ============================================================
-//
-// Cabecera de 304 bytes fijos:
-//   [0..8]    longitud_datos  (u64 LE)
-//   [8..264]  nombre_archivo  (256 bytes, relleno con ceros)
-//   [264..268] tipo           (u32 LE)
-//   [268..300] checksum       (SHA-256, 32 bytes)
-//   [300..304] version        (u32 LE)
 
 pub struct Cabecera {
     pub longitud_datos: u64,
@@ -337,7 +332,7 @@ impl Cabecera {
         let nb = self.nombre_archivo.as_bytes();
         let len = nb.len().min(MAX_NOMBRE);
         buf[8..8 + len].copy_from_slice(&nb[..len]);
-        buf[264..268].copy_from_slice(&1u32.to_le_bytes()); // tipo Archivo
+        buf[264..268].copy_from_slice(&1u32.to_le_bytes());
         buf[268..300].copy_from_slice(&self.checksum);
         buf[300..304].copy_from_slice(&VERSION_PROTOCOLO.to_le_bytes());
         buf
@@ -345,20 +340,16 @@ impl Cabecera {
 
     pub fn deserializar(buf: &[u8]) -> Result<Self, String> {
         if buf.len() < TAMAÑO_CABECERA {
-            return Err(format!("Cabecera incompleta: {} bytes ", buf.len()));
+            return Err(format!("Cabecera incompleta: {} bytes", buf.len()));
         }
         let longitud_datos = u64::from_le_bytes(
-            buf[0..8]
-                .try_into()
-                .map_err(|_| "Error leyendo longitud ")?,
+            buf[0..8].try_into().map_err(|_| "Error leyendo longitud")?,
         );
         let nombre_raw = &buf[8..264];
         let fin = nombre_raw.iter().position(|&b| b == 0).unwrap_or(256);
         let nombre_archivo = String::from_utf8_lossy(&nombre_raw[..fin]).to_string();
         let version = u32::from_le_bytes(
-            buf[300..304]
-                .try_into()
-                .map_err(|_| "Error leyendo version ")?,
+            buf[300..304].try_into().map_err(|_| "Error leyendo version")?,
         );
         if version != VERSION_PROTOCOLO {
             return Err(format!("Versión incompatible: {}", version));
@@ -400,7 +391,7 @@ pub fn recibir_archivo<S: Read + Write>(stream: &mut S) -> Result<(String, Vec<u
 
     if cabecera.longitud_datos > MAX_TAMAÑO_ARCHIVO {
         return Err(format!(
-            "Archivo demasiado grande: {} bytes ",
+            "Archivo demasiado grande: {} bytes",
             cabecera.longitud_datos
         ));
     }
@@ -410,20 +401,157 @@ pub fn recibir_archivo<S: Read + Write>(stream: &mut S) -> Result<(String, Vec<u
         .read_exact(&mut datos)
         .map_err(|e| format!("Error leyendo datos: {}", e))?;
 
-    // Verificamos integridad con checksum SHA-256
     let mut hasher = Sha256::new();
     hasher.update(&datos);
     let checksum: [u8; 32] = hasher.finalize().into();
     if checksum != cabecera.checksum {
-        return Err("Checksum invalido - datos corruptos en transito ".to_string());
+        return Err("Checksum inválido — datos corruptos en tránsito".to_string());
     }
 
     log::info!(
-        "[P2P] Recibido {} ({} bytes) - integro.",
+        "[P2P] Recibido {} ({} bytes) - íntegro.",
         cabecera.nombre_archivo,
         datos.len()
     );
     Ok((cabecera.nombre_archivo, datos))
+}
+
+// ============================================================
+// VERIFICADOR SERVIDOR (cliente → servidor): TOFU con pinning
+// ============================================================
+// Primera conexión a un peer: acepta y guarda el fingerprint SHA-256.
+// Siguientes: rechaza si cambió. Ahora también verifica la firma TLS.
+
+#[derive(Debug)]
+struct VerificadorPinning {
+    peer_ip: String,
+    subclave_hex: String,
+}
+
+impl rustls::client::danger::ServerCertVerifier for VerificadorPinning {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer,
+        _intermediates: &[CertificateDer],
+        _server_name: &ServerName,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        let fp = fingerprint_cert(end_entity);
+        let mut peers = cargar_peers_trusted(&self.subclave_hex);
+        match peers.get(&self.peer_ip) {
+            Some(esperado) => {
+                if *esperado != fp {
+                    return Err(rustls::Error::General(format!(
+                        "Certificado de {} no coincide con el registrado. Posible MITM.",
+                        self.peer_ip
+                    )));
+                }
+            }
+            None => {
+                peers.insert(self.peer_ip.clone(), fp);
+                guardar_peers_trusted(&peers, &self.subclave_hex);
+                log::warn!("[P2P] Peer {} registrado (TOFU).", self.peer_ip);
+            }
+        }
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+// ============================================================
+// VERIFICADOR CLIENTE (servidor → cliente): mTLS
+// ============================================================
+// El servidor requiere que el cliente presente un certificado.
+// Acepta cualquier cert autofirmado válido — la autenticación real
+// es que el cliente tiene la clave privada correspondiente (mTLS).
+
+#[derive(Debug)]
+struct VerificadorClienteP2P;
+
+impl rustls::server::danger::ClientCertVerifier for VerificadorClienteP2P {
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+
+    fn verify_client_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+        if end_entity.as_ref().is_empty() {
+            return Err(rustls::Error::NoCertificatesPresented);
+        }
+        Ok(rustls::server::danger::ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
 }
 
 // ============================================================
@@ -450,8 +578,7 @@ impl ServidorP2P {
         let listener = TcpListener::bind(format!("0.0.0.0:{}", PUERTO_TRANSFERENCIA))
             .map_err(|e| format!("No se pudo abrir puerto {}: {}", PUERTO_TRANSFERENCIA, e))?;
 
-        log::warn!("[P2P] Servidor activo en puerto {}.", PUERTO_TRANSFERENCIA);
-        log::warn!("[P2P] Archivos recibidos en {:?}", recibidos_dir());
+        log::warn!("[P2P] Servidor mTLS activo en puerto {}.", PUERTO_TRANSFERENCIA);
 
         for conexion in listener.incoming() {
             let stream = match conexion {
@@ -468,7 +595,6 @@ impl ServidorP2P {
                 .unwrap_or("?".to_string());
             log::warn!("[P2P] Conexión desde {}", redactar_ip(&ip));
 
-            // Negociamos TLS con rustls síncrono
             let conn = match rustls::ServerConnection::new(config_arc.clone()) {
                 Ok(c) => c,
                 Err(e) => {
@@ -493,34 +619,64 @@ impl ServidorP2P {
         Ok(())
     }
 
+    /// Guarda el archivo recibido cifrándolo con la clave local.
+    /// Los archivos llegan en claro (el emisor descifra su .babel antes de enviar),
+    /// así el receptor puede abrirlos con su propia clave.
     fn guardar_archivo(&self, nombre: &str, datos: &[u8], ip: &str) {
-        // Sanitizamos el nombre para evitar path traversal
         let nombre_seguro = Path::new(nombre)
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("archivo_recibido")
             .to_string();
 
-        // Si el archivo es un mensaje de texto - no lo guardamos en disco
-        // lo metemos en el buffer de mensajes entrantes
+        // Mensajes de texto — no se guardan en disco, van al buffer en RAM
         if nombre_seguro == "mensaje.txt" {
             if let Ok(texto) = String::from_utf8(datos.to_vec()) {
                 if let Ok(mut msgs) = MENSAJES_ENTRANTES.lock() {
-                    msgs.push(texto);
+                    if msgs.len() < MAX_MENSAJES {
+                        msgs.push(texto);
+                    } else {
+                        log::warn!("[P2P] Buffer de mensajes lleno, mensaje descartado.");
+                    }
                 }
             }
             return;
         }
-        let ruta = recibidos_dir().join(&nombre_seguro);
-        match fs::write(&ruta, datos) {
+
+        if self.subclave_hex.is_empty() {
+            log::error!("[P2P] Sin clave de sesión — no se puede cifrar el archivo recibido.");
+            return;
+        }
+
+        // Cifrar con la clave local antes de guardar
+        let contenido_b64 = crate::traductor::comprimir_b64(datos);
+        let cifrado = match crate::seguridad::blindar_documento(&contenido_b64, &self.subclave_hex) {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("[P2P] Error cifrando archivo recibido: {}", e);
+                return;
+            }
+        };
+
+        // Nombre: babel_p2p_{nombre_sin_ext}_{ts}.babel
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let nombre_sin_ext = Path::new(&nombre_seguro)
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or("p2p");
+        let nombre_babel = format!("babel_p2p_{}_{}.babel", nombre_sin_ext, ts);
+        let ruta = recibidos_dir().join(&nombre_babel);
+
+        match fs::write(&ruta, cifrado) {
             Ok(_) => {
-                log::info!("[OK] Guardado: {}", ruta.display());
+                log::info!("[OK] P2P recibido y cifrado: {}", ruta.display());
                 crate::seguridad::registrar_evento_seguridad(
                     &format!(
                         "P2P recibido de {}: {} ({} bytes)",
-                        ip,
-                        nombre_seguro,
-                        datos.len()
+                        ip, nombre_seguro, datos.len()
                     ),
                     &self.subclave_hex,
                 );
@@ -531,85 +687,16 @@ impl ServidorP2P {
 
     fn construir_config_servidor(&self) -> Result<ServerConfig, String> {
         let (cert_der, clave_der) = GestorCertificados::generar_o_cargar()?;
-
         let cert = CertificateDer::from(cert_der);
         let clave = PrivateKeyDer::Pkcs8(clave_der.into());
 
-        // TLS 1.3 con autenticación del servidor.
-        // mTLS completo se añade en la siguiente versión con WebPkiClientVerifier.
+        // mTLS: el servidor requiere que el cliente presente un certificado válido.
         let config = ServerConfig::builder()
-            .with_no_client_auth()
+            .with_client_cert_verifier(Arc::new(VerificadorClienteP2P))
             .with_single_cert(vec![cert], clave)
-            .map_err(|e| format!("Error configurando servidor TLS: {}", e))?;
+            .map_err(|e| format!("Error configurando servidor mTLS: {}", e))?;
 
         Ok(config)
-    }
-}
-
-// ============================================================
-// VERIFICADOR CON PINNING - TOFU (Trust On First Use)
-// ============================================================
-// Primera conexión a un peer: acepta y guarda el fingerprint SHA-256 del cert.
-// Conexiones siguientes: rechaza si el fingerprint cambió (MITM imposible).
-
-#[derive(Debug)]
-struct VerificadorPinning {
-    peer_ip: String,
-}
-
-impl rustls::client::danger::ServerCertVerifier for VerificadorPinning {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer,
-        _intermediates: &[CertificateDer],
-        _server_name: &ServerName,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        let fp = fingerprint_cert(end_entity);
-        let mut peers = cargar_peers_trusted();
-        match peers.get(&self.peer_ip) {
-            Some(esperado) => {
-                if *esperado != fp {
-                    return Err(rustls::Error::General(format!(
-                        "Certificado de {} no coincide con el registrado. Posible MITM.",
-                        self.peer_ip
-                    )));
-                }
-            }
-            None => {
-                peers.insert(self.peer_ip.clone(), fp);
-                guardar_peers_trusted(&peers);
-                log::warn!("[P2P] Peer {} registrado (TOFU).", self.peer_ip);
-            }
-        }
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _: &[u8],
-        _: &CertificateDer,
-        _: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _: &[u8],
-        _: &CertificateDer,
-        _: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::RSA_PKCS1_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::ED25519,
-        ]
     }
 }
 
@@ -628,61 +715,64 @@ impl ClienteP2P {
         }
     }
 
+    /// Envía un archivo .babel descifrado para que el receptor pueda re-cifrarlo
+    /// con su propia clave. El canal TLS garantiza confidencialidad en tránsito.
     pub fn enviar(&self, peer: &PeerDescubierto, ruta_archivo: &str) -> Result<(), String> {
-        let datos = fs::read(ruta_archivo)
-            .map_err(|e| format!("No se pudo leer {}: {}", ruta_archivo, e))?;
+        if self.subclave_hex.is_empty() {
+            return Err("Sin clave de sesión para descifrar el archivo".into());
+        }
 
-        let nombre = Path::new(ruta_archivo)
+        // Descifrar el .babel del emisor
+        let bytes_cifrados = fs::read(ruta_archivo)
+            .map_err(|e| format!("No se pudo leer {}: {}", ruta_archivo, e))?;
+        let contenido = crate::seguridad::descifrar_documento(bytes_cifrados, &self.subclave_hex)
+            .map_err(|e| format!("Error descifrando para envío P2P: {}", e))?;
+
+        // Descomprimir/decodificar → bytes en bruto del documento original
+        let datos = crate::traductor::descomprimir_b64(&contenido)
+            .unwrap_or_else(|_| contenido.into_bytes());
+
+        // Derivar nombre limpio (sin prefijo "babel_" ni extensión ".babel")
+        let nombre_babel_file = Path::new(ruta_archivo)
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("archivo.babel ")
-            .to_string();
+            .unwrap_or("archivo.babel");
+        let nombre_base = nombre_babel_file
+            .trim_end_matches(".babel")
+            .trim_start_matches("babel_");
+
+        // Detectar extensión real por magic bytes
+        let ext = if datos.starts_with(b"PK") {
+            "docx"
+        } else if datos.starts_with(b"%PDF") {
+            "pdf"
+        } else if datos.starts_with(b"\x89PNG") {
+            "png"
+        } else if datos.starts_with(b"\xFF\xD8\xFF") {
+            "jpg"
+        } else {
+            "txt"
+        };
+        let nombre_envio = format!("{}.{}", nombre_base, ext);
 
         log::warn!("[P2P] Conectando a {} ({})...", peer.nombre, redactar_ip(&peer.ip));
 
-        let config_tls = self.construir_config_cliente(&peer.ip)?;
-        let config_arc = Arc::new(config_tls);
-
-        let stream = TcpStream::connect(format!("{}:{}", peer.ip, peer.puerto))
-            .map_err(|e| format!("No se pudo conectar a {}: {}", peer.ip, e))?;
-
-        let server_name = ServerName::try_from(peer.nombre.clone())
-            .or_else(|_| ServerName::try_from("localhost"))
-            .map_err(|e| format!("ServerName inválido para '{}': {}", peer.nombre, e))?;
-
-        let conn = rustls::ClientConnection::new(config_arc, server_name)
-            .map_err(|e| format!("Error conexión TLS: {}", e))?;
-
-        let mut tls_stream = rustls::StreamOwned::new(conn, stream);
-
-        log::warn!("[P2P] Túnel TLS establecido con {}.", peer.nombre);
-
-        enviar_archivo(&mut tls_stream, &nombre, &datos)?;
+        let mut tls_stream = self.conectar_tls(peer)?;
+        enviar_archivo(&mut tls_stream, &nombre_envio, &datos)?;
 
         crate::seguridad::registrar_evento_seguridad(
             &format!(
                 "P2P enviado a {} ({}): {} ({} bytes)",
-                peer.nombre,
-                peer.ip,
-                nombre,
-                datos.len()
+                peer.nombre, peer.ip, nombre_envio, datos.len()
             ),
             &self.subclave_hex,
         );
 
-        log::info!("[OK] {} enviado a {}.", nombre, peer.nombre);
+        log::info!("[OK] {} enviado a {}.", nombre_envio, peer.nombre);
         Ok(())
     }
 
-    fn construir_config_cliente(&self, peer_ip: &str) -> Result<ClientConfig, String> {
-        let config = ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(VerificadorPinning {
-                peer_ip: peer_ip.to_string(),
-            }))
-            .with_no_client_auth();
-        Ok(config)
-    }
+    /// Envía bytes arbitrarios (mensajes de texto) sin descifrar — no son .babel.
     pub fn enviar_bytes(
         &self,
         peer: &PeerDescubierto,
@@ -690,7 +780,16 @@ impl ClienteP2P {
         datos: &[u8],
     ) -> Result<(), String> {
         log::warn!("[P2P] Conectando a {} ({})...", peer.nombre, redactar_ip(&peer.ip));
+        let mut tls_stream = self.conectar_tls(peer)?;
+        enviar_archivo(&mut tls_stream, nombre, datos)?;
+        log::info!("[OK] Mensaje enviado a {}.", peer.nombre);
+        Ok(())
+    }
 
+    fn conectar_tls(
+        &self,
+        peer: &PeerDescubierto,
+    ) -> Result<rustls::StreamOwned<rustls::ClientConnection, TcpStream>, String> {
         let config_tls = self.construir_config_cliente(&peer.ip)?;
         let config_arc = Arc::new(config_tls);
 
@@ -704,11 +803,25 @@ impl ClienteP2P {
         let conn = rustls::ClientConnection::new(config_arc, server_name)
             .map_err(|e| format!("Error conexión TLS: {}", e))?;
 
-        let mut tls_stream = rustls::StreamOwned::new(conn, stream);
+        log::warn!("[P2P] Túnel mTLS establecido con {}.", peer.nombre);
+        Ok(rustls::StreamOwned::new(conn, stream))
+    }
 
-        enviar_archivo(&mut tls_stream, nombre, datos)?;
+    fn construir_config_cliente(&self, peer_ip: &str) -> Result<ClientConfig, String> {
+        let (cert_der, clave_der) = GestorCertificados::generar_o_cargar()?;
+        let cert = CertificateDer::from(cert_der);
+        let clave = PrivateKeyDer::Pkcs8(clave_der.into());
 
-        log::info!("[OK] Mensaje enviado a {}.", peer.nombre);
-        Ok(())
+        // mTLS: el cliente presenta su certificado al servidor
+        let config = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(VerificadorPinning {
+                peer_ip: peer_ip.to_string(),
+                subclave_hex: self.subclave_hex.clone(),
+            }))
+            .with_client_auth_cert(vec![cert], clave)
+            .map_err(|e| format!("Error configurando cert cliente mTLS: {}", e))?;
+
+        Ok(config)
     }
 }

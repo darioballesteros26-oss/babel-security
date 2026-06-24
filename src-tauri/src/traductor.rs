@@ -163,6 +163,7 @@ pub fn enviar_archivo_descifrado(
 
     let mailer = lettre::SmtpTransport::relay(smtp_servidor)?
         .credentials(creds)
+        .timeout(Some(std::time::Duration::from_secs(30)))
         .build();
 
     mailer.send(&email)?;

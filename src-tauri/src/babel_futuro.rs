@@ -31,9 +31,10 @@ use std::time::{Duration, SystemTime};
 
 use crate::traductor;
 
-const CARPETA_ENTRADA: &str = "../entrada_babel";
-const CARPETA_SALIDA: &str = "../salida_babel";
 const EXTENSIONES_VALIDAS: &[&str] = &["pdf", "docx", "txt"];
+
+fn carpeta_entrada() -> PathBuf { crate::babel_dir().join("entrada") }
+fn carpeta_salida() -> PathBuf { crate::babel_dir().join("salida") }
 
 // ============================================================
 // FUNCIÓN 1 — WATCH: Procesado automático en segundo plano
@@ -63,16 +64,14 @@ const EXTENSIONES_VALIDAS: &[&str] = &["pdf", "docx", "txt"];
 /// (traduce y cifra) y lo mueve a `salida_babel/`.
 /// Diseñado para correr en un hilo separado en segundo plano.
 pub fn iniciar_watch(dict: &HashMap<String, String>, subclave_hex: &str, intervalo_segundos: u64) {
-    // Crear carpetas si no existen
-    let _ = fs::create_dir_all(CARPETA_ENTRADA);
-    let _ = fs::create_dir_all(CARPETA_SALIDA);
+    let entrada = carpeta_entrada();
+    let _ = fs::create_dir_all(&entrada);
+    let _ = fs::create_dir_all(carpeta_salida());
 
-    // Registro de archivos ya procesados para no repetirlos
-    // Clave: ruta del archivo | Valor: timestamp de última modificación
     let mut procesados: HashMap<PathBuf, SystemTime> = HashMap::new();
 
     loop {
-        let entradas = match fs::read_dir(CARPETA_ENTRADA) {
+        let entradas = match fs::read_dir(&entrada) {
             Ok(e) => e,
             Err(_) => {
                 std::thread::sleep(Duration::from_secs(intervalo_segundos));
@@ -109,12 +108,12 @@ pub fn iniciar_watch(dict: &HashMap<String, String>, subclave_hex: &str, interva
                 continue;
             }
 
-            // Procesar el archivo
-            traductor::procesar_archivo_inteligente(
+            let _ = traductor::procesar_archivo_inteligente(
                 path.to_str().unwrap_or(""),
                 dict,
                 subclave_hex,
                 "sistema",
+                "es-en",
             );
 
             // Mover a salida y registrar como procesado
@@ -135,7 +134,7 @@ fn mover_a_salida(ruta: &Path) {
     };
 
     let nombre_salida = format!("procesado_{}", nombre.to_string_lossy());
-    let destino = PathBuf::from(CARPETA_SALIDA).join(&nombre_salida);
+    let destino = carpeta_salida().join(&nombre_salida);
 
     if fs::rename(ruta, &destino).is_err() {
         if fs::copy(ruta, &destino).is_ok() {
@@ -187,21 +186,23 @@ pub fn procesar_archivo_arrastrado(
     subclave_hex: &str,
     id_usuario: &str,
 ) {
-    let _ = fs::create_dir_all(CARPETA_ENTRADA);
+    let entrada = carpeta_entrada();
+    let _ = fs::create_dir_all(&entrada);
 
     let nombre = ruta
         .file_name()
         .unwrap_or_else(|| std::ffi::OsStr::new("archivo"));
-    let destino = PathBuf::from(CARPETA_ENTRADA).join(nombre);
+    let destino = entrada.join(nombre);
 
     if fs::copy(ruta, &destino).is_err() {
         return;
     }
 
-    traductor::procesar_archivo_inteligente(
+    let _ = traductor::procesar_archivo_inteligente(
         destino.to_str().unwrap_or(""),
         dict,
         subclave_hex,
         id_usuario,
+        "es-en",
     );
 }
