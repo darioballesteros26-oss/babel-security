@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
+use tauri::Manager;
 use zeroize::{Zeroize, Zeroizing};
 
 const MAX_ARCHIVOS: usize = 1000;
@@ -2693,10 +2694,52 @@ fn borrar_html_frase() {
 
 fn main() {
     env_logger::init();
+
+    // PID del servidor Python del USB (0 = no arrancado)
+    static USB_SERVER_PID: std::sync::atomic::AtomicU32 =
+        std::sync::atomic::AtomicU32::new(0);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .setup(|_app| Ok(()))
+        .setup(|app| {
+            // Modo USB: si Resources/ contiene python + servidor, arrancarlo
+            if let Ok(res) = app.path().resource_dir() {
+                let py_bin   = res.join("python").join("bin").join("python3");
+                let servidor = res.join("servidor").join("nllb_server_usb.py");
+                if py_bin.exists() && servidor.exists() {
+                    let mut rng_bytes = [0u8; 16];
+                    rand::rngs::OsRng.fill_bytes(&mut rng_bytes);
+                    let token = format!("babel_{}", hex::encode(rng_bytes));
+
+                    std::env::set_var("BABEL_NLLB_TOKEN", &token);
+                    std::env::set_var("TESSDATA_PREFIX", res.join("tessdata"));
+                    std::env::set_var("TRANSFORMERS_OFFLINE", "1");
+                    std::env::set_var("HF_DATASETS_OFFLINE", "1");
+                    std::env::set_var("TOKENIZERS_PARALLELISM", "false");
+
+                    if let Ok(child) = std::process::Command::new(&py_bin)
+                        .arg(&servidor)
+                        .spawn()
+                    {
+                        USB_SERVER_PID
+                            .store(child.id(), std::sync::atomic::Ordering::Relaxed);
+                        std::mem::forget(child); // proceso corre hasta que lo matemos
+                    }
+                }
+            }
+            Ok(())
+        })
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                let pid = USB_SERVER_PID.load(std::sync::atomic::Ordering::Relaxed);
+                if pid > 0 {
+                    let _ = std::process::Command::new("kill")
+                        .args(["-TERM", &pid.to_string()])
+                        .status();
+                }
+            }
+        })
         .manage(SesionActiva::nueva())
         .invoke_handler(tauri::generate_handler![
             verificar_entorno_seguro,
