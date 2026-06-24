@@ -309,7 +309,6 @@ if [[ $CACHE_VALID -eq 1 ]]; then
   echo "  ✓ Caché hit — copiando Python+paquetes (sin internet)..."
   rm -rf "$RESOURCES/python"
   rsync -a "$PY_CACHE_ENV/" "$RESOURCES/python/"
-  find "$RESOURCES/python" -name '._*' -delete 2>/dev/null || true
   echo "  ✓ Python copiado desde caché"
 else
   # Caché MISS: descargar, extraer e instalar paquetes una vez
@@ -356,7 +355,6 @@ print(hits[0] if hits else '')
 
   echo "  Copiando entorno Python al USB..."
   rsync -a "$PY_CACHE_ENV/" "$RESOURCES/python/"
-  find "$RESOURCES/python" -name '._*' -delete 2>/dev/null || true
   echo "  ✓ (próxima vez será instantáneo desde caché)"
 fi
 
@@ -364,9 +362,15 @@ PY_VER=$("$RESOURCES/python/bin/python3" --version 2>&1)
 T4_END=$(( SECONDS - T4 ))
 echo "└─ $PY_VER listo (${T4_END}s)"
 
-# Firmar el bundle completo DESPUÉS de añadir todos los recursos
-echo "  Re-firmando bundle con recursos incluidos..."
-codesign -f -s - --deep "$APP" 2>/dev/null || true
+# Eliminar archivos AppleDouble de todo el .app antes de firmar.
+# macOS los crea en exFAT para xattrs; codesign falla si los encuentra
+# y transformers los confunde con .py causando UnicodeDecodeError.
+echo "  Limpiando archivos AppleDouble (._*)..."
+find "$APP" -name '._*' -delete 2>/dev/null || true
+
+# Firmar el bundle completo DESPUÉS de añadir todos los recursos y limpiar
+echo "  Firmando bundle..."
+codesign -f -s - --deep "$APP" 2>&1 | grep -v "^$" || true
 
 # Quitar quarantine en la máquina de origen.
 # Otros Macs re-aplican quarantine al copiar desde USB — clic derecho → Abrir la 1ª vez.
