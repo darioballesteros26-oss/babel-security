@@ -377,6 +377,7 @@ async function intentarAcceso(): Promise<void> {
         mostrarPantalla("nombre");
       } else {
         mostrarPantalla("principal");
+        cargarAjustesTraduccion().catch(() => {});
       }
 
     } else {
@@ -2422,6 +2423,10 @@ async function enviarEmail(): Promise<void> {
     mostrarToast("Rellena destinatario y asunto", true);
     return;
   }
+  if (!archivoEmailFile && !archivoEmailRuta) {
+    mostrarToast("Selecciona un archivo para adjuntar", true);
+    return;
+  }
 
   const confirmado = window.confirm(
     "AVISO DE SEGURIDAD\n\n" +
@@ -3008,6 +3013,7 @@ function guardarNombreDisplay(): void {
   const bienvenida = document.getElementById("bienvenida-usuario");
   if (bienvenida) bienvenida.textContent = nombre ? `Bienvenido, ${nombre}` : "Bienvenido";
   mostrarPantalla("principal");
+  cargarAjustesTraduccion().catch(() => {});
 }
 
 // Cargar ajustes al arrancar
