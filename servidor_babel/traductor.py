@@ -82,14 +82,17 @@ def _traducir_directo(texto: str, par: str) -> str:
     if palabras and max(palabras.count(p) for p in set(palabras)) > 2:
         raise RuntimeError(f"Repetición en modelo {par}")
 
-    # Garble fonético: 3+ palabras con el mismo prefijo de 2 letras
-    prefijos = [
-        "".join(c for c in w.lower() if c.isalpha())[:2]
-        for w in resultado.split()
-        if sum(c.isalpha() for c in w) >= 2
-    ]
-    if len(prefijos) >= 3 and len(set(prefijos)) <= 1:
-        raise RuntimeError(f"Garble fonético en modelo {par}")
+    # Garble fonético: 5+ palabras con el mismo prefijo de 2 letras
+    # Solo aplica en textos largos para evitar falsos positivos en frases cortas
+    palabras_resultado = resultado.split()
+    if len(palabras_resultado) >= 5:
+        prefijos = [
+            "".join(c for c in w.lower() if c.isalpha())[:2]
+            for w in palabras_resultado
+            if sum(c.isalpha() for c in w) >= 2
+        ]
+        if len(prefijos) >= 5 and len(set(prefijos)) <= 1:
+            raise RuntimeError(f"Garble fonético en modelo {par}")
 
     return resultado
 

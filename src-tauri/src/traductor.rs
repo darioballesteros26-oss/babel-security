@@ -621,7 +621,18 @@ fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
     let tmp_base = tmp_dir.join(format!("ocr_{}_{}", pagina, hex::encode(rand_bytes)));
     let tmp_img = format!("{}.png", tmp_base.to_string_lossy());
 
-    let ok = std::process::Command::new("/opt/homebrew/bin/pdftoppm")
+    let pdftoppm = [
+        "/opt/homebrew/bin/pdftoppm",
+        "/usr/local/bin/pdftoppm",
+        "/usr/bin/pdftoppm",
+        "pdftoppm",
+    ]
+    .iter()
+    .copied()
+    .find(|&p| p == "pdftoppm" || std::path::Path::new(p).exists())
+    .unwrap_or("pdftoppm");
+
+    let ok = std::process::Command::new(pdftoppm)
         .args([
             "-r",
             "300",

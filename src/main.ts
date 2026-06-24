@@ -21,11 +21,10 @@ function escapeHTML(s: string): string {
     .replace(/'/g, "&#039;");
 }
 
-let _renombraViejo = "";          // ID del buzón en renombrado (traducciones)
+let _renombraViejo = "";
 let _renombraViejoG = "";
 let _renombraArchivoRuta = "";
-let _renombraEsArchivo = false;      // ID del buzón en renombrado (guardados)
-let _renombraEsGuardado = false;  // Flag para saber qué sistema usa el modal
+let _renombraEsGuardado = false;
 let buzonParentPendiente: string | null = null;
 let buzonParentPendienteG: string | null = null;
 
@@ -212,9 +211,7 @@ function añadirResultadoArchivo(nombreResultado: string, ruta: string): void {
       <span class="burbuja-hora">BABEL · Este documento no ha salido de tu ordenador</span>
     </div>`;
   const btnVer = burbuja.querySelector(".btn-ver-resultado") as HTMLButtonElement;
-  const btnExportar = burbuja.querySelector(".btn-exportar-resultado") as HTMLButtonElement;
   btnVer?.addEventListener("click", () => verArchivo(ruta));
-  btnExportar?.addEventListener("click", () => descargarArchivo(ruta, nombreLimpio));
   contenedor.appendChild(burbuja);
 }
 
@@ -584,13 +581,10 @@ function sincronizarSelectorIdioma(valor: string): void {
 async function cerrarSesion(): Promise<void> {
   limpiarCamposSensibles();
   borrarChat();
-
-
   // Zeroizar credenciales de sesión
   _sesionPass = "0".repeat(_sesionPass.length); _sesionPass = "";
   _sesionMaestra = "0".repeat(_sesionMaestra.length); _sesionMaestra = "";
   _sesionUsuario = "0".repeat(_sesionUsuario.length); _sesionUsuario = "";
-  borrarChat();
   desactivarTimerInactividad();
   await invoke("cerrar_sesion_rust");
   limpiarCamposSensibles();
@@ -614,7 +608,10 @@ function volverAlPanel(): void {
 async function cambiarIdiomaDesdeSelectores(): Promise<void> {
   const origen = (document.getElementById("selector-origen") as HTMLSelectElement)?.value ?? "es";
   const destino = (document.getElementById("selector-destino") as HTMLSelectElement)?.value ?? "en";
-  if (origen === destino) return;
+  if (origen === destino) {
+    mostrarToast("Origen y destino son el mismo idioma", true);
+    return;
+  }
   await cambiarIdioma(`${origen}_${destino}`);
 }
 
@@ -983,7 +980,6 @@ async function guardarArchivoSinTraducir(rutaArchivo: string): Promise<void> {
       rutaCompleta: rutaArchivo,
 
     });
-    console.log("buzon activo al guardar:", buzonActivoGuardados);
     if (buzonActivoGuardados !== "todos") {
       try {
         await invoke("mover_archivo_guardado", { ruta: rutaCifrada, buzonDestino: buzonActivoGuardados });
@@ -1229,15 +1225,10 @@ async function confirmarRenombrar(): Promise<void> {
   const input = document.getElementById("input-renombrar-buzon") as HTMLInputElement;
   const nombreNuevo = input?.value.trim() ?? "";
   const esGuardado = _renombraEsGuardado;
-  const esArchivo = _renombraEsArchivo;
-  _renombraEsArchivo = false;
   cerrarModalRenombrar();
   if (!nombreNuevo) return;
   try {
-    if (esArchivo) {
-      await invoke("renombrar_archivo", { ruta: _renombraArchivoRuta, nombreNuevo });
-      await cargarArchivosGuardados();
-    } else if (esGuardado) {
+    if (esGuardado) {
       await invoke("renombrar_buzon_guardado", { id: _renombraViejoG, nombreNuevo });
       await cargarBuzonesGuardados();
     } else {
@@ -1291,7 +1282,7 @@ async function exportarTodo(): Promise<void> {
     if (archivos.length === 0) { mostrarToast("No hay archivos para exportar", true); return; }
     let errores = 0;
     for (const a of archivos) {
-      try { await invoke("exportar_archivo", { ruta: a.trad?.ruta ?? a.ruta }); }
+      try { await invoke("exportar_archivo", { ruta: a.ruta }); }
       catch { errores++; }
     }
     mostrarToast(errores === 0 ? `✓ ${archivos.length} archivos exportados a Descargas` : `${errores} errores al exportar`, errores > 0);
@@ -1820,16 +1811,11 @@ function seleccionarPeer(ip: string, _nombre: string): void {
 }
 
 async function conectarP2P(): Promise<void> {
-  // Enviar solicitud de conexión al otro Babel
   const ip = (document.getElementById("p2p-ip-input") as HTMLInputElement)?.value?.trim();
   if (!ip) { mostrarToast("Introduce la IP del destino", true); return; }
 
-  // Enviar solicitud de conexión al otro Babel
-  const miNombre = "Babel-" + (await invoke<string>("obtener_ip_local").catch(() => "desconocido"));
-  await invoke("enviar_mensaje_p2p", {
-    ip,
-    mensaje: `__BABEL_SOLICITUD__:${miNombre}`
-  });
+  const miIp = await invoke<string>("obtener_ip_local").catch(() => "desconocido");
+  const miNombre = "Babel-" + miIp;
   const faseInicio = document.getElementById("p2p-fase-inicio");
   const faseCarga = document.getElementById("p2p-fase-carga");
   const faseChat = document.getElementById("p2p-fase-chat");
@@ -1840,26 +1826,21 @@ async function conectarP2P(): Promise<void> {
   if (faseCarga) faseCarga.style.display = "flex";
 
   try {
-    // Verificamos que hay un Babel en esa IP buscando peers
-    const peers = await invoke<any[]>("buscar_peers_p2p");
-    const peerEncontrado = peers.find(p => p.ip === ip) ?? { ip, nombre: "Babel-Remoto" };
-
+    await invoke("enviar_mensaje_p2p", { ip, mensaje: `__BABEL_SOLICITUD__:${miNombre}` });
     ipP2PConectada = ip;
-
+    iniciarPollMensajes();
     setTimeout(() => {
       if (faseCarga) faseCarga.style.display = "none";
       if (faseChat) faseChat.style.display = "flex";
-      iniciarPollMensajes();
       if (estadoTexto) estadoTexto.textContent = `CONECTADO · ${ip}`;
       if (dot) { dot.style.background = "#22c55e"; dot.style.opacity = "1"; }
-      añadirMensajeP2P("sistema", `Túnel mTLS establecido con ${peerEncontrado.nombre} (${ip})`);
-    }, 4000);
-
+      añadirMensajeP2P("sistema", `Túnel mTLS establecido con Babel-Remoto (${ip})`);
+    }, 1500);
   } catch (e) {
     if (faseCarga) faseCarga.style.display = "none";
     if (faseInicio) faseInicio.style.display = "flex";
     ipP2PConectada = "";
-    mostrarToast("No se encontró Babel en " + ip, true);
+    mostrarToast("No se pudo conectar con " + ip + ": " + String(e), true);
   }
 }
 
@@ -1936,16 +1917,13 @@ function detenerPollP2P(): void {
   }
 }
 
-// Simula recibir un mensaje del otro cliente (para testing en demo)
-// Cuando el P2P real esté conectado esto se sustituye por eventos de Tauri
-async function simularMensajeEntrante(texto: string): Promise<void> {
+async function manejarMensajeEntrante(texto: string): Promise<void> {
   if (p2pTraduccionActiva) {
     try {
-      const idioma = "es_en";
-      const [traducido] = await invoke<[string, number]>("traducir_texto", {
-        texto,
-        idioma
-      });
+      const origenSel = (document.getElementById("selector-origen") as HTMLSelectElement)?.value ?? "es";
+      const destinoSel = (document.getElementById("selector-destino") as HTMLSelectElement)?.value ?? "en";
+      const idioma = origenSel !== destinoSel ? `${origenSel}_${destinoSel}` : "es_en";
+      const [traducido] = await invoke<[string, number]>("traducir_texto", { texto, idioma });
       añadirMensajeP2P("ellos", texto, traducido);
     } catch (_) {
       añadirMensajeP2P("ellos", texto);
@@ -1976,7 +1954,7 @@ function iniciarPollMensajes(): void {
           if (estadoTexto) estadoTexto.textContent = `CONECTADO · ${ipP2PConectada}`;
           if (dot) { dot.style.background = "#22c55e"; dot.style.opacity = "1"; }
         } else {
-          await simularMensajeEntrante(mensaje);
+          await manejarMensajeEntrante(mensaje);
         }
       }
     } catch (_) { }
@@ -1990,12 +1968,16 @@ function mostrarSolicitudP2P(nombre: string): void {
   if (!modal || !nombreEl) return;
   nombreEl.textContent = nombre;
   modal.classList.remove("hidden");
-  // Guardar IP del que solicita — viene del polling, usamos ipP2PConectada
-  _solicitudIpRemota = ipP2PConectada;
+  // Extraer IP del nombre del remitente (formato "Babel-192.168.1.X")
+  const ipExtraida = nombre.startsWith("Babel-") ? nombre.slice("Babel-".length) : "";
+  const esIpValida = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ipExtraida);
+  _solicitudIpRemota = esIpValida ? ipExtraida : ipP2PConectada;
 }
 
 async function aceptarSolicitudP2P(): Promise<void> {
   document.getElementById("modal-solicitud-p2p")?.classList.add("hidden");
+  ipP2PConectada = _solicitudIpRemota;
+  iniciarPollMensajes();
   // Ir a fase chat
   const faseInicio = document.getElementById("p2p-fase-inicio");
   const faseChat = document.getElementById("p2p-fase-chat");
@@ -2107,6 +2089,14 @@ async function cargarAjustesTraduccion(): Promise<void> {
   if (elDestino) elDestino.value = destino;
   if (elCategoria) elCategoria.value = categoria;
   if (elBorrado) elBorrado.checked = borradoAuto;
+  // Aplicar el par de idiomas cargado al motor de traducción
+  if (origen !== destino) {
+    const selectorOrigen = document.getElementById("selector-origen") as HTMLSelectElement;
+    const selectorDestino = document.getElementById("selector-destino") as HTMLSelectElement;
+    if (selectorOrigen) selectorOrigen.value = origen;
+    if (selectorDestino) selectorDestino.value = destino;
+    await cambiarIdioma(`${origen}_${destino}`).catch(() => {});
+  }
   // Restaurar estado del sidebar
   const sidebarAbierto = localStorage.getItem("babel-sidebar") === "1";
   const sidebar = document.getElementById("chat-sidebar");
@@ -2322,8 +2312,9 @@ function abrirComponerEmail(): void {
   document.getElementById("email-lector-vacio")?.classList.add("hidden");
   document.getElementById("email-visor")?.classList.add("hidden");
   const comp = document.getElementById("email-compositor");
-  comp?.classList.remove("hidden");
-  comp!.style.display = "flex";
+  if (!comp) return;
+  comp.classList.remove("hidden");
+  comp.style.display = "flex";
 }
 
 // Cierra el compositor y limpia los campos y archivos adjuntos
@@ -2429,10 +2420,6 @@ async function enviarEmail(): Promise<void> {
 
   if (!destinatario || !asunto) {
     mostrarToast("Rellena destinatario y asunto", true);
-    return;
-  }
-  if (!archivoEmailFile && !archivoEmailRuta) {
-    mostrarToast("Selecciona un archivo para adjuntar", true);
     return;
   }
 
@@ -2959,41 +2946,37 @@ function toggleVerPassword(): void {
   const btn = document.getElementById("btn-ver-pass");
   if (!elPass || !btn) return;
 
-  const passGuardada = _sesionPass || "—";
-  const maestraGuardada = _sesionMaestra || "—";
-  const usuarioGuardado = _sesionUsuario || "—";
+  const visible = btn.textContent?.trim() === "OCULTAR";
 
-  // Contraseña completa
-  elPass.textContent = passGuardada;
-  elPass.style.opacity = "1";
-  elPass.style.letterSpacing = "2px";
-
-  // Usuario completo
-  if (elUsuario) {
-    elUsuario.textContent = usuarioGuardado;
-    elUsuario.style.opacity = "1";
-    elUsuario.style.letterSpacing = "2px";
-  }
-
-  // Llave maestra — solo últimos 4 caracteres
-  if (elMaestra) {
-    const oculta = "••••••••" + maestraGuardada.slice(-4);
-    elMaestra.textContent = oculta;
-    elMaestra.style.opacity = "1";
-    elMaestra.style.letterSpacing = "2px";
-  }
-
-  btn.textContent = "OCULTAR";
-
-  if (timerPassword) clearTimeout(timerPassword);
-  timerPassword = setTimeout(() => {
+  const ocultarTodo = () => {
     elPass.textContent = "••••••••";
     elPass.style.opacity = "0.4";
     elPass.style.letterSpacing = "4px";
     if (elUsuario) { elUsuario.textContent = "••••••••"; elUsuario.style.opacity = "0.4"; }
     if (elMaestra) { elMaestra.textContent = "••••••••••••"; elMaestra.style.opacity = "0.4"; }
     btn.textContent = "VER";
-  }, 5000);
+    if (timerPassword) { clearTimeout(timerPassword); timerPassword = null; }
+  };
+
+  if (visible) { ocultarTodo(); return; }
+
+  const passGuardada = _sesionPass || "—";
+  const maestraGuardada = _sesionMaestra || "—";
+  const usuarioGuardado = _sesionUsuario || "—";
+
+  elPass.textContent = passGuardada;
+  elPass.style.opacity = "1";
+  elPass.style.letterSpacing = "2px";
+  if (elUsuario) { elUsuario.textContent = usuarioGuardado; elUsuario.style.opacity = "1"; elUsuario.style.letterSpacing = "2px"; }
+  if (elMaestra) {
+    elMaestra.textContent = "••••••••" + maestraGuardada.slice(-4);
+    elMaestra.style.opacity = "1";
+    elMaestra.style.letterSpacing = "2px";
+  }
+  btn.textContent = "OCULTAR";
+
+  if (timerPassword) clearTimeout(timerPassword);
+  timerPassword = setTimeout(ocultarTodo, 5000);
 }
 
 function cargarAjustesGuardados(): void {
@@ -3013,7 +2996,7 @@ function cargarAjustesGuardados(): void {
 (window as any).destruirSesionP2P = destruirSesionP2P;
 (window as any).guardarAjustesTraduccion = guardarAjustesTraduccion;
 (window as any).toggleTraduccionP2P = toggleTraduccionP2P;
-(window as any).simularMensajeEntrante = simularMensajeEntrante;
+(window as any).manejarMensajeEntrante = manejarMensajeEntrante;
 (window as any).guardarNombreDisplay = guardarNombreDisplay;
 
 function guardarNombreDisplay(): void {
@@ -3052,6 +3035,18 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Recovery BIP39: Enter avanza al siguiente campo; en el 12 verifica
+  // Paste en cualquier campo: si hay 12+ palabras, distribuye automáticamente
+  const distribuirPaste = (e: ClipboardEvent) => {
+    const texto = e.clipboardData?.getData("text") ?? "";
+    const partes = texto.trim().split(/\s+/);
+    if (partes.length < 12) return;
+    e.preventDefault();
+    for (let j = 0; j < 12; j++) {
+      const campo = document.getElementById(`rec-palabra-${j + 1}`) as HTMLInputElement | null;
+      if (campo) campo.value = partes[j].toLowerCase();
+    }
+    (document.getElementById("rec-palabra-12") as HTMLInputElement | null)?.focus();
+  };
   for (let i = 1; i <= 12; i++) {
     const input = document.getElementById(`rec-palabra-${i}`) as HTMLInputElement | null;
     if (!input) continue;
@@ -3063,19 +3058,17 @@ document.addEventListener("DOMContentLoaded", () => {
         else intentarRecuperacion();
       }
     });
-    // Pegar 12 palabras en el primer campo las distribuye automáticamente
-    if (i === 1) {
-      input.addEventListener("paste", (e: ClipboardEvent) => {
-        const texto = e.clipboardData?.getData("text") ?? "";
-        const partes = texto.trim().split(/\s+/);
-        if (partes.length < 12) return;
+    input.addEventListener("paste", distribuirPaste);
+  }
+
+  // P2P chat: Enter envía, Shift+Enter inserta nueva línea
+  const p2pInput = document.getElementById("p2p-input") as HTMLTextAreaElement | null;
+  if (p2pInput) {
+    p2pInput.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        for (let j = 0; j < 12; j++) {
-          const campo = document.getElementById(`rec-palabra-${j + 1}`) as HTMLInputElement | null;
-          if (campo) campo.value = partes[j].toLowerCase();
-        }
-        (document.getElementById("rec-palabra-12") as HTMLInputElement | null)?.focus();
-      });
-    }
+        enviarMensajeP2P();
+      }
+    });
   }
 });

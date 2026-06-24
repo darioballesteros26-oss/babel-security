@@ -694,11 +694,24 @@ fn listar_archivos_guardados(
                     .unwrap_or_else(|| "todos".to_string())
             };
 
+            let fecha_g = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .map(|t| {
+                    let ahora = std::time::SystemTime::now();
+                    let dias = ahora.duration_since(t).unwrap_or_default().as_secs() / 86400;
+                    if dias == 0 { "hoy".to_string() }
+                    else if dias == 1 { "ayer".to_string() }
+                    else if dias < 30 { format!("hace {} días", dias) }
+                    else { format!("hace {} meses", dias / 30) }
+                })
+                .unwrap_or_else(|| "—".to_string());
             archivos.push(MetadatosArchivo {
                 nombre: nombre_limpio,
                 ruta: entry.path().to_string_lossy().to_string(),
                 tamaño: entry.metadata().map(|m| m.len()).unwrap_or(0),
-                fecha: "".to_string(),
+                fecha: fecha_g,
                 idioma: "guardado".to_string(),
                 buzon: nombre_buzon,
                 es_traduccion: false,
@@ -753,7 +766,6 @@ fn listar_archivos_guardados(
             } else {
                 nodos_a
                     .iter()
-                    .chain(nodos_g.iter())
                     .find(|n| n.id == buzon_archivo)
                     .map(|n| n.nombre.clone())
                     .unwrap_or_else(|| "todos".to_string())
@@ -1051,10 +1063,23 @@ fn listar_archivos(
         let fecha = meta
             .modified()
             .map(|t| {
-                let dur = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-                let secs = dur.as_secs();
-                let dias = secs / 86400;
-                format!("{} días", dias)
+                let ahora = std::time::SystemTime::now();
+                let antiguedad = ahora.duration_since(t).unwrap_or_default();
+                let dias = antiguedad.as_secs() / 86400;
+                if dias == 0 {
+                    "hoy".to_string()
+                } else if dias == 1 {
+                    "ayer".to_string()
+                } else if dias < 30 {
+                    format!("hace {} días", dias)
+                } else {
+                    let semanas = dias / 7;
+                    if semanas < 8 {
+                        format!("hace {} sem.", semanas)
+                    } else {
+                        format!("hace {} meses", dias / 30)
+                    }
+                }
             })
             .unwrap_or_else(|_| "—".to_string());
 
@@ -2479,6 +2504,11 @@ fn iniciar_servidor_p2p(sesion: tauri::State<SesionActiva>) -> Result<String, St
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    let id_usuario = sesion
+        .usuario
+        .lock()
+        .map_err(|_| "Error leyendo sesión.".to_string())?
+        .clone();
 
     let hostname = hostname::get()
         .unwrap_or_default()
@@ -2490,7 +2520,7 @@ fn iniciar_servidor_p2p(sesion: tauri::State<SesionActiva>) -> Result<String, St
 
     let clave = subclave_hex.to_string();
     std::thread::spawn(move || {
-        let servidor = babel_p2p::ServidorP2P::nuevo(&clave);
+        let servidor = babel_p2p::ServidorP2P::nuevo(&clave, &id_usuario);
         if let Err(e) = servidor.iniciar() {
             log::error!("[P2P] Error servidor: {}", e);
         }

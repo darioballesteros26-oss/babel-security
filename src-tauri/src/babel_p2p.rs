@@ -560,12 +560,14 @@ impl rustls::server::danger::ClientCertVerifier for VerificadorClienteP2P {
 
 pub struct ServidorP2P {
     subclave_hex: String,
+    id_usuario: String,
 }
 
 impl ServidorP2P {
-    pub fn nuevo(subclave_hex: &str) -> Self {
+    pub fn nuevo(subclave_hex: &str, id_usuario: &str) -> Self {
         Self {
             subclave_hex: subclave_hex.to_string(),
+            id_usuario: id_usuario.to_string(),
         }
     }
 
@@ -595,33 +597,38 @@ impl ServidorP2P {
                 .unwrap_or("?".to_string());
             log::warn!("[P2P] Conexión desde {}", redactar_ip(&ip));
 
-            let conn = match rustls::ServerConnection::new(config_arc.clone()) {
-                Ok(c) => c,
-                Err(e) => {
-                    log::error!("[P2P] Error TLS: {}", e);
-                    continue;
-                }
-            };
+            let config_clone = config_arc.clone();
+            let subclave = self.subclave_hex.clone();
+            let usuario = self.id_usuario.clone();
 
-            let mut tls_stream = rustls::StreamOwned::new(conn, stream);
-
-            match recibir_archivo(&mut tls_stream) {
-                Ok((nombre, datos)) => self.guardar_archivo(&nombre, &datos, &ip),
-                Err(e) => {
-                    log::error!("[P2P] Error recibiendo de {}: {}", redactar_ip(&ip), e);
-                    crate::seguridad::registrar_evento_seguridad(
-                        &format!("Error P2P de {}: {}", ip, e),
-                        &self.subclave_hex,
-                    );
+            // Cada conexión en su propio hilo — evita que un peer lento bloquee el servidor
+            thread::spawn(move || {
+                let conn = match rustls::ServerConnection::new(config_clone) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        log::error!("[P2P] Error TLS: {}", e);
+                        return;
+                    }
+                };
+                let mut tls_stream = rustls::StreamOwned::new(conn, stream);
+                let manejador = ServidorP2P { subclave_hex: subclave, id_usuario: usuario };
+                match recibir_archivo(&mut tls_stream) {
+                    Ok((nombre, datos)) => manejador.guardar_archivo(&nombre, &datos, &ip),
+                    Err(e) => {
+                        log::error!("[P2P] Error recibiendo de {}: {}", redactar_ip(&ip), e);
+                        crate::seguridad::registrar_evento_seguridad(
+                            &format!("Error P2P de {}: {}", ip, e),
+                            &manejador.subclave_hex,
+                        );
+                    }
                 }
-            }
+            });
         }
         Ok(())
     }
 
     /// Guarda el archivo recibido cifrándolo con la clave local.
-    /// Los archivos llegan en claro (el emisor descifra su .babel antes de enviar),
-    /// así el receptor puede abrirlos con su propia clave.
+    /// El nombre incluye el prefijo de usuario para que aparezca en listar_archivos.
     fn guardar_archivo(&self, nombre: &str, datos: &[u8], ip: &str) {
         let nombre_seguro = Path::new(nombre)
             .file_name()
@@ -658,7 +665,6 @@ impl ServidorP2P {
             }
         };
 
-        // Nombre: babel_p2p_{nombre_sin_ext}_{ts}.babel
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -667,7 +673,8 @@ impl ServidorP2P {
             .file_stem()
             .and_then(|n| n.to_str())
             .unwrap_or("p2p");
-        let nombre_babel = format!("babel_p2p_{}_{}.babel", nombre_sin_ext, ts);
+        // Prefijo de usuario para que listar_archivos lo muestre correctamente
+        let nombre_babel = format!("{}_p2p_{}_{}.babel", self.id_usuario, nombre_sin_ext, ts);
         let ruta = recibidos_dir().join(&nombre_babel);
 
         match fs::write(&ruta, cifrado) {
