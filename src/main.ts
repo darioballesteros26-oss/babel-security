@@ -1,5 +1,6 @@
 import "./styles.css";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import DOMPurify from "dompurify";
@@ -265,11 +266,16 @@ function borrarChat(): void {
 window.addEventListener("DOMContentLoaded", async () => {
   mostrarPantalla("carga");
 
-  // NLLB ya arrancó desde Rust — empezamos a detectar cuando esté listo
+  // Evento Rust: servidor USB listo → toast
+  listen("servidor-usb-listo", () => {
+    mostrarToast("Traductor listo", false);
+  }).catch(() => {});
+
+  // Badge NLLB: poll /ping cada 2s hasta que responda
   const badge = document.getElementById("nllb-badge");
   const checkNllb = setInterval(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:5002/ping")
+      const res = await fetch("http://127.0.0.1:5002/ping");
       if (res.ok && badge) {
         badge.style.background = "#22c55e";
         badge.style.opacity = "1";

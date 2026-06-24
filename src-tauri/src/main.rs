@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use zeroize::{Zeroize, Zeroizing};
 
 const MAX_ARCHIVOS: usize = 1000;
@@ -2726,6 +2726,22 @@ fn main() {
                             .store(child.id(), std::sync::atomic::Ordering::Relaxed);
                         std::mem::forget(child); // proceso corre hasta que lo matemos
                     }
+
+                    // Hilo en background: cuando el servidor acepte conexiones,
+                    // emite el evento "servidor-usb-listo" al frontend
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        let addr: std::net::SocketAddr =
+                            "127.0.0.1:5002".parse().unwrap();
+                        let timeout = std::time::Duration::from_secs(1);
+                        for _ in 0..90 {
+                            std::thread::sleep(std::time::Duration::from_secs(2));
+                            if std::net::TcpStream::connect_timeout(&addr, timeout).is_ok() {
+                                let _ = handle.emit("servidor-usb-listo", ());
+                                break;
+                            }
+                        }
+                    });
                 }
             }
             Ok(())
