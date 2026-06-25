@@ -3084,24 +3084,53 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Tauri v2 usa nonces en el CSP; con nonces presentes el navegador ignora
-  // 'unsafe-inline', bloqueando los onclick="fn()" del HTML. Este helper los
-  // convierte a addEventListener en tiempo de ejecución (sin eval).
-  document.querySelectorAll<HTMLElement>("[onclick]").forEach((el) => {
-    const raw = el.getAttribute("onclick") ?? "";
-    el.removeAttribute("onclick");
-    el.addEventListener("click", () => {
-      const m = raw.match(/^([\w$]+)\((.*)\)\s*$/s);
-      if (!m) return;
-      const fn = (window as unknown as Record<string, unknown>)[m[1]];
-      if (typeof fn !== "function") return;
-      const argsRaw = m[2].trim();
-      if (!argsRaw) {
-        (fn as () => void)();
-        return;
-      }
-      const args = argsRaw.split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, ""));
-      (fn as (...a: string[]) => void)(...args);
-    });
-  });
+  bindOnclicks(document.documentElement);
+
+  // MutationObserver: convierte onclick= en nuevos nodos dinámicos (buzones, emails…)
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      m.addedNodes.forEach((node) => {
+        if (!(node instanceof Element)) return;
+        if (node instanceof HTMLElement && node.hasAttribute("onclick")) bindOnclickEl(node);
+        node.querySelectorAll<HTMLElement>("[onclick]").forEach(bindOnclickEl);
+      });
+    }
+  }).observe(document.body, { childList: true, subtree: true });
 });
+
+// Tauri v2 inyecta nonces en script-src; con nonces 'unsafe-inline' queda ignorado
+// por spec CSP, bloqueando onclick="fn()". Convertimos todos a addEventListener.
+// MutationObserver lo aplica también a HTML generado dinámicamente (buzones, etc.)
+function parseOnclickArg(s: string): unknown {
+  s = s.trim();
+  if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) return s.slice(1, -1);
+  if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
+  if (s === "true") return true;
+  if (s === "false") return false;
+  return s;
+}
+
+function bindOnclickEl(el: HTMLElement) {
+  const raw = el.getAttribute("onclick");
+  if (!raw) return;
+  el.removeAttribute("onclick");
+  el.addEventListener("click", (ev: MouseEvent) => {
+    for (const part of raw.split(";").map((s) => s.trim()).filter(Boolean)) {
+      if (part === "event.stopPropagation()") { ev.stopPropagation(); continue; }
+      if (part === "event.preventDefault()") { ev.preventDefault(); continue; }
+      // [\wÀ-ɏ$]+ cubre letras latinas extendidas (ñ, á…)
+      const m = part.match(/^([\wÀ-ɏ$]+)\((.*?)\)\s*$/s);
+      if (!m) continue;
+      const fn = (window as unknown as Record<string, unknown>)[m[1]];
+      if (typeof fn !== "function") continue;
+      const argsRaw = m[2].trim();
+      if (!argsRaw) { (fn as () => void)(); continue; }
+      const args = argsRaw.split(",").map(parseOnclickArg);
+      (fn as (...a: unknown[]) => void)(...args);
+    }
+  });
+}
+
+function bindOnclicks(root: Element) {
+  root.querySelectorAll<HTMLElement>("[onclick]").forEach(bindOnclickEl);
+}

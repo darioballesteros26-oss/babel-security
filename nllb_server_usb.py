@@ -22,8 +22,16 @@ MAX_INPUT_CHARS = 10_000
 # NLLB usa codes más específicos que los genéricos del frontend
 _LANG_NORM = {
     "ara_Arab": "arb_Arab",  # Árabe estándar moderno
-    "zho_Hans": "zho_Hans",  # Chino simplificado (ya correcto)
-    "zho_Hant": "zho_Hant",  # Chino tradicional (ya correcto)
+}
+
+# Rust envía {"par": "es-en"} — mapeamos al formato NLLB
+_PAR_TO_NLLB = {
+    "es-en": ("spa_Latn", "eng_Latn"),
+    "en-es": ("eng_Latn", "spa_Latn"),
+    "es-fr": ("spa_Latn", "fra_Latn"),
+    "fr-es": ("fra_Latn", "spa_Latn"),
+    "es-ar": ("spa_Latn", "arb_Arab"),
+    "ar-es": ("arb_Arab", "spa_Latn"),
 }
 
 app = Flask(__name__)
@@ -48,8 +56,13 @@ def traducir():
 
     data = request.json or {}
     texto = data.get("texto", "").strip()
-    origen = _LANG_NORM.get(data.get("origen", "spa_Latn"), data.get("origen", "spa_Latn"))
-    destino = _LANG_NORM.get(data.get("destino", "eng_Latn"), data.get("destino", "eng_Latn"))
+
+    # Rust manda {"par": "es-en"}; el frontend manda {"origen":…, "destino":…}
+    if "par" in data:
+        origen, destino = _PAR_TO_NLLB.get(data["par"], ("spa_Latn", "eng_Latn"))
+    else:
+        origen = _LANG_NORM.get(data.get("origen", "spa_Latn"), data.get("origen", "spa_Latn"))
+        destino = _LANG_NORM.get(data.get("destino", "eng_Latn"), data.get("destino", "eng_Latn"))
 
     if not texto:
         return jsonify({"traduccion": ""})
