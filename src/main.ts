@@ -2807,6 +2807,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     fraseRecuperacion: "FRASE DE RECUPERACIÓN", recuperarBunker: "RECUPERAR BÚNKER",
     traducidosGuardados: "TRADUCIDOS Y GUARDADOS", buzones: "BUZONES", archivosTitulo: "ARCHIVOS",
     noArchivos: "No hay archivos guardados", arrastra: "Arrastra documentos aquí para cifrarlos",
+    buzonesTord: "BUZONES", finder: "◫ FINDER",
   },
   en: {
     traducir: "TRANSLATE", archivos: "FILES", p2p: "P2P", ajustes: "⚙ SETTINGS", cerrarSesion: "SIGN OUT",
@@ -2820,6 +2821,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     fraseRecuperacion: "RECOVERY PHRASE", recuperarBunker: "RECOVER VAULT",
     traducidosGuardados: "TRANSLATED & SAVED", buzones: "FOLDERS", archivosTitulo: "FILES",
     noArchivos: "No saved files", arrastra: "Drag documents here to encrypt them",
+    buzonesTord: "FOLDERS", finder: "◫ FINDER",
   },
   fr: {
     traducir: "TRADUIRE", archivos: "FICHIERS", p2p: "P2P", ajustes: "⚙ PARAMÈTRES", cerrarSesion: "DÉCONNEXION",
@@ -2833,6 +2835,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     fraseRecuperacion: "PHRASE DE RÉCUPÉRATION", recuperarBunker: "RÉCUPÉRER LE COFFRE",
     traducidosGuardados: "TRADUITS ET SAUVEGARDÉS", buzones: "DOSSIERS", archivosTitulo: "FICHIERS",
     noArchivos: "Aucun fichier sauvegardé", arrastra: "Faites glisser des documents ici pour les chiffrer",
+    buzonesTord: "DOSSIERS", finder: "◫ FINDER",
   },
   ar: {
     traducir: "ترجمة", archivos: "ملفات", p2p: "P2P", ajustes: "⚙ إعدادات", cerrarSesion: "تسجيل الخروج",
@@ -2846,6 +2849,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     fraseRecuperacion: "عبارة الاسترداد", recuperarBunker: "استرداد الخزنة",
     traducidosGuardados: "مترجم ومحفوظ", buzones: "المجلدات", archivosTitulo: "الملفات",
     noArchivos: "لا توجد ملفات محفوظة", arrastra: "اسحب المستندات هنا لتشفيرها",
+    buzonesTord: "المجلدات", finder: "◫ FINDER",
   },
 };
 
@@ -2884,6 +2888,8 @@ function cambiarIdiomaUI(idioma: string): void {
     "ui-recuperar-bunker": t.recuperarBunker,
     "ui-traducidos-guardados": t.traducidosGuardados,
     "ui-buzones": t.buzones,
+    "ui-buzones-trad": t.buzonesTord,
+    "ui-finder": t.finder,
     "ui-archivos-titulo": t.archivosTitulo,
     "ui-no-archivos": t.noArchivos,
     "ui-arrastra": t.arrastra,
