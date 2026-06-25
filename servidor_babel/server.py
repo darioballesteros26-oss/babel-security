@@ -22,7 +22,15 @@ BABEL_TOKEN = os.environ.get("BABEL_NLLB_TOKEN", "")
 MAX_INPUT_CHARS = 10_000
 
 # F-3: lista blanca de pares soportados — rechaza valores arbitrarios
-PARES_PERMITIDOS = {"es-en", "en-es", "es-fr", "fr-es", "es-ar", "ar-es"}
+PARES_PERMITIDOS = {
+    "es-en", "en-es", "es-fr", "fr-es", "es-ar", "ar-es",
+    "fr-en", "en-fr", "en-ar", "ar-en", "fr-ar", "ar-fr",
+    "es-de", "de-es", "fr-de", "de-fr", "ar-de", "de-ar",
+    "es-ru", "ru-es", "fr-ru", "ru-fr", "ar-ru", "ru-ar",
+    "es-zh", "zh-es", "fr-zh", "zh-fr", "ar-zh", "zh-ar",
+    "de-ru", "ru-de", "de-zh", "zh-de", "ru-zh", "zh-ru",
+    "en-de", "de-en", "en-ru", "ru-en", "en-zh", "zh-en",
+}
 
 # F-2: el token debe tener al menos 32 caracteres para ser útil
 if BABEL_TOKEN and len(BABEL_TOKEN) < 32:

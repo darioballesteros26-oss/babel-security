@@ -5,21 +5,50 @@ import os
 # Pares directos principales
 PARES = ["es-en", "en-es", "es-fr", "fr-es", "es-ar", "ar-es"]
 
-# Auxiliares para cadenas de pivote (se cargan una sola vez)
-PARES_AUXILIARES = ["fr-en"]
+# Auxiliares: modelos puente para cadenas de pivote
+PARES_AUXILIARES = ["fr-en", "de-en", "en-de", "ru-en", "en-ru", "zh-en", "en-zh"]
 
 # Pares que cargan en float32: float16 en MPS genera garbage en estos modelos
 PARES_FLOAT32 = {"fr-es", "es-ar"}
 
-# Cadenas de pivote: pares sin modelo directo que se resuelven encadenando
-# Los pares aquí NO necesitan modelo propio — usan los modelos de PARES y PARES_AUXILIARES
+# Cadenas de pivote — todos los pasos deben ser modelos directos en _modelos
 CADENAS = {
-    "fr-es": ["fr-en", "en-es"],   # rescate cuando el directo falla
-    "en-fr": ["en-es", "es-fr"],   # EN→ES→FR (pivote)
-    "en-ar": ["en-es", "es-ar"],   # EN→ES→AR (pivote)
-    "ar-en": ["ar-es", "es-en"],   # AR→ES→EN (pivote)
-    "fr-ar": ["fr-es", "es-ar"],   # FR→ES→AR (pivote)
-    "ar-fr": ["ar-es", "es-fr"],   # AR→ES→FR (pivote)
+    # Rescate fr-es cuando el directo falla
+    "fr-es": ["fr-en", "en-es"],
+    # Pares ES/FR/AR sin modelo directo
+    "en-fr": ["en-es", "es-fr"],
+    "en-ar": ["en-es", "es-ar"],
+    "ar-en": ["ar-es", "es-en"],
+    "fr-ar": ["fr-es", "es-ar"],
+    "ar-fr": ["ar-es", "es-fr"],
+    # Pares con DE (puente via EN)
+    "es-de": ["es-en", "en-de"],
+    "de-es": ["de-en", "en-es"],
+    "fr-de": ["fr-en", "en-de"],
+    "de-fr": ["de-en", "en-es", "es-fr"],
+    "ar-de": ["ar-es", "es-en", "en-de"],
+    "de-ar": ["de-en", "en-es", "es-ar"],
+    # Pares con RU (puente via EN)
+    "es-ru": ["es-en", "en-ru"],
+    "ru-es": ["ru-en", "en-es"],
+    "fr-ru": ["fr-en", "en-ru"],
+    "ru-fr": ["ru-en", "en-es", "es-fr"],
+    "ar-ru": ["ar-es", "es-en", "en-ru"],
+    "ru-ar": ["ru-en", "en-es", "es-ar"],
+    # Pares con ZH (puente via EN)
+    "es-zh": ["es-en", "en-zh"],
+    "zh-es": ["zh-en", "en-es"],
+    "fr-zh": ["fr-en", "en-zh"],
+    "zh-fr": ["zh-en", "en-es", "es-fr"],
+    "ar-zh": ["ar-es", "es-en", "en-zh"],
+    "zh-ar": ["zh-en", "en-es", "es-ar"],
+    # Pares cruzados DE/RU/ZH
+    "de-ru": ["de-en", "en-ru"],
+    "ru-de": ["ru-en", "en-de"],
+    "de-zh": ["de-en", "en-zh"],
+    "zh-de": ["zh-en", "en-de"],
+    "ru-zh": ["ru-en", "en-zh"],
+    "zh-ru": ["zh-en", "en-ru"],
 }
 
 _modelos: dict = {}
