@@ -2651,11 +2651,18 @@ fn obtener_mensajes_p2p(sesion: tauri::State<SesionActiva>) -> Result<Vec<String
 
 fn idioma_a_par(idioma: &str) -> &'static str {
     match idioma {
+        "es_en" => "es-en",
         "en_es" => "en-es",
         "es_fr" => "es-fr",
         "fr_es" => "fr-es",
         "es_ar" => "es-ar",
         "ar_es" => "ar-es",
+        "fr_en" => "fr-en",
+        "en_fr" => "en-fr",
+        "en_ar" => "en-ar",
+        "ar_en" => "ar-en",
+        "fr_ar" => "fr-ar",
+        "ar_fr" => "ar-fr",
         _ => "es-en",
     }
 }

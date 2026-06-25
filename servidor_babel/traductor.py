@@ -5,16 +5,21 @@ import os
 # Pares directos principales
 PARES = ["es-en", "en-es", "es-fr", "fr-es", "es-ar", "ar-es"]
 
-# Auxiliares para cadenas de rescate (solo fr-en es viable; en-ar está roto)
+# Auxiliares para cadenas de pivote (se cargan una sola vez)
 PARES_AUXILIARES = ["fr-en"]
 
 # Pares que cargan en float32: float16 en MPS genera garbage en estos modelos
 PARES_FLOAT32 = {"fr-es", "es-ar"}
 
-# Cadenas de rescate: si el directo falla, se encadenan estos pasos en orden
-# es-ar no tiene cadena (en-ar está roto, no hay alternativa viable)
+# Cadenas de pivote: pares sin modelo directo que se resuelven encadenando
+# Los pares aquí NO necesitan modelo propio — usan los modelos de PARES y PARES_AUXILIARES
 CADENAS = {
-    "fr-es": ["fr-en", "en-es"],
+    "fr-es": ["fr-en", "en-es"],   # rescate cuando el directo falla
+    "en-fr": ["en-es", "es-fr"],   # EN→ES→FR (pivote)
+    "en-ar": ["en-es", "es-ar"],   # EN→ES→AR (pivote)
+    "ar-en": ["ar-es", "es-en"],   # AR→ES→EN (pivote)
+    "fr-ar": ["fr-es", "es-ar"],   # FR→ES→AR (pivote)
+    "ar-fr": ["ar-es", "es-fr"],   # AR→ES→FR (pivote)
 }
 
 _modelos: dict = {}
