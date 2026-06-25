@@ -1157,7 +1157,7 @@ async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent): Promi
     const agregar = (label: string, id: string, indent: number, tieneHijos: boolean) => {
       const item = document.createElement("div");
       const colapsado = buzonesColapsados.has(id);
-      item.style.cssText = `display:flex;align-items:center;padding:8px ${16 + indent * 12}px;font-family:'Josefin Sans',sans-serif;font-size:0.7rem;letter-spacing:2px;color:var(--dorado);cursor:pointer;`;
+      item.style.cssText = `display:flex;align-items:center;padding:8px ${16 + indent * 12}px;font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.7rem;letter-spacing:2px;color:var(--dorado);cursor:pointer;`;
       if (tieneHijos) {
         const toggle = document.createElement("span");
         toggle.textContent = colapsado ? "▶ " : "▼ ";
@@ -1305,7 +1305,7 @@ function mostrarToast(mensaje: string, esError: boolean): void {
     color: ${esError ? "#ff6b6b" : "var(--dorado)"};
     border: 1px solid ${esError ? "#ff6b6b44" : "var(--dorado)"};
     padding: 12px 28px;
-    font-family: var(--fuente-titulo, 'Cormorant Garamond', serif);
+    font-family: var(--fuente-titulo, 'Times New Roman', Times, serif, serif);
     font-size: 0.85rem;
     letter-spacing: 0.12em;
     border-radius: 2px;
@@ -1606,7 +1606,7 @@ async function mostrarSelectorBuzon(ruta: string, boton: HTMLElement): Promise<v
     const agregar = (label: string, id: string, indent: number, tieneHijos: boolean) => {
       const item = document.createElement("div");
       const colapsado = buzonesColapsados.has(id);
-      item.style.cssText = `display:flex;align-items:center;padding:8px ${16 + indent * 12}px;font-family:'Josefin Sans',sans-serif;font-size:0.7rem;letter-spacing:2px;color:var(--dorado);cursor:pointer;`;
+      item.style.cssText = `display:flex;align-items:center;padding:8px ${16 + indent * 12}px;font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.7rem;letter-spacing:2px;color:var(--dorado);cursor:pointer;`;
       if (tieneHijos) {
         const toggle = document.createElement("span");
         toggle.textContent = colapsado ? "▶ " : "▼ ";
@@ -1764,12 +1764,12 @@ async function buscarDispositivos(): Promise<void> {
   const lista = document.getElementById("p2p-lista-peers");
   if (!lista) return;
   lista.style.display = "flex";
-  lista.innerHTML = `<div style="font-family:'Josefin Sans',sans-serif;font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);text-align:center;">BUSCANDO...</div>`;
+  lista.innerHTML = `<div style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);text-align:center;">BUSCANDO...</div>`;
 
   try {
     const peers = await invoke<any[]>("buscar_peers_p2p");
     if (peers.length === 0) {
-      lista.innerHTML = `<div style="font-family:'Josefin Sans',sans-serif;font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);text-align:center;opacity:0.5;">NO SE ENCONTRÓ NINGÚN BABEL</div>`;
+      lista.innerHTML = `<div style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);text-align:center;opacity:0.5;">NO SE ENCONTRÓ NINGÚN BABEL</div>`;
       return;
     }
     lista.innerHTML = peers.map(p => `
@@ -1777,8 +1777,8 @@ async function buscarDispositivos(): Promise<void> {
         style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);
         color:var(--texto-principal);padding:10px 14px;cursor:pointer;border-radius:2px;
         display:flex;justify-content:space-between;align-items:center;width:100%;">
-        <span style="font-family:'Josefin Sans',sans-serif;font-size:0.65rem;letter-spacing:1px;">${escapeHTML(p.nombre)}</span>
-        <span style="font-family:'Josefin Sans',sans-serif;font-size:0.58rem;color:var(--dorado);opacity:0.7;">${escapeHTML(p.ip)}</span>
+        <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;letter-spacing:1px;">${escapeHTML(p.nombre)}</span>
+        <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;color:var(--dorado);opacity:0.7;">${escapeHTML(p.ip)}</span>
       </button>`).join("");
     lista.onclick = (e: MouseEvent) => {
       const btn = (e.target as HTMLElement).closest("[data-action='peer']") as HTMLElement | null;
@@ -1843,19 +1843,19 @@ function añadirMensajeP2P(tipo: "yo" | "ellos" | "sistema", texto: string, trad
   const div = document.createElement("div");
 
   if (tipo === "sistema") {
-    div.style.cssText = "text-align:center;font-family:'Josefin Sans',sans-serif;font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);opacity:0.5;padding:4px 0;";
+    div.style.cssText = "text-align:center;font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);opacity:0.5;padding:4px 0;";
     div.textContent = texto;
   } else {
     const esYo = tipo === "yo";
-    const textoTraducido = traduccion ? `<p style="font-family:'Cormorant Garamond',serif;font-size:0.78rem;color:var(--texto-secundario);margin:6px 0 0;font-style:italic;opacity:0.7;">${escapeHTML(traduccion)}</p>` : "";
+    const textoTraducido = traduccion ? `<p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.78rem;color:var(--texto-secundario);margin:6px 0 0;font-style:italic;opacity:0.7;">${escapeHTML(traduccion)}</p>` : "";
     div.style.cssText = `display:flex;justify-content:${esYo ? "flex-end" : "flex-start"};margin-bottom:4px;`;
     div.innerHTML = `
       <div style="max-width:70%;background:${esYo ? "rgba(201,168,76,0.12)" : "rgba(255,255,255,0.05)"};
         border:1px solid ${esYo ? "rgba(201,168,76,0.3)" : "rgba(255,255,255,0.08)"};
         border-radius:3px;padding:10px 14px;">
-        <p style="font-family:'Cormorant Garamond',serif;font-size:0.88rem;color:var(--texto-principal);margin:0;line-height:1.5;">${escapeHTML(texto)}</p>
+        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;color:var(--texto-principal);margin:0;line-height:1.5;">${escapeHTML(texto)}</p>
         ${textoTraducido}
-        <span style="font-family:'Josefin Sans',sans-serif;font-size:0.55rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.5;display:block;margin-top:4px;">${esYo ? "TÚ" : "BABEL REMOTO"} · AES-256</span>
+        <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.55rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.5;display:block;margin-top:4px;">${esYo ? "TÚ" : "BABEL REMOTO"} · AES-256</span>
       </div>`;
   }
 
@@ -2236,18 +2236,18 @@ async function seleccionarEmail(id: number): Promise<void> {
       visor.innerHTML = `
         <div class="email-visor-header" style="display: flex; justify-content: space-between; align-items: flex-start;"> 
           <div style="flex: 1; min-width: 0;">
-            <div style="font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; color: var(--texto-principal); letter-spacing: 0.05em; margin-bottom: 6px;">
+            <div style="font-family: 'Times New Roman', Times, serif, serif; font-size: 1.1rem; color: var(--texto-principal); letter-spacing: 0.05em; margin-bottom: 6px;">
               ${escapeHTML(email.asunto)}
             </div>
             
-            <div style="font-family: 'Josefin Sans', sans-serif; font-size: 0.65rem; letter-spacing: 1px; color: var(--texto-secundario);">
+            <div style="font-family: 'Times New Roman', Times, serif, sans-serif; font-size: 0.65rem; letter-spacing: 1px; color: var(--texto-secundario);">
               ${escapeHTML(email.remitente)} · ${formatearFechaEmail(email.fecha)}
             </div>
 
             ${email.adjuntos.length > 0 ? `
               <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;">
                 ${email.adjuntos.map(a => `
-                  <span style="font-family: 'Josefin Sans', sans-serif; font-size: 0.6rem; letter-spacing: 1px; color: var(--dorado); border: 1px solid var(--borde-dorado); padding: 2px 8px; border-radius: 2px;">
+                  <span style="font-family: 'Times New Roman', Times, serif, sans-serif; font-size: 0.6rem; letter-spacing: 1px; color: var(--dorado); border: 1px solid var(--borde-dorado); padding: 2px 8px; border-radius: 2px;">
                     ◫ ${escapeHTML(a)}
                   </span>
                 `).join("")}
@@ -2260,7 +2260,7 @@ async function seleccionarEmail(id: number): Promise<void> {
           </button>
         </div>
 
-        <div id="email-visor-cuerpo" style="padding: 24px 28px; overflow-y: auto; flex: 1; font-family: 'Cormorant Garamond', serif; font-size: 0.95rem; color: var(--texto-principal); line-height: 1.8; word-break: break-word; letter-spacing: 0.02em;">
+        <div id="email-visor-cuerpo" style="padding: 24px 28px; overflow-y: auto; flex: 1; font-family: 'Times New Roman', Times, serif, serif; font-size: 0.95rem; color: var(--texto-principal); line-height: 1.8; word-break: break-word; letter-spacing: 0.02em;">
         </div>
       `;
 
