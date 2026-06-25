@@ -200,6 +200,15 @@
               <option value="zh">ZH</option>
             </select>
           </div>
+          <button type="button" id="btn-ver-sel" class="hidden"
+            style="font-family:'Rajdhani',sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+            onmouseleave="this.style.background='transparent'">◫ VER ARCHIVO</button>
+          <button type="button" id="btn-eliminar-sel" class="hidden"
+            style="font-family:'Rajdhani',sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onclick="eliminarSeleccionados()"
+            onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
+            onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
           <button type="button" onclick="borrarChat()" class="btn-borrar-chat" id="ui-borrar-chat">BORRAR CHAT</button>
         </div>
       </div>
@@ -240,6 +249,25 @@
               <option value="inmobiliario">INMOBILIARIO</option>
               <option value="empresarial">EMPRESARIAL</option>
             </select>
+          </div>
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(197,160,89,0.08);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span class="sidebar-titulo" id="ui-buzones-trad">BUZONES</span>
+              <button type="button" onclick="mostrarInputBuzon()" class="btn-buzon-nuevo" title="Nuevo buzón">+</button>
+            </div>
+            <div id="input-buzon-nuevo" class="input-buzon-nuevo hidden">
+              <input type="text" id="nombre-buzon-input" class="input-buzon" placeholder="Nombre del buzón..." maxlength="30">
+              <div class="input-buzon-botones">
+                <button type="button" onclick="confirmarBuzon()" class="btn-buzon-confirmar">✓</button>
+                <button type="button" onclick="cancelarBuzon()" class="btn-buzon-cancelar">✕</button>
+              </div>
+            </div>
+            <div id="lista-buzones" class="buzones-lista">
+              <div class="buzon-item activo" onclick="seleccionarBuzon('todos')">
+                <span class="buzon-icono">◫</span>
+                <span class="buzon-nombre">TODOS</span>
+              </div>
+            </div>
           </div>
           <div class="sidebar-version">BABEL v0.1.0 · LOCAL</div>
         </div>
@@ -472,6 +500,14 @@
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensajeP2P();}"></textarea>
             <button type="button" onclick="enviarMensajeP2P()" class="btn-oro"
               style="font-size:0.65rem;padding:10px 16px;height:40px;">ENVIAR</button>
+          </div>
+          <div style="padding:4px 16px 0;display:flex;justify-content:center;">
+            <button type="button" id="p2p-btn-traduccion" onclick="toggleTraduccionP2P()"
+              style="background:transparent;border:1px solid rgba(197,160,89,0.3);color:rgba(197,160,89,0.6);font-family:'Rajdhani',sans-serif;font-size:0.58rem;letter-spacing:3px;padding:6px 20px;cursor:pointer;transition:all 0.2s;opacity:0.4;"
+              onmouseenter="this.style.borderColor='rgba(197,160,89,0.7)';this.style.color='rgba(197,160,89,0.9)'"
+              onmouseleave="this.style.borderColor='rgba(197,160,89,0.3)';this.style.color='rgba(197,160,89,0.6)'">
+              TRADUCCIÓN OFF
+            </button>
           </div>
           <div style="padding:8px 16px 16px;display:flex;justify-content:center;">
             <button type="button" onclick="destruirSesionP2P()"

@@ -553,6 +553,7 @@ function toggleSidebar(): void {
 
 function toggleBorradoAutomatico(activado: boolean): void {
   borradoAutomaticoActivado = activado;
+  guardarAjustesTraduccion().catch(() => {});
 }
 
 // ============================================================
@@ -564,11 +565,11 @@ function toggleBorradoAutomatico(activado: boolean): void {
 async function cambiarCategoriaDiccionario(categoria: string): Promise<void> {
   try {
     await invoke("cambiar_categoria_diccionario", { categoria });
-    // Confirmación visual en el chat
     añadirMensajeBabel(
       `Diccionario actualizado: ${categoria === "todos" ? "TODOS los vocabularios" : categoria.toUpperCase()}`,
       "BABEL · diccionario"
     );
+    guardarAjustesTraduccion().catch(() => {});
   } catch (error) {
     console.error("Error cambiando categoría:", error);
   }
@@ -614,6 +615,7 @@ async function cambiarIdiomaDesdeSelectores(): Promise<void> {
     return;
   }
   await cambiarIdioma(`${origen}_${destino}`);
+  guardarAjustesTraduccion().catch(() => {});
 }
 
 async function cambiarIdioma(idioma: string): Promise<void> {
@@ -1249,18 +1251,16 @@ async function borrarBuzon(id: string): Promise<void> {
     await invoke("eliminar_buzon", { id });
     if (buzonActivo === id) buzonActivo = "todos";
     await cargarBuzones();
-    await cargarArchivosGuardados();
   } catch (error) {
     console.error("Error borrando buzón:", error);
   }
 }
 
-// Activa un buzón de traducciones y recarga archivos filtrados
+// Activa un buzón de traducciones (afecta al guardar la siguiente traducción)
 async function seleccionarBuzon(id: string): Promise<void> {
   buzonActivo = id;
   localStorage.setItem("babel-buzon-activo", id);
   await cargarBuzones();
-  await cargarArchivosGuardados();
 }
 
 // Descifra y exporta un archivo .babel a la carpeta Descargas del usuario
@@ -2026,10 +2026,10 @@ function destruirSesionP2P(): void {
 // ============================================================
 
 async function guardarAjustesTraduccion(): Promise<void> {
-  const origen = (document.getElementById("ajuste-idioma-origen") as HTMLSelectElement)?.value ?? "es";
-  const destino = (document.getElementById("ajuste-idioma-destino") as HTMLSelectElement)?.value ?? "en";
-  const categoria = (document.getElementById("ajuste-categoria") as HTMLSelectElement)?.value ?? "todos";
-  const borradoAuto = (document.getElementById("ajuste-borrado-auto") as HTMLInputElement)?.checked ?? true;
+  const origen = (document.getElementById("selector-origen") as HTMLSelectElement)?.value ?? "es";
+  const destino = (document.getElementById("selector-destino") as HTMLSelectElement)?.value ?? "en";
+  const categoria = (document.getElementById("tipo-diccionario") as HTMLSelectElement)?.value ?? "todos";
+  const borradoAuto = (document.getElementById("toggle-borrado") as HTMLInputElement)?.checked ?? true;
 
   await invoke("save_settings", {
     settings: {
@@ -2039,26 +2039,7 @@ async function guardarAjustesTraduccion(): Promise<void> {
       idioma_destino: destino,
       categoria: categoria,
     }
-  });
-
-  // Aplicar idioma inmediatamente a los selectores del chat
-  const selectorOrigen = document.getElementById("selector-origen") as HTMLSelectElement;
-  const selectorDestino = document.getElementById("selector-destino") as HTMLSelectElement;
-  if (selectorOrigen) selectorOrigen.value = origen;
-  if (selectorDestino) selectorDestino.value = destino;
-  cambiarIdioma(`${origen}_${destino}`);
-
-  // Aplicar categoría al diccionario
-  const tipoDiccionario = document.getElementById("tipo-diccionario") as HTMLSelectElement;
-  if (tipoDiccionario) tipoDiccionario.value = categoria;
-  cambiarCategoriaDiccionario(categoria);
-
-  // Aplicar borrado automático
-  borradoAutomaticoActivado = borradoAuto;
-  const toggleBorrado = document.getElementById("toggle-borrado") as HTMLInputElement;
-  if (toggleBorrado) toggleBorrado.checked = borradoAuto;
-
-  mostrarToast("Ajustes guardados", false);
+  }).catch(() => {});
 }
 
 async function cargarAjustesTraduccion(): Promise<void> {
@@ -2068,16 +2049,13 @@ async function cargarAjustesTraduccion(): Promise<void> {
   const categoria = s.categoria ?? "todos";
   const borradoAuto = s.borrar_al_salir ?? false;
 
-  const elOrigen = document.getElementById("ajuste-idioma-origen") as HTMLSelectElement;
-  const elDestino = document.getElementById("ajuste-idioma-destino") as HTMLSelectElement;
-  const elCategoria = document.getElementById("ajuste-categoria") as HTMLSelectElement;
-  const elBorrado = document.getElementById("ajuste-borrado-auto") as HTMLInputElement;
+  // Aplicar ajustes cargados a los controles reales de la UI
+  const tipoDiccionario = document.getElementById("tipo-diccionario") as HTMLSelectElement;
+  if (tipoDiccionario) tipoDiccionario.value = categoria;
+  const toggleBorrado = document.getElementById("toggle-borrado") as HTMLInputElement;
+  if (toggleBorrado) toggleBorrado.checked = borradoAuto;
+  borradoAutomaticoActivado = borradoAuto;
 
-  if (elOrigen) elOrigen.value = origen;
-  if (elDestino) elDestino.value = destino;
-  if (elCategoria) elCategoria.value = categoria;
-  if (elBorrado) elBorrado.checked = borradoAuto;
-  // Aplicar el par de idiomas cargado al motor de traducción
   if (origen !== destino) {
     const selectorOrigen = document.getElementById("selector-origen") as HTMLSelectElement;
     const selectorDestino = document.getElementById("selector-destino") as HTMLSelectElement;
