@@ -3,13 +3,13 @@
    Estética: Luxury Dark · Dorado Milla de Oro · Minimalismo
    ============================================================ */
 
-@font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 300; src: url('/src/fonts/CormorantGaramond-300.woff2') format('woff2'); }
-@font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 400; src: url('/src/fonts/CormorantGaramond-400.woff2') format('woff2'); }
-@font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 600; src: url('/src/fonts/CormorantGaramond-600.woff2') format('woff2'); }
-@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 300; src: url('/src/fonts/Rajdhani-300.woff2') format('woff2'); }
-@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 400; src: url('/src/fonts/Rajdhani-400.woff2') format('woff2'); }
-@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 600; src: url('/src/fonts/Rajdhani-600.woff2') format('woff2'); }
-@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 700; src: url('/src/fonts/Rajdhani-700.woff2') format('woff2'); }
+@font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 300; src: url('./fonts/CormorantGaramond-300.woff2') format('woff2'); }
+@font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 400; src: url('./fonts/CormorantGaramond-400.woff2') format('woff2'); }
+@font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 600; src: url('./fonts/CormorantGaramond-600.woff2') format('woff2'); }
+@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 300; src: url('./fonts/Rajdhani-300.woff2') format('woff2'); }
+@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 400; src: url('./fonts/Rajdhani-400.woff2') format('woff2'); }
+@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 600; src: url('./fonts/Rajdhani-600.woff2') format('woff2'); }
+@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 700; src: url('./fonts/Rajdhani-700.woff2') format('woff2'); }
 
 :root {
   --fondo: #09090b;

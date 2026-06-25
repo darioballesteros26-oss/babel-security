@@ -246,14 +246,12 @@
 
         <div class="chat-area">
           <div id="chat-mensajes" class="chat-mensajes">
-            <div id="chat-mensajes" class="chat-mensajes">
-              <div class="chat-burbuja babel">
-                <div class="burbuja-icono">B</div>
-                <div class="burbuja-contenido">
-                  <p class="burbuja-texto">Sistema activo. Escribe cualquier término o frase, o usa <strong>+</strong>
-                    para subir un documento PDF, DOCX o TXT.</p>
-                  <span class="burbuja-hora">BABEL · AES-256-GCM</span>
-                </div>
+            <div class="chat-burbuja babel">
+              <div class="burbuja-icono">B</div>
+              <div class="burbuja-contenido">
+                <p class="burbuja-texto">Sistema activo. Escribe cualquier término o frase, o usa <strong>+</strong>
+                  para subir un documento PDF, DOCX o TXT.</p>
+                <span class="burbuja-hora">BABEL · AES-256-GCM</span>
               </div>
             </div>
           </div>
@@ -296,17 +294,17 @@
             onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
             onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
           <button type="button" onclick="cargarArchivosGuardados()" class="btn-secundario-oro"
-            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px" id="ui-actualizar">↺
-            <button type="button" onclick="abrirCarpetaBabelGuardados()" class="btn-secundario-oro"
-              style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;opacity:0.7;"
-              title="Abrir carpeta Guardados en Finder" id="ui-finder">◫ FINDER</button>
-            <button type="button" onclick="exportarTodo()" class="btn-secundario-oro"
-              style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
-              title="Exportar todos los archivos a Descargas" id="ui-exportar-todo">↓ EXPORTAR TODO</button>
-            <button type="button" onclick="abrirImportarGuardado()" class="btn-secundario-oro"
-              style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;" id="ui-importar">+ IMPORTAR</button>
-            <input type="file" id="input-archivo-guardado" accept=".pdf,.docx,.txt" style="display:none"
-              onchange="manejarSeleccionGuardado(event)">
+            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px" id="ui-actualizar">↺ ACTUALIZAR</button>
+          <button type="button" onclick="abrirCarpetaBabelGuardados()" class="btn-secundario-oro"
+            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;opacity:0.7;"
+            title="Abrir carpeta Guardados en Finder" id="ui-finder">◫ FINDER</button>
+          <button type="button" onclick="exportarTodo()" class="btn-secundario-oro"
+            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
+            title="Exportar todos los archivos a Descargas" id="ui-exportar-todo">↓ EXPORTAR TODO</button>
+          <button type="button" onclick="abrirImportarGuardado()" id="ui-importar" class="btn-secundario-oro"
+            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;">+ IMPORTAR</button>
+          <input type="file" id="input-archivo-guardado" accept=".pdf,.docx,.txt" style="display:none"
+            onchange="manejarSeleccionGuardado(event)">
         </div>
       </div>
 
@@ -576,7 +574,7 @@
                 style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;">✕</button>
             </div>
             <div id="visor-cuerpo"
-              style="flex:1;padding:24px;overflow-y:auto;font-family:'Times New Roman',serif;font-size:0.95rem;color:var(--texto-principal);line-height:1.8;white-space:pre-wrap;">
+              style="flex:1;padding:24px;overflow-y:auto;font-family:'Cormorant Garamond',serif;font-size:1.05rem;color:var(--texto-principal);line-height:1.8;white-space:pre-wrap;">
             </div>
           </div>
         </div>
@@ -760,8 +758,8 @@
           color:var(--dorado,#c9a84c);font-size:1.2rem;cursor:pointer;opacity:0.7;padding:0 4px;">✕</button>
       </div>
       <div id="modal-visor-contenido" style="padding:32px 40px;overflow-y:auto;
-  max-height:calc(80vh - 60px);font-family:'Times New Roman',Times,serif;
-  font-size:0.95rem;color:var(--texto-principal,#e8e0d0);line-height:1.9;
+  max-height:calc(80vh - 60px);font-family:'Cormorant Garamond',serif;
+  font-size:1.05rem;color:var(--texto-principal,#e8e0d0);line-height:1.9;
   word-break:break-word;letter-spacing:0.02em;"></div>
     </div>
   </div>
@@ -786,7 +784,7 @@
             border-bottom:1px solid rgba(201,168,76,0.15);font-family:'Cormorant Garamond',serif;
             font-size:0.8rem;color:var(--dorado);letter-spacing:0.12em;">—</div>
           <div id="par-contenido-1" style="padding:28px 32px;overflow-y:auto;flex:1;
-            font-family:'Times New Roman',serif;font-size:0.93rem;
+            font-family:'Cormorant Garamond',serif;font-size:1.05rem;
             color:var(--texto-principal,#e8e0d0);line-height:1.9;
             white-space:pre-wrap;word-break:break-word;"></div>
         </div>
@@ -796,7 +794,7 @@
             border-bottom:1px solid rgba(201,168,76,0.15);font-family:'Cormorant Garamond',serif;
             font-size:0.8rem;color:var(--dorado);letter-spacing:0.12em;">—</div>
           <div id="par-contenido-2" style="padding:28px 32px;overflow-y:auto;flex:1;
-            font-family:'Times New Roman',serif;font-size:0.93rem;
+            font-family:'Cormorant Garamond',serif;font-size:1.05rem;
             color:var(--texto-principal,#e8e0d0);line-height:1.9;
             white-space:pre-wrap;word-break:break-word;"></div>
         </div>
