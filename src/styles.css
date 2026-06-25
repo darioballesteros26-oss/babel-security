@@ -6,10 +6,10 @@
 @font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 300; src: url('./fonts/CormorantGaramond-300.woff2') format('woff2'); }
 @font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 400; src: url('./fonts/CormorantGaramond-400.woff2') format('woff2'); }
 @font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 600; src: url('./fonts/CormorantGaramond-600.woff2') format('woff2'); }
-@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 300; src: url('./fonts/Rajdhani-300.woff2') format('woff2'); }
-@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 400; src: url('./fonts/Rajdhani-400.woff2') format('woff2'); }
-@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 600; src: url('./fonts/Rajdhani-600.woff2') format('woff2'); }
-@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 700; src: url('./fonts/Rajdhani-700.woff2') format('woff2'); }
+@font-face { font-family: 'Raleway'; font-style: normal; font-weight: 300; src: url('./fonts/Raleway-300.woff2') format('woff2'); }
+@font-face { font-family: 'Raleway'; font-style: normal; font-weight: 400; src: url('./fonts/Raleway-400.woff2') format('woff2'); }
+@font-face { font-family: 'Raleway'; font-style: normal; font-weight: 600; src: url('./fonts/Raleway-600.woff2') format('woff2'); }
+@font-face { font-family: 'Raleway'; font-style: normal; font-weight: 700; src: url('./fonts/Raleway-700.woff2') format('woff2'); }
 
 :root {
   --fondo: #09090b;
@@ -31,7 +31,7 @@
 }
 
 body {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   background-color: var(--fondo);
   color: var(--texto-principal);
   display: flex;
@@ -195,7 +195,7 @@ body {
   border-bottom: 1px solid var(--borde-dorado);
   color: var(--texto-principal);
   padding: 12px 16px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.95rem;
   letter-spacing: 1px;
   outline: none;
@@ -219,7 +219,7 @@ body {
   color: #09090b;
   border: none;
   padding: 14px 24px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 3px;
@@ -245,7 +245,7 @@ body {
   color: var(--dorado);
   border: 1px solid var(--borde-dorado);
   padding: 13px 24px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 3px;
@@ -264,7 +264,7 @@ body {
   background: transparent;
   color: var(--texto-secundario);
   border: none;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.75rem;
   letter-spacing: 2px;
   cursor: pointer;
@@ -298,7 +298,7 @@ body {
   border: 1px solid var(--borde-dorado);
   color: var(--dorado);
   padding: 28px 20px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.85rem;
   font-weight: 600;
   letter-spacing: 2px;
@@ -505,7 +505,7 @@ body {
   border: 1px solid var(--borde-dorado);
   color: var(--dorado);
   padding: 6px 10px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 2px;
@@ -784,7 +784,7 @@ body {
   border-bottom: 1px solid var(--borde-dorado);
   color: var(--texto-principal);
   padding: 14px 20px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 1rem;
   letter-spacing: 0.5px;
   outline: none;
@@ -845,7 +845,7 @@ body {
   border: 1px solid rgba(239, 68, 68, 0.3);
   color: rgba(239, 68, 68, 0.6);
   padding: 6px 10px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 2px;
@@ -1020,7 +1020,7 @@ body {
   border: 1px solid var(--borde-dorado);
   color: var(--dorado);
   padding: 4px 8px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.65rem;
   font-weight: 600;
   letter-spacing: 1px;
@@ -1230,7 +1230,7 @@ body {
 .btn-archivo {
   flex: 1;
   padding: 6px 10px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.62rem;
   font-weight: 600;
   letter-spacing: 2px;
@@ -1447,7 +1447,7 @@ body {
   border: 1px solid var(--borde-dorado);
   color: var(--texto-principal);
   padding: 7px 10px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.75rem;
   letter-spacing: 1px;
   outline: none;
@@ -1545,7 +1545,7 @@ body {
 }
 
 .p2p-modo-label {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.85rem;
   font-weight: 700;
   letter-spacing: 3px;
@@ -1553,7 +1553,7 @@ body {
 }
 
 .p2p-modo-desc {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.62rem;
   letter-spacing: 1px;
   color: var(--texto-secundario);
@@ -1576,7 +1576,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.72rem;
   letter-spacing: 2px;
   color: var(--texto-secundario);
@@ -1623,7 +1623,7 @@ body {
   padding: 16px;
   text-align: center;
   cursor: pointer;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.7rem;
   letter-spacing: 2px;
   color: var(--texto-secundario);
@@ -1669,7 +1669,7 @@ body {
 }
 
 .email-sidebar-titulo {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 3px;
@@ -1717,7 +1717,7 @@ body {
 }
 
 .email-item-remitente {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 1px;
@@ -1738,7 +1738,7 @@ body {
 }
 
 .email-item-fecha {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.58rem;
   letter-spacing: 1px;
   color: var(--texto-secundario);
@@ -1753,7 +1753,7 @@ body {
   justify-content: center;
   height: 100%;
   padding: 32px;
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.7rem;
   letter-spacing: 2px;
   color: var(--texto-secundario);
@@ -1766,7 +1766,7 @@ body {
   border: none;
   border-top: 1px solid var(--borde);
   color: var(--texto-secundario);
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.62rem;
   letter-spacing: 2px;
   padding: 12px 16px;
@@ -1819,7 +1819,7 @@ body {
 }
 
 .email-campo-label {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.62rem;
   letter-spacing: 2px;
   color: var(--texto-secundario);
@@ -1917,7 +1917,7 @@ body {
 }
 
 .p2p-btn-grande-desc {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.62rem;
   letter-spacing: 1px;
   color: var(--texto-secundario);
@@ -1950,7 +1950,7 @@ body {
 }
 
 .palabra-numero {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.6rem;
   color: var(--dorado-oscuro);
   letter-spacing: 1px;
@@ -1981,7 +1981,7 @@ body {
 }
 
 .recovery-numero {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.6rem;
   color: var(--texto-secundario);
   min-width: 16px;
@@ -2078,7 +2078,7 @@ body {
 }
 
 .ajuste-label {
-  font-family: 'Rajdhani', sans-serif;
+  font-family: 'Raleway', sans-serif;
   font-size: 0.65rem;
   letter-spacing: 3px;
   color: var(--texto-secundario);
