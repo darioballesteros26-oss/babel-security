@@ -955,6 +955,7 @@ async function abrirCarpetaBabelGuardados(): Promise<void> {
 function irATraduccion(): void {
   mostrarPantalla("traduccion");
   setTimeout(() => iniciarDropZone(), 100);
+  cargarBuzones().catch(() => {});
 }
 
 // Cifra y guarda un archivo arrastrado sin traducirlo (solo cifrado)
