@@ -3083,4 +3083,25 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+
+  // Tauri v2 usa nonces en el CSP; con nonces presentes el navegador ignora
+  // 'unsafe-inline', bloqueando los onclick="fn()" del HTML. Este helper los
+  // convierte a addEventListener en tiempo de ejecución (sin eval).
+  document.querySelectorAll<HTMLElement>("[onclick]").forEach((el) => {
+    const raw = el.getAttribute("onclick") ?? "";
+    el.removeAttribute("onclick");
+    el.addEventListener("click", () => {
+      const m = raw.match(/^([\w$]+)\((.*)\)\s*$/s);
+      if (!m) return;
+      const fn = (window as unknown as Record<string, unknown>)[m[1]];
+      if (typeof fn !== "function") return;
+      const argsRaw = m[2].trim();
+      if (!argsRaw) {
+        (fn as () => void)();
+        return;
+      }
+      const args = argsRaw.split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, ""));
+      (fn as (...a: string[]) => void)(...args);
+    });
+  });
 });
