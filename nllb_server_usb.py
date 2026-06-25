@@ -19,6 +19,13 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 BABEL_TOKEN = os.environ.get("BABEL_NLLB_TOKEN", "")
 MAX_INPUT_CHARS = 10_000
 
+# NLLB usa codes más específicos que los genéricos del frontend
+_LANG_NORM = {
+    "ara_Arab": "arb_Arab",  # Árabe estándar moderno
+    "zho_Hans": "zho_Hans",  # Chino simplificado (ya correcto)
+    "zho_Hant": "zho_Hant",  # Chino tradicional (ya correcto)
+}
+
 app = Flask(__name__)
 CORS(app)
 
@@ -41,8 +48,8 @@ def traducir():
 
     data = request.json or {}
     texto = data.get("texto", "").strip()
-    origen = data.get("origen", "spa_Latn")
-    destino = data.get("destino", "eng_Latn")
+    origen = _LANG_NORM.get(data.get("origen", "spa_Latn"), data.get("origen", "spa_Latn"))
+    destino = _LANG_NORM.get(data.get("destino", "eng_Latn"), data.get("destino", "eng_Latn"))
 
     if not texto:
         return jsonify({"traduccion": ""})
