@@ -579,12 +579,6 @@ async function cambiarCategoriaDiccionario(categoria: string): Promise<void> {
 // Sincroniza el selector del sidebar con el del header
 // ============================================================
 
-function sincronizarSelectorIdioma(valor: string): void {
-  const selectorHeader = document.getElementById("selector-idioma") as HTMLSelectElement;
-  if (selectorHeader) selectorHeader.value = valor;
-}
-
-
 async function cerrarSesion(): Promise<void> {
   limpiarCamposSensibles();
   borrarChat();
@@ -1042,11 +1036,6 @@ async function irAArchivos(): Promise<void> {
   await cargarBuzonesGuardados();
   await cargarArchivosGuardados();
 }
-
-async function irAArchivosGuardados(): Promise<void> {
-  await irAArchivos();
-}
-
 
 // ============================================================
 // BUZONES DE TRADUCCIONES — CREAR, CANCELAR, CONFIRMAR
@@ -1667,14 +1656,6 @@ async function mostrarSelectorBuzon(ruta: string, boton: HTMLElement): Promise<v
 // ============================================================
 // BÚSQUEDA DE ARCHIVOS
 // ============================================================
-
-function filtrarArchivos(texto: string): void {
-  const query = texto.toLowerCase().trim();
-  document.querySelectorAll<HTMLElement>(".archivo-card").forEach(card => {
-    const nombre = card.querySelector(".archivo-card-nombre")?.textContent?.toLowerCase() ?? "";
-    card.style.display = nombre.includes(query) ? "" : "none";
-  });
-}
 
 // ============================================================
 // P2P — FUNCIONES
@@ -2721,7 +2702,6 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).borrarChat = borrarChat;
 (window as any).toggleSidebar = toggleSidebar;
 (window as any).toggleBorradoAutomatico = toggleBorradoAutomatico;
-(window as any).sincronizarSelectorIdioma = sincronizarSelectorIdioma;
 (window as any).cambiarIdioma = cambiarIdioma;
 (window as any).cambiarIdiomaDesdeSelectores = cambiarIdiomaDesdeSelectores;
 (window as any).cambiarCategoriaDiccionario = cambiarCategoriaDiccionario;
@@ -2739,7 +2719,6 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).eliminarSeleccionados = eliminarSeleccionados;
 (window as any).borrarBuzon = borrarBuzon;
 (window as any).mostrarSelectorBuzon = mostrarSelectorBuzon;
-(window as any).filtrarArchivos = filtrarArchivos;
 (window as any).cambiarModoP2P = cambiarModoP2P;
 (window as any).volverDeP2P = volverDeP2P;
 (window as any).iniciarP2P = iniciarP2P;
@@ -2776,7 +2755,6 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).seleccionarPeer = seleccionarPeer;
 (window as any).aceptarSolicitudP2P = aceptarSolicitudP2P;
 (window as any).rechazarSolicitudP2P = rechazarSolicitudP2P;
-(window as any).irAArchivosGuardados = irAArchivosGuardados;
 (window as any).irAArchivos = irAArchivos;
 (window as any).cargarArchivosGuardados = cargarArchivosGuardados;
 (window as any).filtrarArchivosGuardados = filtrarArchivosGuardados;
@@ -2943,51 +2921,16 @@ function cambiarTema(tema: string): void {
   document.documentElement.setAttribute("data-tema", tema);
   localStorage.setItem("babel-tema", tema);
   // Marcar botón activo visualmente
-  ["negro", "marino", "blanco", "blanco-negro"].forEach(t => {
-    const btn = document.getElementById(`tema-${t}`);
+  const _mapaTemasBtn: Record<string, string> = {
+    "negro": "tema-negro",
+    "blanco-dorado": "tema-blanco2",
+    "crema": "tema-crema",
+    "blanco-negro": "tema-blanco-negro",
+  };
+  Object.entries(_mapaTemasBtn).forEach(([t, id]) => {
+    const btn = document.getElementById(id);
     if (btn) btn.style.opacity = t === tema ? "1" : "0.45";
   });
-}
-let timerPassword: ReturnType<typeof setTimeout> | null = null;
-
-function toggleVerPassword(): void {
-  const elPass = document.getElementById("pass-visible");
-  const elMaestra = document.getElementById("maestra-visible");
-  const elUsuario = document.getElementById("usuario-visible");
-  const btn = document.getElementById("btn-ver-pass");
-  if (!elPass || !btn) return;
-
-  const visible = btn.textContent?.trim() === "OCULTAR";
-
-  const ocultarTodo = () => {
-    elPass.textContent = "••••••••";
-    elPass.style.opacity = "0.4";
-    elPass.style.letterSpacing = "4px";
-    if (elUsuario) { elUsuario.textContent = "••••••••"; elUsuario.style.opacity = "0.4"; }
-    if (elMaestra) { elMaestra.textContent = "••••••••••••"; elMaestra.style.opacity = "0.4"; }
-    btn.textContent = "VER";
-    if (timerPassword) { clearTimeout(timerPassword); timerPassword = null; }
-  };
-
-  if (visible) { ocultarTodo(); return; }
-
-  const passGuardada = _sesionPass || "—";
-  const maestraGuardada = _sesionMaestra || "—";
-  const usuarioGuardado = _sesionUsuario || "—";
-
-  elPass.textContent = passGuardada;
-  elPass.style.opacity = "1";
-  elPass.style.letterSpacing = "2px";
-  if (elUsuario) { elUsuario.textContent = usuarioGuardado; elUsuario.style.opacity = "1"; elUsuario.style.letterSpacing = "2px"; }
-  if (elMaestra) {
-    elMaestra.textContent = "••••••••" + maestraGuardada.slice(-4);
-    elMaestra.style.opacity = "1";
-    elMaestra.style.letterSpacing = "2px";
-  }
-  btn.textContent = "OCULTAR";
-
-  if (timerPassword) clearTimeout(timerPassword);
-  timerPassword = setTimeout(ocultarTodo, 5000);
 }
 
 function cargarAjustesGuardados(): void {
@@ -3001,7 +2944,6 @@ function cargarAjustesGuardados(): void {
 // Registrar funciones globales
 (window as any).cambiarTema = cambiarTema;
 (window as any).cambiarIdiomaUI = cambiarIdiomaUI;
-(window as any).toggleVerPassword = toggleVerPassword;
 
 (window as any).enviarMensajeP2P = enviarMensajeP2P;
 (window as any).destruirSesionP2P = destruirSesionP2P;
