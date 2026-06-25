@@ -362,15 +362,14 @@ PY_VER=$("$RESOURCES/python/bin/python3" --version 2>&1)
 T4_END=$(( SECONDS - T4 ))
 echo "└─ $PY_VER listo (${T4_END}s)"
 
-# Eliminar archivos AppleDouble de todo el .app antes de firmar.
-# macOS los crea en exFAT para xattrs; codesign falla si los encuentra
-# y transformers los confunde con .py causando UnicodeDecodeError.
-echo "  Limpiando archivos AppleDouble (._*)..."
+# Firmar el bundle completo DESPUÉS de añadir todos los recursos
+# exFAT crea archivos AppleDouble (._*) al escribir xattrs — hay que limpiarlos antes
+# Y después: codesign también genera ._* al escribir _CodeSignature/ en exFAT
+echo "  Limpiando AppleDouble antes de firmar..."
 find "$APP" -name '._*' -delete 2>/dev/null || true
-
-# Firmar el bundle completo DESPUÉS de añadir todos los recursos y limpiar
-echo "  Firmando bundle..."
-codesign -f -s - --deep "$APP" 2>&1 | grep -v "^$" || true
+echo "  Re-firmando bundle con recursos incluidos..."
+codesign -f -s - --deep "$APP" 2>&1 || echo "  Aviso: codesign salió con error (puede ser normal en exFAT)"
+find "$APP" -name '._*' -delete 2>/dev/null || true
 
 # Quitar quarantine en la máquina de origen.
 # Otros Macs re-aplican quarantine al copiar desde USB — clic derecho → Abrir la 1ª vez.
@@ -463,6 +462,8 @@ else
 fi
 
 # Python: importar los paquetes clave sin cargar el modelo
+# Limpiar ._* del directorio python antes de importar (transformers escanea todos los .py)
+find "$RESOURCES/python" -name '._*' -delete 2>/dev/null || true
 echo "  Comprobando importaciones Python..."
 if "$RESOURCES/python/bin/python3" -c \
      "import flask, ctranslate2, transformers, sentencepiece; print('OK')" \
