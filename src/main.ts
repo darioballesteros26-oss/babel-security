@@ -1264,27 +1264,29 @@ async function seleccionarBuzon(id: string): Promise<void> {
   await cargarBuzones();
 }
 
-// Descifra y exporta un archivo .babel a la carpeta Descargas del usuario
+// Descifra y exporta un archivo .babel — el usuario elige dónde guardarlo
 async function exportarArchivo(ruta: string): Promise<void> {
   try {
     await invoke<string>("exportar_archivo", { ruta });
-    mostrarToast("✓ Exportado a Descargas", false);
+    mostrarToast("✓ Exportado correctamente", false);
   } catch (error) {
-    mostrarToast("Error exportando: " + String(error), true);
+    const msg = String(error);
+    if (msg.includes("cancelada") || msg.includes("cancelado")) return;
+    mostrarToast("Error exportando: " + msg, true);
   }
 }
+// Exporta múltiples archivos con un único folder picker
 async function exportarTodo(): Promise<void> {
   try {
     const archivos = await invoke<any[]>("listar_archivos_guardados", { buzon: "todos" });
     if (archivos.length === 0) { mostrarToast("No hay archivos para exportar", true); return; }
-    let errores = 0;
-    for (const a of archivos) {
-      try { await invoke("exportar_archivo", { ruta: a.ruta }); }
-      catch { errores++; }
-    }
-    mostrarToast(errores === 0 ? `✓ ${archivos.length} archivos exportados a Descargas` : `${errores} errores al exportar`, errores > 0);
-  } catch (e) {
-    mostrarToast("Error: " + String(e), true);
+    const rutas = archivos.map((a: any) => a.ruta);
+    const copiados = await invoke<number>("exportar_archivos_a_carpeta", { rutas });
+    mostrarToast(`✓ ${copiados} archivos exportados`, false);
+  } catch (error) {
+    const msg = String(error);
+    if (msg.includes("cancelada") || msg.includes("cancelado")) return;
+    mostrarToast("Error: " + msg, true);
   }
 }
 (window as any).exportarTodo = exportarTodo;

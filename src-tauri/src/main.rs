@@ -1294,7 +1294,7 @@ fn listar_buzones_guardados(sesion: tauri::State<SesionActiva>) -> Result<Vec<Bu
     Ok(cargar_nodos(std::path::Path::new(&ruta), &subclave_hex))
 }
 // ============================================================
-// COMANDO 13 — Exportar archivo al Finder (Descargas)
+// COMANDO 13 — Exportar archivo al Finder (save panel nativo)
 // ============================================================
 
 #[tauri::command]
@@ -1346,6 +1346,53 @@ fn exportar_archivo(
         .map_err(|e| format!("Error al copiar: {}", e))?;
 
     Ok(destino_path.to_string_lossy().to_string())
+}
+
+// ============================================================
+// COMANDO 13b — Exportar múltiples archivos a una carpeta
+// Muestra UN folder picker nativo; copia todos los archivos ahí.
+// ============================================================
+#[tauri::command]
+fn exportar_archivos_a_carpeta(
+    rutas: Vec<String>,
+    app: tauri::AppHandle,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<u32, String> {
+    let subclave_hex = sesion
+        .subclave_hex
+        .lock()
+        .map_err(|_| "Error leyendo sesión.".to_string())?
+        .clone();
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+
+    use tauri_plugin_dialog::DialogExt;
+    let carpeta_opt = app.dialog().file().blocking_pick_folder();
+    let carpeta = match carpeta_opt {
+        Some(fp) => fp.into_path().map_err(|e| format!("Error procesando carpeta: {}", e))?,
+        None => return Err("Exportación cancelada.".into()),
+    };
+
+    let mut copiados: u32 = 0;
+    for ruta in &rutas {
+        if validar_ruta_en(ruta, archivos_dir())
+            .or_else(|_| validar_ruta_en(ruta, guardados_dir()))
+            .is_err()
+        {
+            continue;
+        }
+        let nombre = match Path::new(ruta).file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => continue,
+        };
+        let destino = carpeta.join(&nombre);
+        if std::fs::copy(ruta, &destino).is_ok() {
+            copiados += 1;
+        }
+    }
+
+    Ok(copiados)
 }
 
 // ============================================================
@@ -1614,6 +1661,15 @@ fn guardar_bytes_sin_traducir(
 
     if nombre_archivo.ends_with(".babel") {
         return Err("Los archivos .babel ya están cifrados.".into());
+    }
+
+    let ext_bytes = std::path::Path::new(&nombre_archivo)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    if !["pdf", "docx", "txt", "png", "jpg", "jpeg"].contains(&ext_bytes.as_str()) {
+        return Err(format!("Tipo de archivo no permitido: .{}", ext_bytes));
     }
 
     if contenido.len() > 100 * 1024 * 1024 {
@@ -2847,6 +2903,7 @@ fn main() {
             crear_buzon,
             listar_buzones,
             exportar_archivo,
+            exportar_archivos_a_carpeta,
             eliminar_archivo,
             eliminar_buzon,
             ver_archivo,
