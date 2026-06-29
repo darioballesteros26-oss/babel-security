@@ -2,11 +2,50 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- ═══════════════════════════════════════════════════════════
+         SANDBOX EXTERIOR — Babel Security macOS
+         ═══════════════════════════════════════════════════════════ -->
+
+    <!-- Activa el contenedor aislado de macOS.
+         Sin esto, todos los demás entitlements de sandbox no tienen efecto.
+         La app queda encerrada en ~/Library/Containers/com.babel.seguridad/ -->
     <key>com.apple.security.app-sandbox</key>
-    <false/>
-    <!-- Full Disk Access: necesario para leer TCC.db y detectar apps con Input Monitoring -->
-    <!-- El usuario debe conceder FDA en Ajustes > Privacidad > Acceso Completo al Disco -->
-    <key>com.apple.security.files.all</key>
     <true/>
+
+    <!-- Permite leer y escribir SOLO los archivos que el usuario selecciona
+         explícitamente mediante un diálogo open/save del sistema (NSOpenPanel / NSSavePanel).
+         Cubre: importar desde pantalla de archivos, importar desde traductor,
+         drag-and-drop hacia la ventana, y exportar desde pantalla de guardado.
+         Sin este permiso los diálogos del Finder no tienen acceso de escritura. -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- Permite conexiones TCP/IP y UDP de SALIDA (rol cliente).
+         Cubre: SMTP (lettre, puertos 587/465) para enviar archivos por email,
+         IMAP (puerto 993) para recibir, y TcpStream::connect() del módulo P2P
+         cuando Babel se conecta a un peer remoto. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Permite escuchar conexiones TCP/IP y UDP de ENTRADA (rol servidor).
+         Cubre: TcpListener::bind() del módulo P2P (puerto de transferencia)
+         y UdpSocket::bind() del sistema de descubrimiento de peers en la red local. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         TODO LO DEMÁS ESTÁ BLOQUEADO POR DEFECTO (no necesita declararse):
+         - Micrófono:   com.apple.security.device.audio-input        → NO
+         - Cámara:      com.apple.security.device.camera             → NO
+         - Contactos:   com.apple.security.personal-information.addressbook → NO
+         - Calendario:  com.apple.security.personal-information.calendars  → NO
+         - Fotos:       com.apple.security.personal-information.photos-library → NO
+         - Localización: com.apple.security.personal-information.location → NO
+         - Bluetooth:   com.apple.security.device.bluetooth           → NO
+         - USB:         com.apple.security.device.usb                → NO
+         - Otras apps:  cross-process acceso                         → NO
+         - Carpetas del sistema: /Library, /etc, TCC.db              → NO
+         - Documentos/Descargas/Escritorio sin diálogo del usuario   → NO
+         ═══════════════════════════════════════════════════════════ -->
 </dict>
 </plist>
