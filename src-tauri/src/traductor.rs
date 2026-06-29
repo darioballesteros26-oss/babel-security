@@ -995,17 +995,22 @@ pub fn cargar_diccionario(
         }
     }
 
-    // 2. Fallback: intentamos importar desde el .json con categorías
+    // 2. Fallback: intentamos importar desde el .json (con categorías o plano)
     if let Ok(contenido) = fs::read_to_string(&ruta_json) {
-        match serde_json::from_str::<HashMap<String, HashMap<String, String>>>(&contenido) {
-            Ok(dict) => {
-                log::info!("[OK] Diccionario importado desde JSON. Cifrando...");
-                let plano = aplanar_categorias(dict, categoria);
-                guardar_diccionario(nombre, &plano, subclave_hex);
-                return plano;
-            }
-            Err(e) => log::error!("[!] JSON de diccionario invalido: {}", e),
+        // Intentar formato categorizado primero
+        if let Ok(dict) = serde_json::from_str::<HashMap<String, HashMap<String, String>>>(&contenido) {
+            log::info!("[OK] Diccionario JSON categorizado importado. Cifrando...");
+            let plano = aplanar_categorias(dict, categoria);
+            guardar_diccionario(nombre, &plano, subclave_hex);
+            return plano;
         }
+        // Fallback: JSON plano (clave → traducción directa sin categorías)
+        if let Ok(plano) = serde_json::from_str::<HashMap<String, String>>(&contenido) {
+            log::info!("[OK] Diccionario JSON plano importado. Cifrando...");
+            guardar_diccionario(nombre, &plano, subclave_hex);
+            return plano;
+        }
+        log::error!("[!] JSON de diccionario con formato no reconocido.");
     }
 
     log::info!("[INIT] Diccionario '{}' nuevo - empezando vacio.", nombre);
@@ -1032,7 +1037,10 @@ static PENDIENTES_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Registra una palabra desconocida en pendientes.babel (cifrado) para traducción futura.
 pub fn registrar_pendiente(palabra: &str, subclave_hex: &str) {
-    let _guard = PENDIENTES_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = PENDIENTES_MUTEX.lock().unwrap_or_else(|e| {
+        log::error!("[!] PENDIENTES_MUTEX poisoned — pendientes.babel puede estar corrupto");
+        e.into_inner()
+    });
     init_dir_dict();
     let ruta = ruta_dict("pendientes.babel");
 

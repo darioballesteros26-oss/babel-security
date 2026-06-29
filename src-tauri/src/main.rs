@@ -121,9 +121,13 @@ impl SesionActiva {
 // independientemente de desde dónde se ejecute el .app.
 
 pub fn babel_dir() -> std::path::PathBuf {
-    let dir = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("Babel");
+    // B1: si dirs::home_dir() falla (p. ej. usuario sin /etc/passwd), probar variables
+    // de entorno antes de caer en el directorio de trabajo actual (inseguro en prod).
+    let home = dirs::home_dir()
+        .or_else(|| std::env::var("HOME").ok().map(std::path::PathBuf::from))
+        .or_else(|| std::env::var("USERPROFILE").ok().map(std::path::PathBuf::from))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let dir = home.join("Babel");
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -341,17 +345,15 @@ fn crear_acceso_bunker(maestra: String, usuario: String, pass: String) -> Result
 // ============================================================
 
 fn incrementar_contador_y_bloquear(sesion: &tauri::State<SesionActiva>) -> Result<(), String> {
-    let ruta_intentos = babel_path("intentos.dat");
-    let disco: u32 = fs::read_to_string(&ruta_intentos)
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0);
+    // HMAC-SHA256 con master.salt: borrar intentos.dat no resetea el valor si hay sesión
+    // activa en RAM, y el HMAC impide modificar el número sin conocer master.salt.
+    let disco: u32 = seguridad::leer_contador_intentos();
     if let Ok(mut c) = sesion.contador.lock() {
         *c = (*c).max(disco) + 1;
-        let _ = fs::write(&ruta_intentos, c.to_string());
+        seguridad::escribir_contador_intentos(*c);
         if *c >= 3 {
             *c = 0;
-            let _ = fs::remove_file(&ruta_intentos);
+            let _ = fs::remove_file(&babel_path("intentos.dat"));
             traductor::activar_bloqueo_disco()
                 .map_err(|e| format!("Error crítico activando bloqueo: {}", e))?;
             return Err("Bloqueado 10 minutos por demasiados intentos fallidos.".into());

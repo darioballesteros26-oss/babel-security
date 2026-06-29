@@ -1348,7 +1348,10 @@ static AUDIT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const AUDIT_MAX_BYTES: u64 = 2 * 1024 * 1024; // 2 MB
 
 fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
-    let _guard = AUDIT_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = AUDIT_MUTEX.lock().unwrap_or_else(|e| {
+        log::error!("[!] AUDIT_MUTEX poisoned — log de auditoría puede estar corrupto");
+        e.into_inner()
+    });
 
     // Rotar si supera el límite — el .old anterior se borra de forma segura (3 pasadas)
     // para que el log cifrado previo no quede recuperable en disco.
@@ -1493,4 +1496,39 @@ pub fn activar_bloqueo() -> Result<(), String> {
     let firma = hex::encode(mac.finalize().into_bytes());
     fs::write(babel_path("bloqueo.tmp"), format!("{}:{}", ts, firma))
         .map_err(|e| format!("activar_bloqueo: no se pudo escribir bloqueo.tmp: {}", e))
+}
+
+// ============================================================
+// HMAC del contador de intentos
+// ============================================================
+// Igual que bloqueo.tmp: formato `{count}:{hmac}` con la misma clave derivada de master.salt.
+// Si el archivo falta, está corrupto o tiene HMAC inválido → se trata como 0 (cero intentos).
+// Eliminar el archivo no resetea el contador en RAM; sólo protege el caso en que la app
+// se reinicia entre intentos y lee del disco.
+
+pub fn leer_contador_intentos() -> u32 {
+    let contenido = match fs::read_to_string(babel_path("intentos.dat")) {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let partes: Vec<&str> = contenido.trim().splitn(2, ':').collect();
+    if partes.len() != 2 { return 0; }
+    let count: u32 = match partes[0].parse() { Ok(n) => n, Err(_) => return 0 };
+    let secret = match clave_hmac_bloqueo() { Some(s) => s, None => return 0 };
+    let mut mac = match <Hmac<Sha256> as KeyInit>::new_from_slice(&secret) {
+        Ok(m) => m, Err(_) => return 0,
+    };
+    mac.update(count.to_string().as_bytes());
+    if hex::encode(mac.finalize().into_bytes()) != partes[1] { return 0; }
+    count
+}
+
+pub fn escribir_contador_intentos(count: u32) {
+    let secret = match clave_hmac_bloqueo() { Some(s) => s, None => return };
+    let mut mac = match <Hmac<Sha256> as KeyInit>::new_from_slice(&secret) {
+        Ok(m) => m, Err(_) => return,
+    };
+    mac.update(count.to_string().as_bytes());
+    let firma = hex::encode(mac.finalize().into_bytes());
+    let _ = fs::write(babel_path("intentos.dat"), format!("{}:{}", count, firma));
 }
