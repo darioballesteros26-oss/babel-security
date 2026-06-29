@@ -5,6 +5,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import DOMPurify from "dompurify";
 
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.tagName === "A") {
+    node.setAttribute("rel", "noopener noreferrer");
+    node.setAttribute("target", "_blank");
+  }
+});
+
 type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos" | "nombre";
 // VARIABLES DE SESIÓN — nunca van a window, se zeroizan al cerrar
 // ============================================================
