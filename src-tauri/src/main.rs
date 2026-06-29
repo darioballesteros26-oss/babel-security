@@ -43,7 +43,18 @@ fn borrar_seguro(ruta: &str) {
             // siendo una limitación del hardware, pero al menos cada pasada se
             // compromete antes de continuar. El contenido ya va cifrado AES-256-GCM.
             for patron in &[vec![0x00u8; tamaño], vec![0xFFu8; tamaño], vec![0xAAu8; tamaño]] {
-                if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(ruta) {
+                // O_NOFOLLOW previene TOCTOU: si la ruta se convirtió en symlink
+                // entre symlink_metadata y open, el kernel rechaza la apertura.
+                #[cfg(unix)]
+                let open_result = {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    #[cfg(target_os = "macos")] const O_NOFOLLOW: i32 = 0x100;
+                    #[cfg(not(target_os = "macos"))] const O_NOFOLLOW: i32 = 0x20000;
+                    std::fs::OpenOptions::new().write(true).custom_flags(O_NOFOLLOW).open(ruta)
+                };
+                #[cfg(not(unix))]
+                let open_result = std::fs::OpenOptions::new().write(true).open(ruta);
+                if let Ok(mut f) = open_result {
                     use std::io::Write;
                     let _ = f.write_all(patron);
                     let _ = f.sync_all();
@@ -975,6 +986,9 @@ fn cambiar_idioma(idioma: String, sesion: tauri::State<SesionActiva>) -> Result<
         .lock()
         .map_err(|_| "Error leyendo sesión.".to_string())?
         .clone();
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
 
     if let Ok(mut i) = sesion.idioma.lock() {
         *i = idioma.clone();
@@ -1199,10 +1213,22 @@ fn guardar_nodos(
 }
 
 fn recopilar_ids(nodos: &[BuzonNodo], id: &str) -> Vec<String> {
+    let mut visitados = std::collections::HashSet::new();
+    recopilar_ids_rec(nodos, id, &mut visitados)
+}
+
+fn recopilar_ids_rec(
+    nodos: &[BuzonNodo],
+    id: &str,
+    visitados: &mut std::collections::HashSet<String>,
+) -> Vec<String> {
+    if !visitados.insert(id.to_string()) {
+        return vec![];
+    }
     let mut lista = vec![id.to_string()];
     for n in nodos {
         if n.parent.as_deref() == Some(id) {
-            lista.extend(recopilar_ids(nodos, &n.id));
+            lista.extend(recopilar_ids_rec(nodos, &n.id, visitados));
         }
     }
     lista
@@ -1505,7 +1531,11 @@ fn renombrar_archivo(
         .map_err(|_| "Error sesión.".to_string())?
         .clone();
 
-    let es_guardado = ruta.contains("/guardados/");
+    let guardados_canon = guardados_dir().canonicalize().unwrap_or_else(|_| guardados_dir());
+    let ruta_canon_local = std::path::Path::new(&ruta)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::PathBuf::from(&ruta));
+    let es_guardado = ruta_canon_local.starts_with(&guardados_canon);
     let dir = if es_guardado {
         guardados_dir()
     } else {
@@ -2375,7 +2405,7 @@ fn guardar_config_email_tauri(
         remitentes_autorizados,
     };
 
-    traductor::guardar_config_email(&creds, &subclave_hex);
+    traductor::guardar_config_email(&creds, &subclave_hex)?;
     Ok(())
 }
 
@@ -2453,30 +2483,33 @@ fn enviar_bytes_cifrados_tauri(
     let ruta_temp = tmp_path(&format!("email_{}", nombre_solo));
     fs::write(&ruta_temp, &bytes).map_err(|e| format!("Error guardando temporal: {}", e))?;
 
-    let creds = traductor::cargar_config_email(&subclave_hex).ok_or_else(|| {
-        "No hay configuración de email guardada. Configura SMTP primero.".to_string()
-    })?;
+    // Closure garantiza borrar_seguro incluso si cargar_config_email devuelve None
+    let resultado = (|| -> Result<(), String> {
+        let creds = traductor::cargar_config_email(&subclave_hex).ok_or_else(|| {
+            "No hay configuración de email guardada. Configura SMTP primero.".to_string()
+        })?;
 
-    let resultado = traductor::enviar_archivo_descifrado(
-        &ruta_temp,
-        &destinatario,
-        &asunto,
-        &cuerpo,
-        &creds.smtp_servidor,
-        &creds.usuario,
-        &creds.password,
-        &subclave_hex,
-    )
-    .map_err(|e| format!("Error enviando email: {}", e));
+        traductor::enviar_archivo_descifrado(
+            &ruta_temp,
+            &destinatario,
+            &asunto,
+            &cuerpo,
+            &creds.smtp_servidor,
+            &creds.usuario,
+            &creds.password,
+            &subclave_hex,
+        )
+        .map_err(|e| format!("Error enviando email: {}", e))?;
 
-    if resultado.is_ok() {
         let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         let evento = format!(
             "[{}] AVISO: documento descifrado enviado por email a {}",
             ts, destinatario
         );
         traductor::registrar_evento(&evento, &subclave_hex);
-    }
+        Ok(())
+    })();
+
     borrar_seguro(&ruta_temp);
     resultado
 }
@@ -2629,9 +2662,9 @@ fn iniciar_servidor_p2p(sesion: tauri::State<SesionActiva>) -> Result<String, St
     let nombre = format!("Babel-{}", hostname);
     babel_p2p::DescubrimientoRed::iniciar_servidor(nombre.clone());
 
-    let clave = subclave_hex.to_string();
+    let clave = Zeroizing::new(subclave_hex.to_string());
     std::thread::spawn(move || {
-        let servidor = babel_p2p::ServidorP2P::nuevo(&clave, &id_usuario);
+        let servidor = babel_p2p::ServidorP2P::nuevo(clave.as_str(), &id_usuario);
         if let Err(e) = servidor.iniciar() {
             log::error!("[P2P] Error servidor: {}", e);
         }

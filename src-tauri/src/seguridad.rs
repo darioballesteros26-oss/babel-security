@@ -1362,8 +1362,9 @@ fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
             use std::io::Write;
             if let Ok(mut f) = fs::OpenOptions::new().append(true).create(true).open(ruta) {
                 let len = (cifrado.len() as u32).to_le_bytes();
-                let _ = f.write_all(&len);
-                let _ = f.write_all(&cifrado);
+                if let Err(e) = f.write_all(&len).and_then(|_| f.write_all(&cifrado)) {
+                    log::error!("[!] Fallo escribiendo evento de auditoría en {}: {}", ruta, e);
+                }
             }
         }
         Err(e) => {

@@ -149,7 +149,7 @@ pub struct PeerDescubierto {
 pub struct GestorCertificados;
 
 impl GestorCertificados {
-    pub fn generar_o_cargar() -> Result<(Vec<u8>, Vec<u8>), String> {
+    pub fn generar_o_cargar() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>), String> {
         let _ = fs::create_dir_all(p2p_dir());
         let _ = fs::create_dir_all(peers_dir());
 
@@ -165,10 +165,10 @@ impl GestorCertificados {
         let cert_der = cert
             .serialize_der()
             .map_err(|e| format!("Error serializando cert: {}", e))?;
-        let clave_der = cert.serialize_private_key_der();
+        let clave_der = Zeroizing::new(cert.serialize_private_key_der());
 
         fs::write(ruta_cert(), &cert_der).map_err(|e| format!("Error guardando cert: {}", e))?;
-        fs::write(ruta_clave(), &clave_der).map_err(|e| format!("Error guardando clave: {}", e))?;
+        fs::write(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -181,12 +181,12 @@ impl GestorCertificados {
         Ok((cert_der, clave_der))
     }
 
-    fn cargar() -> Result<(Vec<u8>, Vec<u8>), String> {
+    fn cargar() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>), String> {
         let cert = fs::read(ruta_cert()).map_err(|e| format!("Error leyendo cert: {}", e))?;
         let clave = Zeroizing::new(
             fs::read(ruta_clave()).map_err(|e| format!("Error leyendo clave: {}", e))?,
         );
-        Ok((cert, clave.to_vec()))
+        Ok((cert, clave))
     }
 }
 
@@ -286,7 +286,16 @@ impl DescubrimientoRed {
         if partes.len() != 2 {
             return None;
         }
-        let nombre = partes[0].to_string();
+        // Sanitizar nombre: solo alfanumérico, guiones y puntos; max 64 chars
+        // Previene inyección de caracteres en SNI y en el log de auditoría
+        let nombre: String = partes[0]
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '.')
+            .take(64)
+            .collect();
+        if nombre.is_empty() {
+            return None;
+        }
         let puerto: u16 = partes[1].trim().parse().ok()?;
         Some(PeerDescubierto {
             ip: origen.ip().to_string(),
@@ -497,8 +506,29 @@ impl rustls::client::danger::ServerCertVerifier for VerificadorPinning {
 // VERIFICADOR CLIENTE (servidor → cliente): mTLS
 // ============================================================
 // El servidor requiere que el cliente presente un certificado.
-// Acepta cualquier cert autofirmado válido — la autenticación real
-// es que el cliente tiene la clave privada correspondiente (mTLS).
+// TOFU: acepta el primer peer que se conecta y registra su fingerprint.
+// Conexiones posteriores se rechazan si el fingerprint no coincide.
+// Thread-safe: CERTS_AUTORIZADOS_MUTEX serializa acceso al archivo.
+
+static CERTS_AUTORIZADOS_MUTEX: Mutex<()> = Mutex::new(());
+
+fn ruta_certs_autorizados() -> std::path::PathBuf {
+    p2p_dir().join("certs_autorizados.dat")
+}
+
+fn cargar_certs_autorizados() -> std::collections::HashSet<String> {
+    fs::read_to_string(ruta_certs_autorizados())
+        .unwrap_or_default()
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+fn guardar_certs_autorizados(certs: &std::collections::HashSet<String>) {
+    let contenido: String = certs.iter().cloned().collect::<Vec<_>>().join("\n");
+    let _ = fs::write(ruta_certs_autorizados(), contenido);
+}
 
 #[derive(Debug)]
 struct VerificadorClienteP2P;
@@ -517,7 +547,18 @@ impl rustls::server::danger::ClientCertVerifier for VerificadorClienteP2P {
         if end_entity.as_ref().is_empty() {
             return Err(rustls::Error::NoCertificatesPresented);
         }
-        Ok(rustls::server::danger::ClientCertVerified::assertion())
+        let fp = fingerprint_cert(end_entity);
+        let _guard = CERTS_AUTORIZADOS_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let mut autorizados = cargar_certs_autorizados();
+        if autorizados.is_empty() || autorizados.contains(&fp) {
+            // TOFU: primer peer o fingerprint ya registrado — aceptar y persistir
+            autorizados.insert(fp);
+            guardar_certs_autorizados(&autorizados);
+            Ok(rustls::server::danger::ClientCertVerified::assertion())
+        } else {
+            log::warn!("[P2P] Certificado cliente rechazado — fingerprint no autorizado.");
+            Err(rustls::Error::General("Certificado P2P no autorizado".into()))
+        }
     }
 
     fn verify_tls12_signature(
@@ -586,7 +627,13 @@ impl ServidorP2P {
 
         for conexion in listener.incoming() {
             let stream = match conexion {
-                Ok(s) => s,
+                Ok(s) => {
+                    // Timeout de 30s — previene DoS por peers que abren conexión y no envían
+                    if let Err(e) = s.set_read_timeout(Some(Duration::from_secs(30))) {
+                        log::warn!("[P2P] No se pudo establecer read_timeout: {}", e);
+                    }
+                    s
+                }
                 Err(e) => {
                     log::error!("[P2P] Error de red: {}", e);
                     continue;
@@ -712,7 +759,7 @@ impl ServidorP2P {
     fn construir_config_servidor(&self) -> Result<ServerConfig, String> {
         let (cert_der, clave_der) = GestorCertificados::generar_o_cargar()?;
         let cert = CertificateDer::from(cert_der);
-        let clave = PrivateKeyDer::Pkcs8(clave_der.into());
+        let clave = PrivateKeyDer::Pkcs8(clave_der.to_vec().into());
 
         // mTLS: el servidor requiere que el cliente presente un certificado válido.
         let config = ServerConfig::builder()
@@ -834,7 +881,7 @@ impl ClienteP2P {
     fn construir_config_cliente(&self, peer_ip: &str) -> Result<ClientConfig, String> {
         let (cert_der, clave_der) = GestorCertificados::generar_o_cargar()?;
         let cert = CertificateDer::from(cert_der);
-        let clave = PrivateKeyDer::Pkcs8(clave_der.into());
+        let clave = PrivateKeyDer::Pkcs8(clave_der.to_vec().into());
 
         // mTLS: el cliente presenta su certificado al servidor
         let config = ClientConfig::builder()

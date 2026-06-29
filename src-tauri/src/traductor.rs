@@ -339,23 +339,27 @@ pub fn motor_atomico(
     dict: &HashMap<String, String>,
     subclave_hex: &str,
 ) -> (String, usize) {
-    let mut resultado = texto.to_string();
+    let mut palabras_traducidas: Vec<String> = Vec::new();
     let mut palabras_desconocidas: Vec<String> = Vec::new();
 
     for palabra in texto.split_whitespace() {
         let (raiz, _signo) = separar_signo(palabra);
         let clave = raiz.to_lowercase();
         if let Some(traduccion) = dict.get(&clave) {
-            resultado = resultado.replace(raiz, traduccion);
-        } else if clave.chars().all(|c| c.is_alphabetic()) && clave.len() > 3 {
-            // Palabra alfabética de más de 3 letras sin traducción conocida
-            if !palabras_desconocidas.contains(&clave) {
-                palabras_desconocidas.push(clave);
+            // Traducción palabra a palabra — evita replace() global que sustituye subcadenas
+            palabras_traducidas.push(traduccion.clone());
+        } else {
+            palabras_traducidas.push(palabra.to_string());
+            if clave.chars().all(|c| c.is_alphabetic()) && clave.len() > 3 {
+                if !palabras_desconocidas.contains(&clave) {
+                    palabras_desconocidas.push(clave);
+                }
             }
         }
     }
 
-    // Registramos todas las palabras desconocidas en pendientes.babel sin interrumpir
+    let resultado = palabras_traducidas.join(" ");
+
     for palabra in &palabras_desconocidas {
         registrar_pendiente(palabra, subclave_hex);
     }
@@ -650,6 +654,11 @@ fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
         .unwrap_or(false);
 
     if !ok {
+        if std::path::Path::new(&tmp_img).exists() {
+            let tam = std::fs::metadata(&tmp_img).map(|m| m.len() as usize).unwrap_or(0);
+            if tam > 0 { let _ = fs::write(&tmp_img, vec![0u8; tam]); }
+            let _ = fs::remove_file(&tmp_img);
+        }
         return String::new();
     }
 
@@ -1004,8 +1013,11 @@ pub fn guardar_diccionario(nombre: &str, dict: &HashMap<String, String>, subclav
     }
 }
 
+static PENDIENTES_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Registra una palabra desconocida en pendientes.babel (cifrado) para traducción futura.
 pub fn registrar_pendiente(palabra: &str, subclave_hex: &str) {
+    let _guard = PENDIENTES_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     init_dir_dict();
     let ruta = ruta_dict("pendientes.babel");
 
@@ -1030,12 +1042,14 @@ pub fn registrar_pendiente(palabra: &str, subclave_hex: &str) {
 }
 
 /// Guarda las credenciales de email cifradas en ~/Babel/config.babel
-pub fn guardar_config_email(creds: &CredencialesEmail, subclave_hex: &str) {
-    if let Ok(json) = serde_json::to_string(&creds) {
-        if let Ok(cifrado) = seguridad::blindar_documento(&json, subclave_hex) {
-            let _ = fs::write(crate::babel_dir().join("config.babel"), cifrado);
-        }
-    }
+pub fn guardar_config_email(creds: &CredencialesEmail, subclave_hex: &str) -> Result<(), String> {
+    let json = serde_json::to_string(&creds)
+        .map_err(|e| format!("Error serializando config de email: {}", e))?;
+    let cifrado = seguridad::blindar_documento(&json, subclave_hex)
+        .map_err(|e| format!("Error cifrando config de email: {}", e))?;
+    fs::write(crate::babel_dir().join("config.babel"), cifrado)
+        .map_err(|e| format!("Error guardando config de email: {}", e))?;
+    Ok(())
 }
 
 /// Carga y descifra las credenciales de email desde ~/Babel/config.babel
@@ -1066,34 +1080,28 @@ fn validar_campo_imap(valor: &str, _campo: &str) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-/// Conecta por IMAP y devuelve los últimos 20 emails de la bandeja.
-/// Usa ENVELOPE para no descargar el cuerpo - solo metadatos.
-pub fn obtener_emails(
+fn obtener_emails_interno(
     imap_dominio: &str,
     usuario: &str,
     password: &str,
-) -> Result<Vec<EmailResumen>, Box<dyn std::error::Error>> {
-    validar_campo_imap(imap_dominio, "imap_dominio")?;
-    validar_campo_imap(usuario, "usuario")?;
-    validar_campo_imap(password, "password")?;
-
+) -> Result<Vec<EmailResumen>, String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
 
     let mut sesion = cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?;
 
-    sesion.select("INBOX")?;
+    sesion.select("INBOX").map_err(|e| e.to_string())?;
 
     // UIDs permanentes — no cambian al borrar emails (a diferencia de seq numbers)
-    let todos: Vec<u32> = sesion.uid_search("ALL")?.into_iter().collect();
+    let todos: Vec<u32> = sesion.uid_search("ALL").map_err(|e| e.to_string())?.into_iter().collect();
 
     let mut ids: Vec<u32> = todos;
     ids.sort_unstable();
     ids.reverse();
     ids.truncate(20);
     if ids.is_empty() {
-        sesion.logout()?;
+        let _ = sesion.logout();
         return Ok(vec![]);
     }
 
@@ -1103,7 +1111,7 @@ pub fn obtener_emails(
         .collect::<Vec<_>>()
         .join(",");
 
-    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS)")?;
+    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS)").map_err(|e| e.to_string())?;
 
     let mut emails: Vec<EmailResumen> = Vec::new();
 
@@ -1171,8 +1179,27 @@ pub fn obtener_emails(
         });
     }
 
-    sesion.logout()?;
+    let _ = sesion.logout();
     Ok(emails)
+}
+
+/// Wrapper con timeout de 30s para obtener_emails_interno.
+pub fn obtener_emails(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+) -> Result<Vec<EmailResumen>, Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    validar_campo_imap(password, "password")?;
+    let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<EmailResumen>, String>>();
+    let dom = imap_dominio.to_string();
+    let usr = usuario.to_string();
+    let pwd = password.to_string();
+    std::thread::spawn(move || { let _ = tx.send(obtener_emails_interno(&dom, &usr, &pwd)); });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .map_err(|_| "Timeout de conexión IMAP (30s)".to_string())?
+        .map_err(|e| e.into())
 }
 
 // ============================================================
@@ -1188,32 +1215,26 @@ pub struct EmailCompletoRust {
     pub adjuntos: Vec<String>,
 }
 
-/// Descarga el cuerpo completo de un email por su ID IMAP.
-/// Parsea remitente, asunto, fecha, cuerpo de texto y nombres de adjuntos.
-pub fn obtener_email_completo(
+fn obtener_email_completo_interno(
     imap_dominio: &str,
     usuario: &str,
     password: &str,
     id: u32,
-) -> Result<EmailCompletoRust, Box<dyn std::error::Error>> {
-    validar_campo_imap(imap_dominio, "imap_dominio")?;
-    validar_campo_imap(usuario, "usuario")?;
-    validar_campo_imap(password, "password")?;
-
+) -> Result<EmailCompletoRust, String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
 
     let mut sesion = cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?;
 
-    sesion.select("INBOX")?;
+    sesion.select("INBOX").map_err(|e| e.to_string())?;
 
-    let fetch = sesion.uid_fetch(id.to_string(), "(RFC822)")?;
+    let fetch = sesion.uid_fetch(id.to_string(), "(RFC822)").map_err(|e| e.to_string())?;
 
     let msg = fetch.iter().next().ok_or("Email no encontrado")?;
 
     let cuerpo_raw = msg.body().unwrap_or(&[]);
-    let email_parseado = mailparse::parse_mail(cuerpo_raw)?;
+    let email_parseado = mailparse::parse_mail(cuerpo_raw).map_err(|e| e.to_string())?;
 
     // Remitente
     let remitente = email_parseado
@@ -1278,7 +1299,7 @@ pub fn obtener_email_completo(
         }
     }
 
-    sesion.logout()?;
+    let _ = sesion.logout();
 
     Ok(EmailCompletoRust {
         id,
@@ -1288,6 +1309,30 @@ pub fn obtener_email_completo(
         cuerpo,
         adjuntos,
     })
+}
+
+pub fn obtener_email_completo(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    id: u32,
+) -> Result<EmailCompletoRust, Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    validar_campo_imap(password, "password")?;
+
+    let dom = imap_dominio.to_string();
+    let usr = usuario.to_string();
+    let pwd = password.to_string();
+
+    let (tx, rx) = std::sync::mpsc::channel::<Result<EmailCompletoRust, String>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(obtener_email_completo_interno(&dom, &usr, &pwd, id));
+    });
+
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .map_err(|_| "Timeout de conexión IMAP (30s)".to_string())?
+        .map_err(|e| e.into())
 }
 
 // ============================================================

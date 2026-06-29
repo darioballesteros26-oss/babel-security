@@ -58,25 +58,26 @@ function renderArbolBuzones(
     const indent = 8 + profundidad * 14;
     const tieneHijos = nodos.some(h => h.parent === n.id);
     const colapsado = buzonesColapsados.has(n.id);
+    const safeId = escapeHTML(n.id).replace(/'/g, "&#039;");
 
     const drop = sistema === "trad"
-      ? `ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="soltarEnBuzon(event,'${n.id}')"`
+      ? `ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="soltarEnBuzon(event,'${safeId}')"`
       : "";
     const onSel = sistema === "trad"
-      ? `seleccionarBuzon('${n.id}')`
-      : `seleccionarBuzonGuardados('${n.id}')`;
+      ? `seleccionarBuzon('${safeId}')`
+      : `seleccionarBuzonGuardados('${safeId}')`;
     const onMas = sistema === "trad"
-      ? `event.stopPropagation();mostrarInputBuzon('${n.id}')`
-      : `event.stopPropagation();mostrarInputBuzonGuardado('${n.id}')`;
+      ? `event.stopPropagation();mostrarInputBuzon('${safeId}')`
+      : `event.stopPropagation();mostrarInputBuzonGuardado('${safeId}')`;
     const onRen = sistema === "trad"
-      ? `event.stopPropagation();iniciarRenombrado('${n.id}','${escapeHTML(n.nombre).replace(/'/g, "&#039;")}')`
-      : `event.stopPropagation();iniciarRenombradoGuardado('${n.id}','${escapeHTML(n.nombre).replace(/'/g, "&#039;")}')`;
+      ? `event.stopPropagation();iniciarRenombrado('${safeId}','${escapeHTML(n.nombre).replace(/'/g, "&#039;")}')`
+      : `event.stopPropagation();iniciarRenombradoGuardado('${safeId}','${escapeHTML(n.nombre).replace(/'/g, "&#039;")}')`;
     const onDel = sistema === "trad"
-      ? `event.stopPropagation();borrarBuzon('${n.id}')`
-      : `event.stopPropagation();borrarBuzonGuardado('${n.id}')`;
+      ? `event.stopPropagation();borrarBuzon('${safeId}')`
+      : `event.stopPropagation();borrarBuzonGuardado('${safeId}')`;
 
     const toggleIcon = tieneHijos
-      ? `<span onclick="event.stopPropagation();toggleColapso('${n.id}','${sistema}')"
+      ? `<span onclick="event.stopPropagation();toggleColapso('${safeId}','${sistema}')"
            style="cursor:pointer;font-size:0.6rem;opacity:0.6;padding:0 3px;transition:transform 0.15s;"
            title="${colapsado ? "Expandir" : "Colapsar"}">${colapsado ? "▶" : "▼"}</span>`
       : `<span style="display:inline-block;width:14px;"></span>`;
@@ -264,6 +265,7 @@ function borrarChat(): void {
 // ============================================================
 
 window.addEventListener("DOMContentLoaded", async () => {
+  invoke("borrar_html_frase").catch(() => {});
   mostrarPantalla("carga");
 
   // Evento Rust: servidor USB listo → toast
@@ -588,7 +590,7 @@ async function cerrarSesion(): Promise<void> {
   _sesionMaestra = "0".repeat(_sesionMaestra.length); _sesionMaestra = "";
   _sesionUsuario = "0".repeat(_sesionUsuario.length); _sesionUsuario = "";
   desactivarTimerInactividad();
-  await invoke("cerrar_sesion_rust");
+  try { await invoke("cerrar_sesion_rust"); } catch { /* continúa cerrando aunque falle */ }
   limpiarCamposSensibles();
   window.location.reload();
 }
@@ -1146,7 +1148,8 @@ async function cargarBuzones(): Promise<void> {
 
 async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent): Promise<void> {
   document.querySelectorAll(".selector-buzon-popup").forEach(el => el.remove());
-  const nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados");
+  let nodos: BuzonNodo[];
+  try { nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados"); } catch (e) { mostrarToast("Error cargando buzones: " + String(e), true); return; }
   const popup = document.createElement("div");
   popup.className = "selector-buzon-popup";
   popup.style.cssText = `position:fixed;background:#0d0d0d;border:1px solid var(--dorado);border-radius:3px;z-index:999;min-width:160px;box-shadow:0 4px 20px rgba(0,0,0,0.5);max-height:60vh;overflow-y:auto;`;
@@ -1599,7 +1602,8 @@ function cerrarVisorParalelo(): void {
 
 async function mostrarSelectorBuzon(ruta: string, boton: HTMLElement): Promise<void> {
   document.querySelectorAll(".selector-buzon-popup").forEach(el => el.remove());
-  const nodos = await invoke<BuzonNodo[]>("listar_buzones");
+  let nodos: BuzonNodo[];
+  try { nodos = await invoke<BuzonNodo[]>("listar_buzones"); } catch (e) { mostrarToast("Error cargando buzones: " + String(e), true); return; }
   const popup = document.createElement("div");
   popup.className = "selector-buzon-popup";
   popup.style.cssText = `position:absolute;background:#0d0d0d;border:1px solid var(--dorado);border-radius:3px;z-index:999;min-width:140px;box-shadow:0 4px 20px rgba(0,0,0,0.5);max-height:60vh;overflow-y:auto;`;
@@ -1883,7 +1887,7 @@ async function enviarMensajeP2P(): Promise<void> {
         ip: ipP2PConectada,
         mensaje: texto
       });
-    } catch (_) { }
+    } catch (e) { mostrarToast("Error enviando mensaje P2P: " + String(e), true); }
   }
 }
 
@@ -2167,10 +2171,9 @@ async function cargarBandejaEmail(): Promise<void> {
 // Convierte fecha RFC 2822 a formato legible: hora si es hoy, día/mes si es anterior
 function formatearFechaEmail(fecha: string): string {
   if (!fecha) return "";
-  // Intentamos parsear la fecha del email (formato RFC 2822)
   try {
     const d = new Date(fecha);
-    if (isNaN(d.getTime())) return fecha.substring(0, 16);
+    if (isNaN(d.getTime())) return escapeHTML(fecha.substring(0, 16));
     const hoy = new Date();
     const esHoy = d.toDateString() === hoy.toDateString();
     if (esHoy) {
@@ -2178,7 +2181,7 @@ function formatearFechaEmail(fecha: string): string {
     }
     return d.toLocaleDateString("es-ES", { day: "2-digit", month: "short" });
   } catch {
-    return fecha.substring(0, 16);
+    return escapeHTML(fecha.substring(0, 16));
   }
 }
 function renderizarCuerpoEmail(contenedor: HTMLElement, cuerpo: string): void {
