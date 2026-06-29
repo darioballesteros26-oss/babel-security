@@ -599,6 +599,9 @@ async function cerrarSesion(): Promise<void> {
   desactivarTimerInactividad();
   try { await invoke("cerrar_sesion_rust"); } catch { /* continúa cerrando aunque falle */ }
   limpiarCamposSensibles();
+  localStorage.removeItem("babel-nombre-display");
+  localStorage.removeItem("babel-buzon-activo");
+  localStorage.removeItem("babel-buzon-activo-g");
   window.location.reload();
 }
 
