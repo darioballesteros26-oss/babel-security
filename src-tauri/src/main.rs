@@ -2074,7 +2074,9 @@ fn generar_frase_recuperacion(
     // antes de que haya login. La seguridad viene de requerir la maestra válida.
     let palabras = generar_palabras_recuperacion();
 
-    let recovery_key = seguridad::derivar_clave_recuperacion(&palabras)?;
+    let salt_maestra = traductor::cargar_o_crear_salt();
+    let recovery_salt = seguridad::derivar_recovery_salt_v2(&salt_maestra);
+    let recovery_key = seguridad::derivar_clave_recuperacion_v2(&palabras, &recovery_salt)?;
     let recovery_key_hex = Zeroizing::new(hex::encode(recovery_key.as_ref()));
     let mut datos_recovery = serde_json::json!({"m": maestra, "p": pass_usuario}).to_string();
     let cifrado_recuperacion = seguridad::blindar_documento(&datos_recovery, &recovery_key_hex)
@@ -2127,8 +2129,11 @@ fn recuperar_con_frase(
         return Err("Una o más palabras no pertenecen al diccionario BIP39.".into());
     }
 
-    let recovery_key = seguridad::derivar_clave_recuperacion(&palabras)?;
-    let recovery_key_hex = Zeroizing::new(hex::encode(recovery_key.as_ref()));
+    // v2 (actual): salt por instalación derivada de master.salt
+    let salt_maestra = traductor::cargar_o_crear_salt();
+    let recovery_salt_v2 = seguridad::derivar_recovery_salt_v2(&salt_maestra);
+    let recovery_key_v2 = seguridad::derivar_clave_recuperacion_v2(&palabras, &recovery_salt_v2)?;
+    let recovery_key_v2_hex = Zeroizing::new(hex::encode(recovery_key_v2.as_ref()));
 
     let cifrado = fs::read(&babel_path("recovery.babel")).map_err(|_| {
         "No se encontró archivo de recuperación. ¿Generaste la frase al crear el búnker?"
@@ -2136,26 +2141,41 @@ fn recuperar_con_frase(
     })?;
 
     let mut datos =
-        match seguridad::descifrar_documento(cifrado.clone(), &recovery_key_hex) {
+        match seguridad::descifrar_documento(cifrado.clone(), &recovery_key_v2_hex) {
             Ok(d) => d,
             Err(_) => {
-                // Fallback: esquema pre-C1 (HKDF sin Argon2id) para recovery.babel antiguos
-                let key_v0 = seguridad::derivar_clave_recuperacion_v0(&palabras)
+                // Fallback v1: salt estática global (búnkers creados antes de esta versión)
+                let key_v1 = seguridad::derivar_clave_recuperacion(&palabras)
                     .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
-                let key_v0_hex = Zeroizing::new(hex::encode(key_v0.as_ref()));
-                match seguridad::descifrar_documento(cifrado, &key_v0_hex) {
+                let key_v1_hex = Zeroizing::new(hex::encode(key_v1.as_ref()));
+                match seguridad::descifrar_documento(cifrado.clone(), &key_v1_hex) {
                     Ok(d) => {
-                        // Migración automática: re-cifrar con esquema nuevo
-                        if let Ok(nuevo) = seguridad::blindar_documento(&d, &recovery_key_hex) {
+                        // Migración automática a v2
+                        if let Ok(nuevo) = seguridad::blindar_documento(&d, &recovery_key_v2_hex) {
                             let _ = fs::write(babel_path("recovery.babel"), nuevo);
                         }
                         d
                     }
                     Err(_) => {
-                        incrementar_contador_y_bloquear(&sesion)?;
-                        return Err(
-                            "Frase incorrecta - no corresponde a este bunker.".to_string()
-                        );
+                        // Fallback v0: HKDF sin Argon2id (búnkers muy antiguos, pre-C1)
+                        let key_v0 = seguridad::derivar_clave_recuperacion_v0(&palabras)
+                            .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
+                        let key_v0_hex = Zeroizing::new(hex::encode(key_v0.as_ref()));
+                        match seguridad::descifrar_documento(cifrado, &key_v0_hex) {
+                            Ok(d) => {
+                                // Migración automática a v2
+                                if let Ok(nuevo) = seguridad::blindar_documento(&d, &recovery_key_v2_hex) {
+                                    let _ = fs::write(babel_path("recovery.babel"), nuevo);
+                                }
+                                d
+                            }
+                            Err(_) => {
+                                incrementar_contador_y_bloquear(&sesion)?;
+                                return Err(
+                                    "Frase incorrecta - no corresponde a este bunker.".to_string()
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -2708,7 +2728,22 @@ fn guardar_html_frase(html: String) -> Result<String, String> {
         return Err("HTML de frase demasiado grande.".into());
     }
     let lower = html.to_lowercase();
-    if lower.contains("<script") || lower.contains("javascript:") || lower.contains("onerror") {
+    let etiquetas_peligrosas = [
+        "<script", "<iframe", "<embed", "<object", "<form",
+        "<link", "<meta", "<base", "<svg", "<math",
+    ];
+    let protocolos_peligrosos = ["javascript:", "vbscript:", "data:text/html"];
+    let eventos_inline = [
+        "onerror", "onload", "onclick", "onmouseover", "onmouseout",
+        "onfocus", "onblur", "onchange", "onsubmit", "onkeydown", "onkeyup",
+        "onkeypress", "oninput", "onmouseenter", "onmouseleave", "ondrag",
+        "ondrop", "onpaste", "oncopy", "oncontextmenu",
+    ];
+    let tiene_contenido_peligroso =
+        etiquetas_peligrosas.iter().any(|t| lower.contains(t))
+        || protocolos_peligrosos.iter().any(|p| lower.contains(p))
+        || eventos_inline.iter().any(|e| lower.contains(e));
+    if tiene_contenido_peligroso {
         return Err("HTML de frase contiene contenido no permitido.".into());
     }
     let ruta = tmp_path("frase_recuperacion.html");

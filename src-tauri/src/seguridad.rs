@@ -500,21 +500,37 @@ impl AntiKeylogger {
                     firma, nombre, pid
                 ),
             ),
-            // Sin firma y sin ruta — proceso fantasma
-            None if exe.as_os_str().is_empty() => (
-                true,
-                format!("Proceso sospechoso sin ruta accesible: {} (PID {})", nombre, pid),
-            ),
-            // Sin firma válida — máxima sospecha
-            None => (
-                true,
-                format!(
-                    "Proceso sospechoso SIN FIRMA VÁLIDA: {} (PID {}) en {}",
-                    nombre,
-                    pid,
-                    exe.display()
-                ),
-            ),
+            // Sin ruta — proceso de kernel o fantasma
+            // En sandbox no podemos confirmar amenaza por los mismos motivos que el caso None
+            None if exe.as_os_str().is_empty() => {
+                let en_sandbox = std::env::var("APP_SANDBOX_CONTAINER_ID").is_ok();
+                (
+                    !en_sandbox,
+                    format!(
+                        "Proceso sin ruta {}: {} (PID {})",
+                        if en_sandbox { "(no verificable en sandbox)" } else { "— sospechoso" },
+                        nombre, pid
+                    ),
+                )
+            }
+            // Sin firma o inaccesible:
+            //   • Sin sandbox → binario sin firma = amenaza confirmada
+            //   • En sandbox  → codesign no puede leer binarios fuera del contenedor;
+            //                    no podemos distinguir "sin firma" de "acceso denegado"
+            None => {
+                let en_sandbox = std::env::var("APP_SANDBOX_CONTAINER_ID").is_ok();
+                if en_sandbox {
+                    (false, format!(
+                        "Proceso no verificable en sandbox (firma inaccesible): {} (PID {})",
+                        nombre, pid
+                    ))
+                } else {
+                    (true, format!(
+                        "Proceso sospechoso SIN FIRMA VÁLIDA: {} (PID {}) en {}",
+                        nombre, pid, exe.display()
+                    ))
+                }
+            }
         }
     }
 
@@ -808,6 +824,17 @@ impl AntiKeylogger {
 
         let mut amenazas = Vec::new();
         let mut advertencias = Vec::new();
+
+        // En App Sandbox, TCC.db está fuera del contenedor.
+        // Cualquier intento de acceso sería bloqueado por el OS y generaría un evento
+        // de auditoría innecesario. El propio sandbox garantiza que ninguna otra app
+        // puede capturar pulsaciones sin el entitlement explícito.
+        if std::env::var("APP_SANDBOX_CONTAINER_ID").is_ok() {
+            advertencias.push(
+                "Verificación de permisos TCC omitida — App Sandbox de macOS activo.".to_string()
+            );
+            return (amenazas, advertencias);
+        }
 
         let home = match dirs::home_dir() {
             Some(h) => h,
@@ -1306,9 +1333,16 @@ impl AntiSandbox {
 /// Cada evento se añade al final del archivo — nunca se sobrescribe.
 /// El archivo es ilegible sin la subclave correcta.
 /// Función interna — los módulos externos usan registrar_evento_seguridad().
+// Mutex global que serializa las escrituras al log de auditoría.
+// P2P y email corren en threads separados — sin esto los bloques len+datos
+// pueden intercalarse y corromper el archivo.
+static AUDIT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const AUDIT_MAX_BYTES: u64 = 2 * 1024 * 1024; // 2 MB
 
 fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
+    let _guard = AUDIT_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
     // Rotar si supera el límite para evitar crecimiento ilimitado
     if let Ok(meta) = fs::metadata(ruta) {
         if meta.len() > AUDIT_MAX_BYTES {
@@ -1373,6 +1407,39 @@ pub fn derivar_clave_recuperacion_v0(
     let mut clave = Zeroizing::new([0u8; 32]);
     hk.expand(b"babel-recovery-v1", clave.as_mut())
         .map_err(|_| "HKDF v0: error derivando clave".to_string())?;
+    Ok(clave)
+}
+
+/// Deriva la salt de recuperación v2 (por instalación) desde la salt maestra.
+/// Cada instalación tiene una salt maestra distinta → cada recovery tiene una salt propia →
+/// no se pueden precalcular rainbow tables entre instalaciones distintas.
+/// No es secreta — se puede recalcular siempre que exista master.salt.
+pub fn derivar_recovery_salt_v2(salt_maestra: &[u8; 32]) -> [u8; 32] {
+    let hk = Hkdf::<Sha256>::new(None, salt_maestra);
+    let mut salt = [0u8; 32];
+    let _ = hk.expand(b"babel-recovery-salt-v2", &mut salt);
+    salt
+}
+
+/// v2: Argon2id con salt derivada por instalación.
+/// Sustituye a derivar_clave_recuperacion (v1) para búnkers nuevos.
+/// Los búnkers existentes migran automáticamente al verificar la frase.
+pub fn derivar_clave_recuperacion_v2(
+    palabras: &[String],
+    salt: &[u8; 32],
+) -> Result<Zeroizing<[u8; 32]>, String> {
+    let frase = Zeroizing::new(palabras.join(" "));
+    let params = Params::new(65536, 3, 1, None)
+        .map_err(|e| format!("Argon2 parámetros inválidos: {}", e))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut ikm = Zeroizing::new([0u8; 32]);
+    argon2
+        .hash_password_into(frase.as_bytes(), salt, ikm.as_mut())
+        .map_err(|e| format!("Argon2 hash falló: {}", e))?;
+    let hk = Hkdf::<Sha256>::new(None, ikm.as_ref());
+    let mut clave = Zeroizing::new([0u8; 32]);
+    hk.expand(b"babel-recovery-v2", clave.as_mut())
+        .map_err(|_| "HKDF: error derivando clave de recuperación v2".to_string())?;
     Ok(clave)
 }
 
