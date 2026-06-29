@@ -392,6 +392,12 @@ impl Cabecera {
         let nombre_raw = &buf[8..264];
         let fin = nombre_raw.iter().position(|&b| b == 0).unwrap_or(256);
         let nombre_archivo = String::from_utf8_lossy(&nombre_raw[..fin]).to_string();
+        let tipo = u32::from_le_bytes(
+            buf[264..268].try_into().map_err(|_| "Error leyendo tipo")?,
+        );
+        if tipo != 1 {
+            return Err(format!("Tipo de transferencia no soportado: {}", tipo));
+        }
         let version = u32::from_le_bytes(
             buf[300..304].try_into().map_err(|_| "Error leyendo version")?,
         );
@@ -496,7 +502,7 @@ impl rustls::client::danger::ServerCertVerifier for VerificadorPinning {
             None => {
                 peers.insert(self.peer_ip.clone(), fp);
                 guardar_peers_trusted(&peers, &self.subclave_hex);
-                log::warn!("[P2P] Peer {} registrado (TOFU).", self.peer_ip);
+                log::warn!("[P2P] Peer {} registrado (TOFU).", redactar_ip(&self.peer_ip));
             }
         }
         Ok(rustls::client::danger::ServerCertVerified::assertion())
@@ -763,7 +769,7 @@ impl ServidorP2P {
                     Err(e) => {
                         log::error!("[P2P] Error recibiendo de {}: {}", redactar_ip(&ip), e);
                         crate::seguridad::registrar_evento_seguridad(
-                            &format!("Error P2P de {}: {}", ip, e),
+                            &format!("Error P2P de {}: {}", redactar_ip(&ip), e),
                             &manejador.subclave_hex,
                         );
                     }

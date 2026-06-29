@@ -2880,7 +2880,7 @@ fn main() {
     static USB_SERVER_PID: std::sync::atomic::AtomicU32 =
         std::sync::atomic::AtomicU32::new(0);
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -2994,7 +2994,9 @@ fn main() {
             tiene_config_email,
             guardar_html_frase,
             borrar_html_frase,
-        ])
-        .run(tauri::generate_context!())
-        .expect("Error crítico al iniciar Babel");
+        ]);
+    if let Err(e) = app.run(tauri::generate_context!()) {
+        eprintln!("[!] Error crítico al iniciar Babel: {}", e);
+        std::process::exit(1);
+    }
 }
