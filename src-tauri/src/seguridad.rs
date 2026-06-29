@@ -1221,6 +1221,13 @@ impl AntiSandbox {
     /// Comprobamos si hay archivos modificados en las últimas 48h
     /// en las carpetas típicas de usuario (Documentos, Descargas, Escritorio).
     fn sin_actividad_humana() -> bool {
+        // En App Sandbox, document_dir/download_dir/desktop_dir apuntan al contenedor,
+        // que está vacío. Esto produce siempre archivos_recientes = 0 → falso positivo
+        // que puede sumar puntos suficientes para bloquear Babel en su propio arranque.
+        if std::env::var("APP_SANDBOX_CONTAINER_ID").is_ok() {
+            return false;
+        }
+
         let carpetas = [
             dirs::document_dir(),
             dirs::download_dir(),

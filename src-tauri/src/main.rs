@@ -601,13 +601,12 @@ fn guardar_documento_sin_traducir(
         .map_err(|_| "Error".to_string())?
         .clone();
 
-    // R-1: canonicalizar antes de comprobar — evita symlinks y variantes sin ".."
+    // Canonicalizar para resolver symlinks — la autorización la gestiona el App Sandbox
+    // a nivel OS mediante user-selected.read-write. El check starts_with(home) se elimina
+    // porque en sandbox dirs::home_dir() apunta al contenedor, no al home real,
+    // y rechazaría archivos legítimos seleccionados por el usuario con un file dialog.
     let ruta_canon = std::fs::canonicalize(&ruta_completa)
         .map_err(|_| "Ruta no accesible o inválida.".to_string())?;
-    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    if !ruta_canon.starts_with(&home) {
-        return Err("Ruta no autorizada.".into());
-    }
 
     // S-1: límite de tamaño antes de leer en memoria
     let meta = std::fs::metadata(&ruta_canon).map_err(|e| format!("Error accediendo archivo: {}", e))?;
@@ -1299,7 +1298,11 @@ fn listar_buzones_guardados(sesion: tauri::State<SesionActiva>) -> Result<Vec<Bu
 // ============================================================
 
 #[tauri::command]
-fn exportar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<String, String> {
+fn exportar_archivo(
+    ruta: String,
+    app: tauri::AppHandle,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<String, String> {
     let subclave_hex = sesion
         .subclave_hex
         .lock()
@@ -1308,10 +1311,9 @@ fn exportar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
-    // Seguridad: solo permitimos exportar desde ~/Babel/archivos/
+    // Seguridad: solo permitimos exportar desde ~/Babel/archivos/ o ~/Babel/guardados/
     validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
-    // Verificar que el archivo existe — ruta ya es absoluta, sin trucos
     if !Path::new(&ruta).exists() {
         return Err(format!("Archivo no encontrado: {}", ruta));
     }
@@ -1326,25 +1328,24 @@ fn exportar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
         return Err("No se pudo extraer el nombre del archivo.".into());
     }
 
-    let home = dirs::home_dir().ok_or("No se pudo obtener el directorio home.")?;
+    // Muestra el save panel nativo del Finder — el usuario elige dónde guardar.
+    // user-selected.read-write concede acceso al destino elegido dentro del sandbox.
+    use tauri_plugin_dialog::DialogExt;
+    let destino_opt = app
+        .dialog()
+        .file()
+        .set_file_name(&nombre)
+        .blocking_save_file();
 
-    // macOS puede llamarlo Downloads (EN) o Descargas (ES)
-    let carpeta_destino = ["Downloads", "Descargas"]
-        .iter()
-        .map(|d| home.join(d))
-        .find(|p| p.exists())
-        .ok_or_else(|| "No se encontró carpeta de descargas.".to_string())?;
+    let destino_path = match destino_opt {
+        Some(fp) => fp.into_path().map_err(|e| format!("Error procesando ruta de destino: {}", e))?,
+        None => return Err("Exportación cancelada.".into()),
+    };
 
-    let destino = carpeta_destino.join(&nombre);
+    std::fs::copy(&ruta, &destino_path)
+        .map_err(|e| format!("Error al copiar: {}", e))?;
 
-    std::fs::copy(&ruta, &destino).map_err(|e| {
-        format!(
-            "Error al copiar.\nOrigen: {}\nDestino: {:?}\nError: {}",
-            ruta, destino, e
-        )
-    })?;
-
-    Ok(destino.to_string_lossy().to_string())
+    Ok(destino_path.to_string_lossy().to_string())
 }
 
 // ============================================================
@@ -2773,6 +2774,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // Modo USB: si Resources/ contiene python + servidor, arrancarlo
