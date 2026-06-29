@@ -900,6 +900,11 @@ fn traducir_documento_ruta(
         return Err(format!("Tipo de archivo no permitido: .{}", ext));
     }
 
+    // Restringir al directorio home del usuario — evita path traversal desde XSS
+    if let Some(home) = dirs::home_dir() {
+        validar_ruta_en(&ruta, home)?;
+    }
+
     // R-2: límite de tamaño antes de procesar
     let meta = std::fs::metadata(&ruta).map_err(|e| format!("Error accediendo archivo: {}", e))?;
     if meta.len() > 100 * 1024 * 1024 {
@@ -936,9 +941,12 @@ fn traducir_documento_ruta(
 
     let par = idioma_a_par(&idioma);
 
+    let ruta_str = path.to_str()
+        .ok_or_else(|| "Ruta contiene caracteres no permitidos (no-UTF8).".to_string())?;
+
     // Procesamos desde la ruta original — sin crear ningún temporal
     traductor::procesar_archivo_inteligente(
-        path.to_str().unwrap_or(""),
+        ruta_str,
         &dict,
         &subclave_hex,
         &id_usuario,

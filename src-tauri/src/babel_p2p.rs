@@ -448,6 +448,7 @@ impl rustls::client::danger::ServerCertVerifier for VerificadorPinning {
         _now: rustls::pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
         let fp = fingerprint_cert(end_entity);
+        let _guard = TOFU_PINNING_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let mut peers = cargar_peers_trusted(&self.subclave_hex);
         match peers.get(&self.peer_ip) {
             Some(esperado) => {
@@ -511,6 +512,10 @@ impl rustls::client::danger::ServerCertVerifier for VerificadorPinning {
 // Thread-safe: CERTS_AUTORIZADOS_MUTEX serializa acceso al archivo.
 
 static CERTS_AUTORIZADOS_MUTEX: Mutex<()> = Mutex::new(());
+
+// Thread-safe: serializa el TOFU del cliente para evitar race condition
+// donde dos conexiones simultáneas podrían registrar fingerprints distintos.
+static TOFU_PINNING_MUTEX: Mutex<()> = Mutex::new(());
 
 fn ruta_certs_autorizados() -> std::path::PathBuf {
     p2p_dir().join("certs_autorizados.dat")

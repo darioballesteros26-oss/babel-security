@@ -184,11 +184,15 @@ pub struct CredencialesEmail {
 // GESTIÓN DE SALT MAESTRA
 // ============================================================
 
+static SALT_MAESTRA_CACHE: OnceLock<[u8; 32]> = OnceLock::new();
+
 /// Carga la sal maestra desde ~/Babel/master.salt.
 /// Si no existe, la genera y la guarda junto con un backup.
 /// La sal NO es secreta: solo debe ser única e inmutable.
 /// Si se pierde sin backup, todos los datos cifrados son irrecuperables.
+/// Thread-safe: OnceLock garantiza una sola inicialización aunque haya concurrencia.
 pub fn cargar_o_crear_salt() -> [u8; 32] {
+    *SALT_MAESTRA_CACHE.get_or_init(|| {
     let dir = crate::babel_dir();
     let ruta_salt = dir.join("master.salt");
     let ruta_bck = dir.join("master.salt.bck");
@@ -233,6 +237,7 @@ pub fn cargar_o_crear_salt() -> [u8; 32] {
     salt_perms_600(&ruta_bck);
     log::info!("[Babel] master.salt generada correctamente.");
     nueva_salt
+    })
 }
 
 #[cfg(unix)]
@@ -1193,10 +1198,10 @@ pub fn obtener_emails(
     validar_campo_imap(usuario, "usuario")?;
     validar_campo_imap(password, "password")?;
     let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<EmailResumen>, String>>();
-    let dom = imap_dominio.to_string();
-    let usr = usuario.to_string();
-    let pwd = password.to_string();
-    std::thread::spawn(move || { let _ = tx.send(obtener_emails_interno(&dom, &usr, &pwd)); });
+    let dom = Zeroizing::new(imap_dominio.to_string());
+    let usr = Zeroizing::new(usuario.to_string());
+    let pwd = Zeroizing::new(password.to_string());
+    std::thread::spawn(move || { let _ = tx.send(obtener_emails_interno(dom.as_str(), usr.as_str(), pwd.as_str())); });
     rx.recv_timeout(std::time::Duration::from_secs(30))
         .map_err(|_| "Timeout de conexión IMAP (30s)".to_string())?
         .map_err(|e| e.into())
@@ -1321,13 +1326,13 @@ pub fn obtener_email_completo(
     validar_campo_imap(usuario, "usuario")?;
     validar_campo_imap(password, "password")?;
 
-    let dom = imap_dominio.to_string();
-    let usr = usuario.to_string();
-    let pwd = password.to_string();
+    let dom = Zeroizing::new(imap_dominio.to_string());
+    let usr = Zeroizing::new(usuario.to_string());
+    let pwd = Zeroizing::new(password.to_string());
 
     let (tx, rx) = std::sync::mpsc::channel::<Result<EmailCompletoRust, String>>();
     std::thread::spawn(move || {
-        let _ = tx.send(obtener_email_completo_interno(&dom, &usr, &pwd, id));
+        let _ = tx.send(obtener_email_completo_interno(dom.as_str(), usr.as_str(), pwd.as_str(), id));
     });
 
     rx.recv_timeout(std::time::Duration::from_secs(30))

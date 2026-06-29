@@ -1083,8 +1083,8 @@ impl AntiSandbox {
     fn ram_sospechosa() -> bool {
         let mut s = System::new_all();
         s.refresh_memory();
-        // total_memory() devuelve kilobytes — convertimos a GB
-        let ram_gb = s.total_memory() as f64 / 1_048_576.0;
+        // total_memory() devuelve bytes desde sysinfo 0.26 — convertimos a GB
+        let ram_gb = s.total_memory() as f64 / 1_073_741_824.0;
         ram_gb < 3.5
     }
 
