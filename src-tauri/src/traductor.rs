@@ -266,8 +266,8 @@ fn leer_salt_abs(ruta: &PathBuf) -> Option<[u8; 32]> {
 
 /// Guarda timestamp + firma HMAC-SHA256(timestamp) en bloqueo.tmp.
 /// Delega en seguridad::activar_bloqueo() para usar la misma clave que leer_bloqueo().
-pub fn activar_bloqueo_disco() {
-    crate::seguridad::activar_bloqueo();
+pub fn activar_bloqueo_disco() -> Result<(), String> {
+    crate::seguridad::activar_bloqueo()
 }
 
 // detector de pdf y docx

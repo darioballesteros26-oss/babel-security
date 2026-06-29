@@ -2558,7 +2558,7 @@ async function intentarRecuperacion(): Promise<void> {
   mostrarMensaje("recovery-msg", "VERIFICANDO FRASE...", false);
 
   try {
-    const [maestra, passUsuario] = await invoke<[string, string]>("recuperar_con_frase", { palabras });
+    const [maestra, passUsuario, aviso] = await invoke<[string, string, string]>("recuperar_con_frase", { palabras });
 
     // Rellenar los campos del login con las credenciales recuperadas
     const campoPass = document.getElementById("login-pass-usuario") as HTMLInputElement;
@@ -2566,7 +2566,11 @@ async function intentarRecuperacion(): Promise<void> {
     const campoMaestra = document.getElementById("login-pass") as HTMLInputElement;
     if (campoMaestra) campoMaestra.value = maestra;
 
-    mostrarMensaje("recovery-msg", `✓ LLAVE MAESTRA RECUPERADA — SE HA RELLENADO EL LOGIN`, false);
+    if (aviso) {
+      mostrarMensaje("recovery-msg", `⚠ ${aviso}`, true);
+    } else {
+      mostrarMensaje("recovery-msg", `✓ LLAVE MAESTRA RECUPERADA — SE HA RELLENADO EL LOGIN`, false);
+    }
 
     // Limpiar campos de recuperación
     for (let i = 1; i <= 12; i++) {

@@ -352,7 +352,8 @@ fn incrementar_contador_y_bloquear(sesion: &tauri::State<SesionActiva>) -> Resul
         if *c >= 3 {
             *c = 0;
             let _ = fs::remove_file(&ruta_intentos);
-            traductor::activar_bloqueo_disco();
+            traductor::activar_bloqueo_disco()
+                .map_err(|e| format!("Error crítico activando bloqueo: {}", e))?;
             return Err("Bloqueado 10 minutos por demasiados intentos fallidos.".into());
         }
     }
@@ -853,6 +854,8 @@ fn mover_archivo_guardado(
 // ============================================================
 #[tauri::command]
 fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
+    // Señalizar al hilo del servidor P2P para que salga y libere su copia de la subclave
+    babel_p2p::detener_servidor_p2p();
     sesion.limpiar();
     // Borrar temporales en claro con 3 pasadas (0x00, 0xFF, 0xAA) + fsync antes de eliminar
     let tmp = babel_dir().join("tmp");
@@ -1605,17 +1608,8 @@ fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
         return Err("No se puede eliminar un enlace simbólico.".into());
     }
 
-    // Zeroize: sobreescribir con ceros antes de borrar
-    // Así los bytes cifrados no quedan recuperables en disco
-    if let Ok(metadata) = fs::metadata(&ruta) {
-        let tamaño = metadata.len() as usize;
-        if tamaño > 0 {
-            let ceros = vec![0u8; tamaño];
-            fs::write(&ruta, &ceros).map_err(|e| format!("Error en zeroize: {}", e))?;
-        }
-    }
-
-    fs::remove_file(&ruta).map_err(|e| format!("Error eliminando: {}", e))?;
+    // 3 pasadas (0x00, 0xFF, 0xAA) + fsync + O_NOFOLLOW (igual que temporales)
+    borrar_seguro(&ruta);
 
     Ok(())
 }
@@ -2165,6 +2159,10 @@ fn generar_frase_recuperacion(
     pass_usuario: String,
     _sesion: tauri::State<SesionActiva>,
 ) -> Result<Vec<String>, String> {
+    // Zeroizing desde el primer momento para que serde_json nunca tenga copias no-zeroized
+    let maestra = Zeroizing::new(maestra);
+    let pass_usuario = Zeroizing::new(pass_usuario);
+
     // No se exige sesión: este comando se llama justo después de crear el búnker,
     // antes de que haya login. La seguridad viene de requerir la maestra válida.
     let palabras = generar_palabras_recuperacion();
@@ -2173,7 +2171,10 @@ fn generar_frase_recuperacion(
     let recovery_salt = seguridad::derivar_recovery_salt_v2(&salt_maestra);
     let recovery_key = seguridad::derivar_clave_recuperacion_v2(&palabras, &recovery_salt)?;
     let recovery_key_hex = Zeroizing::new(hex::encode(recovery_key.as_ref()));
-    let mut datos_recovery = serde_json::json!({"m": maestra, "p": pass_usuario}).to_string();
+    // Construir JSON con format! para evitar copias de strings dentro de serde_json::Value
+    let m_escaped = maestra.replace('\\', "\\\\").replace('"', "\\\"");
+    let p_escaped = pass_usuario.replace('\\', "\\\\").replace('"', "\\\"");
+    let mut datos_recovery = Zeroizing::new(format!("{{\"m\":\"{}\",\"p\":\"{}\"}}", m_escaped, p_escaped));
     let cifrado_recuperacion = seguridad::blindar_documento(&datos_recovery, &recovery_key_hex)
         .map_err(|e| format!("Error cifrando recovery.babel: {}", e))?;
     datos_recovery.zeroize();
@@ -2188,10 +2189,7 @@ fn generar_frase_recuperacion(
         .map_err(|e| format!("Error cifrando mnemonic.babel: {}", e))?;
     fs::write(&babel_path("mnemonic.babel"), &cifrado_mnemonic)
         .map_err(|e| format!("Error guardando mnemonic.babel: {}", e))?;
-    let mut m = maestra;
-    m.zeroize();
-    let mut p = pass_usuario;
-    p.zeroize();
+    // maestra y pass_usuario se zeroizan automáticamente al salir del scope (Zeroizing<String>)
     Ok(palabras)
 }
 
@@ -2203,7 +2201,7 @@ fn generar_frase_recuperacion(
 fn recuperar_con_frase(
     palabras: Vec<String>,
     sesion: tauri::State<SesionActiva>,
-) -> Result<(String, String), String> {
+) -> Result<(String, String, String), String> {
     // Comprobar bloqueo activo
     if let Some(ts) = seguridad::leer_bloqueo() {
         let restante = (ts + 600) - chrono::Local::now().timestamp();
@@ -2235,6 +2233,7 @@ fn recuperar_con_frase(
             .to_string()
     })?;
 
+    let mut usado_v0 = false;
     let mut datos =
         match seguridad::descifrar_documento(cifrado.clone(), &recovery_key_v2_hex) {
             Ok(d) => d,
@@ -2258,6 +2257,7 @@ fn recuperar_con_frase(
                         let key_v0_hex = Zeroizing::new(hex::encode(key_v0.as_ref()));
                         match seguridad::descifrar_documento(cifrado, &key_v0_hex) {
                             Ok(d) => {
+                                usado_v0 = true;
                                 // Migración automática a v2
                                 if let Ok(nuevo) = seguridad::blindar_documento(&d, &recovery_key_v2_hex) {
                                     let _ = fs::write(babel_path("recovery.babel"), nuevo);
@@ -2294,7 +2294,13 @@ fn recuperar_con_frase(
         .to_string();
 
     datos.zeroize();
-    Ok((maestra, pass))
+    let aviso = if usado_v0 {
+        "ADVERTENCIA: búnker creado con esquema BIP39 v0 (HKDF sin Argon2id). \
+         Se ha migrado automáticamente a v2 — vuelve a generar tu frase de recuperación.".to_string()
+    } else {
+        String::new()
+    };
+    Ok((maestra, pass, aviso))
 }
 // ============================================================
 // COMANDO 21 — Ver frase de recuperación (dentro de la app)
@@ -2651,6 +2657,9 @@ fn abrir_carpeta_babel(sesion: tauri::State<SesionActiva>) -> Result<(), String>
 
 #[tauri::command]
 fn iniciar_servidor_p2p(sesion: tauri::State<SesionActiva>) -> Result<String, String> {
+    // Resetear señal de apagado antes de arrancar un nuevo servidor
+    babel_p2p::reiniciar_servidor_p2p();
+
     let subclave_hex = sesion
         .subclave_hex
         .lock()

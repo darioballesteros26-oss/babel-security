@@ -19,7 +19,7 @@ use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -34,6 +34,18 @@ use zeroize::Zeroizing;
 // Buffer global de mensajes entrantes. Limitado a MAX_MENSAJES para evitar OOM.
 pub static MENSAJES_ENTRANTES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 const MAX_MENSAJES: usize = 1000;
+
+// Señal de apagado para el servidor P2P. Se activa en cerrar_sesion para que el
+// hilo del servidor salga limpiamente y libere (zeroize) la subclave en RAM.
+static P2P_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+pub fn detener_servidor_p2p() {
+    P2P_SHUTDOWN.store(true, Ordering::SeqCst);
+}
+
+pub fn reiniciar_servidor_p2p() {
+    P2P_SHUTDOWN.store(false, Ordering::SeqCst);
+}
 
 // ============================================================
 // CONSTANTES
@@ -340,7 +352,14 @@ impl Cabecera {
         let mut buf = vec![0u8; TAMAÑO_CABECERA];
         buf[0..8].copy_from_slice(&self.longitud_datos.to_le_bytes());
         let nb = self.nombre_archivo.as_bytes();
-        let len = nb.len().min(MAX_NOMBRE);
+        // Truncar en límite de carácter UTF-8 válido para evitar secuencias parciales
+        let len = if nb.len() <= MAX_NOMBRE {
+            nb.len()
+        } else {
+            std::str::from_utf8(&nb[..MAX_NOMBRE])
+                .map(|_| MAX_NOMBRE)
+                .unwrap_or_else(|e| e.valid_up_to())
+        };
         buf[8..8 + len].copy_from_slice(&nb[..len]);
         buf[264..268].copy_from_slice(&1u32.to_le_bytes());
         buf[268..300].copy_from_slice(&self.checksum);
@@ -521,17 +540,45 @@ fn ruta_certs_autorizados() -> std::path::PathBuf {
     p2p_dir().join("certs_autorizados.dat")
 }
 
+const TOFU_TTL_SECS: u64 = 90 * 24 * 3600; // 90 días
+
+fn ahora_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+// Formato de cada línea: `fingerprint:unix_timestamp`
+// Entradas sin timestamp (formato legado) se aceptan por compatibilidad y se renuevan.
 fn cargar_certs_autorizados() -> std::collections::HashSet<String> {
+    let ahora = ahora_unix();
     fs::read_to_string(ruta_certs_autorizados())
         .unwrap_or_default()
         .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
+        .filter_map(|l| {
+            let l = l.trim();
+            if l.is_empty() { return None; }
+            // Separar fingerprint y timestamp
+            let mut partes = l.splitn(2, ':');
+            let fp = partes.next()?.to_string();
+            let ts: u64 = partes.next().and_then(|t| t.parse().ok()).unwrap_or(ahora);
+            // Descartar entradas caducadas (> 90 días)
+            if ahora.saturating_sub(ts) > TOFU_TTL_SECS {
+                None
+            } else {
+                Some(fp)
+            }
+        })
         .collect()
 }
 
 fn guardar_certs_autorizados(certs: &std::collections::HashSet<String>) {
-    let contenido: String = certs.iter().cloned().collect::<Vec<_>>().join("\n");
+    let ahora = ahora_unix();
+    let contenido: String = certs.iter()
+        .map(|fp| format!("{}:{}", fp, ahora))
+        .collect::<Vec<_>>()
+        .join("\n");
     let _ = fs::write(ruta_certs_autorizados(), contenido);
 }
 
@@ -606,14 +653,14 @@ impl rustls::server::danger::ClientCertVerifier for VerificadorClienteP2P {
 // ============================================================
 
 pub struct ServidorP2P {
-    subclave_hex: String,
+    subclave_hex: Zeroizing<String>,
     id_usuario: String,
 }
 
 impl ServidorP2P {
     pub fn nuevo(subclave_hex: &str, id_usuario: &str) -> Self {
         Self {
-            subclave_hex: subclave_hex.to_string(),
+            subclave_hex: Zeroizing::new(subclave_hex.to_string()),
             id_usuario: id_usuario.to_string(),
         }
     }
@@ -628,16 +675,37 @@ impl ServidorP2P {
         let listener = TcpListener::bind(format!("0.0.0.0:{}", PUERTO_TRANSFERENCIA))
             .map_err(|e| format!("No se pudo abrir puerto {}: {}", PUERTO_TRANSFERENCIA, e))?;
 
+        // Non-blocking + poll loop permite comprobar P2P_SHUTDOWN sin bloquearse
+        // indefinidamente en accept(). El sleep de 100ms entre reintentos WouldBlock
+        // garantiza que el hilo salga en menos de 200ms tras cerrar sesión.
+        listener.set_nonblocking(true)
+            .map_err(|e| format!("No se pudo poner listener en non-blocking: {}", e))?;
+
         log::warn!("[P2P] Servidor mTLS activo en puerto {}.", PUERTO_TRANSFERENCIA);
 
-        for conexion in listener.incoming() {
-            let stream = match conexion {
-                Ok(s) => {
-                    // Timeout de 30s — previene DoS por peers que abren conexión y no envían
+        loop {
+            if P2P_SHUTDOWN.load(Ordering::Relaxed) {
+                log::warn!("[P2P] Señal de apagado recibida — cerrando servidor.");
+                break;
+            }
+
+            let stream = match listener.accept() {
+                Ok((s, _)) => {
+                    // Restaurar modo bloqueante en el stream de conexión individual
+                    let _ = s.set_nonblocking(false);
+                    // Previene DoS por peers que abren conexión y no envían datos
                     if let Err(e) = s.set_read_timeout(Some(Duration::from_secs(30))) {
                         log::warn!("[P2P] No se pudo establecer read_timeout: {}", e);
                     }
+                    // Previene peers lentos que consumen el hilo indefinidamente al escribir
+                    if let Err(e) = s.set_write_timeout(Some(Duration::from_secs(30))) {
+                        log::warn!("[P2P] No se pudo establecer write_timeout: {}", e);
+                    }
                     s
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(100));
+                    continue;
                 }
                 Err(e) => {
                     log::error!("[P2P] Error de red: {}", e);
