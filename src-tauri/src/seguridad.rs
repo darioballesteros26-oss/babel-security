@@ -1347,6 +1347,20 @@ static AUDIT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const AUDIT_MAX_BYTES: u64 = 2 * 1024 * 1024; // 2 MB
 
+// Lee el SHA-256 del último bloque cifrado escrito en el archivo de auditoría.
+// Se guarda en `{ruta}.tip` para no tener que releer el archivo completo.
+// Si el .tip no existe o no coincide, se registra una advertencia y se usa ceros.
+fn leer_chain_tip(ruta: &str) -> [u8; 32] {
+    fs::read(format!("{}.tip", ruta))
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .unwrap_or([0u8; 32])
+}
+
+fn escribir_chain_tip(ruta: &str, hash: &[u8; 32]) {
+    let _ = fs::write(format!("{}.tip", ruta), hash);
+}
+
 fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
     let _guard = AUDIT_MUTEX.lock().unwrap_or_else(|e| {
         log::error!("[!] AUDIT_MUTEX poisoned — log de auditoría puede estar corrupto");
@@ -1358,20 +1372,30 @@ fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
     if let Ok(meta) = fs::metadata(ruta) {
         if meta.len() > AUDIT_MAX_BYTES {
             crate::borrar_seguro(&format!("{}.old", ruta));
+            crate::borrar_seguro(&format!("{}.tip.old", ruta));
+            let _ = fs::rename(format!("{}.tip", ruta), format!("{}.tip.old", ruta));
             let _ = fs::rename(ruta, format!("{}.old", ruta));
         }
     }
 
-    match blindar_documento(evento, clave_hex) {
+    // Hash chaining: incluir el hash del bloque anterior en el evento cifrado.
+    // Detecta eliminación o reordenación de bloques (integridad forense).
+    let prev_hash = leer_chain_tip(ruta);
+    let prev_hash_hex = hex::encode(prev_hash);
+    let evento_con_cadena = format!("{}|prev={}", evento, prev_hash_hex);
+
+    match blindar_documento(&evento_con_cadena, clave_hex) {
         Ok(cifrado) => {
+            use sha2::{Digest, Sha256};
+            let nuevo_hash: [u8; 32] = Sha256::digest(&cifrado).into();
             use std::io::Write;
             if let Ok(mut f) = fs::OpenOptions::new().append(true).create(true).open(ruta) {
                 let len = (cifrado.len() as u32).to_le_bytes();
                 if let Err(e) = f.write_all(&len).and_then(|_| f.write_all(&cifrado)) {
                     log::error!("[!] Fallo escribiendo evento de auditoría en {}: {}", ruta, e);
                 } else {
-                    // sync_all() garantiza que el evento llegó al dispositivo antes de retornar
                     let _ = f.sync_all();
+                    escribir_chain_tip(ruta, &nuevo_hash);
                 }
             }
         }

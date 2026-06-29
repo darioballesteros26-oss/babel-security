@@ -720,7 +720,7 @@ pub fn procesar_pdf(
                 "-c",
                 "import sys; from pdf2docx import Converter; cv=Converter(sys.argv[1]); cv.convert(sys.argv[2]); cv.close()",
                 ruta,
-                ruta_docx_tmp.to_str().unwrap_or(""),
+                &ruta_docx_tmp.to_string_lossy(),
             ])
             .spawn()
             .ok();

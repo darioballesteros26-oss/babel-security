@@ -1645,7 +1645,7 @@ fn abrir_carpeta_guardados(sesion: tauri::State<SesionActiva>) -> Result<(), Str
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
-    tauri_plugin_opener::open_path(guardados_dir().to_str().unwrap_or(""), None::<&str>)
+    tauri_plugin_opener::open_path(&*guardados_dir().to_string_lossy(), None::<&str>)
         .map_err(|e| format!("Error abriendo Finder: {}", e))
 }
 
@@ -2650,7 +2650,7 @@ fn abrir_carpeta_babel(sesion: tauri::State<SesionActiva>) -> Result<(), String>
         return Err("No hay sesión activa.".into());
     }
     let carpeta_babel = archivos_dir();
-    tauri_plugin_opener::open_path(carpeta_babel.to_str().unwrap_or(""), None::<&str>)
+    tauri_plugin_opener::open_path(&*carpeta_babel.to_string_lossy(), None::<&str>)
         .map_err(|e| format!("Error abriendo Finder: {}", e))
 }
 // ============================================================

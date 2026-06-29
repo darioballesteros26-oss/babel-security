@@ -171,7 +171,14 @@ impl GestorCertificados {
 
         log::warn!("[P2P] Generando certificado de identidad...");
 
-        let cert = generate_simple_self_signed(vec!["localhost".to_string()])
+        // Incluir el hostname real además de localhost para que SNI funcione
+        // cuando el cliente conecta por nombre en vez de por IP.
+        let mut sans = vec!["localhost".to_string()];
+        if let Ok(h) = hostname::get() {
+            let hn = h.to_string_lossy().to_string();
+            if !hn.is_empty() && hn != "localhost" { sans.push(hn); }
+        }
+        let cert = generate_simple_self_signed(sans)
             .map_err(|e| format!("Error generando certificado: {}", e))?;
 
         let cert_der = cert
