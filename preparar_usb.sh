@@ -379,7 +379,15 @@ xattr -rd com.apple.quarantine "$APP" 2>/dev/null || true
 echo ""
 echo "┌─ [5/7] Creando launchers..."
 # macOS: la propia app arranca el servidor desde Contents/Resources/ (ver main.rs)
-# Solo se crean los launchers de Windows.
+# Windows: recursos copiados en win/recursos/ para evitar depender del .app bundle Mac
+
+# Copiar recursos accesibles para el .exe de Windows (fuera del .app bundle)
+echo "  Sincronizando win/recursos/ para Windows..."
+mkdir -p "$USB/win/recursos"
+rsync -a --delete "$RESOURCES/tessdata/"  "$USB/win/recursos/tessdata/"
+rsync -a --delete "$RESOURCES/servidor/"  "$USB/win/recursos/servidor/"
+rsync -a --delete "$RESOURCES/tokenizer/" "$USB/win/recursos/tokenizer/"
+echo "  ✓ win/recursos/ (tessdata, servidor, tokenizer)"
 
 # ── Windows launcher ────────────────────────────────────────────────────
 cat > "$USB/LANZAR_BABEL.bat" << 'WIN_EOF'
@@ -390,6 +398,7 @@ setlocal
 set "USB=%~dp0"
 set "WIN_EXE=%USB%win\babel-interfaz.exe"
 set "PYWIN=%USB%python_win\python.exe"
+set "SERVIDOR=%USB%win\recursos\servidor\nllb_server_usb.py"
 
 if not exist "%WIN_EXE%" (
   echo [ERROR] Falta: win\babel-interfaz.exe
@@ -399,17 +408,25 @@ if not exist "%WIN_EXE%" (
 )
 if not exist "%PYWIN%" (
   echo [ERROR] Falta: python_win\python.exe
-  echo Descarga Python embeddable de python.org y extraelo en python_win\
+  echo Descarga Python 3.12 embeddable de python.org y extraelo en python_win\
+  pause & exit /b 1
+)
+if not exist "%SERVIDOR%" (
+  echo [ERROR] Falta: win\recursos\servidor\nllb_server_usb.py
+  echo Regenera el USB con preparar_usb.sh
   pause & exit /b 1
 )
 
-set TESSDATA_PREFIX=%USB%tessdata
+set TESSDATA_PREFIX=%USB%win\recursos\tessdata
 set TRANSFORMERS_OFFLINE=1
 set HF_DATASETS_OFFLINE=1
 set TOKENIZERS_PARALLELISM=false
-set BABEL_NLLB_TOKEN=babel_usb_win_token
 
-start /B "" "%PYWIN%" "%USB%servidor\nllb_server_usb.py"
+for /f "delims=" %%i in ('powershell -NoProfile -Command "[guid]::NewGuid().ToString('N')"') do set BABEL_NLLB_TOKEN=babel_%%i
+
+echo Iniciando servidor NLLB...
+start /B "" "%PYWIN%" "%SERVIDOR%"
+echo Esperando servidor (20 s)...
 timeout /t 20 /nobreak > NUL
 start "" "%WIN_EXE%"
 WIN_EOF
