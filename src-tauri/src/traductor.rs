@@ -1364,6 +1364,15 @@ pub fn obtener_email_completo(
 
 static UREQ_AGENT: OnceLock<ureq::Agent> = OnceLock::new();
 
+// Token NLLB en OnceLock en lugar de variable de entorno:
+// - Elimina set_var() (UB en contexto multihilo, B7)
+// - El token ya no aparece en `ps aux` ni /proc/self/environ (B8)
+static NLLB_TOKEN: OnceLock<String> = OnceLock::new();
+
+pub fn inicializar_nllb_token(token: String) {
+    let _ = NLLB_TOKEN.set(token);
+}
+
 fn agente_http() -> &'static ureq::Agent {
     UREQ_AGENT.get_or_init(|| {
         ureq::AgentBuilder::new()
@@ -1381,8 +1390,9 @@ pub fn traducir_con_marian(texto: &str, par: &str) -> Result<String, String> {
         return Err(format!("Texto demasiado grande ({} bytes, máx {} KB)", texto.len(), MAX_BYTES / 1000));
     }
     let url = "http://127.0.0.1:5002/traducir";
-    let token = std::env::var("BABEL_NLLB_TOKEN")
-        .map_err(|_| "BABEL_NLLB_TOKEN no configurado".to_string())?;
+    let token = NLLB_TOKEN.get()
+        .ok_or_else(|| "Servidor de traducción no inicializado".to_string())?
+        .clone();
     let body = serde_json::json!({
         "texto": texto,
         "par": par

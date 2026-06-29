@@ -570,26 +570,35 @@ fn ahora_unix() -> u64 {
         .as_secs()
 }
 
-// Formato de cada línea: `fingerprint:unix_timestamp`
-// Entradas sin timestamp (formato legado) se aceptan por compatibilidad y se renuevan.
+// Deriva la clave para cifrar certs_autorizados.dat desde master.salt.
+// Los fingerprints no son contraseñas, pero revelan con qué peers hemos
+// comunicado — cifrarlos equipara la protección a peers_trusted.babel.
+fn clave_certs_autorizados() -> Option<Zeroizing<String>> {
+    let bytes = fs::read(crate::babel_dir().join("master.salt")).ok()?;
+    if bytes.len() < 32 { return None; }
+    Some(Zeroizing::new(hex::encode(&bytes[..32])))
+}
+
+// Formato de cada línea del texto plano interno: `fingerprint:unix_timestamp`
+// El archivo en disco se cifra con AES-256-GCM. Migración automática desde texto plano.
 fn cargar_certs_autorizados() -> std::collections::HashSet<String> {
     let ahora = ahora_unix();
-    fs::read_to_string(ruta_certs_autorizados())
-        .unwrap_or_default()
-        .lines()
+    let ruta = ruta_certs_autorizados();
+
+    // Intentar descifrar (formato nuevo); si falla, leer como texto plano (legado)
+    let texto = clave_certs_autorizados()
+        .and_then(|clave| fs::read(&ruta).ok()
+            .and_then(|blob| crate::seguridad::descifrar_documento(blob, &clave).ok()))
+        .unwrap_or_else(|| fs::read_to_string(&ruta).unwrap_or_default());
+
+    texto.lines()
         .filter_map(|l| {
             let l = l.trim();
             if l.is_empty() { return None; }
-            // Separar fingerprint y timestamp
             let mut partes = l.splitn(2, ':');
             let fp = partes.next()?.to_string();
             let ts: u64 = partes.next().and_then(|t| t.parse().ok()).unwrap_or(ahora);
-            // Descartar entradas caducadas (> 90 días)
-            if ahora.saturating_sub(ts) > TOFU_TTL_SECS {
-                None
-            } else {
-                Some(fp)
-            }
+            if ahora.saturating_sub(ts) > TOFU_TTL_SECS { None } else { Some(fp) }
         })
         .collect()
 }
@@ -600,6 +609,14 @@ fn guardar_certs_autorizados(certs: &std::collections::HashSet<String>) {
         .map(|fp| format!("{}:{}", fp, ahora))
         .collect::<Vec<_>>()
         .join("\n");
+
+    if let Some(clave) = clave_certs_autorizados() {
+        if let Ok(cifrado) = crate::seguridad::blindar_documento(&contenido, &clave) {
+            let _ = fs::write(ruta_certs_autorizados(), cifrado);
+            return;
+        }
+    }
+    // Fallback texto plano si master.salt no existe (primera ejecución)
     let _ = fs::write(ruta_certs_autorizados(), contenido);
 }
 

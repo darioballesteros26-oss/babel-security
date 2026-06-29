@@ -2894,14 +2894,17 @@ fn main() {
                     rand::rngs::OsRng.fill_bytes(&mut rng_bytes);
                     let token = format!("babel_{}", hex::encode(rng_bytes));
 
-                    std::env::set_var("BABEL_NLLB_TOKEN", &token);
-                    std::env::set_var("TESSDATA_PREFIX", res.join("tessdata"));
-                    std::env::set_var("TRANSFORMERS_OFFLINE", "1");
-                    std::env::set_var("HF_DATASETS_OFFLINE", "1");
-                    std::env::set_var("TOKENIZERS_PARALLELISM", "false");
+                    // B7/B8: token en OnceLock (no en env), resto vía Command::env()
+                    // — evita set_var() UB y evita que el token aparezca en `ps aux`
+                    traductor::inicializar_nllb_token(token.clone());
 
                     if let Ok(child) = std::process::Command::new(&py_bin)
                         .arg(&servidor)
+                        .env("BABEL_NLLB_TOKEN", &token)
+                        .env("TESSDATA_PREFIX", res.join("tessdata"))
+                        .env("TRANSFORMERS_OFFLINE", "1")
+                        .env("HF_DATASETS_OFFLINE", "1")
+                        .env("TOKENIZERS_PARALLELISM", "false")
                         .spawn()
                     {
                         USB_SERVER_PID
