@@ -2876,9 +2876,20 @@ fn borrar_html_frase() {
 fn main() {
     env_logger::init();
 
-    // PID del servidor Python del USB (0 = no arrancado)
-    static USB_SERVER_PID: std::sync::atomic::AtomicU32 =
-        std::sync::atomic::AtomicU32::new(0);
+    // Handle del servidor Python del USB — Mutex para poder matar en panic/exit
+    static USB_CHILD: std::sync::Mutex<Option<std::process::Child>> =
+        std::sync::Mutex::new(None);
+
+    // Mata el proceso Python si la app peta antes del evento Destroyed
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Ok(mut guard) = USB_CHILD.lock() {
+            if let Some(mut c) = guard.take() {
+                let _ = c.kill();
+            }
+        }
+        prev_hook(info);
+    }));
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -2907,9 +2918,7 @@ fn main() {
                         .env("TOKENIZERS_PARALLELISM", "false")
                         .spawn()
                     {
-                        USB_SERVER_PID
-                            .store(child.id(), std::sync::atomic::Ordering::Relaxed);
-                        std::mem::forget(child); // proceso corre hasta que lo matemos
+                        *USB_CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
                     }
 
                     // Hilo en background: cuando el servidor acepte conexiones,
@@ -2933,11 +2942,11 @@ fn main() {
         })
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                let pid = USB_SERVER_PID.load(std::sync::atomic::Ordering::Relaxed);
-                if pid > 0 {
-                    let _ = std::process::Command::new("kill")
-                        .args(["-TERM", &pid.to_string()])
-                        .status();
+                if let Ok(mut guard) = USB_CHILD.lock() {
+                    if let Some(mut c) = guard.take() {
+                        let _ = c.kill();
+                        let _ = c.wait();
+                    }
                 }
             }
         })
