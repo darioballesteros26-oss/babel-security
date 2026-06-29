@@ -1350,9 +1350,11 @@ const AUDIT_MAX_BYTES: u64 = 2 * 1024 * 1024; // 2 MB
 fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
     let _guard = AUDIT_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
 
-    // Rotar si supera el límite para evitar crecimiento ilimitado
+    // Rotar si supera el límite — el .old anterior se borra de forma segura (3 pasadas)
+    // para que el log cifrado previo no quede recuperable en disco.
     if let Ok(meta) = fs::metadata(ruta) {
         if meta.len() > AUDIT_MAX_BYTES {
+            crate::borrar_seguro(&format!("{}.old", ruta));
             let _ = fs::rename(ruta, format!("{}.old", ruta));
         }
     }
@@ -1364,6 +1366,9 @@ fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
                 let len = (cifrado.len() as u32).to_le_bytes();
                 if let Err(e) = f.write_all(&len).and_then(|_| f.write_all(&cifrado)) {
                     log::error!("[!] Fallo escribiendo evento de auditoría en {}: {}", ruta, e);
+                } else {
+                    // sync_all() garantiza que el evento llegó al dispositivo antes de retornar
+                    let _ = f.sync_all();
                 }
             }
         }

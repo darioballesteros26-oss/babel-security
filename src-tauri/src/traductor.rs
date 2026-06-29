@@ -38,7 +38,7 @@ use mailparse;
 use mailparse::MailHeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -345,7 +345,8 @@ pub fn motor_atomico(
     subclave_hex: &str,
 ) -> (String, usize) {
     let mut palabras_traducidas: Vec<String> = Vec::new();
-    let mut palabras_desconocidas: Vec<String> = Vec::new();
+    // HashSet para deduplicar en O(1) — Vec::contains era O(n) por entrada
+    let mut palabras_desconocidas: HashSet<String> = HashSet::new();
 
     for palabra in texto.split_whitespace() {
         let (raiz, _signo) = separar_signo(palabra);
@@ -356,19 +357,18 @@ pub fn motor_atomico(
         } else {
             palabras_traducidas.push(palabra.to_string());
             if clave.chars().all(|c| c.is_alphabetic()) && clave.len() > 3 {
-                if !palabras_desconocidas.contains(&clave) {
-                    palabras_desconocidas.push(clave);
-                }
+                palabras_desconocidas.insert(clave);
             }
         }
     }
 
     let resultado = palabras_traducidas.join(" ");
+    let n = palabras_desconocidas.len();
 
     for palabra in &palabras_desconocidas {
         registrar_pendiente(palabra, subclave_hex);
     }
-    (resultado, palabras_desconocidas.len())
+    (resultado, n)
 }
 fn traducir_xml_directo(
     xml: &str,
@@ -747,8 +747,18 @@ pub fn procesar_pdf(
 
     if !ok {
         // Fallback: pdftotext → si vacío, OCR página a página (máx. 50)
+        let pdftotext = [
+            "/opt/homebrew/bin/pdftotext",
+            "/usr/local/bin/pdftotext",
+            "/usr/bin/pdftotext",
+            "pdftotext",
+        ]
+        .iter()
+        .copied()
+        .find(|&p| p == "pdftotext" || std::path::Path::new(p).exists())
+        .unwrap_or("pdftotext");
         let mut texto = Zeroizing::new(
-            std::process::Command::new("/opt/homebrew/bin/pdftotext")
+            std::process::Command::new(pdftotext)
                 .args([ruta, "-"])
                 .output()
                 .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
@@ -1358,6 +1368,10 @@ fn agente_http() -> &'static ureq::Agent {
 /// Llama al servidor Python MarianMT en localhost:5002.
 /// Incluye token de seguridad — Flask rechaza sin él.
 pub fn traducir_con_marian(texto: &str, par: &str) -> Result<String, String> {
+    const MAX_BYTES: usize = 50_000;
+    if texto.len() > MAX_BYTES {
+        return Err(format!("Texto demasiado grande ({} bytes, máx {} KB)", texto.len(), MAX_BYTES / 1000));
+    }
     let url = "http://127.0.0.1:5002/traducir";
     let token = std::env::var("BABEL_NLLB_TOKEN")
         .map_err(|_| "BABEL_NLLB_TOKEN no configurado".to_string())?;

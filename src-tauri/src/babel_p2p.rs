@@ -220,12 +220,27 @@ impl DescubrimientoRed {
             };
             let _ = socket.set_broadcast(true);
 
+            // Rate limiting: máx 10 peticiones por IP por ventana de 1 segundo
+            let mut contadores: HashMap<std::net::IpAddr, (u32, std::time::Instant)> = HashMap::new();
+            const MAX_POR_SEGUNDO: u32 = 10;
+
             let mut buf = [0u8; 256];
             loop {
                 let (n, origen) = match socket.recv_from(&mut buf) {
                     Ok(r) => r,
                     Err(_) => continue,
                 };
+                let ip = origen.ip();
+                let ahora = std::time::Instant::now();
+                let entrada = contadores.entry(ip).or_insert((0, ahora));
+                if ahora.duration_since(entrada.1) >= Duration::from_secs(1) {
+                    *entrada = (0, ahora);
+                }
+                entrada.0 += 1;
+                if entrada.0 > MAX_POR_SEGUNDO {
+                    log::warn!("[P2P] Rate limit UDP: {} descartado.", redactar_ip(&ip.to_string()));
+                    continue;
+                }
                 if &buf[..n] == MENSAJE_ANUNCIO {
                     let respuesta =
                         format!("{}{}:{}", PREFIJO_RESPUESTA, nombre, PUERTO_TRANSFERENCIA);
@@ -729,10 +744,10 @@ impl ServidorP2P {
             let subclave = self.subclave_hex.clone();
             let usuario = self.id_usuario.clone();
             let contador = conexiones_activas.clone();
-            contador.fetch_add(1, Ordering::Relaxed);
 
-            // Cada conexión en su propio hilo — evita que un peer lento bloquee el servidor
+            // fetch_add dentro del closure — si spawn falla el contador no queda corrupto
             thread::spawn(move || {
+                contador.fetch_add(1, Ordering::Relaxed);
                 let conn = match rustls::ServerConnection::new(config_clone) {
                     Ok(c) => c,
                     Err(e) => {

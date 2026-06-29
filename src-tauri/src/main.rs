@@ -31,7 +31,7 @@ const MAX_ARCHIVOS: usize = 1000;
 // Así los bytes no quedan recuperables en disco aunque el SO
 // no haya sobreescrito el sector todavía.
 // Úsalo siempre que el archivo haya existido en claro (sin cifrar).
-fn borrar_seguro(ruta: &str) {
+pub fn borrar_seguro(ruta: &str) {
     if let Ok(meta) = fs::symlink_metadata(ruta) {
         if meta.file_type().is_symlink() {
             return;

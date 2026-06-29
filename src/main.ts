@@ -2194,8 +2194,8 @@ function renderizarCuerpoEmail(contenedor: HTMLElement, cuerpo: string): void {
   if (esHTML) {
     contenedor.innerHTML = DOMPurify.sanitize(cuerpo, {
       ALLOWED_TAGS: ["p", "div", "br", "span", "b", "i", "u", "strong", "em", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "a", "img", "h1", "h2", "h3", "h4", "blockquote", "pre", "code"],
-      ALLOWED_ATTR: ["href", "src", "alt", "title", "class", "width", "height"],
-      FORBID_ATTR: ["style"],
+      ALLOWED_ATTR: ["href", "alt", "title", "class", "width", "height"],
+      FORBID_ATTR: ["style", "src", "onerror", "onload"],
       ALLOW_DATA_ATTR: false,
       FORCE_BODY: true,
     });
