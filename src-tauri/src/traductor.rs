@@ -637,11 +637,11 @@ pub fn clonar_y_traducir(
 }
 
 fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
-    use rand::RngCore;
+    use rand::{rngs::OsRng, RngCore};
     let tmp_dir = crate::babel_dir().join("tmp");
     let _ = std::fs::create_dir_all(&tmp_dir);
     let mut rand_bytes = [0u8; 4];
-    rand::thread_rng().fill_bytes(&mut rand_bytes);
+    OsRng.fill_bytes(&mut rand_bytes);
     let tmp_base = tmp_dir.join(format!("ocr_{}_{}", pagina, hex::encode(rand_bytes)));
     let tmp_img = format!("{}.png", tmp_base.to_string_lossy());
 
@@ -1114,6 +1114,9 @@ pub struct EmailResumen {
 
 /// Rechaza cualquier campo IMAP que contenga \r o \n — previene inyección de comandos.
 fn validar_campo_imap(valor: &str, _campo: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if valor.len() > 320 {
+        return Err("Parámetro de conexión demasiado largo.".into());
+    }
     if valor.contains('\r') || valor.contains('\n') || valor.contains('\0') {
         return Err("Parámetro de conexión inválido.".into());
     }

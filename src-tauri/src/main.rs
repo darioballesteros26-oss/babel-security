@@ -1564,7 +1564,10 @@ fn renombrar_archivo(
     // Nuevo nombre manteniendo prefijo de usuario y extensión
     let nombre_limpio = nombre_nuevo
         .trim()
-        .replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+        .replace(['\0', '/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+    if nombre_limpio.is_empty() {
+        return Err("El nombre no puede estar vacío.".to_string());
+    }
     let nuevo_nombre_archivo = format!("{}_{}.babel", id_usuario, nombre_limpio);
     let nueva_ruta = dir.join(&nuevo_nombre_archivo);
 

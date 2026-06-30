@@ -605,12 +605,17 @@ async function cerrarSesion(): Promise<void> {
   _sesionPass = "0".repeat(_sesionPass.length); _sesionPass = "";
   _sesionMaestra = "0".repeat(_sesionMaestra.length); _sesionMaestra = "";
   _sesionUsuario = "0".repeat(_sesionUsuario.length); _sesionUsuario = "";
+  _firmaEmail = "0".repeat(_firmaEmail.length); _firmaEmail = "";
+  _cuerpoEmailOriginal = "";
   desactivarTimerInactividad();
   try { await invoke("cerrar_sesion_rust"); } catch { /* continúa cerrando aunque falle */ }
   limpiarCamposSensibles();
   localStorage.removeItem("babel-nombre-display");
   localStorage.removeItem("babel-buzon-activo");
   localStorage.removeItem("babel-buzon-activo-g");
+  localStorage.removeItem("babel-sidebar");
+  localStorage.removeItem("babel-idioma-ui");
+  localStorage.removeItem("babel-tema");
   window.location.reload();
 }
 
@@ -2218,10 +2223,18 @@ const emailsVistos = new Set<number>();
 let emailVisorActualId: number | null = null;
 let _firmaEmail: string = "";
 let _cuerpoEmailOriginal: string = "";
+let _imapCargando = false;   // B1: evita sesiones IMAP concurrentes en lectura
+let _imapMutando = false;    // B1: evita sesiones IMAP concurrentes en mutación
 
 async function cargarBandejaEmail(): Promise<void> {
+  if (_imapCargando) return;
+  _imapCargando = true;
   const lista = document.getElementById("email-lista");
-  if (!lista) return;
+  if (!lista) { _imapCargando = false; return; }
+
+  // B2: limpiar el buscador para que no quede un filtro inconsistente tras recargar
+  const buscarEl = document.getElementById("email-buscar") as HTMLInputElement | null;
+  if (buscarEl) buscarEl.value = "";
 
   lista.innerHTML = `<div class="email-vacio"><p class="email-vacio-titulo">Cargando...</p></div>`;
 
@@ -2267,6 +2280,8 @@ async function cargarBandejaEmail(): Promise<void> {
         <p class="email-vacio-titulo">Error cargando</p>
         <p class="email-vacio-sub">${escapeHTML(String(error))}</p>
       </div>`;
+  } finally {
+    _imapCargando = false;
   }
 }
 
@@ -2431,6 +2446,7 @@ function cerrarVisorEmail(): void {
   document.getElementById("email-visor")?.classList.add("hidden");
   document.getElementById("email-lector-vacio")?.classList.remove("hidden");
   emailVisorActualId = null;
+  _cuerpoEmailOriginal = "";
 }
 
 // Abre el selector de archivo del sistema para adjuntar al email
@@ -2618,11 +2634,11 @@ async function copiarCuerpoEmail(): Promise<void> {
 }
 
 async function marcarEmailNoLeido(): Promise<void> {
-  if (emailVisorActualId === null) return;
+  if (emailVisorActualId === null || _imapMutando) return;
+  _imapMutando = true;
   const id = emailVisorActualId;
   try {
     await invoke("marcar_no_leido_tauri", { id });
-    // Actualizar UI: quitar clase activo y restaurar punto de no leído
     const itemEl = document.querySelector(`.email-item[data-id="${id}"]`) as HTMLElement | null;
     if (itemEl) {
       itemEl.classList.add("no-leido");
@@ -2636,6 +2652,8 @@ async function marcarEmailNoLeido(): Promise<void> {
     mostrarToast("Marcado como no leído", false);
   } catch (e) {
     mostrarToast("Error: " + String(e), true);
+  } finally {
+    _imapMutando = false;
   }
 }
 
@@ -2648,7 +2666,8 @@ function insertarPlantillaEmail(texto: string): void {
 }
 
 async function eliminarEmailActual(): Promise<void> {
-  if (emailVisorActualId === null) return;
+  if (emailVisorActualId === null || _imapMutando) return;
+  _imapMutando = true;
   const id = emailVisorActualId;
   try {
     await invoke("eliminar_email_tauri", { id });
@@ -2657,6 +2676,8 @@ async function eliminarEmailActual(): Promise<void> {
     await cargarBandejaEmail();
   } catch (e) {
     mostrarToast(`Error eliminando: ${e}`, true);
+  } finally {
+    _imapMutando = false;
   }
 }
 
