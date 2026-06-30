@@ -1797,6 +1797,31 @@ body {
   opacity: 0.65;
 }
 
+.email-item-snippet {
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.78rem;
+  color: var(--texto-secundario);
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.email-cargando {
+  padding: 28px;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.8rem;
+  letter-spacing: 2px;
+  color: var(--texto-secundario);
+  animation: email-pulso 1.4s ease-in-out infinite;
+}
+
+@keyframes email-pulso {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.65; }
+}
+
 .email-vacio {
   display: flex;
   flex-direction: column;

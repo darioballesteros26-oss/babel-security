@@ -386,7 +386,10 @@ async function intentarAcceso(): Promise<void> {
       if (bienvenida) bienvenida.textContent = nombre ? `Bienvenido, ${nombre}` : "Bienvenido";
 
       activarTimerInactividad();
-      invoke<boolean>("tiene_config_email").then(ok => { _smtpConfigurado = ok; }).catch(() => { });
+      invoke<boolean>("tiene_config_email").then(ok => {
+        _smtpConfigurado = ok;
+        if (ok) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
+      }).catch(() => { });
 
       if (nombreGuardado === null) {
         mostrarPantalla("nombre");
@@ -2138,12 +2141,15 @@ interface EmailResumen {
   asunto: string;
   fecha: string;
   tiene_adjunto: boolean;
+  leido: boolean;
+  snippet: string;
 }
 
 // Email seleccionado actualmente
 let emailSeleccionado: EmailResumen | null = null;
 const emailsVistos = new Set<number>();
 let emailVisorActualId: number | null = null;
+let _firmaEmail: string = "";
 
 async function cargarBandejaEmail(): Promise<void> {
   const lista = document.getElementById("email-lista");
@@ -2164,19 +2170,28 @@ async function cargarBandejaEmail(): Promise<void> {
       return;
     }
 
-    lista.innerHTML = emails.map(email => `
-      <div class="email-item${emailsVistos.has(email.id) ? "" : " no-leido"}" onclick="seleccionarEmail(${email.id})" data-id="${email.id}">
+    let noLeidos = 0;
+    lista.innerHTML = emails.map(email => {
+      const visto = emailsVistos.has(email.id) || email.leido;
+      if (!visto) noLeidos++;
+      return `
+      <div class="email-item${visto ? "" : " no-leido"}" onclick="seleccionarEmail(${email.id})" data-id="${email.id}">
         <div class="email-item-cabecera">
           <div class="email-item-remitente">${escapeHTML(email.remitente)}</div>
-          ${!emailsVistos.has(email.id) ? '<span class="email-punto-nuevo"></span>' : ""}
+          ${!visto ? '<span class="email-punto-nuevo"></span>' : ""}
         </div>
         <div class="email-item-asunto">${escapeHTML(email.asunto)}</div>
+        ${email.snippet ? `<div class="email-item-snippet">${escapeHTML(email.snippet)}</div>` : ""}
         <div class="email-item-meta">
           <span class="email-item-fecha">${formatearFechaEmail(email.fecha)}</span>
           ${email.tiene_adjunto ? '<span class="email-item-adjunto-icono" title="Tiene adjunto">📎</span>' : ""}
         </div>
-      </div>
-    `).join("");
+      </div>`;
+    }).join("");
+
+    // Actualizar contador en el título
+    const tituloSidebar = document.querySelector(".email-sidebar-titulo");
+    if (tituloSidebar) tituloSidebar.textContent = noLeidos > 0 ? `BANDEJA (${noLeidos})` : "BANDEJA";
 
   } catch (error) {
     lista.innerHTML = `
@@ -2254,6 +2269,19 @@ async function seleccionarEmail(id: number): Promise<void> {
   lectorVacio?.classList.add("hidden");
   compositor?.classList.add("hidden");
 
+  // Mostrar indicador de carga inmediatamente
+  if (visor) {
+    visor.classList.remove("hidden");
+    const asuntoEl = document.getElementById("visor-asunto");
+    const metaEl = document.getElementById("visor-meta");
+    const adjuntosEl = document.getElementById("visor-adjuntos");
+    const cuerpoEl = document.getElementById("email-visor-cuerpo");
+    if (asuntoEl) asuntoEl.textContent = "Cargando…";
+    if (metaEl) metaEl.textContent = "";
+    if (adjuntosEl) adjuntosEl.innerHTML = "";
+    if (cuerpoEl) cuerpoEl.innerHTML = '<div class="email-cargando">CARGANDO CORREO</div>';
+  }
+
   try {
     const email = await invoke<{
       id: number;
@@ -2299,6 +2327,12 @@ function abrirComponerEmail(): void {
   if (!comp) return;
   comp.classList.remove("hidden");
   comp.style.display = "flex";
+
+  // Inyectar firma si el campo está vacío
+  const cuerpo = document.getElementById("comp-cuerpo") as HTMLTextAreaElement;
+  if (cuerpo && !cuerpo.value && _firmaEmail) {
+    cuerpo.value = `\n\n—\n${_firmaEmail}`;
+  }
 }
 
 // Cierra el compositor y limpia los campos y archivos adjuntos
@@ -2313,6 +2347,12 @@ function cerrarCompositor(): void {
   if (estado) estado.textContent = "";
   const inputFile = document.getElementById("input-archivo-email") as HTMLInputElement;
   if (inputFile) inputFile.value = "";
+  const ccEl = document.getElementById("comp-cc") as HTMLInputElement;
+  const ccoEl = document.getElementById("comp-cco") as HTMLInputElement;
+  const cuerpoEl = document.getElementById("comp-cuerpo") as HTMLTextAreaElement;
+  if (ccEl) ccEl.value = "";
+  if (ccoEl) ccoEl.value = "";
+  if (cuerpoEl) cuerpoEl.value = "";
 }
 
 // Cierra el visor de email y muestra el estado vacío del lector
@@ -2338,10 +2378,15 @@ function manejarSeleccionArchivoEmail(event: Event): void {
   if (el) el.textContent = "📎 " + archivo.name;
 }
 
-// Muestra u oculta el panel de configuración SMTP/IMAP
+// Muestra u oculta el panel de configuración de correo
 function toggleConfigSmtp(): void {
   const panel = document.getElementById("panel-config-smtp");
+  const estabaOculto = panel?.classList.contains("hidden");
   panel?.classList.toggle("hidden");
+  if (estabaOculto && _firmaEmail) {
+    const firmaEl = document.getElementById("smtp-firma") as HTMLTextAreaElement;
+    if (firmaEl && !firmaEl.value) firmaEl.value = _firmaEmail;
+  }
 }
 
 // Rellena automáticamente los campos SMTP/IMAP según el dominio del email introducido
@@ -2379,14 +2424,17 @@ async function guardarConfigSmtp(): Promise<void> {
   }
 
   try {
+    const firma = (document.getElementById("smtp-firma") as HTMLTextAreaElement)?.value.trim() ?? "";
     await invoke("guardar_config_email_tauri", {
       smtpServidor: servidor,
       imapDominio: imapServidor || servidor.replace("smtp.", "imap."),
       usuario,
       password,
       remitentes,
+      firma,
     });
     _smtpConfigurado = true;
+    _firmaEmail = firma;
     (document.getElementById("smtp-password") as HTMLInputElement).value = "";
     toggleConfigSmtp();
     mostrarToast("Configuración guardada y cifrada", false);
@@ -2399,6 +2447,8 @@ async function guardarConfigSmtp(): Promise<void> {
 
 async function enviarEmail(): Promise<void> {
   const destinatario = (document.getElementById("comp-destinatario") as HTMLInputElement)?.value.trim();
+  const cc = (document.getElementById("comp-cc") as HTMLInputElement)?.value.trim() ?? "";
+  const cco = (document.getElementById("comp-cco") as HTMLInputElement)?.value.trim() ?? "";
   const asunto = (document.getElementById("comp-asunto") as HTMLInputElement)?.value.trim();
   const estado = document.getElementById("comp-estado");
   const cuerpo = (document.getElementById("comp-cuerpo") as HTMLTextAreaElement)?.value.trim() ?? "";
@@ -2430,6 +2480,8 @@ async function enviarEmail(): Promise<void> {
         nombreArchivo: archivoEmailFile.name,
         bytes,
         destinatario,
+        cc,
+        cco,
         asunto,
         cuerpo,
       });
@@ -2437,6 +2489,8 @@ async function enviarEmail(): Promise<void> {
       await invoke("enviar_archivo_cifrado_tauri", {
         ruta: archivoEmailRuta,
         destinatario,
+        cc,
+        cco,
         asunto,
         cuerpo,
       });

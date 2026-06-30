@@ -566,6 +566,16 @@
                   class="email-campo-input">
               </div>
               <div class="email-campo-fila">
+                <span class="email-campo-label">CC</span>
+                <input type="text" id="comp-cc" placeholder="cc@despacho.com, otro@dominio.com"
+                  class="email-campo-input">
+              </div>
+              <div class="email-campo-fila">
+                <span class="email-campo-label">CCO</span>
+                <input type="text" id="comp-cco" placeholder="copia.oculta@dominio.com"
+                  class="email-campo-input">
+              </div>
+              <div class="email-campo-fila">
                 <span class="email-campo-label">Asunto</span>
                 <input type="text" id="comp-asunto" placeholder="Documento confidencial — Babel"
                   class="email-campo-input">
@@ -645,6 +655,12 @@
               <input type="text" id="smtp-remitentes" placeholder="abogado@bufete.com, notaria@dom.com"
                 class="input-vip" style="font-size:0.75rem;">
               <p class="email-config-hint">Solo recibirás documentos de estas direcciones. Separa con comas.</p>
+            </div>
+            <div class="input-grupo">
+              <label class="input-label">Firma</label>
+              <textarea id="smtp-firma" placeholder="Atentamente,&#10;Tu Nombre · Abogado · Col. nº 1234"
+                class="input-vip" style="font-size:0.75rem;resize:vertical;min-height:60px;font-family:'Times New Roman',Times,serif;"></textarea>
+              <p class="email-config-hint">Se añade automáticamente al final de cada correo.</p>
             </div>
             <div class="email-servidores-avanzado">
               <details>

@@ -51,7 +51,9 @@ pub fn enviar_archivo_descifrado(
     ruta: &str,
     destinatario: &str,
     asunto: &str,
-    cuerpo: &str, // ← añade
+    cuerpo: &str,
+    cc: &str,
+    cco: &str,
     smtp_servidor: &str,
     smtp_usuario: &str,
     smtp_password: &str,
@@ -129,9 +131,20 @@ pub fn enviar_archivo_descifrado(
         cuerpo_escapado
     );
 
-    let email = Message::builder()
+    let mut builder = Message::builder()
         .from(smtp_usuario.parse()?)
-        .to(destinatario.parse()?)
+        .to(destinatario.parse()?);
+
+    for addr in cc.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        validar_campo_imap(addr, "cc")?;
+        builder = builder.cc(addr.parse::<lettre::message::Mailbox>()?);
+    }
+    for addr in cco.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        validar_campo_imap(addr, "cco")?;
+        builder = builder.bcc(addr.parse::<lettre::message::Mailbox>()?);
+    }
+
+    let email = builder
         .subject(if asunto.is_empty() {
             "Documento de Babel Security"
         } else {
@@ -178,6 +191,8 @@ pub struct CredencialesEmail {
     pub smtp_servidor: String,
     pub imap_dominio: String,
     pub remitentes_autorizados: Vec<String>,
+    #[serde(default)]
+    pub firma: String,
 }
 
 // ============================================================
@@ -1093,6 +1108,8 @@ pub struct EmailResumen {
     pub asunto: String,
     pub fecha: String,
     pub tiene_adjunto: bool,
+    pub leido: bool,
+    pub snippet: String,
 }
 
 /// Rechaza cualquier campo IMAP que contenga \r o \n — previene inyección de comandos.
@@ -1101,6 +1118,48 @@ fn validar_campo_imap(valor: &str, _campo: &str) -> Result<(), Box<dyn std::erro
         return Err("Parámetro de conexión inválido.".into());
     }
     Ok(())
+}
+
+/// Extrae un snippet de texto plano de los primeros bytes de un mensaje RFC822.
+fn extraer_snippet(datos: &[u8]) -> String {
+    let texto = String::from_utf8_lossy(datos);
+    // Saltar cabeceras — buscar línea en blanco separadora
+    let cuerpo = match texto.find("\r\n\r\n").map(|p| p + 4)
+        .or_else(|| texto.find("\n\n").map(|p| p + 2))
+    {
+        Some(pos) => texto[pos..].trim_start(),
+        None => return String::new(),
+    };
+    // Si empieza con boundary MIME o cabecera de parte, buscar otro separador
+    let cuerpo = if cuerpo.starts_with("--") || cuerpo.starts_with("Content-") {
+        match cuerpo.find("\r\n\r\n").map(|p| p + 4)
+            .or_else(|| cuerpo.find("\n\n").map(|p| p + 2))
+        {
+            Some(pos) => cuerpo[pos..].trim_start(),
+            None => return String::new(),
+        }
+    } else {
+        cuerpo
+    };
+    // Descartar si parece base64 (líneas largas alfanuméricas)
+    if cuerpo.lines().next()
+        .map(|l| l.len() > 60 && l.chars().all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='))
+        .unwrap_or(false)
+    {
+        return String::new();
+    }
+    // Tomar hasta 300 chars y colapsar espacios
+    cuerpo
+        .chars()
+        .take(300)
+        .filter(|c| !c.is_control() || *c == ' ')
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(130)
+        .collect()
 }
 
 /// Devuelve true si la estructura BODYSTRUCTURE indica adjuntos.
@@ -1144,7 +1203,7 @@ fn obtener_emails_interno(
         .collect::<Vec<_>>()
         .join(",");
 
-    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS BODYSTRUCTURE)").map_err(|e| e.to_string())?;
+    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS BODYSTRUCTURE RFC822<0.700>)").map_err(|e| e.to_string())?;
 
     let mut emails: Vec<EmailResumen> = Vec::new();
 
@@ -1205,12 +1264,17 @@ fn obtener_emails_interno(
             .map(|bs| body_tiene_adjunto_str(&format!("{bs:?}")))
             .unwrap_or(false);
 
+        let leido = msg.flags().iter().any(|f| format!("{f:?}").contains("Seen"));
+        let snippet = msg.body().map(extraer_snippet).unwrap_or_default();
+
         emails.push(EmailResumen {
             id,
             remitente,
             asunto,
             fecha,
             tiene_adjunto,
+            leido,
+            snippet,
         });
     }
 

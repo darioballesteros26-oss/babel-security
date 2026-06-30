@@ -2408,6 +2408,7 @@ fn guardar_config_email_tauri(
     usuario: String,
     password: String,
     remitentes: String,
+    firma: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
     let subclave_hex = sesion
@@ -2428,6 +2429,7 @@ fn guardar_config_email_tauri(
         usuario,
         password,
         remitentes_autorizados,
+        firma,
     };
 
     traductor::guardar_config_email(&creds, &subclave_hex)?;
@@ -2442,6 +2444,8 @@ fn guardar_config_email_tauri(
 fn enviar_archivo_cifrado_tauri(
     ruta: String,
     destinatario: String,
+    cc: String,
+    cco: String,
     asunto: String,
     cuerpo: String,
     sesion: tauri::State<SesionActiva>,
@@ -2463,6 +2467,8 @@ fn enviar_archivo_cifrado_tauri(
         &destinatario,
         &asunto,
         &cuerpo,
+        &cc,
+        &cco,
         &creds.smtp_servidor,
         &creds.usuario,
         &creds.password,
@@ -2490,8 +2496,10 @@ fn enviar_bytes_cifrados_tauri(
     nombre_archivo: String,
     bytes: Vec<u8>,
     destinatario: String,
+    cc: String,
+    cco: String,
     asunto: String,
-    cuerpo: String, // ← añade
+    cuerpo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
     let subclave_hex = sesion
@@ -2519,6 +2527,8 @@ fn enviar_bytes_cifrados_tauri(
             &destinatario,
             &asunto,
             &cuerpo,
+            &cc,
+            &cco,
             &creds.smtp_servidor,
             &creds.usuario,
             &creds.password,
@@ -2626,6 +2636,24 @@ fn obtener_email_completo_tauri(
         cuerpo: email.cuerpo,
         adjuntos: email.adjuntos,
     })
+}
+
+// ============================================================
+// COMANDO — Obtener firma del email configurado
+// ============================================================
+
+#[tauri::command]
+fn obtener_firma_email(sesion: tauri::State<SesionActiva>) -> String {
+    let subclave_hex = match sesion.subclave_hex.lock() {
+        Ok(s) => s.clone(),
+        Err(_) => return String::new(),
+    };
+    if subclave_hex.is_empty() {
+        return String::new();
+    }
+    traductor::cargar_config_email(&subclave_hex)
+        .map(|c| c.firma.clone())
+        .unwrap_or_default()
 }
 
 // ============================================================
@@ -3051,6 +3079,7 @@ fn main() {
             obtener_usuario_con_maestra,
             renombrar_archivo,
             tiene_config_email,
+            obtener_firma_email,
             eliminar_email_tauri,
             guardar_html_frase,
             borrar_html_frase,
