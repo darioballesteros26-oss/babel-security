@@ -2048,6 +2048,8 @@ fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Strin
 // COMANDO 18 — Guardar y cargar ajustes
 // ============================================================
 
+fn default_timeout() -> u32 { 15 }
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct AppSettings {
     borrar_al_salir: bool,
@@ -2055,6 +2057,8 @@ pub struct AppSettings {
     idioma_origen: String,
     idioma_destino: String,
     categoria: String,
+    #[serde(default = "default_timeout")]
+    timeout_sesion_minutos: u32,
 }
 
 #[tauri::command]
@@ -2092,6 +2096,7 @@ fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, Stri
         idioma_origen: "es".to_string(),
         idioma_destino: "en".to_string(),
         categoria: "todos".to_string(),
+        timeout_sesion_minutos: 15,
     };
 
     if let Ok(cifrado) = fs::read(&babel_path("settings.babel")) {

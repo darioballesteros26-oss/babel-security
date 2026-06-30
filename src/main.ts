@@ -1415,15 +1415,16 @@ async function eliminarSeleccionados(): Promise<void> {
   }
 }
 // ============================================================
-// CIERRE AUTOMÁTICO POR INACTIVIDAD — 10 minutos
+// CIERRE AUTOMÁTICO POR INACTIVIDAD
 // ============================================================
 let timerInactividad: ReturnType<typeof setTimeout> | null = null;
+let _tiempoLockMs: number = 15 * 60 * 1000; // default hasta que carguen los ajustes
 
 function resetearTimerInactividad(): void {
   if (timerInactividad) clearTimeout(timerInactividad);
   timerInactividad = setTimeout(() => {
     cerrarSesion();
-  }, 15 * 60 * 1000); // 15 minutos de inactividad
+  }, _tiempoLockMs);
 }
 
 function activarTimerInactividad(): void {
@@ -2050,6 +2051,7 @@ async function guardarAjustesTraduccion(): Promise<void> {
   const destino = (document.getElementById("selector-destino") as HTMLSelectElement)?.value ?? "en";
   const categoria = (document.getElementById("tipo-diccionario") as HTMLSelectElement)?.value ?? "todos";
   const borradoAuto = (document.getElementById("toggle-borrado") as HTMLInputElement)?.checked ?? true;
+  const timeoutMin = parseInt((document.getElementById("selector-timeout") as HTMLSelectElement)?.value ?? "15", 10);
 
   await invoke("save_settings", {
     settings: {
@@ -2058,8 +2060,17 @@ async function guardarAjustesTraduccion(): Promise<void> {
       idioma_origen: origen,
       idioma_destino: destino,
       categoria: categoria,
+      timeout_sesion_minutos: timeoutMin,
     }
   }).catch(() => {});
+}
+
+async function guardarTimeoutSesion(minutos: string): Promise<void> {
+  const min = Math.max(5, Math.min(60, parseInt(minutos, 10)));
+  _tiempoLockMs = min * 60 * 1000;
+  resetearTimerInactividad();
+  await guardarAjustesTraduccion();
+  mostrarToast(`Bloqueo automático: ${min} min`, false);
 }
 
 async function cargarAjustesTraduccion(): Promise<void> {
@@ -2068,6 +2079,15 @@ async function cargarAjustesTraduccion(): Promise<void> {
   const destino = s.idioma_destino ?? "en";
   const categoria = s.categoria ?? "todos";
   const borradoAuto = s.borrar_al_salir ?? false;
+  const timeoutMin: number = Math.max(5, Math.min(60, s.timeout_sesion_minutos ?? 15));
+
+  // Aplicar timeout al timer de inactividad
+  _tiempoLockMs = timeoutMin * 60 * 1000;
+  resetearTimerInactividad();
+
+  // Sincronizar selector de timeout en ajustes si ya está visible
+  const selectorTimeout = document.getElementById("selector-timeout") as HTMLSelectElement;
+  if (selectorTimeout) selectorTimeout.value = String(timeoutMin);
 
   // Aplicar ajustes cargados a los controles reales de la UI
   const tipoDiccionario = document.getElementById("tipo-diccionario") as HTMLSelectElement;
@@ -2872,6 +2892,7 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).cerrarModalRenombrarArchivo = cerrarModalRenombrarArchivo;
 (window as any).verComparacionRutas = verComparacionRutas;
 (window as any).aprobarPeerPendiente = aprobarPeerPendiente;
+(window as any).guardarTimeoutSesion = guardarTimeoutSesion;
 
 async function aprobarPeerPendiente(fingerprint: string): Promise<void> {
   try {

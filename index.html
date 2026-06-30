@@ -797,6 +797,33 @@
         </select>
       </div>
 
+      <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+        <div class="ajuste-label" id="ui-timeout-label">BLOQUEO AUTOMÁTICO POR INACTIVIDAD</div>
+        <select id="selector-timeout" class="input-vip" style="margin-top:12px;width:100%;"
+          onchange="guardarTimeoutSesion(this.value)">
+          <option value="5">5 minutos</option>
+          <option value="10">10 minutos</option>
+          <option value="15" selected>15 minutos (recomendado)</option>
+          <option value="20">20 minutos</option>
+          <option value="30">30 minutos</option>
+          <option value="45">45 minutos</option>
+          <option value="60">60 minutos</option>
+        </select>
+        <div style="margin-top:8px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+          Sin actividad durante este tiempo → pantalla de acceso
+        </div>
+      </div>
+
+      <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+        <div class="ajuste-label">CLAVE DE RECUPERACIÓN BIP39</div>
+        <div style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+          12 palabras que permiten recuperar el acceso si olvidas la contraseña. No hagas capturas.
+        </div>
+        <button type="button" onclick="verFraseApp()" class="btn-vip" style="width:100%;padding:12px 0;">
+          VER FRASE DE RECUPERACIÓN
+        </button>
+      </div>
+
       <button type="button" onclick="mostrarPantalla('principal')" class="btn-link"
         style="margin-top:28px;text-align:center;" id="ui-volver-panel">← VOLVER AL PANEL</button>
     </div>
