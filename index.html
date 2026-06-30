@@ -533,6 +533,10 @@
               <button type="button" onclick="abrirComponerEmail()" class="email-btn-nuevo" title="Nuevo correo">＋</button>
             </div>
           </div>
+          <div class="email-buscar-wrap">
+            <input type="text" id="email-buscar" class="email-buscar-input"
+              placeholder="BUSCAR CORREO..." oninput="filtrarEmails(this.value)">
+          </div>
           <div id="email-lista" class="email-lista">
             <div class="email-vacio">
               <span style="font-size:2rem;opacity:0.13;">✉</span>
@@ -607,8 +611,13 @@
                 <button type="button" onclick="eliminarEmailActual()" class="email-btn-accion peligro">🗑 Eliminar</button>
                 <select id="email-idioma" onchange="cambiarIdiomaEmail(this.value)" class="email-idioma-sel">
                   <option value="ninguno">Sin traducir</option>
-                  <option value="es_en">Español → Inglés</option>
-                  <option value="en_es">Inglés → Español</option>
+                  <option value="es_en">ES → EN</option>
+                  <option value="en_es">EN → ES</option>
+                  <option value="fr_es">FR → ES</option>
+                  <option value="es_fr">ES → FR</option>
+                  <option value="ar_es">AR → ES</option>
+                  <option value="de_es">DE → ES</option>
+                  <option value="ru_es">RU → ES</option>
                 </select>
               </div>
               <button type="button" onclick="cerrarVisorEmail()" class="email-btn-cerrar-visor">✕</button>

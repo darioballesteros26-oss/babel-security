@@ -1711,6 +1711,31 @@ body {
   color: var(--dorado);
 }
 
+.email-buscar-wrap {
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid rgba(197, 160, 89, 0.1);
+  flex-shrink: 0;
+}
+
+.email-buscar-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(197, 160, 89, 0.18);
+  outline: none;
+  color: var(--texto-principal);
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.62rem;
+  letter-spacing: 2px;
+  padding: 5px 2px;
+}
+
+.email-buscar-input::placeholder {
+  color: var(--texto-secundario);
+  opacity: 0.35;
+}
+
 .email-lista {
   flex: 1;
   overflow-y: auto;

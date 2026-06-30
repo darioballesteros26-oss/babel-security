@@ -2170,6 +2170,7 @@ let emailSeleccionado: EmailResumen | null = null;
 const emailsVistos = new Set<number>();
 let emailVisorActualId: number | null = null;
 let _firmaEmail: string = "";
+let _cuerpoEmailOriginal: string = "";
 
 async function cargarBandejaEmail(): Promise<void> {
   const lista = document.getElementById("email-lista");
@@ -2329,6 +2330,9 @@ async function seleccionarEmail(id: number): Promise<void> {
           ? email.adjuntos.map(a => `<span class="email-adjunto-tag">📎 ${escapeHTML(a)}</span>`).join("")
           : "";
       }
+      _cuerpoEmailOriginal = email.cuerpo;
+      const idiomaEl = document.getElementById("email-idioma") as HTMLSelectElement;
+      if (idiomaEl) idiomaEl.value = "ninguno";
       if (cuerpoEl) renderizarCuerpoEmail(cuerpoEl, email.cuerpo);
     }
   } catch (error) {
@@ -2560,9 +2564,34 @@ async function eliminarEmailActual(): Promise<void> {
   }
 }
 
-// Placeholder — traducción de emails está pendiente de implementar
-function cambiarIdiomaEmail(_idioma: string): void {
-  mostrarToast("Traducción de emails — próximamente", false);
+async function cambiarIdiomaEmail(idioma: string): Promise<void> {
+  const cuerpoEl = document.getElementById("email-visor-cuerpo");
+  if (!cuerpoEl) return;
+  if (idioma === "ninguno") {
+    renderizarCuerpoEmail(cuerpoEl, _cuerpoEmailOriginal);
+    return;
+  }
+  if (!_cuerpoEmailOriginal) return;
+  cuerpoEl.innerHTML = '<div class="email-cargando">TRADUCIENDO...</div>';
+  try {
+    const textoPlano = _cuerpoEmailOriginal.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const [traducido] = await invoke<[string, number]>("traducir_texto", { texto: textoPlano, idioma });
+    cuerpoEl.textContent = traducido;
+  } catch (e) {
+    renderizarCuerpoEmail(cuerpoEl, _cuerpoEmailOriginal);
+    mostrarToast("Error al traducir: " + String(e), true);
+    const sel = document.getElementById("email-idioma") as HTMLSelectElement;
+    if (sel) sel.value = "ninguno";
+  }
+}
+
+function filtrarEmails(texto: string): void {
+  const q = texto.toLowerCase();
+  document.querySelectorAll<HTMLElement>("#email-lista .email-item").forEach(item => {
+    const remitente = item.querySelector(".email-item-remitente")?.textContent?.toLowerCase() ?? "";
+    const asunto = item.querySelector(".email-item-asunto")?.textContent?.toLowerCase() ?? "";
+    item.style.display = !q || remitente.includes(q) || asunto.includes(q) ? "" : "none";
+  });
 }
 
 // Navega a EMAIL y abre el compositor con el archivo de ARCHIVOS ya adjuntado
@@ -2893,6 +2922,7 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).verComparacionRutas = verComparacionRutas;
 (window as any).aprobarPeerPendiente = aprobarPeerPendiente;
 (window as any).guardarTimeoutSesion = guardarTimeoutSesion;
+(window as any).filtrarEmails = filtrarEmails;
 
 async function aprobarPeerPendiente(fingerprint: string): Promise<void> {
   try {
@@ -3172,6 +3202,17 @@ document.addEventListener("DOMContentLoaded", () => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         enviarMensajeP2P();
+      }
+    });
+  }
+
+  // Email compositor: Ctrl+Enter / Cmd+Enter envía el correo
+  const compCuerpo = document.getElementById("comp-cuerpo") as HTMLTextAreaElement | null;
+  if (compCuerpo) {
+    compCuerpo.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        enviarEmail();
       }
     });
   }
