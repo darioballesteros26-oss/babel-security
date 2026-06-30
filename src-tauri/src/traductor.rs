@@ -1371,6 +1371,67 @@ pub fn obtener_email_completo(
 }
 
 // ============================================================
+// EMAIL - ELIMINAR EMAIL POR UID (IMAP \Deleted + EXPUNGE)
+// ============================================================
+
+fn eliminar_email_interno(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+) -> Result<(), String> {
+    let cliente = imap::ClientBuilder::new(imap_dominio, 993)
+        .connect()
+        .map_err(|e| format!("Error conexión IMAP: {}", e))?;
+
+    let mut sesion = cliente
+        .login(usuario, password)
+        .map_err(|_| "Error de autenticación IMAP.".to_string())?;
+
+    sesion.select("INBOX").map_err(|e| e.to_string())?;
+
+    sesion
+        .uid_store(uid.to_string(), "+FLAGS (\\Deleted)")
+        .map_err(|e| format!("Error marcando email: {}", e))?;
+
+    sesion
+        .expunge()
+        .map_err(|e| format!("Error purgando email: {}", e))?;
+
+    let _ = sesion.logout();
+    Ok(())
+}
+
+pub fn eliminar_email(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    validar_campo_imap(password, "password")?;
+
+    let dom = Zeroizing::new(imap_dominio.to_string());
+    let usr = Zeroizing::new(usuario.to_string());
+    let pwd = Zeroizing::new(password.to_string());
+
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(eliminar_email_interno(
+            dom.as_str(),
+            usr.as_str(),
+            pwd.as_str(),
+            uid,
+        ));
+    });
+
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .map_err(|_| "Timeout de conexión IMAP (30s)".to_string())?
+        .map_err(|e| e.into())
+}
+
+// ============================================================
 // MARIAN - TRADUCCIÓN NEURONAL VÍA SERVIDOR PYTHON
 // ============================================================
 

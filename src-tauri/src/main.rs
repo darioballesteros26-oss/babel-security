@@ -2629,6 +2629,28 @@ fn obtener_email_completo_tauri(
 }
 
 // ============================================================
+// COMANDO — Eliminar email por UID via IMAP (\Deleted + EXPUNGE)
+// ============================================================
+
+#[tauri::command]
+fn eliminar_email_tauri(
+    id: u32,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    let subclave_hex = sesion
+        .subclave_hex
+        .lock()
+        .map_err(|_| "Error leyendo sesión.".to_string())?
+        .clone();
+
+    let creds = traductor::cargar_config_email(&subclave_hex)
+        .ok_or_else(|| "No hay configuración de email guardada.".to_string())?;
+
+    traductor::eliminar_email(&creds.imap_dominio, &creds.usuario, &creds.password, id)
+        .map_err(|e| format!("Error eliminando email: {}", e))
+}
+
+// ============================================================
 // COMANDO — Comprobar si el email está configurado
 // ============================================================
 
@@ -3029,6 +3051,7 @@ fn main() {
             obtener_usuario_con_maestra,
             renombrar_archivo,
             tiene_config_email,
+            eliminar_email_tauri,
             guardar_html_frase,
             borrar_html_frase,
         ]);

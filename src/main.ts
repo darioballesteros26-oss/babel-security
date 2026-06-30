@@ -2142,12 +2142,14 @@ interface EmailResumen {
 
 // Email seleccionado actualmente
 let emailSeleccionado: EmailResumen | null = null;
+const emailsVistos = new Set<number>();
+let emailVisorActualId: number | null = null;
 
 async function cargarBandejaEmail(): Promise<void> {
   const lista = document.getElementById("email-lista");
   if (!lista) return;
 
-  lista.innerHTML = `<div class="email-vacio"><p>Cargando...</p></div>`;
+  lista.innerHTML = `<div class="email-vacio"><p class="email-vacio-titulo">Cargando...</p></div>`;
 
   try {
     const emails = await invoke<EmailResumen[]>("obtener_emails_tauri");
@@ -2155,25 +2157,32 @@ async function cargarBandejaEmail(): Promise<void> {
     if (emails.length === 0) {
       lista.innerHTML = `
         <div class="email-vacio">
-          <p>Sin correos</p>
-          <p style="font-size:0.6rem;opacity:0.5;margin-top:4px;">La bandeja está vacía</p>
+          <span style="font-size:2rem;opacity:0.13;">✉</span>
+          <p class="email-vacio-titulo">Bandeja vacía</p>
+          <p class="email-vacio-sub">No hay correos en la bandeja</p>
         </div>`;
       return;
     }
 
     lista.innerHTML = emails.map(email => `
-      <div class="email-item" onclick="seleccionarEmail(${email.id})" data-id="${email.id}">
-        <div class="email-item-remitente">${escapeHTML(email.remitente)}</div>
+      <div class="email-item${emailsVistos.has(email.id) ? "" : " no-leido"}" onclick="seleccionarEmail(${email.id})" data-id="${email.id}">
+        <div class="email-item-cabecera">
+          <div class="email-item-remitente">${escapeHTML(email.remitente)}</div>
+          ${!emailsVistos.has(email.id) ? '<span class="email-punto-nuevo"></span>' : ""}
+        </div>
         <div class="email-item-asunto">${escapeHTML(email.asunto)}</div>
-        <div class="email-item-fecha">${formatearFechaEmail(email.fecha)}</div>
+        <div class="email-item-meta">
+          <span class="email-item-fecha">${formatearFechaEmail(email.fecha)}</span>
+          ${email.tiene_adjunto ? '<span class="email-item-adjunto-icono" title="Tiene adjunto">📎</span>' : ""}
+        </div>
       </div>
     `).join("");
 
   } catch (error) {
     lista.innerHTML = `
       <div class="email-vacio">
-        <p>Error cargando emails</p>
-        <p style="font-size:0.6rem;opacity:0.5;margin-top:4px;">${escapeHTML(String(error))}</p>
+        <p class="email-vacio-titulo">Error cargando</p>
+        <p class="email-vacio-sub">${escapeHTML(String(error))}</p>
       </div>`;
   }
 }
@@ -2229,7 +2238,15 @@ function renderizarCuerpoEmail(contenedor: HTMLElement, cuerpo: string): void {
 }
 async function seleccionarEmail(id: number): Promise<void> {
   document.querySelectorAll(".email-item").forEach(el => el.classList.remove("activo"));
-  document.querySelector(`.email-item[data-id="${id}"]`)?.classList.add("activo");
+  const itemEl = document.querySelector(`.email-item[data-id="${id}"]`);
+  itemEl?.classList.add("activo");
+
+  // Marcar como leído visualmente
+  emailsVistos.add(id);
+  if (itemEl) {
+    itemEl.classList.remove("no-leido");
+    itemEl.querySelector(".email-punto-nuevo")?.remove();
+  }
 
   const lectorVacio = document.getElementById("email-lector-vacio");
   const compositor = document.getElementById("email-compositor");
@@ -2247,45 +2264,30 @@ async function seleccionarEmail(id: number): Promise<void> {
       adjuntos: string[];
     }>("obtener_email_completo_tauri", { id });
 
+    emailVisorActualId = email.id;
+
     if (visor) {
       visor.classList.remove("hidden");
-      visor.innerHTML = `
-        <div class="email-visor-header" style="display: flex; justify-content: space-between; align-items: flex-start;"> 
-          <div style="flex: 1; min-width: 0;">
-            <div style="font-family: 'Times New Roman', Times, serif, serif; font-size: 1.1rem; color: var(--texto-principal); letter-spacing: 0.05em; margin-bottom: 6px;">
-              ${escapeHTML(email.asunto)}
-            </div>
-            
-            <div style="font-family: 'Times New Roman', Times, serif, sans-serif; font-size: 0.65rem; letter-spacing: 1px; color: var(--texto-secundario);">
-              ${escapeHTML(email.remitente)} · ${formatearFechaEmail(email.fecha)}
-            </div>
 
-            ${email.adjuntos.length > 0 ? `
-              <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;">
-                ${email.adjuntos.map(a => `
-                  <span style="font-family: 'Times New Roman', Times, serif, sans-serif; font-size: 0.6rem; letter-spacing: 1px; color: var(--dorado); border: 1px solid var(--borde-dorado); padding: 2px 8px; border-radius: 2px;">
-                    ◫ ${escapeHTML(a)}
-                  </span>
-                `).join("")}
-              </div>
-            ` : ""}
-          </div>
+      const asuntoEl = document.getElementById("visor-asunto");
+      const metaEl = document.getElementById("visor-meta");
+      const adjuntosEl = document.getElementById("visor-adjuntos");
+      const cuerpoEl = document.getElementById("email-visor-cuerpo");
 
-          <button type="button" onclick="cerrarVisorEmail()" style="background: transparent; border: none; color: var(--texto-secundario); cursor: pointer; font-size: 1rem; flex-shrink: 0; padding: 4px;">
-            ✕
-          </button>
-        </div>
-
-        <div id="email-visor-cuerpo" style="padding: 24px 28px; overflow-y: auto; flex: 1; font-family: 'Times New Roman', Times, serif, serif; font-size: 0.95rem; color: var(--texto-principal); line-height: 1.8; word-break: break-word; letter-spacing: 0.02em;">
-        </div>
-      `;
-
-      const cuerpoEl = visor.querySelector<HTMLElement>("#email-visor-cuerpo");
+      if (asuntoEl) asuntoEl.textContent = email.asunto || "Sin asunto";
+      if (metaEl) metaEl.textContent = `De: ${email.remitente} · ${formatearFechaEmail(email.fecha)}`;
+      if (adjuntosEl) {
+        adjuntosEl.innerHTML = email.adjuntos.length > 0
+          ? email.adjuntos.map(a => `<span class="email-adjunto-tag">📎 ${escapeHTML(a)}</span>`).join("")
+          : "";
+      }
       if (cuerpoEl) renderizarCuerpoEmail(cuerpoEl, email.cuerpo);
     }
   } catch (error) {
     mostrarToast("Error cargando email: " + String(error), true);
     lectorVacio?.classList.remove("hidden");
+    visor?.classList.add("hidden");
+    emailVisorActualId = null;
   }
 }
 
@@ -2306,7 +2308,7 @@ function cerrarCompositor(): void {
   archivoEmailRuta = "";
   archivoEmailFile = null;
   const nombre = document.getElementById("comp-archivo-nombre");
-  if (nombre) nombre.textContent = "◫ Adjuntar archivo";
+  if (nombre) nombre.textContent = "📎 Adjuntar documento";
   const estado = document.getElementById("comp-estado");
   if (estado) estado.textContent = "";
   const inputFile = document.getElementById("input-archivo-email") as HTMLInputElement;
@@ -2317,6 +2319,7 @@ function cerrarCompositor(): void {
 function cerrarVisorEmail(): void {
   document.getElementById("email-visor")?.classList.add("hidden");
   document.getElementById("email-lector-vacio")?.classList.remove("hidden");
+  emailVisorActualId = null;
 }
 
 // Abre el selector de archivo del sistema para adjuntar al email
@@ -2332,7 +2335,7 @@ function manejarSeleccionArchivoEmail(event: Event): void {
   archivoEmailRuta = archivo.name;
   archivoEmailFile = archivo;
   const el = document.getElementById("comp-archivo-nombre");
-  if (el) el.textContent = "◫ " + archivo.name;
+  if (el) el.textContent = "📎 " + archivo.name;
 }
 
 // Muestra u oculta el panel de configuración SMTP/IMAP
@@ -2444,6 +2447,42 @@ async function enviarEmail(): Promise<void> {
   } catch (error) {
     if (estado) estado.textContent = "";
     mostrarToast("Error enviando: " + String(error), true);
+  }
+}
+
+async function sincronizarEmail(): Promise<void> {
+  if (!_smtpConfigurado) {
+    toggleConfigSmtp();
+    return;
+  }
+  await cargarBandejaEmail();
+}
+
+function responderEmail(): void {
+  const asuntoEl = document.getElementById("visor-asunto");
+  const metaEl = document.getElementById("visor-meta");
+  const asunto = asuntoEl?.textContent ?? "";
+  const meta = metaEl?.textContent ?? "";
+  const remitente = meta.replace(/^De: /, "").split(" · ")[0] ?? "";
+
+  abrirComponerEmail();
+
+  const destinatario = document.getElementById("comp-destinatario") as HTMLInputElement;
+  const asuntoComp = document.getElementById("comp-asunto") as HTMLInputElement;
+  if (destinatario) destinatario.value = remitente;
+  if (asuntoComp && asunto) asuntoComp.value = asunto.startsWith("Re:") ? asunto : `Re: ${asunto}`;
+}
+
+async function eliminarEmailActual(): Promise<void> {
+  if (emailVisorActualId === null) return;
+  const id = emailVisorActualId;
+  try {
+    await invoke("eliminar_email_tauri", { id });
+    cerrarVisorEmail();
+    mostrarToast("Correo eliminado.", false);
+    await cargarBandejaEmail();
+  } catch (e) {
+    mostrarToast(`Error eliminando: ${e}`, true);
   }
 }
 
@@ -2744,6 +2783,9 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).cargarBandejaEmail = cargarBandejaEmail;
 (window as any).seleccionarEmail = seleccionarEmail;
 (window as any).emailSeleccionado = emailSeleccionado;
+(window as any).sincronizarEmail = sincronizarEmail;
+(window as any).responderEmail = responderEmail;
+(window as any).eliminarEmailActual = eliminarEmailActual;
 (window as any).abrirCarpetaBabel = abrirCarpetaBabel;
 (window as any).iniciarPollMensajes = iniciarPollMensajes;
 (window as any).iniciarRenombrado = iniciarRenombrado;

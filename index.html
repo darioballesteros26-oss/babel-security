@@ -524,140 +524,148 @@
 
       <div id="panel-p2p-email" class="p2p-panel hidden"
         style="padding:0;flex-direction:row;align-items:stretch;justify-content:flex-start;">
+        <!-- SIDEBAR: lista de correos -->
         <div class="email-sidebar">
           <div class="email-sidebar-header">
             <span class="email-sidebar-titulo">BANDEJA</span>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <select id="email-idioma" onchange="cambiarIdiomaEmail(this.value)"
-                style="background:transparent;border:1px solid var(--borde);color:var(--texto-secundario);font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.6rem;letter-spacing:1px;padding:4px 6px;cursor:pointer;">
-                <option value="ninguno">SIN TRADUCIR</option>
-                <option value="es_en">ES → EN</option>
-                <option value="en_es">EN → ES</option>
-              </select>
-              <button type="button" onclick="abrirComponerEmail()" class="email-btn-nuevo"
-                title="Nuevo email">＋</button>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <button type="button" onclick="sincronizarEmail()" class="email-btn-sync" title="Actualizar bandeja">↻</button>
+              <button type="button" onclick="abrirComponerEmail()" class="email-btn-nuevo" title="Nuevo correo">＋</button>
             </div>
           </div>
           <div id="email-lista" class="email-lista">
             <div class="email-vacio">
-              <p>Sin correos</p>
-              <p style="font-size:0.6rem;opacity:0.5;margin-top:4px;">Configura SMTP para recibir</p>
+              <span style="font-size:2rem;opacity:0.13;">✉</span>
+              <p class="email-vacio-titulo">Sin correos</p>
+              <p class="email-vacio-sub">Configura tu correo para empezar</p>
+              <button type="button" class="email-vacio-cta" onclick="toggleConfigSmtp()">CONFIGURAR CORREO</button>
             </div>
           </div>
-          <button type="button" onclick="toggleConfigSmtp()" class="email-btn-config">⚙ CONFIGURAR SMTP/IMAP</button>
+          <button type="button" onclick="toggleConfigSmtp()" class="email-btn-config">⚙ Configurar correo</button>
         </div>
 
         <div class="archivos-divisor"></div>
 
+        <!-- LECTOR: compositor / visor / vacío -->
         <div class="email-lector" id="email-lector">
           <div id="email-lector-vacio" class="email-lector-vacio">
-            <span style="font-size:2rem;opacity:0.2;">✉</span>
-            <p
-              style="font-family:'Times New Roman', Times, serif,serif;color:var(--texto-secundario);letter-spacing:2px;font-size:0.8rem;margin-top:12px;">
-              SELECCIONA UN CORREO</p>
+            <span class="email-lector-vacio-icono">✉</span>
+            <p class="email-lector-vacio-texto">SELECCIONA UN CORREO</p>
           </div>
+
+          <!-- COMPOSITOR: nuevo mensaje -->
           <div id="email-compositor" class="hidden" style="display:flex;flex-direction:column;height:100%;">
             <div class="email-compositor-header">
-              <span
-                style="font-family:'Times New Roman', Times, serif,serif;color:var(--dorado);letter-spacing:3px;font-size:0.9rem;">NUEVO
-                MENSAJE</span>
-              <button type="button" onclick="cerrarCompositor()"
-                style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;font-size:1rem;">✕</button>
+              <span class="email-compositor-titulo">NUEVO MENSAJE</span>
+              <button type="button" onclick="cerrarCompositor()" class="email-btn-cerrar-comp">✕</button>
             </div>
             <div class="email-compositor-campos">
               <div class="email-campo-fila">
-                <span class="email-campo-label">PARA</span>
+                <span class="email-campo-label">Para</span>
                 <input type="email" id="comp-destinatario" placeholder="destinatario@despacho.com"
                   class="email-campo-input">
               </div>
               <div class="email-campo-fila">
-                <span class="email-campo-label">ASUNTO</span>
+                <span class="email-campo-label">Asunto</span>
                 <input type="text" id="comp-asunto" placeholder="Documento confidencial — Babel"
                   class="email-campo-input">
               </div>
               <div class="email-campo-fila" style="border-bottom:none;">
-                <span class="email-campo-label">ARCHIVO</span>
-                <div id="comp-archivo-zona" onclick="seleccionarArchivoEmail()"
-                  style="flex:1;border:1px dashed var(--borde);border-radius:2px;padding:10px 14px;cursor:pointer;font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);transition:border-color 0.2s;"
-                  onmouseenter="this.style.borderColor='var(--dorado)'"
-                  onmouseleave="this.style.borderColor='var(--borde)'">
-                  <span id="comp-archivo-nombre">◫ Adjuntar archivo</span>
+                <span class="email-campo-label">Adjunto</span>
+                <div id="comp-archivo-zona" onclick="seleccionarArchivoEmail()" class="email-adjunto-zona"
+                  onmouseenter="this.classList.add('hover')" onmouseleave="this.classList.remove('hover')">
+                  <span id="comp-archivo-nombre">📎 Adjuntar documento</span>
                 </div>
                 <input type="file" id="input-archivo-email" style="display:none;"
                   onchange="manejarSeleccionArchivoEmail(event)">
               </div>
             </div>
             <textarea id="comp-cuerpo" placeholder="Escribe tu mensaje aquí..."
-              style="flex:1;background:transparent;border:none;border-top:1px solid var(--borde);color:var(--texto-principal);font-family:'Times New Roman', Times, serif,serif;font-size:0.9rem;padding:16px;resize:none;outline:none;line-height:1.7;min-height:160px;"></textarea>
+              class="email-compositor-cuerpo"></textarea>
             <div class="email-compositor-footer">
-              <div id="comp-estado"
-                style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);">
-              </div>
+              <div id="comp-estado" class="email-comp-estado"></div>
               <button type="button" onclick="enviarEmail()" class="btn-oro"
-                style="font-size:0.7rem;padding:10px 24px;">ENVIAR CIFRADO ✉</button>
+                style="font-size:0.78rem;padding:10px 24px;">ENVIAR CIFRADO ✉</button>
             </div>
           </div>
+
+          <!-- VISOR: leer email -->
           <div id="email-visor" class="hidden" style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
-            <div class="email-visor-header">
-              <div>
-                <div id="visor-asunto"
-                  style="font-family:'Times New Roman', Times, serif,serif;color:var(--dorado);font-size:1.1rem;letter-spacing:1px;">
-                </div>
-                <div id="visor-remitente"
-                  style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);margin-top:4px;">
-                </div>
+            <div class="email-visor-toolbar">
+              <div class="email-visor-acciones">
+                <button type="button" onclick="responderEmail()" class="email-btn-accion">↩ Responder</button>
+                <button type="button" onclick="eliminarEmailActual()" class="email-btn-accion peligro">🗑 Eliminar</button>
+                <select id="email-idioma" onchange="cambiarIdiomaEmail(this.value)" class="email-idioma-sel">
+                  <option value="ninguno">Sin traducir</option>
+                  <option value="es_en">Español → Inglés</option>
+                  <option value="en_es">Inglés → Español</option>
+                </select>
               </div>
-              <button type="button" onclick="cerrarVisorEmail()"
-                style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;">✕</button>
+              <button type="button" onclick="cerrarVisorEmail()" class="email-btn-cerrar-visor">✕</button>
             </div>
-            <div id="visor-cuerpo"
-              style="flex:1;padding:24px;overflow-y:auto;font-family:'Times New Roman', Times, serif,serif;font-size:1.05rem;color:var(--texto-principal);line-height:1.8;white-space:pre-wrap;">
+            <div class="email-visor-header">
+              <div id="visor-asunto" class="email-visor-asunto"></div>
+              <div id="visor-meta" class="email-visor-meta"></div>
+              <div id="visor-adjuntos" class="email-visor-adjuntos"></div>
             </div>
+            <div id="email-visor-cuerpo" class="email-visor-cuerpo"></div>
           </div>
         </div>
 
+        <!-- PANEL CONFIG -->
         <div id="panel-config-smtp" class="email-config-panel hidden">
           <div class="email-config-header">
-            <span
-              style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.7rem;letter-spacing:3px;color:var(--dorado);">CONFIGURACIÓN</span>
+            <span class="email-config-titulo">CONFIGURAR CORREO</span>
             <button type="button" onclick="toggleConfigSmtp()"
               style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;">✕</button>
           </div>
-          <div style="display:flex;flex-direction:column;gap:12px;padding:0 16px 16px;">
+          <div class="email-config-body">
             <div class="input-grupo">
-              <label class="input-label">SERVIDOR SMTP</label>
-              <input type="text" id="smtp-servidor" style="display:none;">
-            </div>
-            <div class="input-grupo">
-              <label class="input-label">SERVIDOR IMAP</label>
-              <input type="text" id="imap-servidor" style="display:none;">
-            </div>
-            <div class="input-grupo">
-              <label class="input-label">USUARIO</label>
+              <label class="input-label">Dirección de correo</label>
               <input type="text" id="smtp-usuario" placeholder="tu@email.com" class="input-vip"
-                style="font-size:0.75rem;" oninput="autorellenarSmtp(this.value)">
+                style="font-size:0.8rem;" oninput="autorellenarSmtp(this.value)">
+              <p class="email-config-hint">Los servidores se detectan automáticamente.</p>
             </div>
-          </div>
-          <div class="input-grupo">
-            <label class="input-label">CONTRASEÑA APP</label>
-            <div class="input-con-ojo">
-              <input type="password" id="smtp-password" placeholder="••••••••" class="input-vip"
-                style="font-size:0.75rem;">
-              <button type="button" class="btn-ojo" onclick="toggleContraseña('smtp-password')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              </button>
+            <div class="input-grupo">
+              <label class="input-label">Contraseña de aplicación</label>
+              <div class="input-con-ojo">
+                <input type="password" id="smtp-password" placeholder="••••••••" class="input-vip"
+                  style="font-size:0.75rem;">
+                <button type="button" class="btn-ojo" onclick="toggleContraseña('smtp-password')">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+              <p class="email-config-hint">No es tu contraseña habitual. Genera una contraseña de aplicación en la configuración de seguridad de tu cuenta de correo.</p>
             </div>
+            <div class="input-grupo">
+              <label class="input-label">Remitentes autorizados <span class="email-config-opcional">(opcional)</span></label>
+              <input type="text" id="smtp-remitentes" placeholder="abogado@bufete.com, notaria@dom.com"
+                class="input-vip" style="font-size:0.75rem;">
+              <p class="email-config-hint">Solo recibirás documentos de estas direcciones. Separa con comas.</p>
+            </div>
+            <div class="email-servidores-avanzado">
+              <details>
+                <summary>Configuración avanzada de servidores</summary>
+                <div class="email-servidores-detalle">
+                  <div class="input-grupo">
+                    <label class="input-label">Servidor de envío (SMTP)</label>
+                    <input type="text" id="smtp-servidor" placeholder="smtp.gmail.com" class="input-vip"
+                      style="font-size:0.75rem;">
+                  </div>
+                  <div class="input-grupo">
+                    <label class="input-label">Servidor de recepción (IMAP)</label>
+                    <input type="text" id="imap-servidor" placeholder="imap.gmail.com" class="input-vip"
+                      style="font-size:0.75rem;">
+                  </div>
+                </div>
+              </details>
+            </div>
+            <button type="button" onclick="guardarConfigSmtp()" class="btn-oro"
+              style="font-size:0.78rem;padding:10px;">GUARDAR Y CIFRAR</button>
           </div>
-          <div class="input-grupo" style="padding:0 16px;">
-            <label class="input-label">REMITENTES AUTORIZADOS</label>
-            <input type="text" id="smtp-remitentes" placeholder="email1@dominio.com, email2@dominio.com"
-              class="input-vip" style="font-size:0.75rem;">
-          </div>
-          <button type="button" onclick="guardarConfigSmtp()" class="btn-oro"
-            style="font-size:0.7rem;padding:10px;">GUARDAR Y CIFRAR</button>
         </div>
       </div>
     </div>
