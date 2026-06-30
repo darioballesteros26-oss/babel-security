@@ -2171,7 +2171,8 @@ fn generar_frase_recuperacion(
 
     let salt_maestra = traductor::cargar_o_crear_salt();
     let recovery_salt = seguridad::derivar_recovery_salt_v2(&salt_maestra);
-    let recovery_key = seguridad::derivar_clave_recuperacion_v2(&palabras, &recovery_salt)?;
+    // v3: Argon2id 131072/4/4 — mismos parámetros que el login
+    let recovery_key = seguridad::derivar_clave_recuperacion_v3(&palabras, &recovery_salt)?;
     let recovery_key_hex = Zeroizing::new(hex::encode(recovery_key.as_ref()));
     // Construir JSON con format! para evitar copias de strings dentro de serde_json::Value
     let m_escaped = maestra.replace('\\', "\\\\").replace('"', "\\\"");
@@ -2224,11 +2225,14 @@ fn recuperar_con_frase(
         return Err("Una o más palabras no pertenecen al diccionario BIP39.".into());
     }
 
-    // v2 (actual): salt por instalación derivada de master.salt
     let salt_maestra = traductor::cargar_o_crear_salt();
-    let recovery_salt_v2 = seguridad::derivar_recovery_salt_v2(&salt_maestra);
-    let recovery_key_v2 = seguridad::derivar_clave_recuperacion_v2(&palabras, &recovery_salt_v2)?;
-    let recovery_key_v2_hex = Zeroizing::new(hex::encode(recovery_key_v2.as_ref()));
+    let recovery_salt = seguridad::derivar_recovery_salt_v2(&salt_maestra);
+    // v3 (actual): Argon2id 131072/4/4 — mismos parámetros que el login
+    let key_v3 = seguridad::derivar_clave_recuperacion_v3(&palabras, &recovery_salt)?;
+    let key_v3_hex = Zeroizing::new(hex::encode(key_v3.as_ref()));
+    // v2: Argon2id 65536/3/1 con salt por instalación
+    let key_v2 = seguridad::derivar_clave_recuperacion_v2(&palabras, &recovery_salt)?;
+    let key_v2_hex = Zeroizing::new(hex::encode(key_v2.as_ref()));
 
     let cifrado = fs::read(&babel_path("recovery.babel")).map_err(|_| {
         "No se encontró archivo de recuperación. ¿Generaste la frase al crear el búnker?"
@@ -2237,40 +2241,45 @@ fn recuperar_con_frase(
 
     let mut usado_v0 = false;
     let mut datos =
-        match seguridad::descifrar_documento(cifrado.clone(), &recovery_key_v2_hex) {
+        match seguridad::descifrar_documento(cifrado.clone(), &key_v3_hex) {
             Ok(d) => d,
-            Err(_) => {
-                // Fallback v1: salt estática global (búnkers creados antes de esta versión)
-                let key_v1 = seguridad::derivar_clave_recuperacion(&palabras)
-                    .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
-                let key_v1_hex = Zeroizing::new(hex::encode(key_v1.as_ref()));
-                match seguridad::descifrar_documento(cifrado.clone(), &key_v1_hex) {
-                    Ok(d) => {
-                        // Migración automática a v2
-                        if let Ok(nuevo) = seguridad::blindar_documento(&d, &recovery_key_v2_hex) {
-                            let _ = fs::write(babel_path("recovery.babel"), nuevo);
-                        }
-                        d
+            Err(_) => match seguridad::descifrar_documento(cifrado.clone(), &key_v2_hex) {
+                Ok(d) => {
+                    // Migración automática a v3
+                    if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
+                        let _ = fs::write(babel_path("recovery.babel"), nuevo);
                     }
-                    Err(_) => {
-                        // Fallback v0: HKDF sin Argon2id (búnkers muy antiguos, pre-C1)
-                        let key_v0 = seguridad::derivar_clave_recuperacion_v0(&palabras)
-                            .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
-                        let key_v0_hex = Zeroizing::new(hex::encode(key_v0.as_ref()));
-                        match seguridad::descifrar_documento(cifrado, &key_v0_hex) {
-                            Ok(d) => {
-                                usado_v0 = true;
-                                // Migración automática a v2
-                                if let Ok(nuevo) = seguridad::blindar_documento(&d, &recovery_key_v2_hex) {
-                                    let _ = fs::write(babel_path("recovery.babel"), nuevo);
-                                }
-                                d
+                    d
+                }
+                Err(_) => {
+                    // Fallback v1: salt estática global
+                    let key_v1 = seguridad::derivar_clave_recuperacion(&palabras)
+                        .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
+                    let key_v1_hex = Zeroizing::new(hex::encode(key_v1.as_ref()));
+                    match seguridad::descifrar_documento(cifrado.clone(), &key_v1_hex) {
+                        Ok(d) => {
+                            if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
+                                let _ = fs::write(babel_path("recovery.babel"), nuevo);
                             }
-                            Err(_) => {
-                                incrementar_contador_y_bloquear(&sesion)?;
-                                return Err(
-                                    "Frase incorrecta - no corresponde a este bunker.".to_string()
-                                );
+                            d
+                        }
+                        Err(_) => {
+                            // Fallback v0: HKDF sin Argon2id (muy antiguos)
+                            let key_v0 = seguridad::derivar_clave_recuperacion_v0(&palabras)
+                                .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
+                            let key_v0_hex = Zeroizing::new(hex::encode(key_v0.as_ref()));
+                            match seguridad::descifrar_documento(cifrado, &key_v0_hex) {
+                                Ok(d) => {
+                                    usado_v0 = true;
+                                    if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
+                                        let _ = fs::write(babel_path("recovery.babel"), nuevo);
+                                    }
+                                    d
+                                }
+                                Err(_) => {
+                                    incrementar_contador_y_bloquear(&sesion)?;
+                                    return Err("Frase incorrecta - no corresponde a este bunker.".to_string());
+                                }
                             }
                         }
                     }
@@ -2298,7 +2307,7 @@ fn recuperar_con_frase(
     datos.zeroize();
     let aviso = if usado_v0 {
         "ADVERTENCIA: búnker creado con esquema BIP39 v0 (HKDF sin Argon2id). \
-         Se ha migrado automáticamente a v2 — vuelve a generar tu frase de recuperación.".to_string()
+         Se ha migrado automáticamente a v3 — vuelve a generar tu frase de recuperación.".to_string()
     } else {
         String::new()
     };
@@ -2760,6 +2769,19 @@ fn enviar_mensaje_p2p(
 // Obtener mensajes de texto recibidos por P2P
 //=============================================================
 #[tauri::command]
+fn listar_peers_pendientes_cmd(_sesion: tauri::State<SesionActiva>) -> Vec<String> {
+    crate::babel_p2p::listar_peers_pendientes()
+}
+
+#[tauri::command]
+fn aprobar_peer_pendiente_cmd(
+    fingerprint: String,
+    _sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    crate::babel_p2p::aprobar_peer_pendiente(&fingerprint)
+}
+
+#[tauri::command]
 fn obtener_mensajes_p2p(sesion: tauri::State<SesionActiva>) -> Result<Vec<String>, String> {
     // C-2: verificar sesión activa
     let subclave = sesion.subclave_hex.lock().map_err(|_| "Error sesión".to_string())?.clone();
@@ -2770,6 +2792,7 @@ fn obtener_mensajes_p2p(sesion: tauri::State<SesionActiva>) -> Result<Vec<String
         .lock()
         .map_err(|_| "Error leyendo mensajes".to_string())?
         .drain(..)
+        .map(|z| (*z).clone())
         .collect();
     Ok(mensajes)
 }
@@ -2991,6 +3014,8 @@ fn main() {
             enviar_archivo_p2p,
             enviar_mensaje_p2p,
             obtener_mensajes_p2p,
+            listar_peers_pendientes_cmd,
+            aprobar_peer_pendiente_cmd,
             renombrar_buzon,
             guardar_documento_sin_traducir,
             listar_archivos_guardados,

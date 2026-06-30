@@ -31,9 +31,20 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use zeroize::Zeroizing;
 
-// Buffer global de mensajes entrantes. Limitado a MAX_MENSAJES para evitar OOM.
-pub static MENSAJES_ENTRANTES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+// Buffer global de mensajes entrantes. Zeroizing<String> garantiza borrado al drenarlo.
+pub static MENSAJES_ENTRANTES: Mutex<Vec<Zeroizing<String>>> = Mutex::new(Vec::new());
 const MAX_MENSAJES: usize = 1000;
+
+// Peers rechazados por fingerprint desconocido, pendientes de aprobación del usuario.
+// Cada entrada: (fingerprint_completo, ip_redactada).
+pub static PEERS_PENDIENTES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+/// IP LAN local usando el truco de conectar UDP sin enviar tráfico real.
+fn lan_ip() -> Option<std::net::IpAddr> {
+    let s = UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("8.8.8.8:80").ok()?;
+    s.local_addr().ok().map(|a| a.ip())
+}
 
 // Señal de apagado para el servidor P2P. Se activa en cerrar_sesion para que el
 // hilo del servidor salga limpiamente y libere (zeroize) la subclave en RAM.
@@ -138,8 +149,10 @@ pub const PUERTO_TRANSFERENCIA: u16 = 47824;
 pub const TAMAÑO_CABECERA: usize = 304;
 pub const MAX_NOMBRE: usize = 256;
 pub const MAX_TAMAÑO_ARCHIVO: u64 = 100 * 1024 * 1024; // 100MB
-const MENSAJE_ANUNCIO: &[u8] = b"BABEL_P2P_ANNOUNCE_V1";
-const PREFIJO_RESPUESTA: &str = "BABEL_P2P_RESPONSE_V1:";
+// V2: incluye timestamp Unix para invalidar replays > 60 s y fingerprint del cert.
+// V1 se sigue parseando como fallback para compatibilidad con versiones antiguas.
+const PREFIJO_ANUNCIO_V2: &str = "BABEL_P2P_ANNOUNCE_V2:";
+const PREFIJO_RESPUESTA_V2: &str = "BABEL_P2P_RESPONSE_V2:";
 const VERSION_PROTOCOLO: u32 = 1;
 
 // ============================================================
@@ -187,7 +200,19 @@ impl GestorCertificados {
         let clave_der = Zeroizing::new(cert.serialize_private_key_der());
 
         fs::write(ruta_cert(), &cert_der).map_err(|e| format!("Error guardando cert: {}", e))?;
-        fs::write(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
+        // Cifrar la clave privada antes de guardarla en disco
+        if let Some(enc_key) = clave_privada_p2p_enc() {
+            match crate::seguridad::blindar_documento(&hex::encode(clave_der.as_slice()), &enc_key) {
+                Ok(cifrado) => {
+                    fs::write(ruta_clave(), cifrado).map_err(|e| format!("Error guardando clave cifrada: {}", e))?;
+                }
+                Err(_) => {
+                    fs::write(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
+                }
+            }
+        } else {
+            fs::write(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -202,9 +227,31 @@ impl GestorCertificados {
 
     fn cargar() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>), String> {
         let cert = fs::read(ruta_cert()).map_err(|e| format!("Error leyendo cert: {}", e))?;
-        let clave = Zeroizing::new(
-            fs::read(ruta_clave()).map_err(|e| format!("Error leyendo clave: {}", e))?,
-        );
+        let blob = fs::read(ruta_clave()).map_err(|e| format!("Error leyendo clave: {}", e))?;
+
+        let clave = if let Some(enc_key) = clave_privada_p2p_enc() {
+            // Intentar descifrar (formato nuevo cifrado)
+            match crate::seguridad::descifrar_documento(blob.clone(), &enc_key)
+                .and_then(|hex| hex::decode(hex.trim()).map_err(|e| e.to_string()))
+            {
+                Ok(bytes) => Zeroizing::new(bytes),
+                Err(_) => {
+                    // Migración: estaba en texto plano — re-cifrar y guardar
+                    let raw = Zeroizing::new(blob);
+                    if let Ok(cifrado) = crate::seguridad::blindar_documento(&hex::encode(&*raw), &enc_key) {
+                        let _ = fs::write(ruta_clave(), cifrado);
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600));
+                        }
+                    }
+                    raw
+                }
+            }
+        } else {
+            Zeroizing::new(blob)
+        };
         Ok((cert, clave))
     }
 }
@@ -218,18 +265,27 @@ pub struct DescubrimientoRed;
 impl DescubrimientoRed {
     pub fn iniciar_servidor(nombre: String) {
         thread::spawn(move || {
-            let socket = match UdpSocket::bind(format!("0.0.0.0:{}", PUERTO_DESCUBRIMIENTO)) {
-                Ok(s) => s,
-                Err(e) => {
+            // Preferir la IP LAN para no escuchar en todas las interfaces
+            let bind_ip = lan_ip()
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|| "0.0.0.0".to_string());
+            let socket = UdpSocket::bind(format!("{}:{}", bind_ip, PUERTO_DESCUBRIMIENTO))
+                .or_else(|_| UdpSocket::bind(format!("0.0.0.0:{}", PUERTO_DESCUBRIMIENTO)))
+                .unwrap_or_else(|e| {
                     log::warn!("[P2P] No se pudo iniciar descubrimiento: {}", e);
-                    return;
-                }
-            };
+                    std::process::exit(0); // no debería llegar aquí
+                });
             let _ = socket.set_broadcast(true);
 
             // Rate limiting: máx 10 peticiones por IP por ventana de 1 segundo
             let mut contadores: HashMap<std::net::IpAddr, (u32, std::time::Instant)> = HashMap::new();
             const MAX_POR_SEGUNDO: u32 = 10;
+
+            // Fingerprint propio para incluir en la respuesta (permite pre-verificación TOFU)
+            let fp_propio: String = fs::read(ruta_cert())
+                .map(|b| fingerprint_cert(&CertificateDer::from(b)))
+                .map(|fp| fp[..8.min(fp.len())].to_string())
+                .unwrap_or_default();
 
             let mut buf = [0u8; 256];
             loop {
@@ -238,19 +294,28 @@ impl DescubrimientoRed {
                     Err(_) => continue,
                 };
                 let ip = origen.ip();
-                let ahora = std::time::Instant::now();
-                let entrada = contadores.entry(ip).or_insert((0, ahora));
-                if ahora.duration_since(entrada.1) >= Duration::from_secs(1) {
-                    *entrada = (0, ahora);
+                let ahora_inst = std::time::Instant::now();
+                let entrada = contadores.entry(ip).or_insert((0, ahora_inst));
+                if ahora_inst.duration_since(entrada.1) >= Duration::from_secs(1) {
+                    *entrada = (0, ahora_inst);
                 }
                 entrada.0 += 1;
                 if entrada.0 > MAX_POR_SEGUNDO {
                     log::warn!("[P2P] Rate limit UDP: {} descartado.", redactar_ip(&ip.to_string()));
                     continue;
                 }
-                if &buf[..n] == MENSAJE_ANUNCIO {
-                    let respuesta =
-                        format!("{}{}:{}", PREFIJO_RESPUESTA, nombre, PUERTO_TRANSFERENCIA);
+                let msg = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                // Validar formato V2 (con timestamp) o aceptar V1 legado
+                let valido = if let Some(rest) = msg.strip_prefix(PREFIJO_ANUNCIO_V2) {
+                    let ts: u64 = rest.parse().unwrap_or(0);
+                    let ahora_u = ahora_unix();
+                    ts > 0 && ahora_u.saturating_sub(ts) < 60
+                } else {
+                    msg == "BABEL_P2P_ANNOUNCE_V1"
+                };
+                if valido {
+                    let ts = ahora_unix();
+                    let respuesta = format!("{}{}:{}:{}:{}", PREFIJO_RESPUESTA_V2, ts, nombre, PUERTO_TRANSFERENCIA, fp_propio);
                     let _ = socket.send_to(respuesta.as_bytes(), origen);
                 }
             }
@@ -271,8 +336,9 @@ impl DescubrimientoRed {
             std::net::IpAddr::V4(Ipv4Addr::BROADCAST),
             PUERTO_DESCUBRIMIENTO,
         );
+        let anuncio = format!("{}{}", PREFIJO_ANUNCIO_V2, ahora_unix());
         socket
-            .send_to(MENSAJE_ANUNCIO, destino)
+            .send_to(anuncio.as_bytes(), destino)
             .map_err(|e| format!("Error enviando broadcast: {}", e))?;
 
         log::warn!("[P2P] Buscando Babel en la red local...");
@@ -312,30 +378,34 @@ impl DescubrimientoRed {
     }
 
     fn parsear_respuesta(respuesta: &str, origen: &SocketAddr) -> Option<PeerDescubierto> {
-        if !respuesta.starts_with(PREFIJO_RESPUESTA) {
+        let (ts_str, nombre_raw, puerto_str) = if let Some(rest) = respuesta.strip_prefix(PREFIJO_RESPUESTA_V2) {
+            // Formato V2: <ts>:<nombre>:<puerto>:<fp8_opcional>
+            let p: Vec<&str> = rest.splitn(4, ':').collect();
+            if p.len() < 3 { return None; }
+            (p[0], p[1], p[2])
+        } else if let Some(rest) = respuesta.strip_prefix("BABEL_P2P_RESPONSE_V1:") {
+            // Legado V1: <nombre>:<puerto>
+            let p: Vec<&str> = rest.splitn(2, ':').collect();
+            if p.len() != 2 { return None; }
+            ("0", p[0], p[1])
+        } else {
+            return None;
+        };
+
+        // Validar timestamp: rechazar respuestas > 60 s (anti-replay)
+        let ts: u64 = ts_str.parse().unwrap_or(0);
+        if ts > 0 && ahora_unix().saturating_sub(ts) > 60 {
             return None;
         }
-        let resto = &respuesta[PREFIJO_RESPUESTA.len()..];
-        let partes: Vec<&str> = resto.splitn(2, ':').collect();
-        if partes.len() != 2 {
-            return None;
-        }
-        // Sanitizar nombre: solo alfanumérico, guiones y puntos; max 64 chars
-        // Previene inyección de caracteres en SNI y en el log de auditoría
-        let nombre: String = partes[0]
+
+        let nombre: String = nombre_raw
             .chars()
             .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '.')
             .take(64)
             .collect();
-        if nombre.is_empty() {
-            return None;
-        }
-        let puerto: u16 = partes[1].trim().parse().ok()?;
-        Some(PeerDescubierto {
-            ip: origen.ip().to_string(),
-            puerto,
-            nombre,
-        })
+        if nombre.is_empty() { return None; }
+        let puerto: u16 = puerto_str.trim().parse().ok()?;
+        Some(PeerDescubierto { ip: origen.ip().to_string(), puerto, nombre })
     }
 
     pub fn peer_manual(ip: &str, nombre: &str) -> PeerDescubierto {
@@ -560,6 +630,11 @@ impl rustls::client::danger::ServerCertVerifier for VerificadorPinning {
 
 static CERTS_AUTORIZADOS_MUTEX: Mutex<()> = Mutex::new(());
 
+// IP del peer actual pasada al verificador vía thread-local (una conexión = un hilo).
+thread_local! {
+    static PEER_IP_ACTUAL: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
+}
+
 // Thread-safe: serializa el TOFU del cliente para evitar race condition
 // donde dos conexiones simultáneas podrían registrar fingerprints distintos.
 static TOFU_PINNING_MUTEX: Mutex<()> = Mutex::new(());
@@ -575,6 +650,18 @@ fn ahora_unix() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+/// Deriva la clave de cifrado para la clave privada P2P desde master.salt.
+/// SHA-256 con dominio propio — distinta de clave_certs_autorizados.
+fn clave_privada_p2p_enc() -> Option<Zeroizing<String>> {
+    let salt = fs::read(crate::babel_dir().join("master.salt")).ok()?;
+    if salt.len() < 32 { return None; }
+    let mut hasher = Sha256::new();
+    hasher.update(b"babel-p2p-clave-privada-v1:");
+    hasher.update(&salt[..32]);
+    let derived: [u8; 32] = hasher.finalize().into();
+    Some(Zeroizing::new(hex::encode(derived)))
 }
 
 // Deriva la clave para cifrar certs_autorizados.dat desde master.salt.
@@ -647,14 +734,26 @@ impl rustls::server::danger::ClientCertVerifier for VerificadorClienteP2P {
         let fp = fingerprint_cert(end_entity);
         let _guard = CERTS_AUTORIZADOS_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let mut autorizados = cargar_certs_autorizados();
-        if autorizados.is_empty() || autorizados.contains(&fp) {
-            // TOFU: primer peer o fingerprint ya registrado — aceptar y persistir
+
+        if autorizados.contains(&fp) {
+            // Fingerprint ya autorizado — aceptar sin re-guardar
+            Ok(rustls::server::danger::ClientCertVerified::assertion())
+        } else if autorizados.is_empty() {
+            // TOFU bootstrap: primer peer ever — auto-aceptar
             autorizados.insert(fp);
             guardar_certs_autorizados(&autorizados);
+            log::warn!("[P2P] Primer peer registrado por TOFU (bootstrap).");
             Ok(rustls::server::danger::ClientCertVerified::assertion())
         } else {
-            log::warn!("[P2P] Certificado cliente rechazado — fingerprint no autorizado.");
-            Err(rustls::Error::General("Certificado P2P no autorizado".into()))
+            // Peer desconocido — añadir a pendientes para que el usuario lo apruebe
+            let ip_red = PEER_IP_ACTUAL.with(|c| redactar_ip(&c.borrow()));
+            if let Ok(mut pending) = PEERS_PENDIENTES.lock() {
+                if !pending.iter().any(|(f, _)| f == &fp) {
+                    pending.push((fp.clone(), ip_red.clone()));
+                    log::warn!("[P2P] Peer {} pendiente de aprobación.", ip_red);
+                }
+            }
+            Err(rustls::Error::General("Certificado P2P no autorizado — aprobación pendiente".into()))
         }
     }
 
@@ -717,7 +816,12 @@ impl ServidorP2P {
         let config_arc = Arc::new(config_tls);
         let conexiones_activas = Arc::new(AtomicUsize::new(0));
 
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", PUERTO_TRANSFERENCIA))
+        // Preferir LAN IP para no exponer el servidor en todas las interfaces
+        let bind_addr = lan_ip()
+            .map(|ip| format!("{}:{}", ip, PUERTO_TRANSFERENCIA))
+            .unwrap_or_else(|| format!("0.0.0.0:{}", PUERTO_TRANSFERENCIA));
+        let listener = TcpListener::bind(&bind_addr)
+            .or_else(|_| TcpListener::bind(format!("0.0.0.0:{}", PUERTO_TRANSFERENCIA)))
             .map_err(|e| format!("No se pudo abrir puerto {}: {}", PUERTO_TRANSFERENCIA, e))?;
 
         // Non-blocking + poll loop permite comprobar P2P_SHUTDOWN sin bloquearse
@@ -776,7 +880,10 @@ impl ServidorP2P {
             let contador = conexiones_activas.clone();
 
             // fetch_add dentro del closure — si spawn falla el contador no queda corrupto
+            let ip_clone = ip.clone();
             thread::spawn(move || {
+                // Inyectar la IP en el thread-local antes del handshake TLS
+                PEER_IP_ACTUAL.with(|c| *c.borrow_mut() = ip_clone);
                 contador.fetch_add(1, Ordering::Relaxed);
                 let conn = match rustls::ServerConnection::new(config_clone) {
                     Ok(c) => c,
@@ -823,7 +930,7 @@ impl ServidorP2P {
             if let Ok(texto) = String::from_utf8(datos.to_vec()) {
                 if let Ok(mut msgs) = MENSAJES_ENTRANTES.lock() {
                     if msgs.len() < MAX_MENSAJES {
-                        msgs.push(texto);
+                        msgs.push(Zeroizing::new(texto));
                     } else {
                         log::warn!("[P2P] Buffer de mensajes lleno, mensaje descartado.");
                     }
@@ -1013,4 +1120,31 @@ impl ClienteP2P {
 
         Ok(config)
     }
+}
+
+// ============================================================
+// APROBACIÓN DE PEERS PENDIENTES (M9 TOFU)
+// ============================================================
+
+/// Devuelve los peers pendientes de aprobación como "fp8:ip_redactada".
+pub fn listar_peers_pendientes() -> Vec<String> {
+    PEERS_PENDIENTES
+        .lock()
+        .map(|g| g.iter().map(|(fp, ip)| format!("{}:{}", &fp[..8.min(fp.len())], ip)).collect())
+        .unwrap_or_default()
+}
+
+/// Aprueba un peer pendiente por su fingerprint (completo o los 8 primeros chars).
+pub fn aprobar_peer_pendiente(fp_input: &str) -> Result<(), String> {
+    let _guard = CERTS_AUTORIZADOS_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let mut pendientes = PEERS_PENDIENTES.lock().map_err(|_| "Lock error".to_string())?;
+    let pos = pendientes
+        .iter()
+        .position(|(fp, _)| fp == fp_input || fp.starts_with(fp_input))
+        .ok_or("Peer no encontrado en pendientes")?;
+    let (fp_completo, _) = pendientes.remove(pos);
+    let mut autorizados = cargar_certs_autorizados();
+    autorizados.insert(fp_completo);
+    guardar_certs_autorizados(&autorizados);
+    Ok(())
 }

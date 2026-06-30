@@ -1103,6 +1103,16 @@ fn validar_campo_imap(valor: &str, _campo: &str) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+/// Devuelve true si la estructura BODYSTRUCTURE indica adjuntos.
+/// Usa la representación Debug del tipo opaco de imap-proto para evitar
+/// depender de los tipos internos del crate alpha.
+fn body_tiene_adjunto_str(bs_debug: &str) -> bool {
+    let s = bs_debug.to_ascii_lowercase();
+    s.contains("multipart") && (s.contains("mixed") || s.contains("related"))
+        || s.contains("\"attachment\"")
+        || s.contains("attachment\"")
+}
+
 fn obtener_emails_interno(
     imap_dominio: &str,
     usuario: &str,
@@ -1134,7 +1144,7 @@ fn obtener_emails_interno(
         .collect::<Vec<_>>()
         .join(",");
 
-    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS)").map_err(|e| e.to_string())?;
+    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS BODYSTRUCTURE)").map_err(|e| e.to_string())?;
 
     let mut emails: Vec<EmailResumen> = Vec::new();
 
@@ -1191,7 +1201,9 @@ fn obtener_emails_interno(
             .unwrap_or("")
             .to_string();
 
-        let tiene_adjunto = false;
+        let tiene_adjunto = msg.bodystructure()
+            .map(|bs| body_tiene_adjunto_str(&format!("{bs:?}")))
+            .unwrap_or(false);
 
         emails.push(EmailResumen {
             id,

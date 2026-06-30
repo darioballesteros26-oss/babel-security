@@ -53,6 +53,7 @@ zip = "8.6.0"
 tesseract = "0.14"
 image = "0.25"
 zstd = "0.13"
+libc  = "0.2"
 
 [profile.release]
 opt-level     = 3

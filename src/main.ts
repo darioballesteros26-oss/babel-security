@@ -2775,7 +2775,36 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).confirmarRenombrarArchivo = confirmarRenombrarArchivo;
 (window as any).cerrarModalRenombrarArchivo = cerrarModalRenombrarArchivo;
 (window as any).verComparacionRutas = verComparacionRutas;
+(window as any).aprobarPeerPendiente = aprobarPeerPendiente;
 
+async function aprobarPeerPendiente(fingerprint: string): Promise<void> {
+  try {
+    await invoke("aprobar_peer_pendiente_cmd", { fingerprint });
+    mostrarToast("Peer aprobado. Puede volver a conectarse.", false);
+    await actualizarPeersPendientes();
+  } catch (e) {
+    mostrarToast(`Error aprobando peer: ${e}`, true);
+  }
+}
+
+async function actualizarPeersPendientes(): Promise<void> {
+  try {
+    const pendientes = await invoke<string[]>("listar_peers_pendientes_cmd");
+    const banner = document.getElementById("peers-pendientes-banner");
+    if (!banner) return;
+    if (pendientes.length === 0) {
+      banner.style.display = "none";
+      return;
+    }
+    banner.style.display = "block";
+    banner.innerHTML = pendientes.map(p =>
+      `<div style="display:flex;gap:8px;align-items:center;margin:4px 0">
+        <span style="font-family:monospace;font-size:0.85rem">${escapeHTML(p)}</span>
+        <button type="button" onclick="aprobarPeerPendiente('${escapeHTML(p.split(':')[0])}')" style="background:var(--dorado);color:#000;border:none;border-radius:4px;padding:2px 8px;cursor:pointer">Aprobar</button>
+      </div>`
+    ).join("");
+  } catch { /* sin sesión activa */ }
+}
 
 let _rutaArrastrada: string = "";
 let _esGuardadoArrastrado: boolean = false;
@@ -3032,13 +3061,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   bindOnclicks(document.documentElement);
 
-  // MutationObserver: convierte onclick= en nuevos nodos dinámicos (buzones, emails…)
+  // MutationObserver: convierte atributos on* en nuevos nodos dinámicos
+  const INLINE_ATTRS = INLINE_EVENT_MAP.map(([a]) => a);
   new MutationObserver((muts) => {
     for (const m of muts) {
       m.addedNodes.forEach((node) => {
         if (!(node instanceof Element)) return;
-        if (node instanceof HTMLElement && node.hasAttribute("onclick")) bindOnclickEl(node);
-        node.querySelectorAll<HTMLElement>("[onclick]").forEach(bindOnclickEl);
+        if (node instanceof HTMLElement && INLINE_ATTRS.some(a => node.hasAttribute(a))) bindOnclickEl(node);
+        const selector = INLINE_ATTRS.map(a => `[${a}]`).join(",");
+        node.querySelectorAll<HTMLElement>(selector).forEach(bindOnclickEl);
       });
     }
   }).observe(document.body, { childList: true, subtree: true });
@@ -3056,27 +3087,44 @@ function parseOnclickArg(s: string): unknown {
   return s;
 }
 
+function dispatchInlineHandler(raw: string, ev: Event) {
+  for (const part of raw.split(";").map((s) => s.trim()).filter(Boolean)) {
+    if (part === "event.stopPropagation()") { ev.stopPropagation(); continue; }
+    if (part === "event.preventDefault()") { ev.preventDefault(); continue; }
+    const m = part.match(/^([\wÀ-ɏ$]+)\((.*?)\)\s*$/s);
+    if (!m) continue;
+    const fn = (window as unknown as Record<string, unknown>)[m[1]];
+    if (typeof fn !== "function") continue;
+    const argsRaw = m[2].trim();
+    if (!argsRaw) { (fn as () => void)(); continue; }
+    const args = argsRaw.split(",").map(parseOnclickArg);
+    (fn as (...a: unknown[]) => void)(...args);
+  }
+}
+
+// Mapeo de atributos inline → eventos DOM equivalentes
+const INLINE_EVENT_MAP: Array<[string, string]> = [
+  ["onclick",      "click"],
+  ["ondragover",   "dragover"],
+  ["ondragleave",  "dragleave"],
+  ["ondrop",       "drop"],
+  ["onchange",     "change"],
+  ["oninput",      "input"],
+  ["onkeydown",    "keydown"],
+  ["onkeyup",      "keyup"],
+  ["onsubmit",     "submit"],
+];
+
 function bindOnclickEl(el: HTMLElement) {
-  const raw = el.getAttribute("onclick");
-  if (!raw) return;
-  el.removeAttribute("onclick");
-  el.addEventListener("click", (ev: MouseEvent) => {
-    for (const part of raw.split(";").map((s) => s.trim()).filter(Boolean)) {
-      if (part === "event.stopPropagation()") { ev.stopPropagation(); continue; }
-      if (part === "event.preventDefault()") { ev.preventDefault(); continue; }
-      // [\wÀ-ɏ$]+ cubre letras latinas extendidas (ñ, á…)
-      const m = part.match(/^([\wÀ-ɏ$]+)\((.*?)\)\s*$/s);
-      if (!m) continue;
-      const fn = (window as unknown as Record<string, unknown>)[m[1]];
-      if (typeof fn !== "function") continue;
-      const argsRaw = m[2].trim();
-      if (!argsRaw) { (fn as () => void)(); continue; }
-      const args = argsRaw.split(",").map(parseOnclickArg);
-      (fn as (...a: unknown[]) => void)(...args);
-    }
-  });
+  for (const [attr, evtName] of INLINE_EVENT_MAP) {
+    const raw = el.getAttribute(attr);
+    if (!raw) continue;
+    el.removeAttribute(attr);
+    el.addEventListener(evtName, (ev: Event) => dispatchInlineHandler(raw, ev));
+  }
 }
 
 function bindOnclicks(root: Element) {
-  root.querySelectorAll<HTMLElement>("[onclick]").forEach(bindOnclickEl);
+  const selector = INLINE_EVENT_MAP.map(([a]) => `[${a}]`).join(",");
+  root.querySelectorAll<HTMLElement>(selector).forEach(bindOnclickEl);
 }

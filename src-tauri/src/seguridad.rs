@@ -15,6 +15,22 @@
 use crate::babel_path;
 use std::fs;
 
+/// Intenta bloquear una región de memoria para que no sea paginada al swap.
+/// Falla silenciosamente si el SO lo rechaza (App Sandbox macOS, sin root Linux).
+#[inline]
+fn try_mlock(ptr: *const u8, len: usize) {
+    #[cfg(unix)]
+    unsafe {
+        libc::mlock(ptr as *const libc::c_void, len);
+    }
+    #[cfg(not(unix))]
+    { let _ = (ptr, len); }
+}
+
+// --- Sistema ---
+#[cfg(unix)]
+extern crate libc;
+
 // --- Criptografía ---
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -100,6 +116,7 @@ pub fn derivar_subclave(
     let mut subclave = Zeroizing::new([0u8; 32]);
     hk.expand(contexto.as_bytes(), subclave.as_mut())
         .map_err(|_| "HKDF: longitud de salida inválida".to_string())?;
+    try_mlock(subclave.as_ptr(), 32);
 
     Ok(subclave)
 }
@@ -1480,6 +1497,28 @@ pub fn derivar_clave_recuperacion_v2(
     let mut clave = Zeroizing::new([0u8; 32]);
     hk.expand(b"babel-recovery-v2", clave.as_mut())
         .map_err(|_| "HKDF: error derivando clave de recuperación v2".to_string())?;
+    Ok(clave)
+}
+
+/// v3: Argon2id con parámetros iguales al login (131072 MB, 4 iter, 4 hilos).
+/// Más resistente a GPU que v2 (65536/3/1). Búnkers nuevos usan v3.
+/// v2 y v1 siguen funcionando como fallback para búnkers existentes.
+pub fn derivar_clave_recuperacion_v3(
+    palabras: &[String],
+    salt: &[u8; 32],
+) -> Result<Zeroizing<[u8; 32]>, String> {
+    let frase = Zeroizing::new(palabras.join(" "));
+    let params = Params::new(131072, 4, 4, None)
+        .map_err(|e| format!("Argon2 parámetros inválidos: {}", e))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut ikm = Zeroizing::new([0u8; 32]);
+    argon2
+        .hash_password_into(frase.as_bytes(), salt, ikm.as_mut())
+        .map_err(|e| format!("Argon2 hash falló: {}", e))?;
+    let hk = Hkdf::<Sha256>::new(None, ikm.as_ref());
+    let mut clave = Zeroizing::new([0u8; 32]);
+    hk.expand(b"babel-recovery-v3", clave.as_mut())
+        .map_err(|_| "HKDF: error derivando clave de recuperación v3".to_string())?;
     Ok(clave)
 }
 

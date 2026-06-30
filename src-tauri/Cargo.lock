@@ -447,6 +447,7 @@ dependencies = [
  "image",
  "imap",
  "lettre",
+ "libc",
  "log",
  "lopdf 0.32.0",
  "mailparse",
