@@ -1495,6 +1495,47 @@ pub fn eliminar_email(
         .map_err(|e| e.into())
 }
 
+fn marcar_no_leido_interno(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+) -> Result<(), String> {
+    let cliente = imap::ClientBuilder::new(imap_dominio, 993)
+        .connect()
+        .map_err(|e| format!("Error conexión IMAP: {}", e))?;
+    let mut sesion = cliente
+        .login(usuario, password)
+        .map_err(|_| "Error de autenticación IMAP.".to_string())?;
+    sesion.select("INBOX").map_err(|e| e.to_string())?;
+    sesion
+        .uid_store(uid.to_string(), "-FLAGS (\\Seen)")
+        .map_err(|e| format!("Error marcando no leído: {}", e))?;
+    let _ = sesion.logout();
+    Ok(())
+}
+
+pub fn marcar_no_leido(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    validar_campo_imap(password, "password")?;
+    let dom = Zeroizing::new(imap_dominio.to_string());
+    let usr = Zeroizing::new(usuario.to_string());
+    let pwd = Zeroizing::new(password.to_string());
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(marcar_no_leido_interno(dom.as_str(), usr.as_str(), pwd.as_str(), uid));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .map_err(|_| "Timeout IMAP (30s)".to_string())?
+        .map_err(|e| e.into())
+}
+
 // ============================================================
 // MARIAN - TRADUCCIÓN NEURONAL VÍA SERVIDOR PYTHON
 // ============================================================

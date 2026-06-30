@@ -181,8 +181,14 @@ function añadirMensajeBabel(texto: string, pie?: string): void {
     <div class="burbuja-icono">B</div>
     <div class="burbuja-contenido">
       <p class="burbuja-texto">${escapeHTML(texto)}</p>
-      <span class="burbuja-hora">${escapeHTML(pie ?? "BABEL")}</span>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+        <span class="burbuja-hora">${escapeHTML(pie ?? "BABEL")}</span>
+        <button type="button" class="burbuja-btn-copiar" title="Copiar traducción">⊕</button>
+      </div>
     </div>`;
+  burbuja.querySelector(".burbuja-btn-copiar")?.addEventListener("click", () => {
+    navigator.clipboard.writeText(texto).then(() => mostrarToast("Copiado", false)).catch(() => {});
+  });
   contenedor.appendChild(burbuja);
   scrollAlFinal();
 }
@@ -631,6 +637,40 @@ async function cambiarIdiomaDesdeSelectores(): Promise<void> {
   }
   await cambiarIdioma(`${origen}_${destino}`);
   guardarAjustesTraduccion().catch(() => {});
+}
+
+function swapIdiomaTraduccion(): void {
+  const sel1 = document.getElementById("selector-origen") as HTMLSelectElement;
+  const sel2 = document.getElementById("selector-destino") as HTMLSelectElement;
+  if (!sel1 || !sel2) return;
+  const tmp = sel1.value;
+  sel1.value = sel2.value;
+  sel2.value = tmp;
+  cambiarIdiomaDesdeSelectores();
+}
+
+function actualizarContadorPalabras(texto: string): void {
+  const el = document.getElementById("contador-palabras");
+  if (!el) return;
+  if (!texto.trim()) { el.textContent = ""; return; }
+  const palabras = texto.trim().split(/\s+/).length;
+  const chars = texto.length;
+  el.textContent = `${palabras} palabra${palabras !== 1 ? "s" : ""} · ${chars} caracteres`;
+}
+
+function toggleBtnLimpiar(valor: string): void {
+  const btn = document.getElementById("btn-limpiar-input") as HTMLButtonElement;
+  if (btn) btn.style.display = valor ? "block" : "none";
+}
+
+function limpiarInputTraduccion(): void {
+  const input = document.getElementById("chat-input") as HTMLTextAreaElement;
+  if (!input) return;
+  input.value = "";
+  input.style.height = "auto";
+  actualizarContadorPalabras("");
+  toggleBtnLimpiar("");
+  input.focus();
 }
 
 async function cambiarIdioma(idioma: string): Promise<void> {
@@ -1418,13 +1458,19 @@ async function eliminarSeleccionados(): Promise<void> {
 // CIERRE AUTOMÁTICO POR INACTIVIDAD
 // ============================================================
 let timerInactividad: ReturnType<typeof setTimeout> | null = null;
+let timerAvisoLock: ReturnType<typeof setTimeout> | null = null;
 let _tiempoLockMs: number = 15 * 60 * 1000; // default hasta que carguen los ajustes
 
 function resetearTimerInactividad(): void {
   if (timerInactividad) clearTimeout(timerInactividad);
-  timerInactividad = setTimeout(() => {
-    cerrarSesion();
-  }, _tiempoLockMs);
+  if (timerAvisoLock) clearTimeout(timerAvisoLock);
+  timerInactividad = setTimeout(() => { cerrarSesion(); }, _tiempoLockMs);
+  const avisoMs = _tiempoLockMs - 2 * 60 * 1000;
+  if (avisoMs > 0) {
+    timerAvisoLock = setTimeout(() => {
+      mostrarToast("La sesión se cerrará en 2 minutos por inactividad", true);
+    }, avisoMs);
+  }
 }
 
 function activarTimerInactividad(): void {
@@ -1436,6 +1482,7 @@ function activarTimerInactividad(): void {
 
 function desactivarTimerInactividad(): void {
   if (timerInactividad) clearTimeout(timerInactividad);
+  if (timerAvisoLock) clearTimeout(timerAvisoLock);
   ["mousemove", "keydown", "mousedown", "touchstart", "click"].forEach(evento => {
     document.removeEventListener(evento, resetearTimerInactividad);
   });
@@ -2551,6 +2598,55 @@ function responderEmail(): void {
   if (asuntoComp && asunto) asuntoComp.value = asunto.startsWith("Re:") ? asunto : `Re: ${asunto}`;
 }
 
+let _zoomEmailRem: number = 0.92;
+
+function cambiarZoomEmail(delta: number): void {
+  _zoomEmailRem = Math.max(0.72, Math.min(1.5, _zoomEmailRem + delta * 0.1));
+  const cuerpoEl = document.getElementById("email-visor-cuerpo");
+  if (cuerpoEl) cuerpoEl.style.fontSize = `${_zoomEmailRem}rem`;
+}
+
+async function copiarCuerpoEmail(): Promise<void> {
+  const cuerpoEl = document.getElementById("email-visor-cuerpo");
+  if (!cuerpoEl) return;
+  try {
+    await navigator.clipboard.writeText(cuerpoEl.innerText);
+    mostrarToast("Texto copiado al portapapeles", false);
+  } catch {
+    mostrarToast("No se pudo copiar el texto", true);
+  }
+}
+
+async function marcarEmailNoLeido(): Promise<void> {
+  if (emailVisorActualId === null) return;
+  const id = emailVisorActualId;
+  try {
+    await invoke("marcar_no_leido_tauri", { id });
+    // Actualizar UI: quitar clase activo y restaurar punto de no leído
+    const itemEl = document.querySelector(`.email-item[data-id="${id}"]`) as HTMLElement | null;
+    if (itemEl) {
+      itemEl.classList.add("no-leido");
+      if (!itemEl.querySelector(".email-punto-nuevo")) {
+        const punto = document.createElement("span");
+        punto.className = "email-punto-nuevo";
+        itemEl.querySelector(".email-item-cabecera")?.appendChild(punto);
+      }
+    }
+    emailsVistos.delete(id);
+    mostrarToast("Marcado como no leído", false);
+  } catch (e) {
+    mostrarToast("Error: " + String(e), true);
+  }
+}
+
+function insertarPlantillaEmail(texto: string): void {
+  const cuerpo = document.getElementById("comp-cuerpo") as HTMLTextAreaElement;
+  if (!cuerpo) return;
+  const firma = _firmaEmail ? `\n\n—\n${_firmaEmail}` : "";
+  cuerpo.value = texto + firma;
+  cuerpo.focus();
+}
+
 async function eliminarEmailActual(): Promise<void> {
   if (emailVisorActualId === null) return;
   const id = emailVisorActualId;
@@ -2923,6 +3019,14 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).aprobarPeerPendiente = aprobarPeerPendiente;
 (window as any).guardarTimeoutSesion = guardarTimeoutSesion;
 (window as any).filtrarEmails = filtrarEmails;
+(window as any).swapIdiomaTraduccion = swapIdiomaTraduccion;
+(window as any).actualizarContadorPalabras = actualizarContadorPalabras;
+(window as any).toggleBtnLimpiar = toggleBtnLimpiar;
+(window as any).limpiarInputTraduccion = limpiarInputTraduccion;
+(window as any).cambiarZoomEmail = cambiarZoomEmail;
+(window as any).copiarCuerpoEmail = copiarCuerpoEmail;
+(window as any).marcarEmailNoLeido = marcarEmailNoLeido;
+(window as any).insertarPlantillaEmail = insertarPlantillaEmail;
 
 async function aprobarPeerPendiente(fingerprint: string): Promise<void> {
   try {
@@ -3216,6 +3320,22 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+
+  // Atajos globales de navegación (solo cuando el foco no está en un input/textarea)
+  document.addEventListener("keydown", (e: KeyboardEvent) => {
+    const enInput = ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as Element)?.tagName ?? "");
+    if (enInput) return;
+    if (e.altKey && e.key === "t") { mostrarPantalla("traduccion"); return; }
+    if (e.altKey && e.key === "e") {
+      mostrarPantalla("principal");
+      cambiarModoP2P("email");
+      return;
+    }
+    if (e.key === "F5") {
+      e.preventDefault();
+      if (_smtpConfigurado) { sincronizarEmail(); mostrarToast("Actualizando bandeja…", false); }
+    }
+  });
 
   bindOnclicks(document.documentElement);
 

@@ -611,6 +611,22 @@ body {
   padding: 0 4px;
 }
 
+.burbuja-btn-copiar {
+  background: transparent;
+  border: none;
+  color: var(--texto-secundario);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+
+.burbuja-btn-copiar:hover {
+  opacity: 1;
+  color: var(--dorado);
+}
+
 /* ── Burbuja archivo ── */
 .burbuja-archivo {
   display: flex;
@@ -2128,6 +2144,32 @@ body {
 }
 
 .email-adjunto-zona:hover, .email-adjunto-zona.hover {
+  border-color: var(--dorado);
+  color: var(--dorado);
+}
+
+.email-plantillas-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--borde);
+}
+
+.email-plantilla-btn {
+  background: transparent;
+  border: 1px solid rgba(197, 160, 89, 0.25);
+  color: var(--texto-secundario);
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.6rem;
+  letter-spacing: 1px;
+  padding: 4px 10px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 0.15s;
+}
+
+.email-plantilla-btn:hover {
   border-color: var(--dorado);
   color: var(--dorado);
 }

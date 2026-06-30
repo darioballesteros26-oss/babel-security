@@ -188,7 +188,9 @@
               <option value="ru">RU</option>
               <option value="zh">ZH</option>
             </select>
-            <span style="color:var(--dorado);font-size:0.8rem;">→</span>
+            <button type="button" onclick="swapIdiomaTraduccion()" title="Intercambiar idiomas"
+              style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:2px 4px;opacity:0.8;transition:opacity 0.15s;"
+              onmouseenter="this.style.opacity='1'" onmouseleave="this.style.opacity='0.8'">⇄</button>
             <select id="selector-destino" class="selector-idioma" onchange="cambiarIdiomaDesdeSelectores()"
               style="min-width:80px;">
               <option value="en">EN</option>
@@ -291,13 +293,20 @@
         </div>
       </div>
 
+      <div style="padding:0 16px 2px;display:flex;justify-content:space-between;align-items:center;min-height:16px;">
+        <span id="contador-palabras" style="font-family:'Times New Roman',Times,serif;font-size:0.55rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.4;"></span>
+      </div>
       <div id="chat-input-barra" class="chat-input-barra">
         <button type="button" onclick="seleccionarArchivo()" class="btn-mas" title="Subir documento">+</button>
         <input type="file" id="input-archivo" accept=".pdf,.docx,.txt" style="display:none"
           onchange="manejarSeleccion(event)">
         <textarea id="chat-input" class="chat-input" placeholder="Escribe un término o frase..."
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensaje();}"
+          oninput="actualizarContadorPalabras(this.value);toggleBtnLimpiar(this.value);"
           autocomplete="off" rows="1"></textarea>
+        <button type="button" id="btn-limpiar-input" onclick="limpiarInputTraduccion()" title="Limpiar texto"
+          style="display:none;background:transparent;border:none;color:var(--texto-secundario);font-size:1.1rem;cursor:pointer;padding:0 4px;opacity:0.5;flex-shrink:0;"
+          onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='0.5'">×</button>
         <button type="button" onclick="enviarMensaje()" class="btn-enviar" title="Traducir">⟳</button>
       </div>
 
@@ -594,6 +603,12 @@
                   onchange="manejarSeleccionArchivoEmail(event)">
               </div>
             </div>
+            <div class="email-plantillas-wrap">
+              <button type="button" onclick="insertarPlantillaEmail('Recibido, gracias por su mensaje. Le responderemos a la mayor brevedad posible.')" class="email-plantilla-btn">Recibido</button>
+              <button type="button" onclick="insertarPlantillaEmail('Su consulta está pendiente de revisión. Le contactaremos en breve con una respuesta.')" class="email-plantilla-btn">Pendiente revisión</button>
+              <button type="button" onclick="insertarPlantillaEmail('Confirmamos la recepción de la documentación. Procederemos con los trámites pertinentes.')" class="email-plantilla-btn">Confirmado</button>
+              <button type="button" onclick="insertarPlantillaEmail('Queda registrado en nuestro expediente. Cualquier consulta, no dude en contactarnos.')" class="email-plantilla-btn">Registrado</button>
+            </div>
             <textarea id="comp-cuerpo" placeholder="Escribe tu mensaje aquí..."
               class="email-compositor-cuerpo"></textarea>
             <div class="email-compositor-footer">
@@ -608,6 +623,10 @@
             <div class="email-visor-toolbar">
               <div class="email-visor-acciones">
                 <button type="button" onclick="responderEmail()" class="email-btn-accion">↩ Responder</button>
+                <button type="button" onclick="marcarEmailNoLeido()" class="email-btn-accion" title="Marcar como no leído">◎ No leído</button>
+                <button type="button" onclick="copiarCuerpoEmail()" class="email-btn-accion" title="Copiar texto del correo">⊕ Copiar</button>
+                <button type="button" onclick="cambiarZoomEmail(-1)" class="email-btn-accion" title="Reducir texto">A−</button>
+                <button type="button" onclick="cambiarZoomEmail(1)" class="email-btn-accion" title="Aumentar texto">A+</button>
                 <button type="button" onclick="eliminarEmailActual()" class="email-btn-accion peligro">🗑 Eliminar</button>
                 <select id="email-idioma" onchange="cambiarIdiomaEmail(this.value)" class="email-idioma-sel">
                   <option value="ninguno">Sin traducir</option>

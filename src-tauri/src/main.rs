@@ -2684,6 +2684,26 @@ fn eliminar_email_tauri(
 }
 
 // ============================================================
+// COMANDO — Marcar email como no leído (IMAP -\Seen)
+// ============================================================
+
+#[tauri::command]
+fn marcar_no_leido_tauri(
+    id: u32,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    let subclave_hex = sesion
+        .subclave_hex
+        .lock()
+        .map_err(|_| "Error leyendo sesión.".to_string())?
+        .clone();
+    let creds = traductor::cargar_config_email(&subclave_hex)
+        .ok_or_else(|| "No hay configuración de email guardada.".to_string())?;
+    traductor::marcar_no_leido(&creds.imap_dominio, &creds.usuario, &creds.password, id)
+        .map_err(|e| format!("Error marcando no leído: {}", e))
+}
+
+// ============================================================
 // COMANDO — Comprobar si el email está configurado
 // ============================================================
 
@@ -3086,6 +3106,7 @@ fn main() {
             tiene_config_email,
             obtener_firma_email,
             eliminar_email_tauri,
+            marcar_no_leido_tauri,
             guardar_html_frase,
             borrar_html_frase,
         ]);
