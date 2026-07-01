@@ -286,6 +286,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     mostrarToast("Traductor listo", false);
   }).catch(() => {});
 
+  // Evento Rust: monitor periódico detectó nueva amenaza de seguridad
+  listen<string[]>("amenaza-detectada", (evento) => {
+    const amenazas = evento.payload ?? [];
+    if (amenazas.length > 0) mostrarAlertaAmenaza(amenazas);
+  }).catch(() => {});
+
   // Badge NLLB: poll /ping cada 2s hasta que responda
   const badge = document.getElementById("nllb-badge");
   const checkNllb = setInterval(async () => {
@@ -1385,6 +1391,86 @@ function mostrarToast(mensaje: string, esError: boolean): void {
     toast.style.opacity = "0";
     setTimeout(() => toast.remove(), 300);
   }, 3000);
+}
+
+// Modal de seguridad persistente — amenaza detectada por el monitor en segundo plano.
+// No se cierra automáticamente: el usuario debe decidir si cerrar sesión o continuar.
+function mostrarAlertaAmenaza(amenazas: string[]): void {
+  // Evitar duplicados si el evento llega varias veces antes de que se cierre
+  if (document.getElementById("babel-amenaza-overlay")) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "babel-amenaza-overlay";
+  overlay.style.cssText = `
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.82);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--fuente-titulo, 'Times New Roman', Times, serif);
+  `;
+
+  const lista = amenazas.map(a => `<li style="margin:4px 0;color:#ffaaaa;">${a}</li>`).join("");
+
+  overlay.innerHTML = `
+    <div style="
+      background:#1a0a0a;
+      border:1px solid #ff4444;
+      border-radius:4px;
+      padding:36px 40px;
+      max-width:480px;
+      width:90%;
+      box-shadow:0 0 40px #ff000044;
+      text-align:center;
+    ">
+      <div style="font-size:2rem;margin-bottom:16px;">⚠</div>
+      <h2 style="color:#ff6b6b;font-size:1rem;letter-spacing:0.15em;margin:0 0 12px;">
+        AMENAZA DETECTADA
+      </h2>
+      <p style="color:#aaa;font-size:0.8rem;letter-spacing:0.08em;margin:0 0 18px;">
+        El monitor de seguridad ha detectado software potencialmente peligroso activo en este sistema:
+      </p>
+      <ul style="
+        list-style:none;
+        padding:0;
+        margin:0 0 24px;
+        font-size:0.78rem;
+        letter-spacing:0.06em;
+        text-align:left;
+      ">${lista}</ul>
+      <p style="color:#888;font-size:0.72rem;margin:0 0 28px;letter-spacing:0.06em;">
+        Recomendación: cierra la sesión y verifica tu sistema antes de continuar.
+      </p>
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button onclick="cerrarSesion();document.getElementById('babel-amenaza-overlay')?.remove();" style="
+          background:#3a0a0a;
+          color:#ff6b6b;
+          border:1px solid #ff444466;
+          padding:10px 22px;
+          font-family:inherit;
+          font-size:0.78rem;
+          letter-spacing:0.12em;
+          border-radius:2px;
+          cursor:pointer;
+        ">CERRAR SESIÓN</button>
+        <button onclick="document.getElementById('babel-amenaza-overlay')?.remove();" style="
+          background:#111;
+          color:#888;
+          border:1px solid #333;
+          padding:10px 22px;
+          font-family:inherit;
+          font-size:0.78rem;
+          letter-spacing:0.12em;
+          border-radius:2px;
+          cursor:pointer;
+        ">CONTINUAR (riesgo)</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
 }
 
 // ============================================================
