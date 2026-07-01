@@ -364,7 +364,16 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "cerrar-visor-email": cerrarVisorEmail(); break;
     case "cerrar-compositor": cerrarCompositor(); break;
     case "insertar-plantilla": insertarPlantillaEmail(el.dataset.texto!); break;
+    case "abrir-resultado-busqueda":
+      abrirResultadoBusqueda(el.dataset.buzonId!, el.dataset.ruta!, el.dataset.esTrad === "true");
+      break;
   }
+});
+
+// Cierra el dropdown de búsqueda al hacer clic fuera
+document.addEventListener("click", (e: MouseEvent) => {
+  const dentro = (e.target as Element).closest(".buscar-g-wrap");
+  if (!dentro) ocultarResultadosBusqueda();
 });
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -794,6 +803,7 @@ interface MetadatosArchivo {
   fecha: string;
   idioma: string;
   buzon: string;
+  buzon_id: string;
   es_traduccion: boolean;
 }
 
@@ -908,6 +918,21 @@ async function cargarArchivosGuardados(): Promise<void> {
       _esGuardadoArrastrado = card.dataset.guardado === "true";
     };
 
+    // Resaltar archivo si venimos de una búsqueda cross-buzones
+    if (_resaltarRuta) {
+      const rutaBuscada = _resaltarRuta;
+      _resaltarRuta = null;
+      const cards = lista.querySelectorAll<HTMLElement>(".archivo-card");
+      for (const card of cards) {
+        if (card.dataset.ruta === rutaBuscada) {
+          card.scrollIntoView({ behavior: "smooth", block: "center" });
+          card.classList.add("archivo-card-resaltado");
+          setTimeout(() => card.classList.remove("archivo-card-resaltado"), 2000);
+          break;
+        }
+      }
+    }
+
   } catch (error) {
     mostrarToast("Error cargando lista: " + String(error), true);
     console.error("Error cargando guardados:", error);
@@ -924,13 +949,102 @@ function actualizarSeleccionGuardados(): void {
 }
 
 // Filtra la lista de archivos guardados por texto de búsqueda
+let _resaltarRuta: string | null = null;
+let _buscarTimer: ReturnType<typeof setTimeout> | null = null;
+
 function filtrarArchivosGuardados(texto: string): void {
-  const cards = document.querySelectorAll<HTMLElement>("#lista-guardados .archivo-card");
+  if (_buscarTimer) clearTimeout(_buscarTimer);
+
+  if (!texto) {
+    ocultarResultadosBusqueda();
+    document.querySelectorAll<HTMLElement>("#lista-guardados .archivo-card")
+      .forEach(c => c.style.display = "");
+    return;
+  }
+
+  // Filtro inmediato en cards visibles
   const q = texto.toLowerCase();
-  cards.forEach(card => {
-    const nombre = card.querySelector(".archivo-card-nombre")?.textContent?.toLowerCase() ?? "";
-    card.style.display = nombre.includes(q) ? "" : "none";
-  });
+  document.querySelectorAll<HTMLElement>("#lista-guardados .archivo-card")
+    .forEach(card => {
+      const nombre = card.querySelector(".archivo-card-nombre")?.textContent?.toLowerCase() ?? "";
+      card.style.display = nombre.includes(q) ? "" : "none";
+    });
+
+  // Búsqueda cross-buzones con debounce
+  if (texto.length >= 2) {
+    _buscarTimer = setTimeout(() => buscarEnTodosBuzones(texto), 300);
+  }
+}
+
+async function buscarEnTodosBuzones(texto: string): Promise<void> {
+  const container = document.getElementById("buscar-g-resultados");
+  if (!container) return;
+  container.classList.remove("hidden");
+  container.innerHTML = `<div style="padding:10px 14px;color:var(--texto-secundario);font-size:0.7rem;letter-spacing:1px;">Buscando...</div>`;
+
+  try {
+    const todos = await invoke<MetadatosArchivo[]>("listar_archivos_guardados", { buzon: "todos" });
+    const q = texto.toLowerCase();
+    const limpiar = (n: string) =>
+      n.replace(/\.babel$/, "").replace(/__orig/gi, "").replace(/_\d{8,}$/, "").trim();
+
+    const resultados = todos
+      .filter(a => a.idioma !== "original" && !a.nombre.toLowerCase().includes("__orig"))
+      .filter(a => limpiar(a.nombre).toLowerCase().includes(q))
+      .slice(0, 8);
+
+    if (resultados.length === 0) {
+      container.innerHTML = `<div style="padding:10px 14px;color:var(--texto-secundario);font-size:0.7rem;letter-spacing:1px;text-align:center;">Sin resultados</div>`;
+      return;
+    }
+
+    container.innerHTML = resultados.map(a => {
+      const nombre = escapeHTML(limpiar(a.nombre));
+      const buzonNombre = a.buzon === "todos" || !a.buzon
+        ? "Sin carpeta"
+        : escapeHTML(a.buzon.toUpperCase());
+      const tipo = a.es_traduccion ? "TRAD" : "GUARDADO";
+      const tipoColor = a.es_traduccion ? "var(--dorado)" : "var(--texto-secundario)";
+      return `<div class="resultado-busqueda"
+        data-action="abrir-resultado-busqueda"
+        data-buzon-id="${escapeHTML(a.buzon_id)}"
+        data-ruta="${escapeHTML(a.ruta)}"
+        data-es-trad="${a.es_traduccion}">
+        <div class="resultado-busqueda-nombre">${nombre}</div>
+        <div class="resultado-busqueda-meta">
+          <span style="opacity:0.5;">📁 ${buzonNombre}</span>
+          <span style="color:${tipoColor};">${tipo}</span>
+        </div>
+      </div>`;
+    }).join("");
+  } catch {
+    container.classList.add("hidden");
+  }
+}
+
+function ocultarResultadosBusqueda(): void {
+  document.getElementById("buscar-g-resultados")?.classList.add("hidden");
+}
+
+function abrirResultadoBusqueda(buzonId: string, ruta: string, esTrad: boolean): void {
+  ocultarResultadosBusqueda();
+  const inputBuscar = document.getElementById("input-buscar-g") as HTMLInputElement | null;
+  if (inputBuscar) inputBuscar.value = "";
+  _resaltarRuta = ruta;
+  // Archivos de traducción usan sistema de buzones distinto al de guardados;
+  // navegamos a "todos" para garantizar que el archivo sea visible.
+  seleccionarBuzonGuardados(esTrad ? "todos" : buzonId);
+}
+
+function actualizarBadgeEmail(n: number): void {
+  const badge = document.getElementById("email-badge");
+  if (!badge) return;
+  if (n > 0) {
+    badge.textContent = n > 99 ? "99+" : String(n);
+    badge.classList.remove("hidden");
+  } else {
+    badge.classList.add("hidden");
+  }
 }
 
 // Activa un buzón guardado y recarga su contenido
@@ -2469,9 +2583,10 @@ async function cargarBandejaEmail(): Promise<void> {
       </div>`;
     }).join("");
 
-    // Actualizar contador en el título
+    // Actualizar contador en el título y badge en botón EMAIL
     const tituloSidebar = document.querySelector(".email-sidebar-titulo");
     if (tituloSidebar) tituloSidebar.textContent = noLeidos > 0 ? `BANDEJA (${noLeidos})` : "BANDEJA";
+    actualizarBadgeEmail(noLeidos);
 
   } catch (error) {
     lista.innerHTML = `

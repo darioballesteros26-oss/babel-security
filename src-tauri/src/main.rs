@@ -743,6 +743,7 @@ fn listar_archivos_guardados(
                 fecha: fecha_g,
                 idioma: "guardado".to_string(),
                 buzon: nombre_buzon,
+                buzon_id: buzon_archivo.clone(),
                 es_traduccion: false,
             });
         }
@@ -807,6 +808,7 @@ fn listar_archivos_guardados(
                 fecha: "".to_string(),
                 idioma,
                 buzon: nombre_buzon,
+                buzon_id: buzon_archivo.clone(),
                 es_traduccion: true,
             });
         }
@@ -1041,6 +1043,7 @@ struct MetadatosArchivo {
     fecha: String,
     idioma: String,
     buzon: String,
+    buzon_id: String,
     es_traduccion: bool,
 }
 
@@ -1173,6 +1176,7 @@ fn listar_archivos(
                     .map(|n| n.nombre.clone())
                     .unwrap_or_else(|| "todos".to_string())
             },
+            buzon_id: buzon_archivo.clone(),
             es_traduccion: true,
         });
     }

@@ -347,12 +347,15 @@
       </div>
 
       <div style="padding:12px 24px 20px;display:flex;gap:8px;">
-        <div
-          style="flex:1;display:flex;align-items:center;gap:10px;background:transparent;border:1px solid var(--borde);border-radius:2px;padding:10px 16px;transition:border-color 0.2s;">
-          <span style="color:var(--texto-secundario);font-size:1rem;opacity:0.5;flex-shrink:0;">⌕</span>
-          <input type="text" id="input-buscar-g" placeholder="BUSCAR ARCHIVO..."
-            oninput="filtrarArchivosGuardados(this.value)"
-            style="flex:1;background:transparent;border:none;outline:none;color:var(--texto-principal);font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.72rem;letter-spacing:2px;min-width:0;">
+        <div class="buscar-g-wrap" style="flex:1;">
+          <div style="display:flex;align-items:center;gap:10px;background:transparent;border:1px solid var(--borde);border-radius:2px;padding:10px 16px;transition:border-color 0.2s;">
+            <span style="color:var(--texto-secundario);font-size:1rem;opacity:0.5;flex-shrink:0;">⌕</span>
+            <input type="text" id="input-buscar-g" placeholder="BUSCAR EN TODOS LOS BUZONES..."
+              oninput="filtrarArchivosGuardados(this.value)"
+              autocomplete="off"
+              style="flex:1;background:transparent;border:none;outline:none;color:var(--texto-principal);font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.72rem;letter-spacing:2px;min-width:0;">
+          </div>
+          <div id="buscar-g-resultados" class="buscar-resultados hidden"></div>
         </div>
       </div>
 
@@ -417,6 +420,7 @@
           <span class="p2p-btn-grande-icono">✉</span>
           <span class="p2p-btn-grande-label">EMAIL</span>
           <span class="p2p-btn-grande-desc">Enviar archivos cifrados por correo</span>
+          <span id="email-badge" class="email-badge hidden">0</span>
         </button>
       </div>
 
