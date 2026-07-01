@@ -699,12 +699,16 @@ fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
 }
 
 fn borrar_seguro_local(ruta: &str) {
+    use std::io::Write as _;
     if let Ok(meta) = fs::metadata(ruta) {
         let tam = meta.len() as usize;
         if tam > 0 {
-            let _ = fs::write(ruta, vec![0u8; tam]);
-            let _ = fs::write(ruta, vec![0xFFu8; tam]);
-            let _ = fs::write(ruta, vec![0xAAu8; tam]);
+            for byte in [0x00u8, 0xFF, 0xAA] {
+                if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(ruta) {
+                    let _ = f.write_all(&vec![byte; tam]);
+                    let _ = f.sync_all();
+                }
+            }
         }
     }
     let _ = fs::remove_file(ruta);
@@ -1308,6 +1312,36 @@ pub fn obtener_emails(
 // EMAIL - OBTENER EMAIL COMPLETO POR ID
 // ============================================================
 
+fn extraer_mime_rec(parte: &mailparse::ParsedMail, cuerpo: &mut String, adjuntos: &mut Vec<String>) {
+    let ct = parte.headers.get_first_header("Content-Type")
+        .map(|h| h.get_value().to_lowercase())
+        .unwrap_or_default();
+    let cd = parte.headers.get_first_header("Content-Disposition")
+        .map(|h| h.get_value().to_lowercase())
+        .unwrap_or_default();
+    if !parte.subparts.is_empty() {
+        for sub in &parte.subparts {
+            extraer_mime_rec(sub, cuerpo, adjuntos);
+        }
+    } else if cd.contains("attachment") {
+        let nombre_raw = cd.split(';')
+            .find(|p| p.trim().starts_with("filename"))
+            .and_then(|p| p.split('=').nth(1))
+            .map(|n| n.trim().trim_matches('"').to_string())
+            .unwrap_or_else(|| "adjunto".to_string());
+        let nombre = std::path::Path::new(&nombre_raw)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("adjunto")
+            .to_string();
+        adjuntos.push(nombre);
+    } else if ct.contains("text/plain") && cuerpo.is_empty() {
+        *cuerpo = parte.get_body().unwrap_or_default();
+    } else if ct.contains("text/html") && cuerpo.is_empty() {
+        *cuerpo = parte.get_body().unwrap_or_default();
+    }
+}
+
 pub struct EmailCompletoRust {
     pub id: u32,
     pub remitente: String,
@@ -1359,47 +1393,11 @@ fn obtener_email_completo_interno(
         .map(|h| h.get_value())
         .unwrap_or_default();
 
-    // Cuerpo de texto
+    // Cuerpo de texto — búsqueda recursiva para soportar MIME anidado
+    // (ej: multipart/mixed → multipart/alternative → text/plain + text/html)
     let mut cuerpo = String::new();
     let mut adjuntos: Vec<String> = Vec::new();
-
-    if email_parseado.subparts.is_empty() {
-        cuerpo = email_parseado.get_body().unwrap_or_default();
-    } else {
-        for parte in &email_parseado.subparts {
-            let content_type = parte
-                .headers
-                .get_first_header("Content-Type")
-                .map(|h| h.get_value().to_lowercase())
-                .unwrap_or_default();
-
-            let content_disposition = parte
-                .headers
-                .get_first_header("Content-Disposition")
-                .map(|h| h.get_value().to_lowercase())
-                .unwrap_or_default();
-
-            if content_disposition.contains("attachment") {
-                let nombre_raw = content_disposition
-                    .split(';')
-                    .find(|p| p.trim().starts_with("filename"))
-                    .and_then(|p| p.split('=').nth(1))
-                    .map(|n| n.trim().trim_matches('"').to_string())
-                    .unwrap_or_else(|| "adjunto".to_string());
-                // Quitar cualquier componente de directorio para prevenir path traversal
-                let nombre = std::path::Path::new(&nombre_raw)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("adjunto")
-                    .to_string();
-                adjuntos.push(nombre);
-            } else if content_type.contains("text/plain") && cuerpo.is_empty() {
-                cuerpo = parte.get_body().unwrap_or_default();
-            } else if content_type.contains("text/html") && cuerpo.is_empty() {
-                cuerpo = parte.get_body().unwrap_or_default();
-            }
-        }
-    }
+    extraer_mime_rec(&email_parseado, &mut cuerpo, &mut adjuntos);
 
     let _ = sesion.logout();
 

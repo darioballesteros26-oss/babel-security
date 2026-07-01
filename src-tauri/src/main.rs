@@ -1573,6 +1573,14 @@ fn renombrar_archivo(
 
     fs::rename(&ruta, &nueva_ruta).map_err(|e| format!("Error renombrando: {}", e))?;
 
+    // Renombrar también el archivo __orig.babel compañero (traducciones)
+    let nombre_viejo_orig = format!("{}__orig.babel", nombre_viejo.trim_end_matches(".babel"));
+    let nuevo_nombre_orig = format!("{}__orig.babel", nuevo_nombre_archivo.trim_end_matches(".babel"));
+    let ruta_orig_vieja = dir.join(&nombre_viejo_orig);
+    if ruta_orig_vieja.exists() {
+        let _ = fs::rename(&ruta_orig_vieja, dir.join(&nuevo_nombre_orig));
+    }
+
     // Actualizar índice de buzones
     let ruta_index = if es_guardado {
         guardados_path(".buzon_index_guardados.babel")
@@ -1585,7 +1593,9 @@ fn renombrar_archivo(
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default();
     if let Some(buzon) = index.remove(&nombre_viejo) {
+        let buzon_orig = index.remove(&nombre_viejo_orig).unwrap_or(buzon.clone());
         index.insert(nuevo_nombre_archivo, buzon);
+        index.insert(nuevo_nombre_orig, buzon_orig);
         let json = serde_json::to_string(&index).map_err(|e| format!("Error: {}", e))?;
         let cifrado = seguridad::blindar_documento(&json, &subclave_hex)
             .map_err(|e| format!("Error: {}", e))?;
