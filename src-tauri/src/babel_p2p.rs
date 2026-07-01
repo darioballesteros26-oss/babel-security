@@ -31,7 +31,7 @@ use rustls::{ClientConfig, ServerConfig};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 // Buffer global de mensajes entrantes. Zeroizing<String> garantiza borrado al drenarlo.
 pub static MENSAJES_ENTRANTES: Mutex<Vec<Zeroizing<String>>> = Mutex::new(Vec::new());
@@ -310,12 +310,15 @@ impl DescubrimientoRed {
             let bind_ip = lan_ip()
                 .map(|ip| ip.to_string())
                 .unwrap_or_else(|| "0.0.0.0".to_string());
-            let socket = UdpSocket::bind(format!("{}:{}", bind_ip, PUERTO_DESCUBRIMIENTO))
+            let socket = match UdpSocket::bind(format!("{}:{}", bind_ip, PUERTO_DESCUBRIMIENTO))
                 .or_else(|_| UdpSocket::bind(format!("0.0.0.0:{}", PUERTO_DESCUBRIMIENTO)))
-                .unwrap_or_else(|e| {
-                    log::warn!("[P2P] No se pudo iniciar descubrimiento: {}", e);
-                    std::process::exit(0); // no debería llegar aquí
-                });
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("[P2P] No se pudo iniciar descubrimiento UDP: {}", e);
+                    return; // sale solo del hilo, no del proceso — los Drop de Zeroize se ejecutan
+                }
+            };
             let _ = socket.set_broadcast(true);
 
             // Rate limiting: máx 10 peticiones por IP por ventana de 1 segundo
@@ -705,12 +708,12 @@ fn ahora_unix() -> u64 {
 /// HKDF-SHA256 con info de dominio propio — requiere conocer la contraseña para leer la clave P2P.
 fn clave_privada_p2p_enc(subclave_hex: &str) -> Option<Zeroizing<String>> {
     if subclave_hex.len() < 64 { return None; }
-    let ikm = hex::decode(subclave_hex).ok()?;
-    let hk = Hkdf::<Sha256>::new(None, &ikm);
+    let ikm = Zeroizing::new(hex::decode(subclave_hex).ok()?);
+    let hk = Hkdf::<Sha256>::new(None, &*ikm);
     let mut okm = [0u8; 32];
     hk.expand(b"babel-p2p-clave-privada-v2", &mut okm).ok()?;
     let result = Zeroizing::new(hex::encode(okm));
-    okm.iter_mut().for_each(|b| *b = 0);
+    okm.zeroize();
     Some(result)
 }
 
