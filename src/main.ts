@@ -993,6 +993,13 @@ async function buscarEnTodosBuzones(texto: string): Promise<void> {
       .filter(a => limpiar(a.nombre).toLowerCase().includes(q))
       .slice(0, 8);
 
+    // Verificar que el input sigue activo — el invoke puede haber llegado tarde
+    const inputEl = document.getElementById("input-buscar-g") as HTMLInputElement | null;
+    if (!inputEl || inputEl.value.length < 2) {
+      container.classList.add("hidden");
+      return;
+    }
+
     if (resultados.length === 0) {
       container.innerHTML = `<div style="padding:10px 14px;color:var(--texto-secundario);font-size:0.7rem;letter-spacing:1px;text-align:center;">Sin resultados</div>`;
       return;
