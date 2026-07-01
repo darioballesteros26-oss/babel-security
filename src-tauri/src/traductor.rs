@@ -292,16 +292,18 @@ pub fn procesar_archivo_inteligente(
     subclave_hex: &str,
     id_usuario: &str,
     par: &str,
+    progreso: &dyn Fn(u8, &str),
 ) -> Result<(), String> {
     let ruta_limpia = ruta.trim();
+    progreso(3, "LEYENDO DOCUMENTO...");
 
     if ruta_limpia.ends_with(".docx") {
         log::warn!("Detectado documento Word. Iniciando Preservador...");
-        clonar_y_traducir(ruta_limpia, dict, subclave_hex, id_usuario, par)
+        clonar_y_traducir(ruta_limpia, dict, subclave_hex, id_usuario, par, progreso)
             .map_err(|e| format!("Error en Word: {}", e))?;
     } else if ruta_limpia.ends_with(".pdf") {
         log::warn!("Detectado archivo PDF. Iniciando Extractor...");
-        procesar_pdf(ruta_limpia, dict, subclave_hex, id_usuario, par)
+        procesar_pdf(ruta_limpia, dict, subclave_hex, id_usuario, par, progreso)
             .map_err(|e| format!("Error en PDF: {}", e))?;
     } else if ruta_limpia.ends_with(".txt") {
         let texto = fs::read_to_string(ruta_limpia)
@@ -322,12 +324,17 @@ pub fn procesar_archivo_inteligente(
 
         // Traducir párrafo a párrafo para evitar bucles en NLLB
         let parrafos: Vec<&str> = texto.split('\n').collect();
+        let total_p = parrafos.iter().filter(|p| !p.trim().is_empty()).count().max(1);
+        let mut traducidos_p = 0usize;
         let mut traducido_final = String::new();
         for parrafo in &parrafos {
             if parrafo.trim().is_empty() {
                 traducido_final.push('\n');
                 continue;
             }
+            let pct = (10 + traducidos_p * 80 / total_p).min(90) as u8;
+            progreso(pct, &format!("TRADUCIENDO... {}%", pct));
+            traducidos_p += 1;
             let traducido = match traducir_con_marian(parrafo, par) {
                 Ok(t) => t,
                 Err(_) => {
@@ -339,6 +346,7 @@ pub fn procesar_archivo_inteligente(
             traducido_final.push_str(&traducido);
             traducido_final.push('\n');
         }
+        progreso(93, "CIFRANDO RESULTADO...");
         // Guardar traducción cifrada
         if let Ok(cifrado) = seguridad::blindar_documento(&traducido_final, subclave_hex) {
             let salida = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
@@ -390,11 +398,26 @@ fn traducir_xml_directo(
     dict: &HashMap<String, String>,
     subclave_hex: &str,
     par: &str,
+    pct_inicio: u8,
+    pct_fin: u8,
+    progreso: &dyn Fn(u8, &str),
 ) -> String {
+    let xml_total = xml.len().max(1);
     let mut resultado = String::with_capacity(xml.len() * 2);
     let mut resto = xml;
+    let mut ultimo_pct = pct_inicio;
 
     loop {
+        // Progreso continuo basado en posición de caracteres procesados
+        let pos_actual = xml_total - resto.len();
+        let pct = (pct_inicio as usize
+            + pos_actual * pct_fin.saturating_sub(pct_inicio) as usize / xml_total)
+            .min(pct_fin as usize) as u8;
+        if pct >= ultimo_pct + 3 {
+            ultimo_pct = pct;
+            progreso(pct, &format!("TRADUCIENDO... {}%", pct));
+        }
+
         // Buscar el próximo <w:p> o <w:p ...> (no <w:pPr>, <w:pStyle>, etc.)
         let Some(pos) = encontrar_wp(resto) else {
             resultado.push_str(resto);
@@ -551,6 +574,7 @@ pub fn clonar_y_traducir(
     subclave_hex: &str,
     id_usuario: &str,
     par: &str,
+    progreso: &dyn Fn(u8, &str),
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::{Read, Write};
 
@@ -578,8 +602,9 @@ pub fn clonar_y_traducir(
         let _ = fs::write(&salida_orig, cifrado_orig);
     }
 
-    // Traducir document.xml
-    let xml_traducido = traducir_xml_directo(&xml_doc, dict, subclave_hex, par);
+    progreso(15, "PROCESANDO WORD...");
+    // Traducir document.xml (rango de progreso 20–88%)
+    let xml_traducido = traducir_xml_directo(&xml_doc, dict, subclave_hex, par, 20, 88, progreso);
 
     // Reempaquetar ZIP preservando TODO — imágenes, estilos, fuentes, relaciones
     let mut buf_out = std::io::Cursor::new(Vec::new());
@@ -610,7 +635,7 @@ pub fn clonar_y_traducir(
                 let mut xml_sub = String::new();
                 file.read_to_string(&mut xml_sub)?;
                 let xml_sub_trad =
-                    traducir_xml_directo(&xml_sub, dict, subclave_hex, par);
+                    traducir_xml_directo(&xml_sub, dict, subclave_hex, par, 88, 95, progreso);
                 zip_out.start_file(&name, opts_deflate)?;
                 zip_out.write_all(xml_sub_trad.as_bytes())?;
             } else {
@@ -720,6 +745,7 @@ pub fn procesar_pdf(
     subclave_hex: &str,
     id_usuario: &str,
     par: &str,
+    progreso: &dyn Fn(u8, &str),
 ) -> Result<(), Box<dyn std::error::Error>> {
     let nombre = std::path::Path::new(ruta)
         .file_stem()
@@ -731,6 +757,7 @@ pub fn procesar_pdf(
     let tmp_dir = crate::babel_dir().join("tmp");
     let _ = fs::create_dir_all(&tmp_dir);
 
+    progreso(5, "CONVIRTIENDO PDF...");
     // PASO 1: PDF → DOCX con pdf2docx (timeout 120 s)
     let ruta_docx_tmp = tmp_dir.join(format!("{}_tmp.docx", nombre));
     let ok = {
@@ -795,14 +822,20 @@ pub fn procesar_pdf(
             }
             *texto = ocr_total;
         }
+        progreso(15, "EXTRAYENDO TEXTO...");
         // Traducir párrafo a párrafo con NLLB (fallback a diccionario)
         let parrafos: Vec<String> = texto.lines().map(String::from).collect();
+        let total_p = parrafos.iter().filter(|p| !p.trim().is_empty()).count().max(1);
+        let mut traducidos_p = 0usize;
         let mut traducido = String::new();
         for parrafo in &parrafos {
             if parrafo.trim().is_empty() {
                 traducido.push('\n');
                 continue;
             }
+            let pct = (20 + traducidos_p * 70 / total_p).min(90) as u8;
+            progreso(pct, &format!("TRADUCIENDO... {}%", pct));
+            traducidos_p += 1;
             let t = match traducir_con_marian(parrafo, par) {
                 Ok(t) => t,
                 Err(_) => {
@@ -813,6 +846,7 @@ pub fn procesar_pdf(
             traducido.push_str(&t);
             traducido.push('\n');
         }
+        progreso(93, "CIFRANDO RESULTADO...");
         let cifrado = seguridad::blindar_documento(&traducido, subclave_hex)?;
         fs::write(
             archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre)),
@@ -821,6 +855,7 @@ pub fn procesar_pdf(
         return Ok(());
     }
 
+    progreso(10, "PROCESANDO PDF...");
     // PASO 2 & 3 — cleanup de ruta_docx_tmp garantizado aunque falle la traducción
     // (el original __orig lo guarda clonar_y_traducir internamente)
     let resultado = (|| -> Result<(), Box<dyn std::error::Error>> {
@@ -831,6 +866,7 @@ pub fn procesar_pdf(
             subclave_hex,
             id_usuario,
             par,
+            progreso,
         )?;
         // Renombrar _tmp → nombre final (clonar_y_traducir usa el stem del DOCX temporal)
         let salida_tmp = archivos_dir.join(format!("{}_{}_tmp.babel", id_usuario, nombre));

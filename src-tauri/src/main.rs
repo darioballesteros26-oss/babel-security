@@ -472,6 +472,7 @@ fn cambiar_categoria_diccionario(
 
 #[tauri::command]
 fn traducir_documento(
+    app: tauri::AppHandle,
     nombre_archivo: String,
     contenido: Vec<u8>,
     sesion: tauri::State<SesionActiva>,
@@ -538,12 +539,16 @@ fn traducir_documento(
 
         let par_doc = idioma_a_par(&idioma_doc);
 
+        let progreso = |pct: u8, msg: &str| {
+            let _ = app.emit("progreso-traduccion", serde_json::json!({"pct": pct, "msg": msg}));
+        };
         traductor::procesar_archivo_inteligente(
             &ruta_temp,
             &dict,
             &subclave_hex,
             &id_usuario,
             par_doc,
+            &progreso,
         )?;
 
         Ok(nombre_resultado)
@@ -891,6 +896,7 @@ fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
 
 #[tauri::command]
 fn traducir_documento_ruta(
+    app: tauri::AppHandle,
     ruta: String,
     nombre_archivo: String,
     sesion: tauri::State<SesionActiva>,
@@ -965,6 +971,9 @@ fn traducir_documento_ruta(
     let ruta_str = path.to_str()
         .ok_or_else(|| "Ruta contiene caracteres no permitidos (no-UTF8).".to_string())?;
 
+    let progreso = |pct: u8, msg: &str| {
+        let _ = app.emit("progreso-traduccion", serde_json::json!({"pct": pct, "msg": msg}));
+    };
     // Procesamos desde la ruta original — sin crear ningún temporal
     traductor::procesar_archivo_inteligente(
         ruta_str,
@@ -972,6 +981,7 @@ fn traducir_documento_ruta(
         &subclave_hex,
         &id_usuario,
         par,
+        &progreso,
     )?;
 
     let ruta_real = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));

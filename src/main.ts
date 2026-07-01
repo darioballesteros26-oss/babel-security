@@ -240,8 +240,16 @@ function scrollAlFinal(): void {
 function mostrarProcesando(visible: boolean): void {
   const el = document.getElementById("chat-procesando");
   if (!el) return;
-  visible ? el.classList.remove("hidden") : el.classList.add("hidden");
-  if (visible) scrollAlFinal();
+  if (visible) {
+    const textoEl = el.querySelector<HTMLElement>(".procesando-texto");
+    const barraEl = document.getElementById("procesando-barra");
+    if (textoEl) textoEl.textContent = "TRADUCIENDO";
+    if (barraEl) barraEl.style.width = "0%";
+    el.classList.remove("hidden");
+    scrollAlFinal();
+  } else {
+    el.classList.add("hidden");
+  }
 }
 
 // Borrar chat manualmente con zeroize de todos los textos en DOM
@@ -390,6 +398,15 @@ window.addEventListener("DOMContentLoaded", async () => {
   listen<string[]>("amenaza-detectada", (evento) => {
     const amenazas = evento.payload ?? [];
     if (amenazas.length > 0) mostrarAlertaAmenaza(amenazas);
+  }).catch(() => {});
+
+  // Progreso de traducción de documentos (PDF/DOCX/TXT)
+  listen<{ pct: number; msg: string }>("progreso-traduccion", (evento) => {
+    const { pct, msg } = evento.payload;
+    const textoEl = document.querySelector<HTMLElement>(".procesando-texto");
+    const barraEl = document.getElementById("procesando-barra");
+    if (textoEl) textoEl.textContent = msg;
+    if (barraEl) barraEl.style.width = `${Math.min(pct, 100)}%`;
   }).catch(() => {});
 
   // Badge NLLB: poll /ping cada 2s hasta que responda

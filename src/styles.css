@@ -730,6 +730,28 @@ body {
   animation-delay: 0.4s;
 }
 
+.procesando-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.procesando-barra-wrap {
+  height: 2px;
+  background: rgba(197, 160, 89, 0.15);
+  border-radius: 1px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.procesando-barra {
+  height: 100%;
+  background: var(--dorado);
+  border-radius: 1px;
+  transition: width 0.4s ease;
+}
+
 @keyframes pulso {
 
   0%,
