@@ -841,6 +841,8 @@ function filtrarArchivosGuardados(texto: string): void {
 function seleccionarBuzonGuardados(id: string): void {
   buzonActivoGuardados = id;
   localStorage.setItem("babel-buzon-activo-g", id);
+  const buscarEl = document.getElementById("input-buscar-g") as HTMLInputElement | null;
+  if (buscarEl) { buscarEl.value = ""; filtrarArchivosGuardados(""); }
   cargarBuzonesGuardados();
   cargarArchivosGuardados();
 }
@@ -3279,7 +3281,7 @@ function guardarNombreDisplay(): void {
 
 // Cargar ajustes al arrancar
 document.addEventListener("DOMContentLoaded", cargarAjustesGuardados);
-document.addEventListener("DOMContentLoaded", cargarAjustesTraduccion);
+document.addEventListener("DOMContentLoaded", () => cargarAjustesTraduccion().catch(() => {}));
 
 // ============================================================
 // UX GLOBAL — Escape cierra modales, Enter navega recovery, paste BIP39
