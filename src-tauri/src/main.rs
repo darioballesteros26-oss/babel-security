@@ -93,6 +93,7 @@ impl SesionActiva {
     fn limpiar(&self) {
         use zeroize::Zeroize;
         if let Ok(mut s) = self.subclave_hex.lock() {
+            seguridad::munlock_bytes(s.as_bytes()); // liberar antes de zeroizar
             s.zeroize();
         }
         if let Ok(mut u) = self.usuario.lock() {
@@ -409,6 +410,7 @@ fn verificar_login(
 
     if let Ok(mut s) = sesion.subclave_hex.lock() {
         *s = Zeroizing::new(subclave_hex.to_string());
+        seguridad::mlock_bytes(s.as_bytes()); // evitar que el SO page la clave al swap
     }
     if let Ok(mut u) = sesion.usuario.lock() {
         *u = usuario_guardado.nombre.clone();

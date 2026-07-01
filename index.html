@@ -27,10 +27,10 @@
       <h2 class="subtitulo-babel" id="ui-bienvenido-sistema">BIENVENIDO AL SISTEMA</h2>
       <p class="descripcion">¿Es tu primera vez o ya tienes un búnker?</p>
       <div class="login-box">
-        <button type="button" onclick="mostrarPantalla('login')" class="btn-oro" id="ui-acceder-bunker">ACCEDER A BÚNKER
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="login" class="btn-oro" id="ui-acceder-bunker">ACCEDER A BÚNKER
           EXISTENTE</button>
         <div class="separador">— O —</div>
-        <button type="button" onclick="mostrarPantalla('configuracion')" class="btn-secundario-oro">CREAR NUEVO
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="configuracion" class="btn-secundario-oro">CREAR NUEVO
           BÚNKER</button>
       </div>
     </div>
@@ -44,7 +44,7 @@
           <label class="input-label">LLAVE MAESTRA <span class="hint">(mín. 12 caracteres)</span></label>
           <div class="input-con-ojo">
             <input type="password" id="master-key" placeholder="••••••••••••" class="input-vip">
-            <button type="button" class="btn-ojo" onclick="toggleContraseña('master-key')" title="Ver">
+            <button type="button" class="btn-ojo" data-action="toggle-contrasena" data-campo="master-key" title="Ver">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
                 stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -61,7 +61,7 @@
           <label class="input-label">CONTRASEÑA DE USUARIO <span class="hint">(mín. 8 caracteres)</span></label>
           <div class="input-con-ojo">
             <input type="password" id="user-pass" placeholder="••••••••" class="input-vip">
-            <button type="button" class="btn-ojo" onclick="toggleContraseña('user-pass')" title="Ver">
+            <button type="button" class="btn-ojo" data-action="toggle-contrasena" data-campo="user-pass" title="Ver">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
                 stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -79,8 +79,8 @@
           ⚠ ADVERTENCIA: Si pierdes tu llave maestra, no existe forma de recuperar el acceso. Guárdala en un lugar
           seguro.
         </div>
-        <button type="button" onclick="crearBunker()" class="btn-oro">CREAR BÚNKER CIFRADO</button>
-        <button type="button" onclick="volverAtras()" class="btn-link">← VOLVER ATRÁS</button>
+        <button type="button" data-action="crear-bunker" class="btn-oro">CREAR BÚNKER CIFRADO</button>
+        <button type="button" data-action="volver-atras" class="btn-link">← VOLVER ATRÁS</button>
         <p id="response-msg" class="msg-error hidden"></p>
       </div>
     </div>
@@ -95,7 +95,7 @@
           <div class="input-con-ojo">
             <input type="password" id="login-pass" placeholder="••••••••••••" class="input-vip"
               onkeydown="if(event.key==='Enter')document.getElementById('login-pass-usuario').focus()">
-            <button type="button" class="btn-ojo" onclick="toggleContraseña('login-pass')" title="Ver">
+            <button type="button" class="btn-ojo" data-action="toggle-contrasena" data-campo="login-pass" title="Ver">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
                 stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -110,7 +110,7 @@
             <input type="password" id="login-pass-usuario"
               placeholder="••••••••" class="input-vip"
               onkeydown="if(event.key==='Enter')intentarAcceso()">
-            <button type="button" class="btn-ojo" onclick="toggleContraseña('login-pass-usuario')" title="Ver">
+            <button type="button" class="btn-ojo" data-action="toggle-contrasena" data-campo="login-pass-usuario" title="Ver">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
                 stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -119,10 +119,10 @@
             </button>
           </div>
         </div>
-        <button type="button" onclick="intentarAcceso()" class="btn-oro">DESBLOQUEAR BÚNKER</button>
-        <button type="button" onclick="mostrarPantalla('decision')" class="btn-link">← VOLVER ATRÁS</button>
+        <button type="button" data-action="intentar-acceso" class="btn-oro">DESBLOQUEAR BÚNKER</button>
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="decision" class="btn-link">← VOLVER ATRÁS</button>
         <!-- Enlace recuperación — discreto -->
-        <button type="button" onclick="irARecuperacion()" class="btn-link"
+        <button type="button" data-action="ir-a-recuperacion" class="btn-link"
           style="font-size:0.6rem;opacity:0.4;margin-top:4px;letter-spacing:1px;">
           ¿Olvidaste tu llave maestra? → Recuperar con frase
         </button>
@@ -139,25 +139,25 @@
       <div class="logo-babel small">BABEL</div>
       <p class="descripcion" id="bienvenida-usuario">Bienvenido</p>
       <div class="panel-botones">
-        <button type="button" onclick="irATraduccion()" class="btn-panel">
+        <button type="button" data-action="ir-a-traduccion" class="btn-panel">
           <span class="panel-icono">⟳</span>
           <span class="panel-texto" id="pantalla-texto-traducir">TRADUCIR</span>
         </button>
-        <button type="button" onclick="irAArchivos()" class="btn-panel">
+        <button type="button" data-action="ir-a-archivos" class="btn-panel">
           <span class="panel-icono">◫</span>
           <span class="panel-texto" id="pantalla-texto-archivos">ARCHIVOS</span>
         </button>
-        <button type="button" onclick="mostrarPantalla('comunicacion')" class="btn-panel">
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="comunicacion" class="btn-panel">
           <span class="panel-icono">⇄</span>
           <span class="panel-texto" id="pantalla-texto-p2p">P2P</span>
         </button>
       </div>
-      <button type="button" onclick="mostrarPantalla('ajustes')" class="btn-link"
+      <button type="button" data-action="mostrar-pantalla" data-pantalla="ajustes" class="btn-link"
         style="margin-top:20px;letter-spacing:2px;" id="pantalla-texto-ajustes">⚙ AJUSTES</button>
-      <button type="button" onclick="cerrarSesion()" class="btn-link" style="margin-top:8px"
+      <button type="button" data-action="cerrar-sesion" class="btn-link" style="margin-top:8px"
         id="pantalla-texto-cerrar">CERRAR SESIÓN</button>
       <!-- Ver frase desde dentro de la app -->
-      <button type="button" onclick="verFraseApp()" class="btn-link"
+      <button type="button" data-action="ver-frase-app" class="btn-link"
         style="margin-top:6px;font-size:0.6rem;opacity:0.35;letter-spacing:1px;">
         VER FRASE DE RECUPERACIÓN
       </button>
@@ -168,8 +168,8 @@
 
       <div class="chat-header">
         <div class="chat-header-izquierda">
-          <button type="button" onclick="volverAlPanel()" class="btn-link">← PANEL</button>
-          <button type="button" onclick="toggleSidebar()" class="btn-sidebar" id="btn-sidebar"
+          <button type="button" data-action="volver-al-panel" class="btn-link">← PANEL</button>
+          <button type="button" data-action="toggle-sidebar" class="btn-sidebar" id="btn-sidebar"
             title="Configuración">☰</button>
         </div>
         <div class="chat-header-centro">
@@ -188,7 +188,7 @@
               <option value="ru">RU</option>
               <option value="zh">ZH</option>
             </select>
-            <button type="button" onclick="swapIdiomaTraduccion()" title="Intercambiar idiomas"
+            <button type="button" data-action="swap-idioma" title="Intercambiar idiomas"
               style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:2px 4px;opacity:0.8;transition:opacity 0.15s;"
               onmouseenter="this.style.opacity='1'" onmouseleave="this.style.opacity='0.8'">⇄</button>
             <select id="selector-destino" class="selector-idioma" onchange="cambiarIdiomaDesdeSelectores()"
@@ -204,15 +204,15 @@
           </div>
           <button type="button" id="btn-ver-sel" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
-            onclick="verComparacion()"
+            data-action="ver-comparacion"
             onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">◫ VER ARCHIVO</button>
           <button type="button" id="btn-eliminar-sel" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
-            onclick="eliminarSeleccionados()"
+            data-action="eliminar-seleccionados"
             onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
             onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
-          <button type="button" onclick="borrarChat()" class="btn-borrar-chat" id="ui-borrar-chat">BORRAR CHAT</button>
+          <button type="button" data-action="borrar-chat" class="btn-borrar-chat" id="ui-borrar-chat">BORRAR CHAT</button>
         </div>
       </div>
 
@@ -256,17 +256,17 @@
           <div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(197,160,89,0.08);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
               <span class="sidebar-titulo" id="ui-buzones-trad">BUZONES</span>
-              <button type="button" onclick="mostrarInputBuzon()" class="btn-buzon-nuevo" title="Nuevo buzón">+</button>
+              <button type="button" data-action="mostrar-input-buzon" class="btn-buzon-nuevo" title="Nuevo buzón">+</button>
             </div>
             <div id="input-buzon-nuevo" class="input-buzon-nuevo hidden">
               <input type="text" id="nombre-buzon-input" class="input-buzon" placeholder="Nombre del buzón..." maxlength="30">
               <div class="input-buzon-botones">
-                <button type="button" onclick="confirmarBuzon()" class="btn-buzon-confirmar">✓</button>
-                <button type="button" onclick="cancelarBuzon()" class="btn-buzon-cancelar">✕</button>
+                <button type="button" data-action="confirmar-buzon" class="btn-buzon-confirmar">✓</button>
+                <button type="button" data-action="cancelar-buzon" class="btn-buzon-cancelar">✕</button>
               </div>
             </div>
             <div id="lista-buzones" class="buzones-lista">
-              <div class="buzon-item activo" onclick="seleccionarBuzon('todos')">
+              <div class="buzon-item activo" data-action="seleccionar-buzon" data-buzon="todos">
                 <span class="buzon-icono">◫</span>
                 <span class="buzon-nombre">TODOS</span>
               </div>
@@ -297,17 +297,17 @@
         <span id="contador-palabras" style="font-family:'Times New Roman',Times,serif;font-size:0.55rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.4;"></span>
       </div>
       <div id="chat-input-barra" class="chat-input-barra">
-        <button type="button" onclick="seleccionarArchivo()" class="btn-mas" title="Subir documento">+</button>
+        <button type="button" data-action="seleccionar-archivo" class="btn-mas" title="Subir documento">+</button>
         <input type="file" id="input-archivo" accept=".pdf,.docx,.txt" style="display:none"
           onchange="manejarSeleccion(event)">
         <textarea id="chat-input" class="chat-input" placeholder="Escribe un término o frase..."
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensaje();}"
           oninput="actualizarContadorPalabras(this.value);toggleBtnLimpiar(this.value);"
           autocomplete="off" rows="1"></textarea>
-        <button type="button" id="btn-limpiar-input" onclick="limpiarInputTraduccion()" title="Limpiar texto"
+        <button type="button" id="btn-limpiar-input" data-action="limpiar-input" title="Limpiar texto"
           style="display:none;background:transparent;border:none;color:var(--texto-secundario);font-size:1.1rem;cursor:pointer;padding:0 4px;opacity:0.5;flex-shrink:0;"
           onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='0.5'">×</button>
-        <button type="button" onclick="enviarMensaje()" class="btn-enviar" title="Traducir">⟳</button>
+        <button type="button" data-action="enviar-mensaje" class="btn-enviar" title="Traducir">⟳</button>
       </div>
 
     </div>
@@ -316,30 +316,30 @@
     <!-- PANTALLA — ARCHIVOS GUARDADOS SIN TRADUCIR -->
     <div id="pantalla-archivos-guardados" class="pantalla pantalla-archivos hidden">
       <div class="archivos-header">
-        <button type="button" onclick="mostrarPantalla('principal')" class="btn-link" id="ui-volver-archivos">←
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="principal" class="btn-link" id="ui-volver-archivos">←
           VOLVER</button>
         <div class="chat-header-centro">
           <span class="chat-titulo">BABEL</span>
           <span id="ui-traducidos-guardados">TRADUCIDOS Y GUARDADOS</span>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <button type="button" id="btn-ver-sel-g" onclick="verArchivoGuardado()" class="hidden"
+          <button type="button" id="btn-ver-sel-g" data-action="ver-archivo-guardado" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">◫ VER ARCHIVO</button>
-          <button type="button" id="btn-eliminar-sel-g" onclick="eliminarSeleccionadosGuardados()" class="hidden"
+          <button type="button" id="btn-eliminar-sel-g" data-action="eliminar-sel-guardados" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
             onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
-          <button type="button" onclick="cargarArchivosGuardados()" class="btn-secundario-oro"
+          <button type="button" data-action="cargar-archivos-guardados" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px" id="ui-actualizar">↺ ACTUALIZAR</button>
-          <button type="button" onclick="abrirCarpetaBabelGuardados()" class="btn-secundario-oro"
+          <button type="button" data-action="abrir-carpeta-guardados" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;opacity:0.7;"
             title="Abrir carpeta Guardados en Finder" id="ui-finder">◫ FINDER</button>
-          <button type="button" onclick="exportarTodo()" class="btn-secundario-oro"
+          <button type="button" data-action="exportar-todo" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
             title="Exportar todos los archivos a Descargas" id="ui-exportar-todo">↓ EXPORTAR TODO</button>
-          <button type="button" onclick="abrirImportarGuardado()" id="ui-importar" class="btn-secundario-oro"
+          <button type="button" data-action="abrir-importar-guardado" id="ui-importar" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;">+ IMPORTAR</button>
           <input type="file" id="input-archivo-guardado" accept=".pdf,.docx,.txt" style="display:none"
             onchange="manejarSeleccionGuardado(event)">
@@ -360,19 +360,19 @@
         <div class="buzones-panel">
           <div class="buzones-header">
             <span class="buzones-titulo" id="ui-buzones">BUZONES</span>
-            <button type="button" onclick="mostrarInputBuzonGuardado()" class="btn-buzon-nuevo"
+            <button type="button" data-action="mostrar-input-buzon-guardado" class="btn-buzon-nuevo"
               title="Nuevo buzón">+</button>
           </div>
           <div id="input-buzon-nuevo-g" class="input-buzon-nuevo hidden">
             <input type="text" id="nombre-buzon-input-g" class="input-buzon" placeholder="Nombre del buzón..."
               maxlength="30">
             <div class="input-buzon-botones">
-              <button type="button" onclick="confirmarBuzonGuardado()" class="btn-buzon-confirmar">✓</button>
-              <button type="button" onclick="cancelarBuzonGuardado()" class="btn-buzon-cancelar">✕</button>
+              <button type="button" data-action="confirmar-buzon-guardado" class="btn-buzon-confirmar">✓</button>
+              <button type="button" data-action="cancelar-buzon-guardado" class="btn-buzon-cancelar">✕</button>
             </div>
           </div>
           <div id="lista-buzones-g" class="buzones-lista">
-            <div class="buzon-item activo" onclick="seleccionarBuzonGuardados('todos')">
+            <div class="buzon-item activo" data-action="seleccionar-buzon-guardados" data-buzon="todos">
               <span class="buzon-icono">◫</span>
               <span class="buzon-nombre">TODOS</span>
             </div>
@@ -399,7 +399,7 @@
     <div id="pantalla-comunicacion" class="pantalla pantalla-p2p hidden">
 
       <div class="archivos-header">
-        <button type="button" onclick="volverDeP2P()" class="btn-link">← PANEL</button>
+        <button type="button" data-action="volver-de-p2p" class="btn-link">← PANEL</button>
         <div class="chat-header-centro">
           <span class="chat-titulo">BABEL</span>
           <span id="p2p-subtitulo" class="chat-subtitulo">RED P2P · CIFRADO LOCAL</span>
@@ -408,12 +408,12 @@
       </div>
 
       <div id="p2p-selector-inicial" class="p2p-selector-inicial">
-        <button type="button" class="p2p-btn-grande" onclick="cambiarModoP2P('chat')">
+        <button type="button" class="p2p-btn-grande" data-action="cambiar-modo-p2p" data-modo="chat">
           <span class="p2p-btn-grande-icono">◈</span>
           <span class="p2p-btn-grande-label">CHAT</span>
           <span class="p2p-btn-grande-desc">Mensajes cifrados en red local</span>
         </button>
-        <button type="button" class="p2p-btn-grande" onclick="cambiarModoP2P('email')">
+        <button type="button" class="p2p-btn-grande" data-action="cambiar-modo-p2p" data-modo="email">
           <span class="p2p-btn-grande-icono">✉</span>
           <span class="p2p-btn-grande-label">EMAIL</span>
           <span class="p2p-btn-grande-desc">Enviar archivos cifrados por correo</span>
@@ -440,7 +440,7 @@
             <div
               style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:3px;color:var(--dorado);margin-bottom:12px;">
               MODO SERVIDOR — RECIBIR</div>
-            <button type="button" class="btn-oro" onclick="iniciarP2P()"
+            <button type="button" class="btn-oro" data-action="iniciar-p2p"
               style="width:100%;font-size:0.7rem;padding:12px;">INICIAR SERVIDOR</button>
             <div id="p2p-mi-info" style="display:none;margin-top:16px;">
               <div
@@ -465,7 +465,7 @@
             <div
               style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:3px;color:var(--dorado);margin-bottom:12px;">
               MODO CLIENTE — CONECTAR</div>
-            <button type="button" class="btn-oro" onclick="buscarDispositivos()"
+            <button type="button" class="btn-oro" data-action="buscar-dispositivos"
               style="width:100%;font-size:0.7rem;padding:12px;">
               ⊕ BUSCAR DISPOSITIVOS
             </button>
@@ -474,7 +474,7 @@
             <div style="margin-top:12px;display:flex;gap:8px;">
               <input type="text" id="p2p-ip-input" placeholder="O escribe IP manualmente..." class="input-vip"
                 style="flex:1;font-size:0.7rem;letter-spacing:2px;">
-              <button type="button" class="btn-secundario-oro" onclick="conectarP2P()"
+              <button type="button" class="btn-secundario-oro" data-action="conectar-p2p"
                 style="font-size:0.7rem;padding:10px 20px;white-space:nowrap;">IR</button>
             </div>
           </div>
@@ -508,11 +508,11 @@
             <textarea id="p2p-input" placeholder="Mensaje cifrado..."
               style="flex:1;background:transparent;border:1px solid var(--borde);border-radius:2px;color:var(--texto-principal);font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.72rem;letter-spacing:1px;padding:10px 14px;resize:none;height:40px;outline:none;"
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensajeP2P();}"></textarea>
-            <button type="button" onclick="enviarMensajeP2P()" class="btn-oro"
+            <button type="button" data-action="enviar-mensaje-p2p" class="btn-oro"
               style="font-size:0.65rem;padding:10px 16px;height:40px;">ENVIAR</button>
           </div>
           <div style="padding:4px 16px 0;display:flex;justify-content:center;">
-            <button type="button" id="p2p-btn-traduccion" onclick="toggleTraduccionP2P()"
+            <button type="button" id="p2p-btn-traduccion" data-action="toggle-traduccion-p2p"
               style="background:transparent;border:1px solid rgba(197,160,89,0.3);color:rgba(197,160,89,0.6);font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;letter-spacing:3px;padding:6px 20px;cursor:pointer;transition:all 0.2s;opacity:0.4;"
               onmouseenter="this.style.borderColor='rgba(197,160,89,0.7)';this.style.color='rgba(197,160,89,0.9)'"
               onmouseleave="this.style.borderColor='rgba(197,160,89,0.3)';this.style.color='rgba(197,160,89,0.6)'">
@@ -520,7 +520,7 @@
             </button>
           </div>
           <div style="padding:8px 16px 16px;display:flex;justify-content:center;">
-            <button type="button" onclick="destruirSesionP2P()"
+            <button type="button" data-action="destruir-sesion-p2p"
               style="background:transparent;border:1px solid rgba(255,80,80,0.3);color:rgba(255,80,80,0.6);font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;letter-spacing:3px;padding:8px 20px;cursor:pointer;transition:all 0.2s;"
               onmouseenter="this.style.borderColor='rgba(255,80,80,0.7)';this.style.color='rgba(255,80,80,0.9)'"
               onmouseleave="this.style.borderColor='rgba(255,80,80,0.3)';this.style.color='rgba(255,80,80,0.6)'">
@@ -538,8 +538,8 @@
           <div class="email-sidebar-header">
             <span class="email-sidebar-titulo">BANDEJA</span>
             <div style="display:flex;gap:6px;align-items:center;">
-              <button type="button" onclick="sincronizarEmail()" class="email-btn-sync" title="Actualizar bandeja">↻</button>
-              <button type="button" onclick="abrirComponerEmail()" class="email-btn-nuevo" title="Nuevo correo">＋</button>
+              <button type="button" data-action="sincronizar-email" class="email-btn-sync" title="Actualizar bandeja">↻</button>
+              <button type="button" data-action="abrir-componer-email" class="email-btn-nuevo" title="Nuevo correo">＋</button>
             </div>
           </div>
           <div class="email-buscar-wrap">
@@ -551,10 +551,10 @@
               <span style="font-size:2rem;opacity:0.13;">✉</span>
               <p class="email-vacio-titulo">Sin correos</p>
               <p class="email-vacio-sub">Configura tu correo para empezar</p>
-              <button type="button" class="email-vacio-cta" onclick="toggleConfigSmtp()">CONFIGURAR CORREO</button>
+              <button type="button" class="email-vacio-cta" data-action="toggle-config-smtp">CONFIGURAR CORREO</button>
             </div>
           </div>
-          <button type="button" onclick="toggleConfigSmtp()" class="email-btn-config">⚙ Configurar correo</button>
+          <button type="button" data-action="toggle-config-smtp" class="email-btn-config">⚙ Configurar correo</button>
         </div>
 
         <div class="archivos-divisor"></div>
@@ -570,7 +570,7 @@
           <div id="email-compositor" class="hidden" style="display:flex;flex-direction:column;height:100%;">
             <div class="email-compositor-header">
               <span class="email-compositor-titulo">NUEVO MENSAJE</span>
-              <button type="button" onclick="cerrarCompositor()" class="email-btn-cerrar-comp">✕</button>
+              <button type="button" data-action="cerrar-compositor" class="email-btn-cerrar-comp">✕</button>
             </div>
             <div class="email-compositor-campos">
               <div class="email-campo-fila">
@@ -595,7 +595,7 @@
               </div>
               <div class="email-campo-fila" style="border-bottom:none;">
                 <span class="email-campo-label">Adjunto</span>
-                <div id="comp-archivo-zona" onclick="seleccionarArchivoEmail()" class="email-adjunto-zona"
+                <div id="comp-archivo-zona" data-action="seleccionar-archivo-email" class="email-adjunto-zona"
                   onmouseenter="this.classList.add('hover')" onmouseleave="this.classList.remove('hover')">
                   <span id="comp-archivo-nombre">📎 Adjuntar documento</span>
                 </div>
@@ -604,16 +604,16 @@
               </div>
             </div>
             <div class="email-plantillas-wrap">
-              <button type="button" onclick="insertarPlantillaEmail('Recibido, gracias por su mensaje. Le responderemos a la mayor brevedad posible.')" class="email-plantilla-btn">Recibido</button>
-              <button type="button" onclick="insertarPlantillaEmail('Su consulta está pendiente de revisión. Le contactaremos en breve con una respuesta.')" class="email-plantilla-btn">Pendiente revisión</button>
-              <button type="button" onclick="insertarPlantillaEmail('Confirmamos la recepción de la documentación. Procederemos con los trámites pertinentes.')" class="email-plantilla-btn">Confirmado</button>
-              <button type="button" onclick="insertarPlantillaEmail('Queda registrado en nuestro expediente. Cualquier consulta, no dude en contactarnos.')" class="email-plantilla-btn">Registrado</button>
+              <button type="button" data-action="insertar-plantilla" data-texto="Recibido, gracias por su mensaje. Le responderemos a la mayor brevedad posible." class="email-plantilla-btn">Recibido</button>
+              <button type="button" data-action="insertar-plantilla" data-texto="Su consulta está pendiente de revisión. Le contactaremos en breve con una respuesta." class="email-plantilla-btn">Pendiente revisión</button>
+              <button type="button" data-action="insertar-plantilla" data-texto="Confirmamos la recepción de la documentación. Procederemos con los trámites pertinentes." class="email-plantilla-btn">Confirmado</button>
+              <button type="button" data-action="insertar-plantilla" data-texto="Queda registrado en nuestro expediente. Cualquier consulta, no dude en contactarnos." class="email-plantilla-btn">Registrado</button>
             </div>
             <textarea id="comp-cuerpo" placeholder="Escribe tu mensaje aquí..."
               class="email-compositor-cuerpo"></textarea>
             <div class="email-compositor-footer">
               <div id="comp-estado" class="email-comp-estado"></div>
-              <button type="button" onclick="enviarEmail()" class="btn-oro"
+              <button type="button" data-action="enviar-email" class="btn-oro"
                 style="font-size:0.78rem;padding:10px 24px;">ENVIAR CIFRADO ✉</button>
             </div>
           </div>
@@ -622,12 +622,12 @@
           <div id="email-visor" class="hidden" style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
             <div class="email-visor-toolbar">
               <div class="email-visor-acciones">
-                <button type="button" onclick="responderEmail()" class="email-btn-accion">↩ Responder</button>
-                <button type="button" onclick="marcarEmailNoLeido()" class="email-btn-accion" title="Marcar como no leído">◎ No leído</button>
-                <button type="button" onclick="copiarCuerpoEmail()" class="email-btn-accion" title="Copiar texto del correo">⊕ Copiar</button>
-                <button type="button" onclick="cambiarZoomEmail(-1)" class="email-btn-accion" title="Reducir texto">A−</button>
-                <button type="button" onclick="cambiarZoomEmail(1)" class="email-btn-accion" title="Aumentar texto">A+</button>
-                <button type="button" onclick="eliminarEmailActual()" class="email-btn-accion peligro">🗑 Eliminar</button>
+                <button type="button" data-action="responder-email" class="email-btn-accion">↩ Responder</button>
+                <button type="button" data-action="marcar-no-leido" class="email-btn-accion" title="Marcar como no leído">◎ No leído</button>
+                <button type="button" data-action="copiar-cuerpo-email" class="email-btn-accion" title="Copiar texto del correo">⊕ Copiar</button>
+                <button type="button" data-action="cambiar-zoom-email" data-delta="-1" class="email-btn-accion" title="Reducir texto">A−</button>
+                <button type="button" data-action="cambiar-zoom-email" data-delta="1" class="email-btn-accion" title="Aumentar texto">A+</button>
+                <button type="button" data-action="eliminar-email-actual" class="email-btn-accion peligro">🗑 Eliminar</button>
                 <select id="email-idioma" onchange="cambiarIdiomaEmail(this.value)" class="email-idioma-sel">
                   <option value="ninguno">Sin traducir</option>
                   <option value="es_en">ES → EN</option>
@@ -639,7 +639,7 @@
                   <option value="ru_es">RU → ES</option>
                 </select>
               </div>
-              <button type="button" onclick="cerrarVisorEmail()" class="email-btn-cerrar-visor">✕</button>
+              <button type="button" data-action="cerrar-visor-email" class="email-btn-cerrar-visor">✕</button>
             </div>
             <div class="email-visor-header">
               <div id="visor-asunto" class="email-visor-asunto"></div>
@@ -654,7 +654,7 @@
         <div id="panel-config-smtp" class="email-config-panel hidden">
           <div class="email-config-header">
             <span class="email-config-titulo">CONFIGURAR CORREO</span>
-            <button type="button" onclick="toggleConfigSmtp()"
+            <button type="button" data-action="toggle-config-smtp"
               style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;">✕</button>
           </div>
           <div class="email-config-body">
@@ -669,7 +669,7 @@
               <div class="input-con-ojo">
                 <input type="password" id="smtp-password" placeholder="••••••••" class="input-vip"
                   style="font-size:0.75rem;">
-                <button type="button" class="btn-ojo" onclick="toggleContraseña('smtp-password')">
+                <button type="button" class="btn-ojo" data-action="toggle-contrasena" data-campo="smtp-password">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                     <circle cx="12" cy="12" r="3" />
@@ -707,7 +707,7 @@
                 </div>
               </details>
             </div>
-            <button type="button" onclick="guardarConfigSmtp()" class="btn-oro"
+            <button type="button" data-action="guardar-smtp" class="btn-oro"
               style="font-size:0.78rem;padding:10px;">GUARDAR Y CIFRAR</button>
           </div>
         </div>
@@ -725,10 +725,10 @@
         ⚠ Guarda estas 12 palabras en orden exacto y en papel. Son la única forma de recuperar tu búnker.
       </div>
       <div id="frase-grid" class="frase-bip39-grid"></div>
-      <button type="button" onclick="cerrarFrase()" class="btn-oro" style="margin-top:24px;width:100%;">
+      <button type="button" data-action="cerrar-frase" class="btn-oro" style="margin-top:24px;width:100%;">
         HE GUARDADO MI FRASE → IR AL LOGIN
       </button>
-      <button onclick="imprimirFrase()" class="btn-oro"
+      <button data-action="imprimir-frase" class="btn-oro"
         style="margin-top:12px;width:100%;background:transparent;border:1px solid var(--dorado);color:var(--dorado);">
         🖨️ IMPRIMIR EN PDF
       </button>
@@ -771,10 +771,10 @@
         <div class="recovery-input-item"><span class="recovery-numero">12</span><input type="text" id="rec-palabra-12"
             class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
       </div>
-      <button type="button" onclick="intentarRecuperacion()" class="btn-oro" style="margin-top:20px;width:100%;">
+      <button type="button" data-action="intentar-recuperacion" class="btn-oro" style="margin-top:20px;width:100%;">
         VERIFICAR FRASE
       </button>
-      <button type="button" onclick="mostrarPantalla('login')" class="btn-link">
+      <button type="button" data-action="mostrar-pantalla" data-pantalla="login" class="btn-link">
         ← VOLVER AL LOGIN
       </button>
       <p id="recovery-msg" class="msg-error hidden"></p>
@@ -795,19 +795,19 @@
       <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
         <div class="ajuste-label" id="ui-tema">TEMA</div>
         <div style="display:flex;gap:8px;margin-top:12px;">
-          <button type="button" id="tema-negro" onclick="cambiarTema('negro')"
+          <button type="button" id="tema-negro" data-action="cambiar-tema" data-tema="negro"
             style="flex:1;padding:16px 4px;border:1px solid #c5a059;background:#09090b;color:#c5a059;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
             NEGRO / DORADO
           </button>
-          <button type="button" id="tema-blanco2" onclick="cambiarTema('blanco-dorado')"
+          <button type="button" id="tema-blanco2" data-action="cambiar-tema" data-tema="blanco-dorado"
             style="flex:1;padding:16px 4px;border:1px solid #b8972e;background:#ffffff;color:#b8972e;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
             BLANCO / DORADO
           </button>
-          <button type="button" id="tema-crema" onclick="cambiarTema('crema')"
+          <button type="button" id="tema-crema" data-action="cambiar-tema" data-tema="crema"
             style="flex:1;padding:16px 4px;border:1px solid #ffffff;background:#1a1a1a;color:#ffffff;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
             NEGRO / BLANCO
           </button>
-          <button type="button" id="tema-blanco-negro" onclick="cambiarTema('blanco-negro')"
+          <button type="button" id="tema-blanco-negro" data-action="cambiar-tema" data-tema="blanco-negro"
             style="flex:1;padding:16px 4px;border:1px solid #1a1a1a;background:#ffffff;color:#1a1a1a;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
             BLANCO / NEGRO
           </button>
@@ -847,12 +847,12 @@
         <div style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
           12 palabras que permiten recuperar el acceso si olvidas la contraseña. No hagas capturas.
         </div>
-        <button type="button" onclick="verFraseApp()" class="btn-vip" style="width:100%;padding:12px 0;">
+        <button type="button" data-action="ver-frase-app" class="btn-vip" style="width:100%;padding:12px 0;">
           VER FRASE DE RECUPERACIÓN
         </button>
       </div>
 
-      <button type="button" onclick="mostrarPantalla('principal')" class="btn-link"
+      <button type="button" data-action="mostrar-pantalla" data-pantalla="principal" class="btn-link"
         style="margin-top:28px;text-align:center;" id="ui-volver-panel">← VOLVER AL PANEL</button>
     </div>
   </div>
@@ -870,7 +870,7 @@
         padding:16px 24px;border-bottom:1px solid rgba(201,168,76,0.2);">
         <span id="modal-visor-nombre" style="font-family:'Times New Roman', Times, serif,serif;
           color:var(--dorado,#c9a84c);font-size:0.85rem;letter-spacing:0.15em;"></span>
-        <button type="button" onclick="cerrarVisor()" style="background:transparent;border:none;
+        <button type="button" data-action="cerrar-visor" style="background:transparent;border:none;
           color:var(--dorado,#c9a84c);font-size:1.2rem;cursor:pointer;opacity:0.7;padding:0 4px;">✕</button>
       </div>
       <div id="modal-visor-contenido" style="padding:32px 40px;overflow-y:auto;
@@ -891,7 +891,7 @@
         padding:14px 24px;border-bottom:1px solid rgba(201,168,76,0.2);flex-shrink:0;">
         <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
           letter-spacing:3px;color:var(--dorado);">VISOR DE ARCHIVOS</span>
-        <button type="button" onclick="cerrarVisorParalelo()" style="background:transparent;border:none;
+        <button type="button" data-action="cerrar-visor-paralelo" style="background:transparent;border:none;
           color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
       </div>
       <div style="display:flex;flex:1;overflow:hidden;min-height:0;">
@@ -931,7 +931,7 @@
         padding:14px 24px;border-bottom:1px solid rgba(201,168,76,0.2);">
         <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
           letter-spacing:3px;color:var(--dorado);">FRASE DE RECUPERACIÓN</span>
-        <button type="button" onclick="cerrarVerFrase()" style="background:transparent;border:none;
+        <button type="button" data-action="cerrar-ver-frase" style="background:transparent;border:none;
           color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
       </div>
       <div style="padding:24px;">
@@ -1080,7 +1080,7 @@
           cursor:pointer;flex-shrink:0;margin-top:2px;">
           He leído y acepto los términos de uso y la política de privacidad de Babel Security.
         </label>
-        <button type="button" onclick="aceptarTerminos()" class="btn-oro" style="width:100%;">
+        <button type="button" data-action="aceptar-terminos" class="btn-oro" style="width:100%;">
           ACEPTAR Y CONTINUAR
         </button>
         <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;letter-spacing:1px;
@@ -1113,11 +1113,11 @@
         font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;"
         onkeydown="if(event.key==='Enter')confirmarRenombrar();else if(event.key==='Escape')cerrarModalRenombrar()" />
       <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
-        <button type="button" onclick="cerrarModalRenombrar()" style="background:transparent;border:1px solid var(--borde);
+        <button type="button" data-action="cerrar-modal-renombrar" style="background:transparent;border:1px solid var(--borde);
           color:var(--texto-secundario);padding:6px 14px;cursor:pointer;
           font-size:0.7rem;border-radius:2px;font-family:'Times New Roman', Times, serif,sans-serif;
           letter-spacing:1px;">CANCELAR</button>
-        <button type="button" onclick="confirmarRenombrar()" style="background:var(--dorado);border:none;color:#000;
+        <button type="button" data-action="confirmar-renombrar" style="background:var(--dorado);border:none;color:#000;
           padding:6px 14px;cursor:pointer;font-size:0.7rem;font-weight:700;
           border-radius:2px;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;">
           GUARDAR</button>
@@ -1148,11 +1148,11 @@
         quiere conectarse a tu Babel
       </p>
       <div style="display:flex;gap:12px;justify-content:center;">
-        <button type="button" onclick="rechazarSolicitudP2P()" style="background:transparent;border:1px solid rgba(255,80,80,0.4);
+        <button type="button" data-action="rechazar-solicitud-p2p" style="background:transparent;border:1px solid rgba(255,80,80,0.4);
           color:rgba(255,80,80,0.8);padding:8px 20px;cursor:pointer;
           font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.7rem;letter-spacing:2px;
           border-radius:2px;">RECHAZAR</button>
-        <button type="button" onclick="aceptarSolicitudP2P()" style="background:var(--dorado);border:none;color:#000;
+        <button type="button" data-action="aceptar-solicitud-p2p" style="background:var(--dorado);border:none;color:#000;
           padding:8px 20px;cursor:pointer;font-family:'Times New Roman', Times, serif,sans-serif;
           font-size:0.7rem;letter-spacing:2px;font-weight:700;border-radius:2px;">
           ACEPTAR</button>
@@ -1172,10 +1172,10 @@
       letter-spacing:1px;box-sizing:border-box;margin-bottom:16px;"
         onkeydown="if(event.key==='Enter')confirmarRenombrarArchivo();if(event.key==='Escape')cerrarModalRenombrarArchivo();">
       <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button type="button" onclick="cerrarModalRenombrarArchivo()" style="background:transparent;
+        <button type="button" data-action="cerrar-modal-renombrar-archivo" style="background:transparent;
         border:1px solid var(--borde);color:var(--texto-secundario);font-family:'Times New Roman', Times, serif,sans-serif;
         font-size:0.6rem;letter-spacing:2px;padding:8px 16px;cursor:pointer;">CANCELAR</button>
-        <button type="button" onclick="confirmarRenombrarArchivo()" style="background:var(--dorado);
+        <button type="button" data-action="confirmar-renombrar-archivo" style="background:var(--dorado);
         border:none;color:#000;font-family:'Times New Roman', Times, serif,sans-serif;
         font-size:0.6rem;letter-spacing:2px;padding:8px 16px;cursor:pointer;font-weight:700;">GUARDAR</button>
       </div>
@@ -1199,7 +1199,7 @@
           maxlength="32"
           onkeydown="if(event.key==='Enter')guardarNombreDisplay()">
       </div>
-      <button type="button" onclick="guardarNombreDisplay()" class="btn-oro" style="width:100%;">
+      <button type="button" data-action="guardar-nombre-display" class="btn-oro" style="width:100%;">
         CONTINUAR →
       </button>
     </div>

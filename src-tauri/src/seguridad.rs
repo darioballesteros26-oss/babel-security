@@ -27,6 +27,25 @@ fn try_mlock(ptr: *const u8, len: usize) {
     { let _ = (ptr, len); }
 }
 
+/// Bloquea un slice en RAM para que el SO no lo pagine al swap.
+/// Usar en bytes de claves sensibles ya fijados (no crecerán más).
+pub fn mlock_bytes(data: &[u8]) {
+    if !data.is_empty() {
+        try_mlock(data.as_ptr(), data.len());
+    }
+}
+
+/// Desbloquea un slice previamente bloqueado con mlock_bytes.
+/// Llamar justo antes de zeroizar para que el SO pueda reutilizar la página.
+pub fn munlock_bytes(data: &[u8]) {
+    #[cfg(unix)]
+    if !data.is_empty() {
+        unsafe { libc::munlock(data.as_ptr() as *const libc::c_void, data.len()); }
+    }
+    #[cfg(not(unix))]
+    { let _ = data; }
+}
+
 // --- Sistema ---
 #[cfg(unix)]
 extern crate libc;

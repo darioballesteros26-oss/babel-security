@@ -23,6 +23,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, ServerConfig};
@@ -150,10 +152,29 @@ pub const TAMAÑO_CABECERA: usize = 304;
 pub const MAX_NOMBRE: usize = 256;
 pub const MAX_TAMAÑO_ARCHIVO: u64 = 100 * 1024 * 1024; // 100MB
 // V2: incluye timestamp Unix para invalidar replays > 60 s y fingerprint del cert.
+// V3: añade HMAC-SHA256 de 8 bytes (clave interna de app) — impide que escáneres genéricos
+//     procesen los anuncios como si fueran Babel. La autenticación real es mTLS.
 // V1 se sigue parseando como fallback para compatibilidad con versiones antiguas.
 const PREFIJO_ANUNCIO_V2: &str = "BABEL_P2P_ANNOUNCE_V2:";
+const PREFIJO_ANUNCIO_V3: &str = "BABEL_P2P_ANNOUNCE_V3:";
 const PREFIJO_RESPUESTA_V2: &str = "BABEL_P2P_RESPONSE_V2:";
 const VERSION_PROTOCOLO: u32 = 1;
+// Clave fija de protocolo — todos los nodos Babel la conocen. Protege contra
+// escáneres de red genéricos; la autenticación de identidad real es mTLS + TOFU.
+const APP_DISCOVERY_KEY: &[u8] = b"babel-p2p-discovery-2026-v3";
+
+fn hmac_anuncio(ts: u64) -> String {
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(APP_DISCOVERY_KEY).expect("HMAC any len");
+    mac.update(b"babel-announce:");
+    mac.update(ts.to_string().as_bytes());
+    let tag = mac.finalize().into_bytes();
+    hex::encode(&tag[..8]) // 8 bytes = 64 bits — suficiente para proteger contra scanners
+}
+
+fn verificar_hmac_anuncio(ts: u64, hmac_hex: &str) -> bool {
+    hmac_anuncio(ts) == hmac_hex
+}
 
 // ============================================================
 // ESTRUCTURAS
@@ -174,12 +195,12 @@ pub struct PeerDescubierto {
 pub struct GestorCertificados;
 
 impl GestorCertificados {
-    pub fn generar_o_cargar() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>), String> {
+    pub fn generar_o_cargar(subclave_hex: &str) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>), String> {
         let _ = fs::create_dir_all(p2p_dir());
         let _ = fs::create_dir_all(peers_dir());
 
         if ruta_cert().exists() && ruta_clave().exists() {
-            return Self::cargar();
+            return Self::cargar(subclave_hex);
         }
 
         log::warn!("[P2P] Generando certificado de identidad...");
@@ -200,8 +221,8 @@ impl GestorCertificados {
         let clave_der = Zeroizing::new(cert.serialize_private_key_der());
 
         fs::write(ruta_cert(), &cert_der).map_err(|e| format!("Error guardando cert: {}", e))?;
-        // Cifrar la clave privada antes de guardarla en disco
-        if let Some(enc_key) = clave_privada_p2p_enc() {
+        // Cifrar la clave privada con HKDF de la subclave del usuario
+        if let Some(enc_key) = clave_privada_p2p_enc(subclave_hex) {
             match crate::seguridad::blindar_documento(&hex::encode(clave_der.as_slice()), &enc_key) {
                 Ok(cifrado) => {
                     fs::write(ruta_clave(), cifrado).map_err(|e| format!("Error guardando clave cifrada: {}", e))?;
@@ -225,28 +246,48 @@ impl GestorCertificados {
         Ok((cert_der, clave_der))
     }
 
-    fn cargar() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>), String> {
+    fn cargar(subclave_hex: &str) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>), String> {
         let cert = fs::read(ruta_cert()).map_err(|e| format!("Error leyendo cert: {}", e))?;
         let blob = fs::read(ruta_clave()).map_err(|e| format!("Error leyendo clave: {}", e))?;
 
-        let clave = if let Some(enc_key) = clave_privada_p2p_enc() {
-            // Intentar descifrar (formato nuevo cifrado)
+        // Intentar primero con la clave nueva (HKDF de subclave del usuario)
+        let clave = if let Some(enc_key) = clave_privada_p2p_enc(subclave_hex) {
             match crate::seguridad::descifrar_documento(blob.clone(), &enc_key)
-                .and_then(|hex| hex::decode(hex.trim()).map_err(|e| e.to_string()))
+                .and_then(|h| hex::decode(h.trim()).map_err(|e| e.to_string()))
             {
                 Ok(bytes) => Zeroizing::new(bytes),
                 Err(_) => {
-                    // Migración: estaba en texto plano — re-cifrar y guardar
-                    let raw = Zeroizing::new(blob);
-                    if let Ok(cifrado) = crate::seguridad::blindar_documento(&hex::encode(&*raw), &enc_key) {
-                        let _ = fs::write(ruta_clave(), cifrado);
-                        #[cfg(unix)]
+                    // Migración desde v1 (SHA-256 de master.salt)
+                    if let Some(legacy_key) = clave_privada_p2p_enc_legacy() {
+                        match crate::seguridad::descifrar_documento(blob.clone(), &legacy_key)
+                            .and_then(|h| hex::decode(h.trim()).map_err(|e| e.to_string()))
                         {
-                            use std::os::unix::fs::PermissionsExt;
-                            let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600));
+                            Ok(bytes) => {
+                                // Re-cifrar con clave nueva
+                                if let Ok(cifrado) = crate::seguridad::blindar_documento(&hex::encode(&bytes), &enc_key) {
+                                    let _ = fs::write(ruta_clave(), cifrado);
+                                    #[cfg(unix)]
+                                    { use std::os::unix::fs::PermissionsExt;
+                                      let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600)); }
+                                    log::warn!("[P2P] Clave privada migrada a v2 (HKDF de subclave).");
+                                }
+                                Zeroizing::new(bytes)
+                            }
+                            Err(_) => {
+                                // Texto plano (instalación muy antigua) — re-cifrar
+                                let raw = Zeroizing::new(blob);
+                                if let Ok(cifrado) = crate::seguridad::blindar_documento(&hex::encode(&*raw), &enc_key) {
+                                    let _ = fs::write(ruta_clave(), cifrado);
+                                    #[cfg(unix)]
+                                    { use std::os::unix::fs::PermissionsExt;
+                                      let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600)); }
+                                }
+                                raw
+                            }
                         }
+                    } else {
+                        Zeroizing::new(blob)
                     }
-                    raw
                 }
             }
         } else {
@@ -305,8 +346,15 @@ impl DescubrimientoRed {
                     continue;
                 }
                 let msg = std::str::from_utf8(&buf[..n]).unwrap_or("");
-                // Validar formato V2 (con timestamp) o aceptar V1 legado
-                let valido = if let Some(rest) = msg.strip_prefix(PREFIJO_ANUNCIO_V2) {
+                // Validar V3 (HMAC + timestamp), V2 (solo timestamp) o V1 legado
+                let valido = if let Some(rest) = msg.strip_prefix(PREFIJO_ANUNCIO_V3) {
+                    // rest = "{ts}:{hmac8}"
+                    let mut partes = rest.splitn(2, ':');
+                    let ts: u64 = partes.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let hmac_hex = partes.next().unwrap_or("");
+                    let ahora_u = ahora_unix();
+                    ts > 0 && ahora_u.saturating_sub(ts) < 60 && verificar_hmac_anuncio(ts, hmac_hex)
+                } else if let Some(rest) = msg.strip_prefix(PREFIJO_ANUNCIO_V2) {
                     let ts: u64 = rest.parse().unwrap_or(0);
                     let ahora_u = ahora_unix();
                     ts > 0 && ahora_u.saturating_sub(ts) < 60
@@ -336,7 +384,8 @@ impl DescubrimientoRed {
             std::net::IpAddr::V4(Ipv4Addr::BROADCAST),
             PUERTO_DESCUBRIMIENTO,
         );
-        let anuncio = format!("{}{}", PREFIJO_ANUNCIO_V2, ahora_unix());
+        let ts_anuncio = ahora_unix();
+        let anuncio = format!("{}{}:{}", PREFIJO_ANUNCIO_V3, ts_anuncio, hmac_anuncio(ts_anuncio));
         socket
             .send_to(anuncio.as_bytes(), destino)
             .map_err(|e| format!("Error enviando broadcast: {}", e))?;
@@ -652,9 +701,21 @@ fn ahora_unix() -> u64 {
         .as_secs()
 }
 
-/// Deriva la clave de cifrado para la clave privada P2P desde master.salt.
-/// SHA-256 con dominio propio — distinta de clave_certs_autorizados.
-fn clave_privada_p2p_enc() -> Option<Zeroizing<String>> {
+/// Deriva la clave para cifrar la clave privada P2P desde la subclave Argon2id del usuario.
+/// HKDF-SHA256 con info de dominio propio — requiere conocer la contraseña para leer la clave P2P.
+fn clave_privada_p2p_enc(subclave_hex: &str) -> Option<Zeroizing<String>> {
+    if subclave_hex.len() < 64 { return None; }
+    let ikm = hex::decode(subclave_hex).ok()?;
+    let hk = Hkdf::<Sha256>::new(None, &ikm);
+    let mut okm = [0u8; 32];
+    hk.expand(b"babel-p2p-clave-privada-v2", &mut okm).ok()?;
+    let result = Zeroizing::new(hex::encode(okm));
+    okm.iter_mut().for_each(|b| *b = 0);
+    Some(result)
+}
+
+/// Esquema legacy (v1): SHA-256(master.salt). Solo para migración automática.
+fn clave_privada_p2p_enc_legacy() -> Option<Zeroizing<String>> {
     let salt = fs::read(crate::babel_dir().join("master.salt")).ok()?;
     if salt.len() < 32 { return None; }
     let mut hasher = Sha256::new();
@@ -982,7 +1043,7 @@ impl ServidorP2P {
     }
 
     fn construir_config_servidor(&self) -> Result<ServerConfig, String> {
-        let (cert_der, clave_der) = GestorCertificados::generar_o_cargar()?;
+        let (cert_der, clave_der) = GestorCertificados::generar_o_cargar(&self.subclave_hex)?;
         let cert = CertificateDer::from(cert_der);
         let clave = PrivateKeyDer::Pkcs8(clave_der.to_vec().into());
 
@@ -1104,7 +1165,7 @@ impl ClienteP2P {
     }
 
     fn construir_config_cliente(&self, peer_ip: &str) -> Result<ClientConfig, String> {
-        let (cert_der, clave_der) = GestorCertificados::generar_o_cargar()?;
+        let (cert_der, clave_der) = GestorCertificados::generar_o_cargar(&self.subclave_hex)?;
         let cert = CertificateDer::from(cert_der);
         let clave = PrivateKeyDer::Pkcs8(clave_der.to_vec().into());
 

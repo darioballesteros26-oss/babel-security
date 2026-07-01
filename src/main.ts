@@ -277,6 +277,96 @@ function borrarChat(): void {
 // ARRANQUE
 // ============================================================
 
+// ============================================================
+// DELEGATED CLICK HANDLER — reemplaza todos los onclick="..." del HTML
+// ============================================================
+document.addEventListener("click", (e: MouseEvent) => {
+  const el = (e.target as Element).closest<HTMLElement>("[data-action]");
+  if (!el) return;
+  const action = el.dataset.action!;
+  switch (action) {
+    // Navegación
+    case "mostrar-pantalla": mostrarPantalla(el.dataset.pantalla! as Pantalla); break;
+    case "volver-atras": volverAtras(); break;
+    case "volver-al-panel": volverAlPanel(); break;
+    case "volver-de-p2p": volverDeP2P(); break;
+    case "ir-a-traduccion": irATraduccion(); break;
+    case "ir-a-archivos": irAArchivos(); break;
+    case "ir-a-recuperacion": irARecuperacion(); break;
+    // Sesión / búnker
+    case "crear-bunker": crearBunker(); break;
+    case "intentar-acceso": intentarAcceso(); break;
+    case "cerrar-sesion": cerrarSesion(); break;
+    case "intentar-recuperacion": intentarRecuperacion(); break;
+    case "aceptar-terminos": aceptarTerminos(); break;
+    // UI
+    case "toggle-sidebar": toggleSidebar(); break;
+    case "toggle-contrasena": toggleContraseña(el.dataset.campo!); break;
+    case "cambiar-tema": cambiarTema(el.dataset.tema!); break;
+    case "ver-frase-app": verFraseApp(); break;
+    case "cerrar-frase": cerrarFrase(); break;
+    case "imprimir-frase": imprimirFrase(); break;
+    case "cerrar-ver-frase": cerrarVerFrase(); break;
+    case "cerrar-visor": cerrarVisor(); break;
+    case "cerrar-visor-paralelo": cerrarVisorParalelo(); break;
+    case "ver-comparacion": verComparacion(); break;
+    // Traducción / chat
+    case "enviar-mensaje": enviarMensaje(); break;
+    case "seleccionar-archivo": seleccionarArchivo(); break;
+    case "swap-idioma": swapIdiomaTraduccion(); break;
+    case "limpiar-input": limpiarInputTraduccion(); break;
+    case "borrar-chat": borrarChat(); break;
+    case "eliminar-seleccionados": eliminarSeleccionados(); break;
+    // Buzones de traducción
+    case "mostrar-input-buzon": mostrarInputBuzon(); break;
+    case "confirmar-buzon": confirmarBuzon(); break;
+    case "cancelar-buzon": cancelarBuzon(); break;
+    case "seleccionar-buzon": seleccionarBuzon(el.dataset.buzon!); break;
+    // Archivos guardados
+    case "ver-archivo-guardado": verArchivoGuardado(); break;
+    case "eliminar-sel-guardados": eliminarSeleccionadosGuardados(); break;
+    case "cargar-archivos-guardados": cargarArchivosGuardados(); break;
+    case "abrir-carpeta-guardados": abrirCarpetaBabelGuardados(); break;
+    case "exportar-todo": exportarTodo(); break;
+    case "abrir-importar-guardado": abrirImportarGuardado(); break;
+    case "mostrar-input-buzon-guardado": mostrarInputBuzonGuardado(); break;
+    case "confirmar-buzon-guardado": confirmarBuzonGuardado(); break;
+    case "cancelar-buzon-guardado": cancelarBuzonGuardado(); break;
+    case "seleccionar-buzon-guardados": seleccionarBuzonGuardados(el.dataset.buzon!); break;
+    case "guardar-nombre-display": guardarNombreDisplay(); break;
+    // Renombrar modales
+    case "cerrar-modal-renombrar": cerrarModalRenombrar(); break;
+    case "confirmar-renombrar": confirmarRenombrar(); break;
+    case "cerrar-modal-renombrar-archivo": cerrarModalRenombrarArchivo(); break;
+    case "confirmar-renombrar-archivo": confirmarRenombrarArchivo(); break;
+    // P2P
+    case "iniciar-p2p": iniciarP2P(); break;
+    case "buscar-dispositivos": buscarDispositivos(); break;
+    case "conectar-p2p": conectarP2P(); break;
+    case "enviar-mensaje-p2p": enviarMensajeP2P(); break;
+    case "toggle-traduccion-p2p": toggleTraduccionP2P(); break;
+    case "destruir-sesion-p2p": destruirSesionP2P(); break;
+    case "cambiar-modo-p2p": cambiarModoP2P(el.dataset.modo!); break;
+    case "aceptar-solicitud-p2p": aceptarSolicitudP2P(); break;
+    case "rechazar-solicitud-p2p": rechazarSolicitudP2P(); break;
+    // Email
+    case "sincronizar-email": sincronizarEmail(); break;
+    case "abrir-componer-email": abrirComponerEmail(); break;
+    case "toggle-config-smtp": toggleConfigSmtp(); break;
+    case "guardar-smtp": guardarConfigSmtp(); break;
+    case "seleccionar-archivo-email": seleccionarArchivoEmail(); break;
+    case "enviar-email": enviarEmail(); break;
+    case "responder-email": responderEmail(); break;
+    case "marcar-no-leido": marcarEmailNoLeido(); break;
+    case "copiar-cuerpo-email": copiarCuerpoEmail(); break;
+    case "cambiar-zoom-email": cambiarZoomEmail(Number(el.dataset.delta!)); break;
+    case "eliminar-email-actual": eliminarEmailActual(); break;
+    case "cerrar-visor-email": cerrarVisorEmail(); break;
+    case "cerrar-compositor": cerrarCompositor(); break;
+    case "insertar-plantilla": insertarPlantillaEmail(el.dataset.texto!); break;
+  }
+});
+
 window.addEventListener("DOMContentLoaded", async () => {
   invoke("borrar_html_frase").catch(() => {});
   mostrarPantalla("carga");
@@ -1394,82 +1484,103 @@ function mostrarToast(mensaje: string, esError: boolean): void {
 }
 
 // Modal de seguridad persistente — amenaza detectada por el monitor en segundo plano.
-// No se cierra automáticamente: el usuario debe decidir si cerrar sesión o continuar.
+// No se cierra automáticamente: el usuario debe escribir CONFIRMAR para continuar bajo riesgo.
 function mostrarAlertaAmenaza(amenazas: string[]): void {
-  // Evitar duplicados si el evento llega varias veces antes de que se cierre
   if (document.getElementById("babel-amenaza-overlay")) return;
+
+  const font = "var(--fuente-titulo, 'Times New Roman', Times, serif)";
 
   const overlay = document.createElement("div");
   overlay.id = "babel-amenaza-overlay";
-  overlay.style.cssText = `
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.82);
-    z-index: 99999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: var(--fuente-titulo, 'Times New Roman', Times, serif);
-  `;
+  Object.assign(overlay.style, {
+    position: "fixed", inset: "0", background: "rgba(0,0,0,0.82)",
+    zIndex: "99999", display: "flex", alignItems: "center",
+    justifyContent: "center", fontFamily: font,
+  });
 
-  const lista = amenazas.map(a => `<li style="margin:4px 0;color:#ffaaaa;">${a}</li>`).join("");
+  const caja = document.createElement("div");
+  Object.assign(caja.style, {
+    background: "#1a0a0a", border: "1px solid #ff4444", borderRadius: "4px",
+    padding: "36px 40px", maxWidth: "480px", width: "90%",
+    boxShadow: "0 0 40px #ff000044", textAlign: "center",
+  });
 
-  overlay.innerHTML = `
-    <div style="
-      background:#1a0a0a;
-      border:1px solid #ff4444;
-      border-radius:4px;
-      padding:36px 40px;
-      max-width:480px;
-      width:90%;
-      box-shadow:0 0 40px #ff000044;
-      text-align:center;
-    ">
-      <div style="font-size:2rem;margin-bottom:16px;">⚠</div>
-      <h2 style="color:#ff6b6b;font-size:1rem;letter-spacing:0.15em;margin:0 0 12px;">
-        AMENAZA DETECTADA
-      </h2>
-      <p style="color:#aaa;font-size:0.8rem;letter-spacing:0.08em;margin:0 0 18px;">
-        El monitor de seguridad ha detectado software potencialmente peligroso activo en este sistema:
-      </p>
-      <ul style="
-        list-style:none;
-        padding:0;
-        margin:0 0 24px;
-        font-size:0.78rem;
-        letter-spacing:0.06em;
-        text-align:left;
-      ">${lista}</ul>
-      <p style="color:#888;font-size:0.72rem;margin:0 0 28px;letter-spacing:0.06em;">
-        Recomendación: cierra la sesión y verifica tu sistema antes de continuar.
-      </p>
-      <div style="display:flex;gap:12px;justify-content:center;">
-        <button onclick="cerrarSesion();document.getElementById('babel-amenaza-overlay')?.remove();" style="
-          background:#3a0a0a;
-          color:#ff6b6b;
-          border:1px solid #ff444466;
-          padding:10px 22px;
-          font-family:inherit;
-          font-size:0.78rem;
-          letter-spacing:0.12em;
-          border-radius:2px;
-          cursor:pointer;
-        ">CERRAR SESIÓN</button>
-        <button onclick="document.getElementById('babel-amenaza-overlay')?.remove();" style="
-          background:#111;
-          color:#888;
-          border:1px solid #333;
-          padding:10px 22px;
-          font-family:inherit;
-          font-size:0.78rem;
-          letter-spacing:0.12em;
-          border-radius:2px;
-          cursor:pointer;
-        ">CONTINUAR (riesgo)</button>
-      </div>
-    </div>
-  `;
+  const icono = document.createElement("div");
+  icono.textContent = "⚠";
+  Object.assign(icono.style, { fontSize: "2rem", marginBottom: "16px" });
 
+  const titulo = document.createElement("h2");
+  titulo.textContent = "AMENAZA DETECTADA";
+  Object.assign(titulo.style, { color: "#ff6b6b", fontSize: "1rem", letterSpacing: "0.15em", margin: "0 0 12px" });
+
+  const descripcion = document.createElement("p");
+  descripcion.textContent = "El monitor de seguridad ha detectado software potencialmente peligroso activo en este sistema:";
+  Object.assign(descripcion.style, { color: "#aaa", fontSize: "0.8rem", letterSpacing: "0.08em", margin: "0 0 18px" });
+
+  const lista = document.createElement("ul");
+  Object.assign(lista.style, { listStyle: "none", padding: "0", margin: "0 0 24px", fontSize: "0.78rem", letterSpacing: "0.06em", textAlign: "left" });
+  amenazas.forEach(a => {
+    const li = document.createElement("li");
+    li.textContent = a;
+    Object.assign(li.style, { margin: "4px 0", color: "#ffaaaa" });
+    lista.appendChild(li);
+  });
+
+  const aviso = document.createElement("p");
+  aviso.textContent = "Recomendación: cierra la sesión y verifica tu sistema antes de continuar.";
+  Object.assign(aviso.style, { color: "#888", fontSize: "0.72rem", margin: "0 0 20px", letterSpacing: "0.06em" });
+
+  const inputLabel = document.createElement("p");
+  inputLabel.textContent = "Para continuar bajo riesgo escribe CONFIRMAR:";
+  Object.assign(inputLabel.style, { color: "#666", fontSize: "0.72rem", margin: "0 0 8px" });
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "CONFIRMAR";
+  Object.assign(input.style, {
+    background: "#0d0d0d", color: "#aaa", border: "1px solid #333",
+    padding: "8px 14px", fontFamily: font, fontSize: "0.78rem",
+    letterSpacing: "0.1em", borderRadius: "2px", width: "100%",
+    boxSizing: "border-box", marginBottom: "20px", textAlign: "center",
+  });
+
+  const fila = document.createElement("div");
+  Object.assign(fila.style, { display: "flex", gap: "12px", justifyContent: "center" });
+
+  const btnCerrar = document.createElement("button");
+  btnCerrar.textContent = "CERRAR SESIÓN";
+  Object.assign(btnCerrar.style, {
+    background: "#3a0a0a", color: "#ff6b6b", border: "1px solid #ff444466",
+    padding: "10px 22px", fontFamily: font, fontSize: "0.78rem",
+    letterSpacing: "0.12em", borderRadius: "2px", cursor: "pointer",
+  });
+  btnCerrar.addEventListener("click", () => {
+    overlay.remove();
+    cerrarSesion();
+  });
+
+  const btnContinuar = document.createElement("button");
+  btnContinuar.textContent = "CONTINUAR";
+  Object.assign(btnContinuar.style, {
+    background: "#111", color: "#555", border: "1px solid #222",
+    padding: "10px 22px", fontFamily: font, fontSize: "0.78rem",
+    letterSpacing: "0.12em", borderRadius: "2px", cursor: "not-allowed",
+  });
+  const activarContinuar = () => {
+    const ok = input.value.trim().toUpperCase() === "CONFIRMAR";
+    btnContinuar.style.color = ok ? "#888" : "#555";
+    btnContinuar.style.borderColor = ok ? "#444" : "#222";
+    btnContinuar.style.cursor = ok ? "pointer" : "not-allowed";
+  };
+  input.addEventListener("input", activarContinuar);
+  btnContinuar.addEventListener("click", () => {
+    if (input.value.trim().toUpperCase() === "CONFIRMAR") overlay.remove();
+  });
+
+  fila.appendChild(btnCerrar);
+  fila.appendChild(btnContinuar);
+  caja.append(icono, titulo, descripcion, lista, aviso, inputLabel, input, fila);
+  overlay.appendChild(caja);
   document.body.appendChild(overlay);
 }
 
