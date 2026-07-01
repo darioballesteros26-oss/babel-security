@@ -1578,7 +1578,7 @@ fn renombrar_archivo(
     // Nuevo nombre manteniendo prefijo de usuario y extensión
     let nombre_limpio = nombre_nuevo
         .trim()
-        .replace(['\0', '/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+        .replace(['\0', '\n', '\r', '/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
     if nombre_limpio.is_empty() {
         return Err("El nombre no puede estar vacío.".to_string());
     }
@@ -2429,6 +2429,16 @@ fn aceptar_terminos() -> Result<(), String> {
     fs::write(&babel_path("terminos.babel"), ts).map_err(|e| format!("Error: {}", e))
 }
 
+// Extrae la parte <email@dominio> del remitente para comparar sin display name.
+// Evita bypass de whitelist tipo: "empresa.com <evil@evil.com>"
+fn addr_de_remitente(remitente: &str) -> String {
+    if let Some(start) = remitente.find('<') {
+        remitente[start + 1..].trim_end_matches('>').trim().to_lowercase()
+    } else {
+        remitente.trim().to_lowercase()
+    }
+}
+
 // ============================================================
 // COMANDO 23 — Guardar configuración del email
 // ============================================================
@@ -2605,10 +2615,8 @@ fn obtener_emails_tauri(
 
     if !creds.remitentes_autorizados.is_empty() {
         emails.retain(|e| {
-            creds
-                .remitentes_autorizados
-                .iter()
-                .any(|r| e.remitente.to_lowercase().contains(&r.to_lowercase()))
+            let addr = addr_de_remitente(&e.remitente);
+            creds.remitentes_autorizados.iter().any(|r| addr.contains(r.as_str()))
         });
     }
 
@@ -2648,10 +2656,11 @@ fn obtener_email_completo_tauri(
             .map_err(|e| format!("Error obteniendo email: {}", e))?;
 
     if !creds.remitentes_autorizados.is_empty() {
+        let addr = addr_de_remitente(&email.remitente);
         let autorizado = creds
             .remitentes_autorizados
             .iter()
-            .any(|r| email.remitente.to_lowercase().contains(r.as_str()));
+            .any(|r| addr.contains(r.as_str()));
         if !autorizado {
             return Err(format!(
                 "Email bloqueado: remitente '{}' no está en la lista de autorizados.",
