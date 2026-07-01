@@ -493,6 +493,16 @@ fn traducir_documento(
         .and_then(|n| n.to_str())
         .ok_or("Nombre de archivo inválido.")?
         .to_string();
+
+    let ext_doc = std::path::Path::new(&nombre_solo)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    if !["pdf", "docx", "txt"].contains(&ext_doc.as_str()) {
+        return Err(format!("Tipo de archivo no permitido: .{}", ext_doc));
+    }
+
     let ruta_temp = tmp_path(&nombre_solo);
     fs::write(&ruta_temp, &contenido).map_err(|e| format!("Error guardando temporal: {}", e))?;
     drop(Zeroizing::new(contenido));
@@ -1047,8 +1057,9 @@ struct MetadatosArchivo {
     es_traduccion: bool,
 }
 
-#[tauri::command]
-fn listar_archivos(
+// listar_archivos eliminado — era código muerto, reemplazado por listar_archivos_guardados
+#[allow(dead_code)]
+fn _listar_archivos_obsoleto(
     _buzon: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<Vec<MetadatosArchivo>, String> {
@@ -2620,7 +2631,13 @@ fn obtener_emails_tauri(
     if !creds.remitentes_autorizados.is_empty() {
         emails.retain(|e| {
             let addr = addr_de_remitente(&e.remitente);
-            creds.remitentes_autorizados.iter().any(|r| addr.contains(r.as_str()))
+            creds.remitentes_autorizados.iter().any(|r| {
+                if r.contains('@') {
+                    addr == r.as_str()
+                } else {
+                    addr.ends_with(&format!("@{}", r))
+                }
+            })
         });
     }
 
@@ -2661,10 +2678,13 @@ fn obtener_email_completo_tauri(
 
     if !creds.remitentes_autorizados.is_empty() {
         let addr = addr_de_remitente(&email.remitente);
-        let autorizado = creds
-            .remitentes_autorizados
-            .iter()
-            .any(|r| addr.contains(r.as_str()));
+        let autorizado = creds.remitentes_autorizados.iter().any(|r| {
+            if r.contains('@') {
+                addr == r.as_str()
+            } else {
+                addr.ends_with(&format!("@{}", r))
+            }
+        });
         if !autorizado {
             return Err(format!(
                 "Email bloqueado: remitente '{}' no está en la lista de autorizados.",
@@ -3125,7 +3145,6 @@ fn main() {
             traducir_texto,
             cambiar_categoria_diccionario,
             cambiar_idioma,
-            listar_archivos,
             crear_buzon,
             listar_buzones,
             exportar_archivo,

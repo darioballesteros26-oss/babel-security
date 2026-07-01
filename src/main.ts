@@ -297,6 +297,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "crear-bunker": crearBunker(); break;
     case "intentar-acceso": intentarAcceso(); break;
     case "cerrar-sesion": cerrarSesion(); break;
+    case "desbloquear-pantalla": desbloquearPantalla(); break;
     case "intentar-recuperacion": intentarRecuperacion(); break;
     case "aceptar-terminos": aceptarTerminos(); break;
     // UI
@@ -1033,14 +1034,12 @@ function ocultarResultadosBusqueda(): void {
   document.getElementById("buscar-g-resultados")?.classList.add("hidden");
 }
 
-function abrirResultadoBusqueda(buzonId: string, ruta: string, esTrad: boolean): void {
+function abrirResultadoBusqueda(buzonId: string, ruta: string, _esTrad: boolean): void {
   ocultarResultadosBusqueda();
   const inputBuscar = document.getElementById("input-buscar-g") as HTMLInputElement | null;
   if (inputBuscar) inputBuscar.value = "";
   _resaltarRuta = ruta;
-  // Archivos de traducción usan sistema de buzones distinto al de guardados;
-  // navegamos a "todos" para garantizar que el archivo sea visible.
-  seleccionarBuzonGuardados(esTrad ? "todos" : buzonId);
+  seleccionarBuzonGuardados(buzonId || "todos");
 }
 
 function actualizarBadgeEmail(n: number): void {
@@ -1426,7 +1425,8 @@ async function cargarBuzones(): Promise<void> {
 async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent): Promise<void> {
   document.querySelectorAll(".selector-buzon-popup").forEach(el => el.remove());
   let nodos: BuzonNodo[];
-  try { nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados"); } catch (e) { mostrarToast("Error cargando buzones: " + String(e), true); return; }
+  const cmdBuzones = ruta.includes("/guardados/") ? "listar_buzones_guardados" : "listar_buzones";
+  try { nodos = await invoke<BuzonNodo[]>(cmdBuzones); } catch (e) { mostrarToast("Error cargando buzones: " + String(e), true); return; }
   const popup = document.createElement("div");
   popup.className = "selector-buzon-popup";
   popup.style.cssText = `position:fixed;background:#0d0d0d;border:1px solid var(--dorado);border-radius:3px;z-index:999;min-width:160px;box-shadow:0 4px 20px rgba(0,0,0,0.5);max-height:60vh;overflow-y:auto;`;
@@ -1789,12 +1789,62 @@ let _tiempoLockMs: number = 15 * 60 * 1000; // default hasta que carguen los aju
 function resetearTimerInactividad(): void {
   if (timerInactividad) clearTimeout(timerInactividad);
   if (timerAvisoLock) clearTimeout(timerAvisoLock);
-  timerInactividad = setTimeout(() => { cerrarSesion(); }, _tiempoLockMs);
+  timerInactividad = setTimeout(() => { bloquearPantalla(); }, _tiempoLockMs);
   const avisoMs = _tiempoLockMs - 2 * 60 * 1000;
   if (avisoMs > 0) {
     timerAvisoLock = setTimeout(() => {
-      mostrarToast("La sesión se cerrará en 2 minutos por inactividad", true);
+      mostrarToast("La sesión se bloqueará en 2 minutos por inactividad", true);
     }, avisoMs);
+  }
+}
+
+async function bloquearPantalla(): Promise<void> {
+  desactivarTimerInactividad();
+  _sesionPass = "0".repeat(_sesionPass.length); _sesionPass = "";
+  _sesionMaestra = "0".repeat(_sesionMaestra.length); _sesionMaestra = "";
+  try { await invoke("cerrar_sesion_rust"); } catch { /* continúa bloqueando aunque falle */ }
+  const overlay = document.getElementById("pantalla-bloqueo");
+  if (overlay) {
+    overlay.classList.remove("hidden");
+    setTimeout(() => {
+      (document.getElementById("bloqueo-maestra") as HTMLInputElement | null)?.focus();
+    }, 100);
+  } else {
+    cerrarSesion();
+  }
+}
+
+async function desbloquearPantalla(): Promise<void> {
+  const maestraEl = document.getElementById("bloqueo-maestra") as HTMLInputElement | null;
+  const passEl = document.getElementById("bloqueo-pass") as HTMLInputElement | null;
+  if (!maestraEl || !passEl) return;
+  const maestra = maestraEl.value;
+  const pass = passEl.value;
+  if (!maestra || !pass) {
+    mostrarMensaje("bloqueo-msg", "INTRODUCE TUS CREDENCIALES", true);
+    return;
+  }
+  try {
+    const ok = await invoke<boolean>("verificar_login", { pass: maestra, passUsuario: pass });
+    if (ok) {
+      _sesionPass = pass;
+      _sesionMaestra = maestra;
+      maestraEl.value = "";
+      passEl.value = "";
+      const msgEl = document.getElementById("bloqueo-msg");
+      if (msgEl) { msgEl.textContent = ""; msgEl.classList.add("hidden"); }
+      document.getElementById("pantalla-bloqueo")?.classList.add("hidden");
+      activarTimerInactividad();
+      invoke<boolean>("tiene_config_email").then(ok2 => {
+        _smtpConfigurado = ok2;
+        if (ok2) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
+      }).catch(() => {});
+    } else {
+      mostrarMensaje("bloqueo-msg", "CREDENCIALES INCORRECTAS", true);
+      passEl.value = "";
+    }
+  } catch (e) {
+    mostrarMensaje("bloqueo-msg", "ERROR: " + String(e), true);
   }
 }
 
@@ -3279,6 +3329,7 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).crearBunker = crearBunker;
 (window as any).intentarAcceso = intentarAcceso;
 (window as any).cerrarSesion = cerrarSesion;
+(window as any).desbloquearPantalla = desbloquearPantalla;
 (window as any).volverAtras = volverAtras;
 (window as any).volverAlPanel = volverAlPanel;
 (window as any).seleccionarArchivo = seleccionarArchivo;
@@ -3701,6 +3752,14 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
   }).observe(document.body, { childList: true, subtree: true });
+
+  // Pantalla de bloqueo: Enter navega entre campos y dispara desbloqueo
+  document.getElementById("bloqueo-maestra")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") (document.getElementById("bloqueo-pass") as HTMLInputElement | null)?.focus();
+  });
+  document.getElementById("bloqueo-pass")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") desbloquearPantalla();
+  });
 });
 
 // Tauri v2 inyecta nonces en script-src; con nonces 'unsafe-inline' queda ignorado

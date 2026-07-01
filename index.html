@@ -1212,6 +1212,28 @@
   </div><!-- /.container -->
 
   <script type="module" src="/src/main.ts"></script>
+
+  <!-- PANTALLA BLOQUEO — overlay fijo, se muestra cuando el timer de inactividad se dispara -->
+  <div id="pantalla-bloqueo" class="hidden"
+    style="position:fixed;inset:0;z-index:9999;background:var(--fondo,#0a0a0a);display:flex;align-items:center;justify-content:center;flex-direction:column;">
+    <div class="logo-babel small" style="margin-bottom:12px;">BABEL</div>
+    <p style="letter-spacing:3px;font-size:0.7rem;color:var(--dorado);opacity:0.6;margin-bottom:28px;">SESIÓN BLOQUEADA</p>
+    <div class="login-box">
+      <div class="input-grupo">
+        <label class="input-label">LLAVE MAESTRA</label>
+        <input type="password" id="bloqueo-maestra" placeholder="••••••••••••" class="input-vip" autocomplete="current-password">
+      </div>
+      <div class="input-grupo">
+        <label class="input-label">CONTRASEÑA DE USUARIO</label>
+        <input type="password" id="bloqueo-pass" placeholder="••••••••" class="input-vip" autocomplete="current-password">
+      </div>
+      <button type="button" data-action="desbloquear-pantalla" class="btn-oro">DESBLOQUEAR</button>
+      <button type="button" data-action="cerrar-sesion" class="btn-link"
+        style="margin-top:8px;font-size:0.6rem;opacity:0.5;letter-spacing:1px;">CERRAR SESIÓN</button>
+      <p id="bloqueo-msg" class="msg-error hidden"></p>
+    </div>
+  </div>
+
   <div
     style="position:fixed;bottom:4px;right:8px;opacity:0.25;font-size:0.55rem;letter-spacing:1.5px;font-family:'Times New Roman', Times, serif,sans-serif;pointer-events:none;">
     100% LOCAL · CERO SERVIDORES · CERO EMISIONES
