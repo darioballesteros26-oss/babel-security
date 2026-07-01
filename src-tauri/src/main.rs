@@ -422,6 +422,8 @@ fn verificar_login(
         *c = 0;
     }
     let _ = fs::remove_file(&babel_path("intentos.dat"));
+    // Resetear amenazas conocidas para que el monitor periódico las reporte de nuevo
+    seguridad::resetear_amenazas_conocidas();
 
     let mut json = Zeroizing::new(json);
     json.zeroize();
@@ -2985,6 +2987,10 @@ fn borrar_html_frase() {
 // ============================================================
 
 fn main() {
+    // Impedir que debuggers externos se adjunten al proceso en producción.
+    // En release, cualquier intento de ptrace/lldb cierra la app inmediatamente.
+    seguridad::denegar_depuracion();
+
     env_logger::init();
 
     // Handle del servidor Python del USB — Mutex para poder matar en panic/exit
@@ -3049,6 +3055,26 @@ fn main() {
                     });
                 }
             }
+            // Monitor periódico de amenazas — escanea cada 5 minutos en background.
+            // Solo emite el evento "amenaza-detectada" si hay amenazas NUEVAS respecto
+            // a la última vez, y solo cuando hay sesión activa (subclave no vacía).
+            let handle_monitor = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(300));
+                    let sesion = handle_monitor.state::<SesionActiva>();
+                    let subclave = match sesion.subclave_hex.lock() {
+                        Ok(s) => s.clone(),
+                        Err(_) => continue,
+                    };
+                    if subclave.is_empty() { continue; }
+                    let nuevas = seguridad::analizar_amenazas_nuevas(&subclave);
+                    if !nuevas.is_empty() {
+                        let _ = handle_monitor.emit("amenaza-detectada", &nuevas);
+                    }
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|_window, event| {

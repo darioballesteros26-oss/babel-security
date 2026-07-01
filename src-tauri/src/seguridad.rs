@@ -271,6 +271,17 @@ impl AntiKeylogger {
             // --- Acceso remoto no autorizado ---
             "teamviewer", "anydesk", "radmin", "logmein", "ammyy",
             "ultraviewer", "dameware",
+            // --- Acceso remoto moderno / RMM weaponizados ---
+            "screenconnect", "connectwisec", "splashtop", "parsec", "rustdesk",
+            "meshagent", "zohoassist", "logmeinrescue", "controlroom",
+            "atera", "kaseya", "netsupport", "pulseway",
+            // --- C2 modernos (APT y red team comercial) ---
+            "brute ratel", "nighthawk", "mythic", "pwncat", "starkiller",
+            "dcrat", "venomrat",
+            // --- KVM de red (transmiten pulsaciones por red) ---
+            "synergy", "barrier",
+            // --- Keyloggers adicionales ---
+            "keycastr", "pykeylogger", "keymon", "logkext",
             // --- Captura de pantalla / grabación maliciosa ---
             "recordmydesktop", "screengrab",
             // --- Espionaje genérico ---
@@ -991,6 +1002,18 @@ impl AntiKeylogger {
         amenazas.extend(amenazas_tcc);
         advertencias.extend(avisos_tcc);
 
+        // 5. Clientes IOHIDSystem — procesos suscritos al sistema HID del kernel (macOS)
+        //    Detecta keyloggers IOKit que no aparecen en la lista de procesos normal
+        for a in Self::detectar_clientes_hid_sospechosos() {
+            amenazas.push(a);
+        }
+
+        // 6. Extensiones de sistema (DriverKit/SystemExtension) — vector macOS moderno
+        //    Los keyloggers de nueva generación usan extensiones en lugar de kexts
+        for a in Self::detectar_extensiones_sistema_sospechosas() {
+            amenazas.push(a);
+        }
+
         if uzers::get_current_uid() != 0 {
             advertencias.push(
                 "Sin privilegios de administrador — keyloggers de kernel no detectables. \
@@ -1050,6 +1073,94 @@ impl AntiKeylogger {
 
         Ok(resultado)
     }
+
+    /// Cruza los PIDs suscritos al sistema HID del kernel (ioreg IOHIDSystem) con la
+    /// lista de amenazas. Detecta keyloggers IOKit que usan la API de bajo nivel sin
+    /// necesitar kext — no aparecen como proceso GUI normal pero sí en ioreg.
+    #[cfg(target_os = "macos")]
+    fn detectar_clientes_hid_sospechosos() -> Vec<String> {
+        use std::process::Command;
+        let output = match Command::new("ioreg")
+            .args(&["-n", "IOHIDSystem", "-l", "-w0"])
+            .output()
+        {
+            Ok(o) => o,
+            Err(_) => return vec![],
+        };
+        let texto = String::from_utf8_lossy(&output.stdout);
+        let mut pids_hid = std::collections::HashSet::new();
+        for linea in texto.lines() {
+            if let Some(idx) = linea.find("\"PID\"=") {
+                let inicio = idx + 6;
+                let pid_str: String = linea[inicio..].chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+                if let Ok(pid) = pid_str.parse::<u32>() {
+                    if pid > 1 { pids_hid.insert(pid); }
+                }
+            }
+        }
+        if pids_hid.is_empty() { return vec![]; }
+        let mut s = sysinfo::System::new_all();
+        s.refresh_all();
+        let mut amenazas = Vec::new();
+        for (pid, proceso) in s.processes() {
+            if !pids_hid.contains(&pid.as_u32()) { continue; }
+            let nombre = proceso.name().to_lowercase();
+            if Self::es_proceso_legitimo(&nombre) { continue; }
+            for patron in Self::lista_amenazas() {
+                if nombre.contains(patron) {
+                    amenazas.push(format!(
+                        "Proceso sospechoso suscrito a IOHIDSystem (posible keylogger IOKit): {} (PID {})",
+                        proceso.name(), pid
+                    ));
+                    break;
+                }
+            }
+        }
+        amenazas
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn detectar_clientes_hid_sospechosos() -> Vec<String> { vec![] }
+
+    /// Escanea las extensiones de sistema activas (DriverKit / SystemExtension).
+    /// Los keyloggers modernos en macOS usan extensiones en lugar de kexts para
+    /// evitar requisitos de SIP. Aparecen en `systemextensionsctl list`.
+    #[cfg(target_os = "macos")]
+    fn detectar_extensiones_sistema_sospechosas() -> Vec<String> {
+        use std::process::Command;
+        let output = match Command::new("systemextensionsctl")
+            .arg("list")
+            .output()
+        {
+            Ok(o) => o,
+            Err(_) => return vec![],
+        };
+        let texto = String::from_utf8_lossy(&output.stdout);
+        let patrones = [
+            "keylog", "keymon", "spy", "hook", "capture", "record",
+            "sniff", "intercept", "inject", "stealth", "monitor",
+        ];
+        let mut sospechosas = Vec::new();
+        for linea in texto.lines() {
+            let lower = linea.to_lowercase();
+            if lower.contains("com.apple.") { continue; }
+            for patron in &patrones {
+                if lower.contains(patron) {
+                    sospechosas.push(format!(
+                        "Extensión de sistema con patrón sospechoso ('{}'):  {}",
+                        patron, linea.trim()
+                    ));
+                    break;
+                }
+            }
+        }
+        sospechosas
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn detectar_extensiones_sistema_sospechosas() -> Vec<String> { vec![] }
 }
 
 // ============================================================
@@ -1594,4 +1705,59 @@ pub fn escribir_contador_intentos(count: u32) {
     mac.update(count.to_string().as_bytes());
     let firma = hex::encode(mac.finalize().into_bytes());
     let _ = fs::write(babel_path("intentos.dat"), format!("{}:{}", count, firma));
+}
+
+// ============================================================
+// CAPA 4B — ANTI-DEPURACIÓN
+// ============================================================
+
+/// Llama a PT_DENY_ATTACH (macOS) para que la app se cierre inmediatamente
+/// si alguien intenta adjuntarle un debugger después del arranque.
+/// Solo activo en release — en debug se omite para no bloquear el desarrollo.
+pub fn denegar_depuracion() {
+    #[cfg(all(target_os = "macos", not(debug_assertions)))]
+    unsafe {
+        // PT_DENY_ATTACH = 31 en macOS — no disponible como constante en libc-rs
+        extern "C" { fn ptrace(request: i32, pid: i32, addr: *mut i8, data: i32) -> i32; }
+        ptrace(31, 0, std::ptr::null_mut(), 0);
+    }
+}
+
+// ============================================================
+// MONITOR PERIÓDICO DE AMENAZAS
+// ============================================================
+
+// Amenazas ya reportadas en la sesión actual. Se resetea al hacer login
+// para que cada nueva sesión vea amenazas nuevas aunque persistan del arranque.
+static AMENAZAS_PREVIAS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+/// Resetea el conjunto de amenazas conocidas. Llamar en cada login para que
+/// el escaneo periódico vuelva a reportar amenazas aunque ya existieran antes.
+pub fn resetear_amenazas_conocidas() {
+    if let Ok(mut set) = AMENAZAS_PREVIAS.lock() {
+        set.clear();
+    }
+}
+
+/// Ejecuta el análisis de `AntiKeylogger` y devuelve solo las amenazas NUEVAS
+/// (no vistas en esta sesión). Registra cada nueva amenaza en la auditoría cifrada.
+pub fn analizar_amenazas_nuevas(subclave_hex: &str) -> Vec<String> {
+    let resultado = AntiKeylogger::analizar_entorno();
+    let nuevas: Vec<String> = {
+        let previas = AMENAZAS_PREVIAS.lock().unwrap_or_else(|e| e.into_inner());
+        resultado.amenazas.iter()
+            .filter(|a| !previas.contains(*a))
+            .cloned()
+            .collect()
+    };
+    if !nuevas.is_empty() {
+        if let Ok(mut previas) = AMENAZAS_PREVIAS.lock() {
+            for a in &nuevas {
+                previas.insert(a.clone());
+                registrar_evento_seguridad(&format!("NUEVA AMENAZA (monitor): {}", a), subclave_hex);
+            }
+        }
+    }
+    nuevas
 }
