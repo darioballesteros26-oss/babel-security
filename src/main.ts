@@ -12,7 +12,7 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
-type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos" | "nombre";
+type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos" | "nombre" | "ajustes";
 // VARIABLES DE SESIÓN — nunca van a window, se zeroizan al cerrar
 // ============================================================
 let _sesionPass = "";
@@ -2133,9 +2133,9 @@ async function cargarAjustesTraduccion(): Promise<void> {
   const borradoAuto = s.borrar_al_salir ?? false;
   const timeoutMin: number = Math.max(5, Math.min(60, s.timeout_sesion_minutos ?? 15));
 
-  // Aplicar timeout al timer de inactividad
+  // Aplicar timeout al timer de inactividad (solo si hay sesión activa)
   _tiempoLockMs = timeoutMin * 60 * 1000;
-  resetearTimerInactividad();
+  if (_sesionPass) resetearTimerInactividad();
 
   // Sincronizar selector de timeout en ajustes si ya está visible
   const selectorTimeout = document.getElementById("selector-timeout") as HTMLSelectElement;
@@ -2352,7 +2352,7 @@ async function seleccionarEmail(id: number): Promise<void> {
   lectorVacio?.classList.add("hidden");
   compositor?.classList.add("hidden");
 
-  // Mostrar indicador de carga inmediatamente
+  // Mostrar indicador de carga inmediatamente; resetear zoom al nuevo correo
   if (visor) {
     visor.classList.remove("hidden");
     const asuntoEl = document.getElementById("visor-asunto");
@@ -2362,7 +2362,11 @@ async function seleccionarEmail(id: number): Promise<void> {
     if (asuntoEl) asuntoEl.textContent = "Cargando…";
     if (metaEl) metaEl.textContent = "";
     if (adjuntosEl) adjuntosEl.innerHTML = "";
-    if (cuerpoEl) cuerpoEl.innerHTML = '<div class="email-cargando">CARGANDO CORREO</div>';
+    if (cuerpoEl) {
+      cuerpoEl.innerHTML = '<div class="email-cargando">CARGANDO CORREO</div>';
+      _zoomEmailRem = 0.92;
+      cuerpoEl.style.fontSize = "";
+    }
   }
 
   try {
@@ -2433,9 +2437,13 @@ function cerrarCompositor(): void {
   if (estado) estado.textContent = "";
   const inputFile = document.getElementById("input-archivo-email") as HTMLInputElement;
   if (inputFile) inputFile.value = "";
+  const destEl = document.getElementById("comp-destinatario") as HTMLInputElement;
+  const asuntoEl = document.getElementById("comp-asunto") as HTMLInputElement;
   const ccEl = document.getElementById("comp-cc") as HTMLInputElement;
   const ccoEl = document.getElementById("comp-cco") as HTMLInputElement;
   const cuerpoEl = document.getElementById("comp-cuerpo") as HTMLTextAreaElement;
+  if (destEl) destEl.value = "";
+  if (asuntoEl) asuntoEl.value = "";
   if (ccEl) ccEl.value = "";
   if (ccoEl) ccoEl.value = "";
   if (cuerpoEl) cuerpoEl.value = "";
@@ -3348,7 +3356,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (enInput) return;
     if (e.altKey && e.key === "t") { mostrarPantalla("traduccion"); return; }
     if (e.altKey && e.key === "e") {
-      mostrarPantalla("principal");
+      mostrarPantalla("comunicacion");
       cambiarModoP2P("email");
       return;
     }
