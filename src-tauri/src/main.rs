@@ -556,10 +556,6 @@ fn traducir_texto(
     idioma: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(String, usize), String> {
-    if texto.len() > 50_000 {
-        return Err("El texto supera el límite de 50 000 caracteres.".into());
-    }
-
     let subclave_hex = sesion
         .subclave_hex
         .lock()
