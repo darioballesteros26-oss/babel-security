@@ -998,6 +998,16 @@ fn leer_resultado(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Ve
 
 #[tauri::command]
 fn cambiar_idioma(idioma: String, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
+    if idioma.len() < 4
+        || idioma.len() > 10
+        || !idioma.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        || !idioma.contains('_')
+        || idioma.starts_with('_')
+        || idioma.ends_with('_')
+    {
+        return Err("Idioma no válido.".into());
+    }
+
     let subclave_hex = sesion
         .subclave_hex
         .lock()
