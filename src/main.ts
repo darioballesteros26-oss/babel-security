@@ -1051,12 +1051,13 @@ function ocultarResultadosBusqueda(): void {
   document.getElementById("buscar-g-resultados")?.classList.add("hidden");
 }
 
-function abrirResultadoBusqueda(buzonId: string, ruta: string, _esTrad: boolean): void {
+function abrirResultadoBusqueda(buzonId: string, ruta: string, esTrad: boolean): void {
   ocultarResultadosBusqueda();
   const inputBuscar = document.getElementById("input-buscar-g") as HTMLInputElement | null;
   if (inputBuscar) inputBuscar.value = "";
   _resaltarRuta = ruta;
-  seleccionarBuzonGuardados(buzonId || "todos");
+  // Traducciones usan el sistema de buzones de archivos — mostramos "todos" para no ocultar guardados
+  seleccionarBuzonGuardados(esTrad ? "todos" : (buzonId || "todos"));
 }
 
 function actualizarBadgeEmail(n: number): void {
@@ -1850,12 +1851,14 @@ async function desbloquearPantalla(): Promise<void> {
       passEl.value = "";
       const msgEl = document.getElementById("bloqueo-msg");
       if (msgEl) { msgEl.textContent = ""; msgEl.classList.add("hidden"); }
+      _sesionUsuario = localStorage.getItem("babel-nombre-display") ?? "";
       document.getElementById("pantalla-bloqueo")?.classList.add("hidden");
       activarTimerInactividad();
       invoke<boolean>("tiene_config_email").then(ok2 => {
         _smtpConfigurado = ok2;
         if (ok2) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
       }).catch(() => {});
+      cargarAjustesTraduccion().catch(() => {});
     } else {
       mostrarMensaje("bloqueo-msg", "CREDENCIALES INCORRECTAS", true);
       passEl.value = "";

@@ -2644,8 +2644,10 @@ fn obtener_emails_tauri(
             creds.remitentes_autorizados.iter().any(|r| {
                 if r.contains('@') {
                     addr == r.as_str()
-                } else {
+                } else if r.contains('.') {
                     addr.ends_with(&format!("@{}", r))
+                } else {
+                    addr.contains(r.as_str())
                 }
             })
         });
@@ -2691,8 +2693,10 @@ fn obtener_email_completo_tauri(
         let autorizado = creds.remitentes_autorizados.iter().any(|r| {
             if r.contains('@') {
                 addr == r.as_str()
-            } else {
+            } else if r.contains('.') {
                 addr.ends_with(&format!("@{}", r))
+            } else {
+                addr.contains(r.as_str())
             }
         });
         if !autorizado {
