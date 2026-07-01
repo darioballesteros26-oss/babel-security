@@ -552,7 +552,7 @@ pub fn recibir_archivo<S: Read + Write>(stream: &mut S) -> Result<(String, Vec<u
 #[derive(Debug)]
 struct VerificadorPinning {
     peer_ip: String,
-    subclave_hex: String,
+    subclave_hex: Zeroizing<String>,
 }
 
 impl rustls::client::danger::ServerCertVerifier for VerificadorPinning {
@@ -1001,13 +1001,13 @@ impl ServidorP2P {
 // ============================================================
 
 pub struct ClienteP2P {
-    subclave_hex: String,
+    subclave_hex: Zeroizing<String>,
 }
 
 impl ClienteP2P {
     pub fn nuevo(subclave_hex: &str) -> Self {
         Self {
-            subclave_hex: subclave_hex.to_string(),
+            subclave_hex: Zeroizing::new(subclave_hex.to_string()),
         }
     }
 
