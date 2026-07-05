@@ -18,7 +18,12 @@ CORS(app, origins=[
     "http://127.0.0.1:1420",
 ])
 
-BABEL_TOKEN = os.environ.get("BABEL_NLLB_TOKEN", "")
+# Token compartido con la app. Si no se pasa por entorno se usa un valor por defecto
+# FIJO e idéntico al de la app (traductor.rs::NLLB_TOKEN_DEFECTO). Así la app traduce
+# se abra como se abra (doble clic o script) sin configurar nada. Es defensa en
+# profundidad sobre un puerto solo-localhost; el modo USB sigue usando token aleatorio.
+_TOKEN_DEFECTO = "babel-local-default-token-2026-no-compartir"
+BABEL_TOKEN = os.environ.get("BABEL_NLLB_TOKEN") or _TOKEN_DEFECTO
 MAX_INPUT_CHARS = 10_000
 
 # F-3: lista blanca de pares soportados — rechaza valores arbitrarios
@@ -47,10 +52,9 @@ def _verificar_token():
 
 @app.route("/ping", methods=["GET"])
 def ping():
-    # F-1: /ping también requiere token para no revelar que el servidor está activo
-    err = _verificar_token()
-    if err:
-        return err
+    # Liveness PÚBLICA (sin token): el badge de la app la consulta desde el webview,
+    # donde no dispone del token. Solo revela que el servidor está arriba en un puerto
+    # que ya está restringido a 127.0.0.1. /traducir sigue exigiendo token.
     return jsonify({"ok": True})
 
 

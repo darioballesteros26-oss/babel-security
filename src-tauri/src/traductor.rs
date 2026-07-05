@@ -1553,8 +1553,31 @@ static UREQ_AGENT: OnceLock<ureq::Agent> = OnceLock::new();
 // - El token ya no aparece en `ps aux` ni /proc/self/environ (B8)
 static NLLB_TOKEN: OnceLock<String> = OnceLock::new();
 
+// Token por defecto FIJO, idéntico al de server.py (_TOKEN_DEFECTO). Permite que la app
+// se autentique con el servidor local aunque se abra con doble clic (sin BABEL_NLLB_TOKEN
+// en el entorno) — antes ese caso caía al diccionario y traducía palabra por palabra.
+// Es defensa en profundidad sobre un puerto solo-localhost; el modo USB lo sobrescribe
+// con un token aleatorio vía inicializar_nllb_token.
+const NLLB_TOKEN_DEFECTO: &str = "babel-local-default-token-2026-no-compartir";
+
 pub fn inicializar_nllb_token(token: String) {
     let _ = NLLB_TOKEN.set(token);
+}
+
+/// Resuelve el token efectivo por prioridad: OnceLock (modo USB) > variable de entorno
+/// (arrancar_babel.sh / npm run tauri dev) > constante por defecto compartida.
+fn token_efectivo() -> String {
+    if let Some(t) = NLLB_TOKEN.get() {
+        if !t.is_empty() {
+            return t.clone();
+        }
+    }
+    if let Ok(t) = std::env::var("BABEL_NLLB_TOKEN") {
+        if !t.is_empty() {
+            return t;
+        }
+    }
+    NLLB_TOKEN_DEFECTO.to_string()
 }
 
 fn agente_http() -> &'static ureq::Agent {
@@ -1574,9 +1597,7 @@ pub fn traducir_con_marian(texto: &str, par: &str) -> Result<String, String> {
         return Err(format!("Texto demasiado grande ({} bytes, máx {} KB)", texto.len(), MAX_BYTES / 1000));
     }
     let url = "http://127.0.0.1:5002/traducir";
-    let token = NLLB_TOKEN.get()
-        .ok_or_else(|| "Servidor de traducción no inicializado".to_string())?
-        .clone();
+    let token = token_efectivo();
     let body = serde_json::json!({
         "texto": texto,
         "par": par

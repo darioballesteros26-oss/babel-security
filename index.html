@@ -306,8 +306,6 @@
         <input type="file" id="input-archivo" accept=".pdf,.docx,.txt" style="display:none"
           onchange="manejarSeleccion(event)">
         <textarea id="chat-input" class="chat-input" placeholder="Escribe un término o frase..."
-          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensaje();}"
-          oninput="actualizarContadorPalabras(this.value);toggleBtnLimpiar(this.value);"
           autocomplete="off" rows="1"></textarea>
         <button type="button" id="btn-limpiar-input" data-action="limpiar-input" title="Limpiar texto"
           style="display:none;background:transparent;border:none;color:var(--texto-secundario);font-size:1.1rem;cursor:pointer;padding:0 4px;opacity:0.5;flex-shrink:0;"

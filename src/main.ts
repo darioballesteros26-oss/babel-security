@@ -403,9 +403,23 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (amenazas.length > 0) mostrarAlertaAmenaza(amenazas);
   }).catch(() => {});
 
+  // El comando traducir_documento_dialogo emite este evento justo tras elegir el archivo,
+  // antes de empezar a traducir. Lo usamos para mostrar la burbuja "TÚ" y la barra.
+  listen<{ nombre: string; ext: string }>("archivo-seleccionado", (evento) => {
+    const { nombre, ext } = evento.payload;
+    añadirMensajeArchivo(nombre, `${ext} · local`);
+    mostrarProcesando(true);
+  }).catch(() => {});
+
   // Progreso de traducción de documentos (PDF/DOCX/TXT)
+  // Auto-muestra el elemento aunque nadie llamara mostrarProcesando(true) antes
   listen<{ pct: number; msg: string }>("progreso-traduccion", (evento) => {
     const { pct, msg } = evento.payload;
+    const el = document.getElementById("chat-procesando");
+    if (el?.classList.contains("hidden")) {
+      el.classList.remove("hidden");
+      scrollAlFinal();
+    }
     const textoEl = document.querySelector<HTMLElement>(".procesando-texto");
     const barraEl = document.getElementById("procesando-barra");
     if (textoEl) textoEl.textContent = msg;
@@ -612,8 +626,21 @@ async function enviarMensaje(): Promise<void> {
 // TRADUCCIÓN — VÍA SELECTOR DE ARCHIVO
 // ============================================================
 
-function seleccionarArchivo(): void {
-  document.getElementById("input-archivo")?.click();
+// Importa y traduce un documento vía diálogo nativo (NSOpenPanel).
+// El comando Rust emite "archivo-seleccionado" nada más elegir el archivo (antes de
+// traducir), y el listener de abajo lo usa para mostrar la burbuja "TÚ" y la barra.
+async function seleccionarArchivo(): Promise<void> {
+  try {
+    const ruta = await invoke<string | null>("traducir_documento_dialogo");
+    if (!ruta) return;
+    mostrarProcesando(false);
+    ultimaRutaResultado = ruta;
+    const partes = ruta.replace(/\\/g, "/").split("/");
+    añadirResultadoArchivo(partes[partes.length - 1], ruta);
+  } catch (error) {
+    mostrarProcesando(false);
+    añadirMensajeBabel("Error procesando archivo: " + String(error), "BABEL · error");
+  }
 }
 
 function manejarSeleccion(event: Event): void {
@@ -1226,14 +1253,6 @@ let dropZoneInicializada = false;
 
 async function iniciarDropZone(): Promise<void> {
   if (dropZoneInicializada) return;
-
-  const textarea = document.getElementById("chat-input") as HTMLTextAreaElement;
-  if (textarea) {
-    textarea.addEventListener("input", () => {
-      textarea.style.height = "auto";
-      textarea.style.height = textarea.scrollHeight + "px";
-    });
-  }
 
   await getCurrentWindow().onDragDropEvent(async (event) => {
     // Detectar qué pantalla está activa
@@ -3733,6 +3752,25 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   bindOnclicks(document.documentElement);
+
+  // Chat input: Enter envía (sin Shift), input actualiza contador y auto-resize.
+  // No se usan atributos inline para evitar problemas con dispatchInlineHandler
+  // (que no puede evaluar if-conditionals ni referencias a `this`).
+  const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
+  if (chatInput) {
+    chatInput.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        enviarMensaje();
+      }
+    });
+    chatInput.addEventListener("input", () => {
+      actualizarContadorPalabras(chatInput.value);
+      toggleBtnLimpiar(chatInput.value);
+      chatInput.style.height = "auto";
+      chatInput.style.height = chatInput.scrollHeight + "px";
+    });
+  }
 
   // MutationObserver: convierte atributos on* en nuevos nodos dinámicos
   const INLINE_ATTRS = INLINE_EVENT_MAP.map(([a]) => a);

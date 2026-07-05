@@ -1103,6 +1103,139 @@ fn traducir_documento_ruta(
 }
 
 // ============================================================
+// COMANDO — Traducir documento vía diálogo de selección nativo
+// El <input type=file> del webview no abre el selector en la app sandbox (mismo
+// motivo que importar_archivo_dialogo); este comando usa el NSOpenPanel nativo,
+// única vía por la que el sandbox concede lectura de archivos fuera del contenedor.
+// async + spawn_blocking para no deadlockear el hilo principal con el diálogo.
+// ============================================================
+#[tauri::command]
+async fn traducir_documento_dialogo(
+    app: tauri::AppHandle,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<Option<String>, String> {
+    // Extraer datos de sesión ANTES de cruzar a spawn_blocking (State no es Send).
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa. Inicia sesión primero.".into());
+    }
+    let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
+    let dict = sesion
+        .diccionario
+        .lock()
+        .map_err(|_| "Error leyendo diccionario.".to_string())?
+        .clone();
+    let idioma = sesion
+        .idioma
+        .lock()
+        .map_err(|_| "Error leyendo idioma.".to_string())?
+        .clone();
+    let par = idioma_a_par(&idioma);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let seleccion = app
+            .dialog()
+            .file()
+            .add_filter("Documentos", &["pdf", "docx", "txt"])
+            .blocking_pick_file();
+
+        let ruta_fp = match seleccion {
+            Some(fp) => fp,
+            None => return Ok(None), // usuario canceló — sin error
+        };
+        let ruta = ruta_fp
+            .into_path()
+            .map_err(|e| format!("Ruta de origen inválida: {}", e))?;
+
+        let ext = ruta
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+        if !["pdf", "docx", "txt"].contains(&ext.as_str()) {
+            return Err(format!("Tipo de archivo no permitido: .{}", ext));
+        }
+
+        let meta = std::fs::metadata(&ruta)
+            .map_err(|e| format!("Error accediendo al archivo: {}", e))?;
+        if meta.len() > 100 * 1024 * 1024 {
+            return Err("El archivo supera el límite de 100 MB.".into());
+        }
+
+        let nombre = ruta
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("Nombre de archivo inválido")?
+            .to_string();
+        let nombre_base = std::path::Path::new(&nombre)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&nombre);
+        let ruta_str = ruta
+            .to_str()
+            .ok_or_else(|| "Ruta contiene caracteres no permitidos (no-UTF8).".to_string())?;
+
+        // Notificar al frontend: el usuario eligió el archivo, empieza la traducción.
+        // El frontend usa este evento para mostrar la burbuja "TÚ" y activar la barra de
+        // progreso sin necesidad de partir el comando en dos llamadas (lo que rompería el
+        // security-scoped access del sandbox).
+        let _ = app.emit("archivo-seleccionado", serde_json::json!({
+            "nombre": nombre,
+            "ext": ext.to_uppercase()
+        }));
+
+        let progreso = |pct: u8, msg: &str| {
+            let _ = app.emit("progreso-traduccion", serde_json::json!({"pct": pct, "msg": msg}));
+        };
+        traductor::procesar_archivo_inteligente(
+            ruta_str,
+            &dict,
+            &subclave_hex,
+            &id_usuario,
+            par,
+            &progreso,
+        )?;
+
+        let ruta_real = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
+        Ok(Some(ruta_real))
+    })
+    .await
+    .map_err(|e| format!("Error interno al traducir: {}", e))?
+}
+
+// ============================================================
+// COMANDO — Solo diálogo de selección (sin traducir).
+// El frontend lo usa para mostrar la burbuja "TÚ" antes de llamar
+// a traducir_documento_ruta, replicando el flujo del drag & drop.
+// ============================================================
+#[tauri::command]
+async fn seleccionar_ruta_dialogo(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let seleccion = app
+            .dialog()
+            .file()
+            .add_filter("Documentos", &["pdf", "docx", "txt"])
+            .blocking_pick_file();
+        let ruta_fp = match seleccion {
+            Some(fp) => fp,
+            None => return Ok(None),
+        };
+        let ruta = ruta_fp
+            .into_path()
+            .map_err(|e| format!("Ruta inválida: {}", e))?;
+        let ruta_str = ruta
+            .to_str()
+            .ok_or_else(|| "Ruta contiene caracteres no permitidos (no-UTF8).".to_string())?
+            .to_string();
+        Ok(Some(ruta_str))
+    })
+    .await
+    .map_err(|e| format!("Error en diálogo: {}", e))?
+}
+
+// ============================================================
 // COMANDO 8 — Leer resultado para descarga
 // ============================================================
 
@@ -3052,6 +3185,8 @@ fn main() {
             traducir_documento,
             cerrar_sesion_rust,
             traducir_documento_ruta,
+            traducir_documento_dialogo,
+            seleccionar_ruta_dialogo,
             leer_resultado,
             traducir_texto,
             cambiar_categoria_diccionario,
