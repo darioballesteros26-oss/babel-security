@@ -713,6 +713,7 @@ struct ImportarDialogoResultado {
     ruta_cifrada: String,
     nombre: String,
     original_borrado: bool,
+    ruta_original: String,
 }
 
 #[tauri::command]
@@ -740,7 +741,7 @@ async fn importar_archivo_dialogo(
     // Por eso el comando es async y todo el bloque bloqueante corre en spawn_blocking, en un
     // hilo dedicado, dejando el hilo principal libre para dibujar los diálogos.
     tauri::async_runtime::spawn_blocking(move || {
-        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+        use tauri_plugin_dialog::DialogExt;
 
         // Diálogo de selección nativo del sistema. El App Sandbox concede acceso
         // read-write EXCLUSIVAMENTE al archivo que el usuario elija aquí.
@@ -764,35 +765,40 @@ async fn importar_archivo_dialogo(
             .ok_or("Nombre de archivo inválido")?
             .to_string();
 
-        // Cifrar y guardar. SOLO si esto tiene éxito preguntamos por el borrado.
+        // Cifrar y guardar. La confirmación de borrar el original la gestiona el frontend
+        // (modal con checkbox "no volver a preguntar"); si el usuario acepta, llama al
+        // comando borrar_archivo_original con la misma ruta que devolvemos aquí.
         let ruta_cifrada =
             cifrar_y_guardar_desde_ruta(&nombre, &ruta_original_str, &subclave_hex, &id_usuario)?;
-
-        // Confirmación simple antes de destruir el original.
-        let quiere_borrar = app
-            .dialog()
-            .message("¿Eliminar el archivo original del ordenador?")
-            .title("Babel")
-            .buttons(MessageDialogButtons::OkCancelCustom("Sí".into(), "No".into()))
-            .blocking_show();
-
-        let mut original_borrado = false;
-        if quiere_borrar {
-            // Borrado seguro de 3 pasadas (0x00, 0xFF, 0xAA) + fsync sobre la ruta EXACTA
-            // que el usuario seleccionó. No se detecta ni toca ningún otro archivo: el scope
-            // del sandbox (user-selected.read-write) solo autoriza este.
-            borrar_seguro(&ruta_original_str);
-            original_borrado = !std::path::Path::new(&ruta_original_str).exists();
-        }
 
         Ok(Some(ImportarDialogoResultado {
             ruta_cifrada,
             nombre,
-            original_borrado,
+            original_borrado: false,
+            ruta_original: ruta_original_str,
         }))
     })
     .await
     .map_err(|e| format!("Error interno al importar: {}", e))?
+}
+
+// ============================================================
+// COMANDO — Borrar de forma segura el archivo original tras importar.
+// El frontend pide confirmación (con opción "no volver a preguntar") y
+// solo llama aquí si el usuario acepta.  La ruta fue generada por el
+// propio backend en importar_archivo_dialogo — no es input libre del usuario.
+// ============================================================
+#[tauri::command]
+fn borrar_archivo_original(ruta: String) -> Result<bool, String> {
+    if ruta.contains("..") {
+        return Err("Ruta no autorizada.".into());
+    }
+    // Verificar que el archivo es accesible (el sandbox lo permite si viene de NSOpenPanel)
+    let path = std::fs::canonicalize(&ruta)
+        .map_err(|_| "Archivo no accesible.".to_string())?;
+    let ruta_canon = path.to_str().unwrap_or(&ruta).to_string();
+    borrar_seguro(&ruta_canon);
+    Ok(!path.exists())
 }
 
 // ============================================================
@@ -3210,6 +3216,7 @@ fn main() {
             renombrar_buzon,
             guardar_documento_sin_traducir,
             importar_archivo_dialogo,
+            borrar_archivo_original,
             listar_archivos_guardados,
             crear_buzon_guardado,
             listar_buzones_guardados,

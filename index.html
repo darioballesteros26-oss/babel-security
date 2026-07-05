@@ -1239,6 +1239,52 @@
     style="position:fixed;bottom:4px;right:8px;opacity:0.25;font-size:0.55rem;letter-spacing:1.5px;font-family:'Times New Roman', Times, serif,sans-serif;pointer-events:none;">
     100% LOCAL · CERO SERVIDORES · CERO EMISIONES
   </div>
+
+  <!-- MODAL CONFIRMAR — genérico con checkbox "no volver a preguntar" -->
+  <div id="modal-confirmar" class="hidden" style="
+    position:fixed;inset:0;z-index:5000;
+    background:rgba(0,0,0,0.88);
+    display:flex;align-items:center;justify-content:center;">
+    <div style="
+      background:#0d0d0d;
+      border:1px solid var(--dorado,#c5a059);
+      border-radius:4px;
+      padding:28px 28px 22px;
+      min-width:300px;max-width:380px;">
+      <p id="modal-confirmar-titulo" style="
+        font-family:'Times New Roman',Times,serif;
+        font-size:0.65rem;letter-spacing:3px;
+        color:var(--dorado);margin-bottom:14px;"></p>
+      <p id="modal-confirmar-msg" style="
+        font-size:0.8rem;color:var(--texto-principal);
+        margin-bottom:12px;line-height:1.5;"></p>
+      <ul id="modal-confirmar-riesgos" style="
+        font-size:0.74rem;color:var(--texto-secundario);
+        padding-left:16px;margin:0 0 16px;line-height:1.7;"></ul>
+      <label style="display:flex;align-items:center;gap:8px;
+        font-size:0.72rem;color:var(--texto-secundario);
+        cursor:pointer;margin-bottom:20px;">
+        <input type="checkbox" id="modal-confirmar-no-volver"
+          style="accent-color:var(--dorado);cursor:pointer;">
+        No volver a preguntar
+      </label>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button type="button" id="modal-confirmar-cancelar" style="
+          background:transparent;border:1px solid var(--borde);
+          color:var(--texto-secundario);padding:6px 16px;cursor:pointer;
+          font-size:0.7rem;border-radius:2px;
+          font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
+          CANCELAR</button>
+        <button type="button" id="modal-confirmar-ok" style="
+          background:var(--dorado);border:none;color:#000;
+          padding:6px 16px;cursor:pointer;font-size:0.7rem;font-weight:700;
+          border-radius:2px;
+          font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
+          CONFIRMAR</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 
 

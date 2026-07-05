@@ -1124,20 +1124,68 @@ function seleccionarBuzonGuardados(id: string): void {
   cargarArchivosGuardados();
 }
 
+// LS keys para preferencias "no volver a preguntar"
+const LS_NO_PREG_BORRAR_ORIG = "babel_noPreg_borrarOrig";
+const LS_NO_PREG_ELIMINAR    = "babel_noPreg_eliminar";
+
+// Modal de confirmación reutilizable con checkbox "no volver a preguntar".
+// Guarda en localStorage la elección del usuario si marca el checkbox.
+// respetarNo: si true, un "no" guardado resuelve false sin mostrar el modal.
+function confirmarConCheckbox(cfg: {
+  titulo: string;
+  msg: string;
+  riesgos: string[];
+  textoOk: string;
+  lsKey: string;
+  respetarNo?: boolean;
+}): Promise<boolean> {
+  const pref = localStorage.getItem(cfg.lsKey);
+  if (pref === "si") return Promise.resolve(true);
+  if (cfg.respetarNo && pref === "no") return Promise.resolve(false);
+
+  return new Promise(resolve => {
+    const modal     = document.getElementById("modal-confirmar")!;
+    const tituloEl  = document.getElementById("modal-confirmar-titulo")!;
+    const msgEl     = document.getElementById("modal-confirmar-msg")!;
+    const riesgosEl = document.getElementById("modal-confirmar-riesgos")!;
+    const noVolvEl  = document.getElementById("modal-confirmar-no-volver") as HTMLInputElement;
+    const okBtn     = document.getElementById("modal-confirmar-ok")!;
+    const cancelBtn = document.getElementById("modal-confirmar-cancelar")!;
+
+    tituloEl.textContent = cfg.titulo;
+    msgEl.textContent    = cfg.msg;
+    riesgosEl.innerHTML  = cfg.riesgos.map(r => `<li>${escapeHTML(r)}</li>`).join("");
+    okBtn.textContent    = cfg.textoOk;
+    noVolvEl.checked     = false;
+
+    modal.classList.remove("hidden");
+
+    const cerrar = () => modal.classList.add("hidden");
+
+    okBtn.onclick = () => {
+      if (noVolvEl.checked) localStorage.setItem(cfg.lsKey, "si");
+      cerrar(); resolve(true);
+    };
+    cancelBtn.onclick = () => {
+      if (noVolvEl.checked) localStorage.setItem(cfg.lsKey, "no");
+      cerrar(); resolve(false);
+    };
+  });
+}
+
 // Importa un archivo mediante el diálogo de selección nativo (NSOpenPanel).
-// A diferencia del <input type="file">, este flujo devuelve la ruta real del
-// original, lo que permite —tras cifrarlo y guardarlo— ofrecer borrarlo de forma
-// segura. El backend pide confirmación "¿Eliminar el archivo original?" (sí/no)
-// y solo destruye la ruta exacta que el usuario eligió, sin tocar nada más.
+// Tras cifrar y guardar, muestra un modal propio para preguntar si borrar el original,
+// con opción de "no volver a preguntar" que se persiste en localStorage.
 async function abrirImportarGuardado(): Promise<void> {
   try {
     const res = await invoke<{
       ruta_cifrada: string;
       nombre: string;
       original_borrado: boolean;
+      ruta_original: string;
     } | null>("importar_archivo_dialogo");
 
-    if (!res) return; // el usuario canceló el diálogo de selección
+    if (!res) return;
 
     if (buzonActivoGuardados !== "todos") {
       try {
@@ -1147,7 +1195,30 @@ async function abrirImportarGuardado(): Promise<void> {
       }
     }
 
-    const sufijo = res.original_borrado ? " · original destruido de forma segura" : "";
+    let originalBorrado = false;
+    if (res.ruta_original) {
+      const confirmar = await confirmarConCheckbox({
+        titulo: "BORRAR ORIGINAL",
+        msg: "¿Eliminar el archivo original del ordenador?",
+        riesgos: [
+          "El archivo ya ha sido cifrado y guardado en Babel.",
+          "Si eliminas el original, solo podrás acceder a él desde Babel.",
+          "El borrado es de 3 pasadas — no puede recuperarse de ninguna forma.",
+        ],
+        textoOk: "ELIMINAR ORIGINAL",
+        lsKey: LS_NO_PREG_BORRAR_ORIG,
+        respetarNo: true,
+      });
+      if (confirmar) {
+        try {
+          originalBorrado = await invoke<boolean>("borrar_archivo_original", { ruta: res.ruta_original });
+        } catch (e) {
+          mostrarToast(`Error al eliminar original: ${e}`, true);
+        }
+      }
+    }
+
+    const sufijo = originalBorrado ? " · original destruido de forma segura" : "";
     mostrarToast(`✓ ${res.nombre} guardado y cifrado${sufijo}`, false);
     await cargarArchivosGuardados();
   } catch (error) {
@@ -1223,6 +1294,20 @@ function cerrarModalRenombrarArchivo(): void {
 async function eliminarSeleccionadosGuardados(): Promise<void> {
   const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
   if (checkboxes.length === 0) return;
+
+  const n = checkboxes.length;
+  const confirmar = await confirmarConCheckbox({
+    titulo: "ELIMINAR ARCHIVO",
+    msg: `¿Eliminar ${n === 1 ? "este archivo" : `estos ${n} archivos`} de forma permanente?`,
+    riesgos: [
+      "El archivo será destruido con 3 pasadas de sobreescritura.",
+      "No puede recuperarse de ninguna forma, ni con software de recuperación.",
+      "Asegúrate de que no necesitas acceder a él nunca más.",
+    ],
+    textoOk: "ELIMINAR",
+    lsKey: LS_NO_PREG_ELIMINAR,
+  });
+  if (!confirmar) return;
 
   const rutas: string[] = [];
   checkboxes.forEach(cb => {
@@ -1799,7 +1884,20 @@ async function eliminarSeleccionados(): Promise<void> {
   const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox:checked");
   if (checkboxes.length === 0) return;
 
-  // Recoger rutas de los archivos seleccionados
+  const n = checkboxes.length;
+  const confirmar = await confirmarConCheckbox({
+    titulo: "ELIMINAR ARCHIVO",
+    msg: `¿Eliminar ${n === 1 ? "este archivo" : `estos ${n} archivos`} de forma permanente?`,
+    riesgos: [
+      "El archivo será destruido con 3 pasadas de sobreescritura.",
+      "No puede recuperarse de ninguna forma, ni con software de recuperación.",
+      "Asegúrate de que no necesitas acceder a él nunca más.",
+    ],
+    textoOk: "ELIMINAR",
+    lsKey: LS_NO_PREG_ELIMINAR,
+  });
+  if (!confirmar) return;
+
   const rutas: string[] = [];
   checkboxes.forEach(cb => {
     const card = cb.closest(".archivo-card") as HTMLElement;
@@ -1807,7 +1905,6 @@ async function eliminarSeleccionados(): Promise<void> {
     if (ruta) rutas.push(ruta);
   });
 
-  // Eliminar uno a uno con zeroize
   let errores = 0;
   for (const ruta of rutas) {
     try {
@@ -1817,7 +1914,6 @@ async function eliminarSeleccionados(): Promise<void> {
     }
   }
 
-  // Recargar la lista
   await cargarArchivosGuardados();
 
   if (errores > 0) {
