@@ -178,28 +178,26 @@
         </div>
         <div class="chat-header-derecha">
           <div style="display:flex;align-items:center;gap:6px;">
-            <select id="selector-origen" class="selector-idioma" onchange="cambiarIdiomaDesdeSelectores()"
-              style="min-width:80px;">
-              <option value="es">ES</option>
-              <option value="en">EN</option>
-              <option value="fr">FR</option>
-              <option value="ar">AR</option>
-              <option value="de">DE</option>
-              <option value="ru">RU</option>
-              <option value="zh">ZH</option>
+            <select id="selector-origen" class="selector-idioma" onchange="cambiarIdiomaDesdeSelectores()">
+              <option value="es">Español</option>
+              <option value="en">English</option>
+              <option value="fr">Français</option>
+              <option value="ar">Árabe</option>
+              <option value="de">Deutsch</option>
+              <option value="ru">Русский</option>
+              <option value="zh">中文</option>
             </select>
             <button type="button" data-action="swap-idioma" title="Intercambiar idiomas"
               style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:2px 4px;opacity:0.8;transition:opacity 0.15s;"
               onmouseenter="this.style.opacity='1'" onmouseleave="this.style.opacity='0.8'">⇄</button>
-            <select id="selector-destino" class="selector-idioma" onchange="cambiarIdiomaDesdeSelectores()"
-              style="min-width:80px;">
-              <option value="en">EN</option>
-              <option value="es">ES</option>
-              <option value="fr">FR</option>
-              <option value="ar">AR</option>
-              <option value="de">DE</option>
-              <option value="ru">RU</option>
-              <option value="zh">ZH</option>
+            <select id="selector-destino" class="selector-idioma" onchange="cambiarIdiomaDesdeSelectores()">
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="ar">Árabe</option>
+              <option value="de">Deutsch</option>
+              <option value="ru">Русский</option>
+              <option value="zh">中文</option>
             </select>
           </div>
           <button type="button" id="btn-ver-sel" class="hidden"
@@ -828,6 +826,33 @@
           <option value="fr">Français</option>
           <option value="ar">العربية</option>
         </select>
+      </div>
+
+      <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+        <div class="ajuste-label">IDIOMA DE TRADUCCIÓN</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
+          <select id="ajuste-idioma-origen" class="input-vip" style="flex:1;"
+            onchange="cambiarIdiomaDesdeAjustes()">
+            <option value="es">Español</option>
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+            <option value="ar">Árabe</option>
+            <option value="de">Deutsch</option>
+            <option value="ru">Русский</option>
+            <option value="zh">中文</option>
+          </select>
+          <span style="color:var(--dorado);font-size:1rem;opacity:0.8;">→</span>
+          <select id="ajuste-idioma-destino" class="input-vip" style="flex:1;"
+            onchange="cambiarIdiomaDesdeAjustes()">
+            <option value="en">English</option>
+            <option value="es">Español</option>
+            <option value="fr">Français</option>
+            <option value="ar">Árabe</option>
+            <option value="de">Deutsch</option>
+            <option value="ru">Русский</option>
+            <option value="zh">中文</option>
+          </select>
+        </div>
       </div>
 
       <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">

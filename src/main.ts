@@ -799,6 +799,17 @@ function volverAlPanel(): void {
 
 
 
+function sincronizarSelectoresIdioma(origen: string, destino: string): void {
+  const s1 = document.getElementById("selector-origen") as HTMLSelectElement | null;
+  const s2 = document.getElementById("selector-destino") as HTMLSelectElement | null;
+  const a1 = document.getElementById("ajuste-idioma-origen") as HTMLSelectElement | null;
+  const a2 = document.getElementById("ajuste-idioma-destino") as HTMLSelectElement | null;
+  if (s1) s1.value = origen;
+  if (s2) s2.value = destino;
+  if (a1) a1.value = origen;
+  if (a2) a2.value = destino;
+}
+
 async function cambiarIdiomaDesdeSelectores(): Promise<void> {
   const origen = (document.getElementById("selector-origen") as HTMLSelectElement)?.value ?? "es";
   const destino = (document.getElementById("selector-destino") as HTMLSelectElement)?.value ?? "en";
@@ -806,6 +817,19 @@ async function cambiarIdiomaDesdeSelectores(): Promise<void> {
     mostrarToast("Origen y destino son el mismo idioma", true);
     return;
   }
+  sincronizarSelectoresIdioma(origen, destino);
+  await cambiarIdioma(`${origen}_${destino}`);
+  guardarAjustesTraduccion().catch(() => {});
+}
+
+async function cambiarIdiomaDesdeAjustes(): Promise<void> {
+  const origen = (document.getElementById("ajuste-idioma-origen") as HTMLSelectElement)?.value ?? "es";
+  const destino = (document.getElementById("ajuste-idioma-destino") as HTMLSelectElement)?.value ?? "en";
+  if (origen === destino) {
+    mostrarToast("Origen y destino son el mismo idioma", true);
+    return;
+  }
+  sincronizarSelectoresIdioma(origen, destino);
   await cambiarIdioma(`${origen}_${destino}`);
   guardarAjustesTraduccion().catch(() => {});
 }
@@ -2663,10 +2687,7 @@ async function cargarAjustesTraduccion(): Promise<void> {
   borradoAutomaticoActivado = borradoAuto;
 
   if (origen !== destino) {
-    const selectorOrigen = document.getElementById("selector-origen") as HTMLSelectElement;
-    const selectorDestino = document.getElementById("selector-destino") as HTMLSelectElement;
-    if (selectorOrigen) selectorOrigen.value = origen;
-    if (selectorDestino) selectorDestino.value = destino;
+    sincronizarSelectoresIdioma(origen, destino);
     await cambiarIdioma(`${origen}_${destino}`).catch(() => {});
   }
   // Restaurar estado del sidebar
@@ -3451,6 +3472,7 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).toggleBorradoAutomatico = toggleBorradoAutomatico;
 (window as any).cambiarIdioma = cambiarIdioma;
 (window as any).cambiarIdiomaDesdeSelectores = cambiarIdiomaDesdeSelectores;
+(window as any).cambiarIdiomaDesdeAjustes = cambiarIdiomaDesdeAjustes;
 (window as any).cambiarCategoriaDiccionario = cambiarCategoriaDiccionario;
 (window as any).toggleContraseña = toggleContraseña;
 
