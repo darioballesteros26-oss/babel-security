@@ -40,8 +40,8 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
+// (std::io::Write se importa localmente en clonar_y_traducir — ya no se usa a nivel de módulo)
 use std::sync::OnceLock;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -723,20 +723,11 @@ fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
     resultado
 }
 
+// M6: delega en crate::borrar_seguro, que aplica O_NOFOLLOW + symlink_metadata para evitar
+// TOCTOU por symlink (los temporales viven en ~/Babel/tmp, potencialmente compartido) además
+// de las 3 pasadas + fsync. Antes esta versión local abría con write() sin O_NOFOLLOW.
 fn borrar_seguro_local(ruta: &str) {
-    use std::io::Write as _;
-    if let Ok(meta) = fs::metadata(ruta) {
-        let tam = meta.len() as usize;
-        if tam > 0 {
-            for byte in [0x00u8, 0xFF, 0xAA] {
-                if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(ruta) {
-                    let _ = f.write_all(&vec![byte; tam]);
-                    let _ = f.sync_all();
-                }
-            }
-        }
-    }
-    let _ = fs::remove_file(ruta);
+    crate::borrar_seguro(ruta);
 }
 
 pub fn procesar_pdf(
@@ -953,35 +944,13 @@ pub fn separar_signo(palabra: &str) -> (&str, &str) {
 }
 
 pub fn registrar_evento(evento: &str, subclave_hex: &str) {
+    // A1: delegamos en seguridad::registrar_evento_seguridad para que TODAS las escrituras
+    // a auditoria.babel pasen por AUDIT_MUTEX + hash-chaining. Antes este writer escribía
+    // el mismo archivo sin serializar ni encadenar, lo que corrompía el log bajo concurrencia
+    // (monitor de amenazas, threads P2P, email) y rompía la cadena forense.
     let fecha = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let mensaje = format!("[{}] {}", fecha, evento);
-
-    match seguridad::blindar_documento(&mensaje, subclave_hex) {
-        Ok(cifrado) => {
-            // Ruta absoluta para la auditoría - siempre en ~/Babel/
-            let ruta_auditoria = crate::babel_dir().join("auditoria.babel");
-            let ruta_backup = crate::babel_dir().join("auditoria_backup.babel");
-
-            let escribir = |ruta: &PathBuf| -> bool {
-                if let Ok(mut archivo) = fs::OpenOptions::new().append(true).create(true).open(ruta)
-                {
-                    let _ = archivo.write_all(&(cifrado.len() as u32).to_le_bytes());
-                    let _ = archivo.write_all(&cifrado);
-                    true
-                } else {
-                    false
-                }
-            };
-
-            if !escribir(&ruta_auditoria) {
-                log::warn!("[!] Auditoría principal inaccesible...");
-                if !escribir(&ruta_backup) {
-                    log::error!("[!] Error crítico: no se pudo registrar el evento.");
-                }
-            }
-        }
-        Err(e) => log::error!(" [!] Error de seguridad en auditoría: {}", e),
-    }
+    seguridad::registrar_evento_seguridad(&mensaje, subclave_hex);
 }
 
 // ============================================================

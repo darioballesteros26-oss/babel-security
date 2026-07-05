@@ -24,6 +24,11 @@ use zeroize::{Zeroize, Zeroizing};
 
 const MAX_ARCHIVOS: usize = 1000;
 
+// M7: serializa el ciclo leer-descifrar-modificar-recifrar de los índices de buzones
+// (.buzon_index*.babel). Sin esto, dos operaciones de mover/renombrar concurrentes
+// pueden perder actualizaciones (last-write-wins sobre estado obsoleto).
+static BUZON_INDEX_MUTEX: Mutex<()> = Mutex::new(());
+
 // ============================================================
 // HELPER — Borrado seguro de archivos temporales
 // ============================================================
@@ -70,7 +75,11 @@ pub fn borrar_seguro(ruta: &str) {
 // ============================================================
 
 pub struct SesionActiva {
-    pub subclave_hex: Mutex<Zeroizing<String>>,
+    // Parche 4: la subclave residente se guarda como 32 bytes crudos (mlock'd), NO como hex.
+    // El hex duplicaba la huella en RAM y su alfabeto [0-9a-f] era un patrón trivial de tallar
+    // en un volcado de memoria. Ahora sólo se codifica a hex transitoriamente, bajo demanda,
+    // vía subclave_hex(); ese String se zeroiza al terminar cada comando. None = sin sesión.
+    pub subclave: Mutex<Option<Zeroizing<[u8; 32]>>>,
     pub usuario: Mutex<String>,
     pub diccionario: Mutex<HashMap<String, String>>,
     pub idioma: Mutex<String>,
@@ -81,7 +90,7 @@ pub struct SesionActiva {
 impl SesionActiva {
     fn nueva() -> Self {
         Self {
-            subclave_hex: Mutex::new(Zeroizing::new(String::new())),
+            subclave: Mutex::new(None),
             usuario: Mutex::new(String::new()),
             diccionario: Mutex::new(HashMap::new()),
             idioma: Mutex::new(String::from("es_en")),
@@ -90,11 +99,26 @@ impl SesionActiva {
         }
     }
 
+    /// Codifica la subclave residente a hex bajo demanda para las funciones cripto que
+    /// esperan `&str`. Devuelve un `Zeroizing<String>` (se borra al final del comando) y
+    /// cadena vacía cuando no hay sesión — así los checks `is_empty()` siguen funcionando.
+    fn subclave_hex(&self) -> Result<Zeroizing<String>, String> {
+        let guard = self
+            .subclave
+            .lock()
+            .map_err(|_| "Error leyendo sesión.".to_string())?;
+        Ok(match guard.as_ref() {
+            Some(k) => Zeroizing::new(hex::encode(&k[..])),
+            None => Zeroizing::new(String::new()),
+        })
+    }
+
     fn limpiar(&self) {
-        use zeroize::Zeroize;
-        if let Ok(mut s) = self.subclave_hex.lock() {
-            seguridad::munlock_bytes(s.as_bytes()); // liberar antes de zeroizar
-            s.zeroize();
+        if let Ok(mut s) = self.subclave.lock() {
+            if let Some(k) = s.as_ref() {
+                seguridad::munlock_bytes(&k[..]); // liberar el mlock antes de descartar
+            }
+            *s = None; // drop del Zeroizing<[u8;32]> → zeroiza los bytes
         }
         if let Ok(mut u) = self.usuario.lock() {
             u.clear();
@@ -212,7 +236,11 @@ fn verificar_entorno_seguro() -> Result<String, String> {
             ));
         }
     }
-    // Comprobar FileVault
+    // Comprobar FileVault — solo genera un aviso, NUNCA salta la verificación de licencia.
+    // Antes hacía return temprano si FileVault estaba OFF, lo que permitía bypasear la
+    // vinculación al equipo simplemente desactivando FileVault (A2).
+    #[allow(unused_mut)]
+    let mut aviso_filevault = String::new();
     #[cfg(target_os = "macos")]
     {
         let fv = std::process::Command::new("fdesetup")
@@ -221,7 +249,9 @@ fn verificar_entorno_seguro() -> Result<String, String> {
         if let Ok(out) = fv {
             let status = String::from_utf8_lossy(&out.stdout);
             if !status.contains("On") {
-                return Ok("BABEL SEGURO — FileVault desactivado. Recomendamos activarlo en Preferencias del Sistema.".into());
+                aviso_filevault =
+                    " — FileVault desactivado. Recomendamos activarlo en Preferencias del Sistema."
+                        .to_string();
             }
         }
     }
@@ -262,7 +292,7 @@ fn verificar_entorno_seguro() -> Result<String, String> {
         let _ = fs::write(&ruta_licencia, &hash);
     };
 
-    Ok("BABEL SEGURO — Todos los protocolos activos.".into())
+    Ok(format!("BABEL SEGURO — Todos los protocolos activos.{}", aviso_filevault))
 }
 // ============================================================
 // COMANDO 2 — Comprobar si el búnker existe
@@ -408,9 +438,11 @@ fn verificar_login(
         return Ok(false);
     }
 
-    if let Ok(mut s) = sesion.subclave_hex.lock() {
-        *s = Zeroizing::new(subclave_hex.to_string());
-        seguridad::mlock_bytes(s.as_bytes()); // evitar que el SO page la clave al swap
+    if let Ok(mut s) = sesion.subclave.lock() {
+        // Guardamos los 32 bytes crudos (Copy) en un buffer mlock'd; el hex local se descarta.
+        let z = Zeroizing::new(*subclave);
+        seguridad::mlock_bytes(&z[..]); // evitar que el SO page la clave al swap
+        *s = Some(z);
     }
     if let Ok(mut u) = sesion.usuario.lock() {
         *u = usuario_guardado.nombre.clone();
@@ -442,11 +474,7 @@ fn cambiar_categoria_diccionario(
     categoria: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
@@ -477,11 +505,7 @@ fn traducir_documento(
     contenido: Vec<u8>,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa. Inicia sesión primero.".into());
@@ -571,11 +595,7 @@ fn traducir_texto(
     idioma: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(String, usize), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
@@ -599,22 +619,17 @@ fn traducir_texto(
 // El contenido se convierte a base64 antes de cifrar con AES-256-GCM.
 // ============================================================
 
-#[tauri::command]
-fn guardar_documento_sin_traducir(
-    nombre_archivo: String,
-    ruta_completa: String,
-    sesion: tauri::State<SesionActiva>,
+// Núcleo compartido: lee un archivo en claro desde una ruta del sistema, lo cifra
+// con AES-256-GCM y lo guarda en ~/Babel/guardados/. Lo usan tanto la importación
+// por drag-and-drop (guardar_documento_sin_traducir) como la importación por diálogo
+// de selección nativo (importar_archivo_dialogo). Devuelve la ruta del .babel creado.
+fn cifrar_y_guardar_desde_ruta(
+    nombre_archivo: &str,
+    ruta_completa: &str,
+    subclave_hex: &str,
+    id_usuario: &str,
 ) -> Result<String, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
-    if subclave_hex.is_empty() {
-        return Err("No hay sesión activa.".into());
-    }
-
-    let nombre_seguro = std::path::Path::new(&nombre_archivo)
+    let nombre_seguro = std::path::Path::new(nombre_archivo)
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or("Nombre de archivo inválido")?
@@ -628,17 +643,11 @@ fn guardar_documento_sin_traducir(
         return Err(format!("Tipo de archivo no permitido: .{}", ext));
     }
 
-    let id_usuario = sesion
-        .usuario
-        .lock()
-        .map_err(|_| "Error".to_string())?
-        .clone();
-
     // Canonicalizar para resolver symlinks — la autorización la gestiona el App Sandbox
     // a nivel OS mediante user-selected.read-write. El check starts_with(home) se elimina
     // porque en sandbox dirs::home_dir() apunta al contenedor, no al home real,
     // y rechazaría archivos legítimos seleccionados por el usuario con un file dialog.
-    let ruta_canon = std::fs::canonicalize(&ruta_completa)
+    let ruta_canon = std::fs::canonicalize(ruta_completa)
         .map_err(|_| "Ruta no accesible o inválida.".to_string())?;
 
     // S-1: límite de tamaño antes de leer en memoria
@@ -655,21 +664,135 @@ fn guardar_documento_sin_traducir(
         .unwrap_or_default()
         .as_secs();
 
-    let nombre_base = std::path::Path::new(&nombre_archivo)
+    let nombre_base = std::path::Path::new(nombre_archivo)
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or(&nombre_archivo);
+        .unwrap_or(nombre_archivo);
 
     let nombre_cifrado = format!("{}_{}_{}.babel", id_usuario, nombre_base, ts);
     let ruta_cifrada = guardados_path(&nombre_cifrado);
 
     let contenido_b64 = traductor::comprimir_b64(&contenido);
-    let cifrado = seguridad::blindar_documento(&contenido_b64, &subclave_hex)
+    let cifrado = seguridad::blindar_documento(&contenido_b64, subclave_hex)
         .map_err(|e| format!("Error cifrando: {}", e))?;
 
     fs::write(&ruta_cifrada, cifrado).map_err(|e| format!("Error guardando: {}", e))?;
 
     Ok(ruta_cifrada)
+}
+
+#[tauri::command]
+fn guardar_documento_sin_traducir(
+    nombre_archivo: String,
+    ruta_completa: String,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<String, String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+
+    let id_usuario = sesion
+        .usuario
+        .lock()
+        .map_err(|_| "Error".to_string())?
+        .clone();
+
+    cifrar_y_guardar_desde_ruta(&nombre_archivo, &ruta_completa, &subclave_hex, &id_usuario)
+}
+
+// ============================================================
+// COMANDO — Importar por diálogo de selección nativo + borrado seguro
+// del original. El NSOpenPanel es el único punto donde el App Sandbox concede
+// acceso read-write a un archivo fuera del contenedor; por eso podemos borrar
+// de forma segura SOLO el archivo que el usuario acaba de elegir aquí.
+// ============================================================
+
+#[derive(serde::Serialize)]
+struct ImportarDialogoResultado {
+    ruta_cifrada: String,
+    nombre: String,
+    original_borrado: bool,
+}
+
+#[tauri::command]
+async fn importar_archivo_dialogo(
+    app: tauri::AppHandle,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<Option<ImportarDialogoResultado>, String> {
+    // Extraemos los datos de sesión ANTES de cruzar a otro hilo: tauri::State no es
+    // Send y no puede sostenerse a través de un .await. subclave_hex es Zeroizing<String>,
+    // así que sigue borrándose de memoria al soltarse dentro del closure.
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let id_usuario = sesion
+        .usuario
+        .lock()
+        .map_err(|_| "Error".to_string())?
+        .clone();
+
+    // Los diálogos nativos blocking_* hacen run_on_main_thread(closure) y luego esperan
+    // el resultado en un canal. Si se invocaran desde el hilo principal —que es donde Tauri
+    // ejecuta los comandos SÍNCRONOS— se produce un DEADLOCK: el main se bloquea esperando
+    // el canal y nunca llega a ejecutar el closure del diálogo, congelando la UI ("cargando").
+    // Por eso el comando es async y todo el bloque bloqueante corre en spawn_blocking, en un
+    // hilo dedicado, dejando el hilo principal libre para dibujar los diálogos.
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+
+        // Diálogo de selección nativo del sistema. El App Sandbox concede acceso
+        // read-write EXCLUSIVAMENTE al archivo que el usuario elija aquí.
+        let seleccion = app
+            .dialog()
+            .file()
+            .add_filter("Documentos", &["pdf", "docx", "txt"])
+            .blocking_pick_file();
+
+        let ruta_fp = match seleccion {
+            Some(fp) => fp,
+            None => return Ok(None), // usuario canceló el diálogo — sin error
+        };
+        let ruta_original = ruta_fp
+            .into_path()
+            .map_err(|e| format!("Ruta de origen inválida: {}", e))?;
+        let ruta_original_str = ruta_original.to_string_lossy().to_string();
+        let nombre = ruta_original
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("Nombre de archivo inválido")?
+            .to_string();
+
+        // Cifrar y guardar. SOLO si esto tiene éxito preguntamos por el borrado.
+        let ruta_cifrada =
+            cifrar_y_guardar_desde_ruta(&nombre, &ruta_original_str, &subclave_hex, &id_usuario)?;
+
+        // Confirmación simple antes de destruir el original.
+        let quiere_borrar = app
+            .dialog()
+            .message("¿Eliminar el archivo original del ordenador?")
+            .title("Babel")
+            .buttons(MessageDialogButtons::OkCancelCustom("Sí".into(), "No".into()))
+            .blocking_show();
+
+        let mut original_borrado = false;
+        if quiere_borrar {
+            // Borrado seguro de 3 pasadas (0x00, 0xFF, 0xAA) + fsync sobre la ruta EXACTA
+            // que el usuario seleccionó. No se detecta ni toca ningún otro archivo: el scope
+            // del sandbox (user-selected.read-write) solo autoriza este.
+            borrar_seguro(&ruta_original_str);
+            original_borrado = !std::path::Path::new(&ruta_original_str).exists();
+        }
+
+        Ok(Some(ImportarDialogoResultado {
+            ruta_cifrada,
+            nombre,
+            original_borrado,
+        }))
+    })
+    .await
+    .map_err(|e| format!("Error interno al importar: {}", e))?
 }
 
 // ============================================================
@@ -686,11 +809,7 @@ fn listar_archivos_guardados(
         .lock()
         .map_err(|_| "Error".to_string())?
         .clone();
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let mut archivos = Vec::new();
 
@@ -843,12 +962,11 @@ fn mover_archivo_guardado(
 ) -> Result<(), String> {
     validar_ruta_en(&ruta, guardados_dir())?;
 
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
+
+    // M7: serializar RMW del índice de buzones.
+    let _idx_guard = BUZON_INDEX_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
 
     let ruta_index = guardados_path(".buzon_index_guardados.babel");
 
@@ -901,11 +1019,7 @@ fn traducir_documento_ruta(
     nombre_archivo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa. Inicia sesión primero.".into());
@@ -994,11 +1108,7 @@ fn traducir_documento_ruta(
 
 #[tauri::command]
 fn leer_resultado(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Vec<u8>, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
@@ -1030,11 +1140,7 @@ fn cambiar_idioma(idioma: String, sesion: tauri::State<SesionActiva>) -> Result<
         return Err("Idioma no válido.".into());
     }
 
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
@@ -1067,143 +1173,6 @@ struct MetadatosArchivo {
     es_traduccion: bool,
 }
 
-// listar_archivos eliminado — era código muerto, reemplazado por listar_archivos_guardados
-#[allow(dead_code)]
-fn _listar_archivos_obsoleto(
-    _buzon: String,
-    sesion: tauri::State<SesionActiva>,
-) -> Result<Vec<MetadatosArchivo>, String> {
-    let id_usuario = sesion
-        .usuario
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
-
-    let subclave_hex = Zeroizing::new(
-        sesion
-            .subclave_hex
-            .lock()
-            .map_err(|_| "Error leyendo sesión.".to_string())?
-            .clone(),
-    );
-
-    // Carpeta absoluta — siempre ~/Babel/archivos/
-    let carpeta = archivos_dir();
-    let ruta_index = archivos_path(".buzon_index.babel");
-
-    let index: HashMap<String, String> = fs::read(&ruta_index)
-        .ok()
-        .and_then(|blob| seguridad::descifrar_documento(blob, &subclave_hex).ok())
-        .and_then(|json| serde_json::from_str(&json).ok())
-        .unwrap_or_default();
-
-    let mut archivos = Vec::new();
-    // Cargar nodos de buzones para resolver ID → nombre en los metadatos
-    let nodos_buzon = cargar_nodos(
-        std::path::Path::new(&archivos_path(".buzones.babel")),
-        &subclave_hex,
-    );
-    let entradas = fs::read_dir(&carpeta).map_err(|e| format!("Error leyendo archivos: {}", e))?;
-
-    for entrada in entradas.flatten() {
-        if archivos.len() >= MAX_ARCHIVOS {
-            break;
-        }
-        let path = entrada.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        let nombre = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        if !nombre.ends_with(".babel") {
-            continue;
-        }
-        if nombre == ".buzones.babel" || nombre == ".buzon_index.babel" {
-            continue;
-        }
-
-        // Solo mostrar archivos del usuario activo
-        if !nombre.starts_with(&format!("{}_", id_usuario)) {
-            continue;
-        }
-
-        let ruta_completa = path.to_string_lossy().to_string();
-        let buzon_archivo = index
-            .get(&nombre)
-            .cloned()
-            .unwrap_or_else(|| "todos".to_string());
-
-        if _buzon != "todos" && buzon_archivo != _buzon {
-            continue;
-        }
-
-        let meta = entrada
-            .metadata()
-            .or_else(|_| fs::metadata(&path))
-            .map_err(|e| format!("Error metadata: {}", e))?;
-
-        let tamaño = meta.len();
-
-        let fecha = meta
-            .modified()
-            .map(|t| {
-                let ahora = std::time::SystemTime::now();
-                let antiguedad = ahora.duration_since(t).unwrap_or_default();
-                let dias = antiguedad.as_secs() / 86400;
-                if dias == 0 {
-                    "hoy".to_string()
-                } else if dias == 1 {
-                    "ayer".to_string()
-                } else if dias < 30 {
-                    format!("hace {} días", dias)
-                } else {
-                    let semanas = dias / 7;
-                    if semanas < 8 {
-                        format!("hace {} sem.", semanas)
-                    } else {
-                        format!("hace {} meses", dias / 30)
-                    }
-                }
-            })
-            .unwrap_or_else(|_| "—".to_string());
-
-        archivos.push(MetadatosArchivo {
-            nombre: nombre
-                .trim_start_matches(&format!("{}_", id_usuario))
-                .to_string(),
-            ruta: ruta_completa,
-            tamaño,
-            fecha,
-            idioma: if nombre.contains("__orig") {
-                "original".to_string()
-            } else {
-                sesion
-                    .idioma
-                    .lock()
-                    .map(|i| i.clone())
-                    .unwrap_or_else(|_| "es_en".to_string())
-            },
-            buzon: if buzon_archivo == "todos" || buzon_archivo.is_empty() {
-                "todos".to_string()
-            } else {
-                nodos_buzon
-                    .iter()
-                    .find(|n| n.id == buzon_archivo)
-                    .map(|n| n.nombre.clone())
-                    .unwrap_or_else(|| "todos".to_string())
-            },
-            buzon_id: buzon_archivo.clone(),
-            es_traduccion: true,
-        });
-    }
-
-    Ok(archivos)
-}
 
 // ============================================================
 // ÁRBOL DE BUZONES — Struct + helpers compartidos
@@ -1296,11 +1265,7 @@ fn crear_buzon(
     parent: Option<String>,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = archivos_path(".buzones.babel");
@@ -1321,11 +1286,7 @@ fn crear_buzon(
 
 #[tauri::command]
 fn listar_buzones(sesion: tauri::State<SesionActiva>) -> Result<Vec<BuzonNodo>, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let ruta = archivos_path(".buzones.babel");
     Ok(cargar_nodos(std::path::Path::new(&ruta), &subclave_hex))
@@ -1340,11 +1301,7 @@ fn crear_buzon_guardado(
     parent: Option<String>,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = guardados_path(".buzones_guardados.babel");
@@ -1362,11 +1319,7 @@ fn crear_buzon_guardado(
 // Lista todos los buzones del sistema de archivos guardados (sin traducir)
 #[tauri::command]
 fn listar_buzones_guardados(sesion: tauri::State<SesionActiva>) -> Result<Vec<BuzonNodo>, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let ruta = guardados_path(".buzones_guardados.babel");
     Ok(cargar_nodos(std::path::Path::new(&ruta), &subclave_hex))
@@ -1376,54 +1329,58 @@ fn listar_buzones_guardados(sesion: tauri::State<SesionActiva>) -> Result<Vec<Bu
 // ============================================================
 
 #[tauri::command]
-fn exportar_archivo(
+async fn exportar_archivo(
     ruta: String,
     app: tauri::AppHandle,
-    sesion: tauri::State<SesionActiva>,
+    sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
-    if subclave_hex.is_empty() {
+    if sesion.subclave_hex()?.is_empty() {
         return Err("No hay sesión activa.".into());
     }
-    // Seguridad: solo permitimos exportar desde ~/Babel/archivos/ o ~/Babel/guardados/
-    validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
-    if !Path::new(&ruta).exists() {
-        return Err(format!("Archivo no encontrado: {}", ruta));
-    }
+    // Igual que en importar: el save panel nativo (blocking_save_file) hace
+    // run_on_main_thread + espera en un canal. En un comando SÍNCRONO correría en el
+    // hilo principal y provocaría un DEADLOCK (UI congelada en "cargando"). Por eso el
+    // comando es async y el diálogo va en spawn_blocking, dejando el hilo principal libre.
+    tauri::async_runtime::spawn_blocking(move || {
+        // Seguridad: solo permitimos exportar desde ~/Babel/archivos/ o ~/Babel/guardados/
+        validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
-    let nombre = Path::new(&ruta)
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
+        if !Path::new(&ruta).exists() {
+            return Err(format!("Archivo no encontrado: {}", ruta));
+        }
 
-    if nombre.is_empty() {
-        return Err("No se pudo extraer el nombre del archivo.".into());
-    }
+        let nombre = Path::new(&ruta)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
 
-    // Muestra el save panel nativo del Finder — el usuario elige dónde guardar.
-    // user-selected.read-write concede acceso al destino elegido dentro del sandbox.
-    use tauri_plugin_dialog::DialogExt;
-    let destino_opt = app
-        .dialog()
-        .file()
-        .set_file_name(&nombre)
-        .blocking_save_file();
+        if nombre.is_empty() {
+            return Err("No se pudo extraer el nombre del archivo.".into());
+        }
 
-    let destino_path = match destino_opt {
-        Some(fp) => fp.into_path().map_err(|e| format!("Error procesando ruta de destino: {}", e))?,
-        None => return Err("Exportación cancelada.".into()),
-    };
+        // Muestra el save panel nativo del Finder — el usuario elige dónde guardar.
+        // user-selected.read-write concede acceso al destino elegido dentro del sandbox.
+        use tauri_plugin_dialog::DialogExt;
+        let destino_opt = app
+            .dialog()
+            .file()
+            .set_file_name(&nombre)
+            .blocking_save_file();
 
-    std::fs::copy(&ruta, &destino_path)
-        .map_err(|e| format!("Error al copiar: {}", e))?;
+        let destino_path = match destino_opt {
+            Some(fp) => fp.into_path().map_err(|e| format!("Error procesando ruta de destino: {}", e))?,
+            None => return Err("Exportación cancelada.".into()),
+        };
 
-    Ok(destino_path.to_string_lossy().to_string())
+        std::fs::copy(&ruta, &destino_path)
+            .map_err(|e| format!("Error al copiar: {}", e))?;
+
+        Ok(destino_path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Error interno al exportar: {}", e))?
 }
 
 // ============================================================
@@ -1431,46 +1388,47 @@ fn exportar_archivo(
 // Muestra UN folder picker nativo; copia todos los archivos ahí.
 // ============================================================
 #[tauri::command]
-fn exportar_archivos_a_carpeta(
+async fn exportar_archivos_a_carpeta(
     rutas: Vec<String>,
     app: tauri::AppHandle,
-    sesion: tauri::State<SesionActiva>,
+    sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<u32, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
-    if subclave_hex.is_empty() {
+    if sesion.subclave_hex()?.is_empty() {
         return Err("No hay sesión activa.".into());
     }
 
-    use tauri_plugin_dialog::DialogExt;
-    let carpeta_opt = app.dialog().file().blocking_pick_folder();
-    let carpeta = match carpeta_opt {
-        Some(fp) => fp.into_path().map_err(|e| format!("Error procesando carpeta: {}", e))?,
-        None => return Err("Exportación cancelada.".into()),
-    };
-
-    let mut copiados: u32 = 0;
-    for ruta in &rutas {
-        if validar_ruta_en(ruta, archivos_dir())
-            .or_else(|_| validar_ruta_en(ruta, guardados_dir()))
-            .is_err()
-        {
-            continue;
-        }
-        let nombre = match Path::new(ruta).file_name() {
-            Some(n) => n.to_string_lossy().to_string(),
-            None => continue,
+    // async + spawn_blocking para que el folder picker nativo no deadlockee el hilo
+    // principal (mismo motivo que exportar_archivo / importar_archivo_dialogo).
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let carpeta_opt = app.dialog().file().blocking_pick_folder();
+        let carpeta = match carpeta_opt {
+            Some(fp) => fp.into_path().map_err(|e| format!("Error procesando carpeta: {}", e))?,
+            None => return Err("Exportación cancelada.".into()),
         };
-        let destino = carpeta.join(&nombre);
-        if std::fs::copy(ruta, &destino).is_ok() {
-            copiados += 1;
-        }
-    }
 
-    Ok(copiados)
+        let mut copiados: u32 = 0;
+        for ruta in &rutas {
+            if validar_ruta_en(ruta, archivos_dir())
+                .or_else(|_| validar_ruta_en(ruta, guardados_dir()))
+                .is_err()
+            {
+                continue;
+            }
+            let nombre = match Path::new(ruta).file_name() {
+                Some(n) => n.to_string_lossy().to_string(),
+                None => continue,
+            };
+            let destino = carpeta.join(&nombre);
+            if std::fs::copy(ruta, &destino).is_ok() {
+                copiados += 1;
+            }
+        }
+
+        Ok(copiados)
+    })
+    .await
+    .map_err(|e| format!("Error interno al exportar: {}", e))?
 }
 
 // ============================================================
@@ -1485,12 +1443,11 @@ fn mover_archivo(
 ) -> Result<(), String> {
     validar_ruta_en(&ruta, archivos_dir())?;
 
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
+
+    // M7: serializar RMW del índice de buzones.
+    let _idx_guard = BUZON_INDEX_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
 
     let ruta_index = archivos_path(".buzon_index.babel");
 
@@ -1523,11 +1480,7 @@ fn mover_archivo(
 
 #[tauri::command]
 fn eliminar_buzon(id: String, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = archivos_path(".buzones.babel");
@@ -1547,11 +1500,7 @@ fn renombrar_buzon(
     nombre_nuevo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = archivos_path(".buzones.babel");
@@ -1572,16 +1521,19 @@ fn renombrar_archivo(
 ) -> Result<String, String> {
     validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
     let id_usuario = sesion
         .usuario
         .lock()
         .map_err(|_| "Error sesión.".to_string())?
         .clone();
+
+    // M7: serializar toda la operación (rename + actualización de índice) contra otras
+    // mutaciones de buzones concurrentes.
+    let _idx_guard = BUZON_INDEX_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
 
     let guardados_canon = guardados_dir().canonicalize().unwrap_or_else(|_| guardados_dir());
     let ruta_canon_local = std::path::Path::new(&ruta)
@@ -1609,6 +1561,14 @@ fn renombrar_archivo(
     }
     let nuevo_nombre_archivo = format!("{}_{}.babel", id_usuario, nombre_limpio);
     let nueva_ruta = dir.join(&nuevo_nombre_archivo);
+
+    // M5: no sobrescribir un archivo existente al renombrar (evita pérdida de datos silenciosa).
+    // Comparamos rutas canónicas para permitir renombrar al mismo archivo (no-op) sin error.
+    let es_mismo = std::path::Path::new(&ruta).canonicalize().ok()
+        == nueva_ruta.canonicalize().ok().filter(|_| nueva_ruta.exists());
+    if nueva_ruta.exists() && !es_mismo {
+        return Err("Ya existe un archivo con ese nombre.".into());
+    }
 
     fs::rename(&ruta, &nueva_ruta).map_err(|e| format!("Error renombrando: {}", e))?;
 
@@ -1646,11 +1606,7 @@ fn renombrar_archivo(
 
 #[tauri::command]
 fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
@@ -1673,11 +1629,7 @@ fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
 // ============================================================
 #[tauri::command]
 fn eliminar_buzon_guardado(id: String, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = guardados_path(".buzones_guardados.babel");
@@ -1689,11 +1641,7 @@ fn eliminar_buzon_guardado(id: String, sesion: tauri::State<SesionActiva>) -> Re
 // Abre la carpeta ~/Babel/guardados/ en Finder
 #[tauri::command]
 fn abrir_carpeta_guardados(sesion: tauri::State<SesionActiva>) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
@@ -1708,11 +1656,7 @@ fn renombrar_buzon_guardado(
     nombre_nuevo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
     let ruta = guardados_path(".buzones_guardados.babel");
@@ -1723,66 +1667,6 @@ fn renombrar_buzon_guardado(
     guardar_nodos(&nodos, std::path::Path::new(&ruta), &subclave_hex)
 }
 
-// ============================================================
-// COMANDO — Guardar archivo sin traducir (vía bytes desde el explorador)
-// Variante de guardar_documento_sin_traducir que recibe los bytes
-// directamente desde TypeScript (para archivos seleccionados con input file).
-// ============================================================
-#[tauri::command]
-fn guardar_bytes_sin_traducir(
-    nombre_archivo: String,
-    contenido: Vec<u8>,
-    sesion: tauri::State<SesionActiva>,
-) -> Result<String, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
-    let id_usuario = sesion
-        .usuario
-        .lock()
-        .map_err(|_| "Error".to_string())?
-        .clone();
-
-    if nombre_archivo.ends_with(".babel") {
-        return Err("Los archivos .babel ya están cifrados.".into());
-    }
-
-    let ext_bytes = std::path::Path::new(&nombre_archivo)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .unwrap_or_default();
-    if !["pdf", "docx", "txt", "png", "jpg", "jpeg"].contains(&ext_bytes.as_str()) {
-        return Err(format!("Tipo de archivo no permitido: .{}", ext_bytes));
-    }
-
-    if contenido.len() > 100 * 1024 * 1024 {
-        return Err("El archivo supera el límite de 100 MB.".to_string());
-    }
-
-    let ts: u64 = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let nombre_base = std::path::Path::new(&nombre_archivo)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&nombre_archivo);
-
-    let nombre_cifrado = format!("{}_{}_{}.babel", id_usuario, nombre_base, ts);
-    let ruta_cifrada = guardados_path(&nombre_cifrado);
-
-    let contenido_b64 = traductor::comprimir_b64(&contenido);
-    let cifrado = seguridad::blindar_documento(&contenido_b64, &subclave_hex)
-        .map_err(|e| format!("Error cifrando: {}", e))?;
-
-    fs::write(&ruta_cifrada, cifrado).map_err(|e| format!("Error guardando: {}", e))?;
-
-    Ok(ruta_cifrada)
-}
 // ============================================================
 // COMANDO 17 — Ver archivo descifrado
 // ============================================================
@@ -2043,11 +1927,10 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
 fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<String, String> {
     validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
 
     let bytes = fs::read(&ruta).map_err(|e| format!("Error leyendo archivo: {}", e))?;
     let contenido = seguridad::descifrar_documento(bytes, &subclave_hex)
@@ -2115,11 +1998,7 @@ pub struct AppSettings {
 
 #[tauri::command]
 fn save_settings(settings: AppSettings, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let data = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
 
@@ -2136,11 +2015,7 @@ fn save_settings(settings: AppSettings, sesion: tauri::State<SesionActiva>) -> R
 // Carga los ajustes — primero intenta settings.babel (cifrado), luego settings.json (plano)
 #[tauri::command]
 fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let default = AppSettings {
         borrar_al_salir: false,
@@ -2376,11 +2251,7 @@ fn recuperar_con_frase(
 
 #[tauri::command]
 fn ver_frase_recuperacion(sesion: tauri::State<SesionActiva>) -> Result<Vec<String>, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -2478,11 +2349,7 @@ fn guardar_config_email_tauri(
     firma: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let remitentes_autorizados: Vec<String> = remitentes
         .split(',')
@@ -2519,11 +2386,7 @@ fn enviar_archivo_cifrado_tauri(
 ) -> Result<(), String> {
     validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let creds = traductor::cargar_config_email(&subclave_hex).ok_or_else(|| {
         "No hay configuración de email guardada. Configura SMTP primero.".to_string()
@@ -2569,11 +2432,7 @@ fn enviar_bytes_cifrados_tauri(
     cuerpo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let nombre_solo = std::path::Path::new(&nombre_archivo)
         .file_name()
@@ -2624,11 +2483,7 @@ fn enviar_bytes_cifrados_tauri(
 fn obtener_emails_tauri(
     sesion: tauri::State<SesionActiva>,
 ) -> Result<Vec<traductor::EmailResumen>, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let creds = traductor::cargar_config_email(&subclave_hex).ok_or_else(|| {
         "No hay configuración de email guardada. Configura SMTP primero.".to_string()
@@ -2675,11 +2530,7 @@ fn obtener_email_completo_tauri(
     id: u32,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<EmailCompleto, String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let creds = traductor::cargar_config_email(&subclave_hex)
         .ok_or_else(|| "No hay configuración de email guardada.".to_string())?;
@@ -2723,8 +2574,8 @@ fn obtener_email_completo_tauri(
 
 #[tauri::command]
 fn obtener_firma_email(sesion: tauri::State<SesionActiva>) -> String {
-    let subclave_hex = match sesion.subclave_hex.lock() {
-        Ok(s) => s.clone(),
+    let subclave_hex = match sesion.subclave_hex() {
+        Ok(s) => s,
         Err(_) => return String::new(),
     };
     if subclave_hex.is_empty() {
@@ -2744,11 +2595,7 @@ fn eliminar_email_tauri(
     id: u32,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
 
     let creds = traductor::cargar_config_email(&subclave_hex)
         .ok_or_else(|| "No hay configuración de email guardada.".to_string())?;
@@ -2766,11 +2613,7 @@ fn marcar_no_leido_tauri(
     id: u32,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     let creds = traductor::cargar_config_email(&subclave_hex)
         .ok_or_else(|| "No hay configuración de email guardada.".to_string())?;
     traductor::marcar_no_leido(&creds.imap_dominio, &creds.usuario, &creds.password, id)
@@ -2783,8 +2626,8 @@ fn marcar_no_leido_tauri(
 
 #[tauri::command]
 fn tiene_config_email(sesion: tauri::State<SesionActiva>) -> bool {
-    let subclave_hex = match sesion.subclave_hex.lock() {
-        Ok(s) => s.clone(),
+    let subclave_hex = match sesion.subclave_hex() {
+        Ok(s) => s,
         Err(_) => return false,
     };
     if subclave_hex.is_empty() {
@@ -2799,11 +2642,7 @@ fn tiene_config_email(sesion: tauri::State<SesionActiva>) -> bool {
 
 #[tauri::command]
 fn abrir_carpeta_babel(sesion: tauri::State<SesionActiva>) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
@@ -2820,11 +2659,10 @@ fn iniciar_servidor_p2p(sesion: tauri::State<SesionActiva>) -> Result<String, St
     // Resetear señal de apagado antes de arrancar un nuevo servidor
     babel_p2p::reiniciar_servidor_p2p();
 
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
     let id_usuario = sesion
         .usuario
         .lock()
@@ -2879,11 +2717,10 @@ fn enviar_archivo_p2p(
 ) -> Result<(), String> {
     validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
 
     // P-1: validar que la IP sea una IPv4 bien formada antes de conectar
     ip.parse::<std::net::Ipv4Addr>().map_err(|_| "IP de destino inválida".to_string())?;
@@ -2900,11 +2737,10 @@ fn enviar_mensaje_p2p(
     mensaje: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
-    let subclave_hex = sesion
-        .subclave_hex
-        .lock()
-        .map_err(|_| "Error leyendo sesión.".to_string())?
-        .clone();
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
 
     // P-1: validar que la IP sea una IPv4 bien formada antes de conectar
     ip.parse::<std::net::Ipv4Addr>().map_err(|_| "IP de destino inválida".to_string())?;
@@ -2933,7 +2769,7 @@ fn aprobar_peer_pendiente_cmd(
 #[tauri::command]
 fn obtener_mensajes_p2p(sesion: tauri::State<SesionActiva>) -> Result<Vec<String>, String> {
     // C-2: verificar sesión activa
-    let subclave = sesion.subclave_hex.lock().map_err(|_| "Error sesión".to_string())?.clone();
+    let subclave = sesion.subclave_hex()?;
     if subclave.is_empty() {
         return Err("No hay sesión activa.".into());
     }
@@ -3001,32 +2837,81 @@ fn idioma_a_par(idioma: &str) -> &'static str {
 // ============================================================
 // COMANDO — Guardar HTML de frase BIP39 en tmp para imprimir
 // ============================================================
+// La plantilla de impresión la construye Rust a partir de las 12 palabras, NO se recibe
+// HTML del frontend. Antes se recibía HTML arbitrario y se filtraba con un blocklist frágil
+// que, además, rechazaba la propia plantilla (`<meta>`, `<style>`) y dejaba la impresión rota.
+// Al aceptar solo palabras validadas contra el diccionario BIP39 (lista cerrada de a-z), no
+// existe ninguna superficie de inyección: nada de lo que escribimos depende de input libre.
+
+const FRASE_HTML_CABECERA: &str = r#"<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Babel Security — Frase de Recuperación</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; background: #fff; color: #1a1a1a; padding: 48px 56px; }
+  header { text-align: center; border-bottom: 2px solid #1a1a1a; padding-bottom: 20px; margin-bottom: 32px; }
+  h1 { font-size: 22px; letter-spacing: 6px; font-weight: 400; margin-bottom: 6px; }
+  .subtitle { font-size: 10px; letter-spacing: 3px; color: #555; text-transform: uppercase; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 40px; }
+  .palabra { display: flex; align-items: center; gap: 12px; border: 1px solid #ccc; padding: 12px 16px; }
+  .num { font-size: 10px; color: #999; min-width: 16px; text-align: right; font-family: 'Courier New', monospace; }
+  .txt { font-size: 15px; letter-spacing: 0.5px; }
+  footer { border-top: 1px solid #ccc; padding-top: 16px; display: flex; justify-content: space-between; }
+  .aviso { font-size: 9px; letter-spacing: 1.5px; color: #888; text-transform: uppercase; }
+  @media print { body { padding: 32px 40px; } }
+</style>
+</head>
+<body>
+  <header>
+    <h1>BABEL SECURITY</h1>
+    <p class="subtitle">Frase de recuperación BIP39 &mdash; Documento confidencial</p>
+  </header>
+  <div class="grid">"#;
+
+const FRASE_HTML_MEDIO: &str = r#"</div>
+  <footer>
+    <span class="aviso">⚠ Guarda este documento bajo llave &mdash; No compartas con nadie</span>
+    <span class="aviso">"#;
+
+const FRASE_HTML_PIE: &str = r#"</span>
+  </footer>
+</body>
+</html>"#;
 
 #[tauri::command]
-fn guardar_html_frase(html: String) -> Result<String, String> {
-    // X-3: rechazar HTML con scripts o tamaño excesivo
-    if html.len() > 1_048_576 {
-        return Err("HTML de frase demasiado grande.".into());
+fn guardar_html_frase(palabras: Vec<String>) -> Result<String, String> {
+    if palabras.len() != 12 {
+        return Err("La frase debe tener exactamente 12 palabras.".into());
     }
-    let lower = html.to_lowercase();
-    let etiquetas_peligrosas = [
-        "<script", "<iframe", "<embed", "<object", "<form",
-        "<link", "<meta", "<base", "<svg", "<math",
-    ];
-    let protocolos_peligrosos = ["javascript:", "vbscript:", "data:text/html"];
-    let eventos_inline = [
-        "onerror", "onload", "onclick", "onmouseover", "onmouseout",
-        "onfocus", "onblur", "onchange", "onsubmit", "onkeydown", "onkeyup",
-        "onkeypress", "oninput", "onmouseenter", "onmouseleave", "ondrag",
-        "ondrop", "onpaste", "oncopy", "oncontextmenu",
-    ];
-    let tiene_contenido_peligroso =
-        etiquetas_peligrosas.iter().any(|t| lower.contains(t))
-        || protocolos_peligrosos.iter().any(|p| lower.contains(p))
-        || eventos_inline.iter().any(|e| lower.contains(e));
-    if tiene_contenido_peligroso {
-        return Err("HTML de frase contiene contenido no permitido.".into());
+    // Cada palabra debe pertenecer al diccionario BIP39 (solo a-z). Esto elimina cualquier
+    // posibilidad de inyección HTML/JS: no escribimos nada que no sea una palabra conocida.
+    for p in &palabras {
+        if !bip39_words::WORDLIST.contains(&p.as_str()) {
+            return Err("Una o más palabras no pertenecen al diccionario BIP39.".into());
+        }
     }
+
+    let celdas: String = palabras
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            format!(
+                "<div class=\"palabra\"><span class=\"num\">{}</span><span class=\"txt\">{}</span></div>",
+                i + 1,
+                p
+            )
+        })
+        .collect();
+
+    let fecha = chrono::Local::now().format("%d/%m/%Y").to_string();
+
+    let html = format!(
+        "{}{}{}{}{}",
+        FRASE_HTML_CABECERA, celdas, FRASE_HTML_MEDIO, fecha, FRASE_HTML_PIE
+    );
+
     let ruta = tmp_path("frase_recuperacion.html");
     std::fs::write(&ruta, html.as_bytes())
         .map_err(|e| format!("Error al guardar HTML: {}", e))?;
@@ -3114,6 +2999,18 @@ fn main() {
                     });
                 }
             }
+
+            // Modo dev / servidor externo: si NO estamos en modo USB, el bloque de arriba
+            // no fija el token NLLB y toda traducción caería al diccionario (solo palabras
+            // sueltas). Aquí lo tomamos del entorno BABEL_NLLB_TOKEN para autenticarnos
+            // contra un servidor arrancado aparte (`npm run tauri dev`, arrancar_babel.sh…).
+            // inicializar_nllb_token es idempotente: si el modo USB ya lo fijó, esto es no-op.
+            if let Ok(tok) = std::env::var("BABEL_NLLB_TOKEN") {
+                if !tok.is_empty() {
+                    traductor::inicializar_nllb_token(tok);
+                }
+            }
+
             // Monitor periódico de amenazas — escanea cada 5 minutos en background.
             // Solo emite el evento "amenaza-detectada" si hay amenazas NUEVAS respecto
             // a la última vez, y solo cuando hay sesión activa (subclave no vacía).
@@ -3122,8 +3019,8 @@ fn main() {
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(300));
                     let sesion = handle_monitor.state::<SesionActiva>();
-                    let subclave = match sesion.subclave_hex.lock() {
-                        Ok(s) => s.clone(),
+                    let subclave = match sesion.subclave_hex() {
+                        Ok(s) => s,
                         Err(_) => continue,
                     };
                     if subclave.is_empty() { continue; }
@@ -3190,6 +3087,7 @@ fn main() {
             aprobar_peer_pendiente_cmd,
             renombrar_buzon,
             guardar_documento_sin_traducir,
+            importar_archivo_dialogo,
             listar_archivos_guardados,
             crear_buzon_guardado,
             listar_buzones_guardados,
@@ -3197,7 +3095,6 @@ fn main() {
             renombrar_buzon_guardado,
             abrir_carpeta_guardados,
             mover_archivo_guardado,
-            guardar_bytes_sin_traducir,
             obtener_usuario_con_maestra,
             renombrar_archivo,
             tiene_config_email,

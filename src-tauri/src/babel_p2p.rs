@@ -320,10 +320,18 @@ impl DescubrimientoRed {
                 }
             };
             let _ = socket.set_broadcast(true);
+            // Timeout de lectura para poder comprobar P2P_SHUTDOWN periódicamente en vez de
+            // bloquearnos para siempre en recv_from. Sin esto el hilo seguía anunciando
+            // hostname+fingerprint tras cerrar sesión (M2).
+            let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
 
             // Rate limiting: máx 10 peticiones por IP por ventana de 1 segundo
             let mut contadores: HashMap<std::net::IpAddr, (u32, std::time::Instant)> = HashMap::new();
             const MAX_POR_SEGUNDO: u32 = 10;
+            // Cota dura del mapa: las IPs de origen UDP son spoofeables, así que un atacante
+            // en LAN podría hacer crecer `contadores` sin límite (DoS de memoria). Purgamos
+            // entradas cuya ventana ya expiró y, si aun así crece demasiado, lo vaciamos.
+            const MAX_ENTRADAS_CONTADORES: usize = 4096;
 
             // Fingerprint propio para incluir en la respuesta (permite pre-verificación TOFU)
             let fp_propio: String = fs::read(ruta_cert())
@@ -333,8 +341,26 @@ impl DescubrimientoRed {
 
             let mut buf = [0u8; 256];
             loop {
+                // Salida limpia al cerrar sesión — libera el socket y deja de anunciarse.
+                if P2P_SHUTDOWN.load(Ordering::Relaxed) {
+                    log::warn!("[P2P] Descubrimiento UDP detenido (sesión cerrada).");
+                    break;
+                }
+
                 let (n, origen) = match socket.recv_from(&mut buf) {
                     Ok(r) => r,
+                    Err(ref e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            || e.kind() == std::io::ErrorKind::TimedOut =>
+                    {
+                        // Tick de timeout: purgar entradas de rate-limit con ventana expirada.
+                        let ahora_p = std::time::Instant::now();
+                        contadores.retain(|_, (_, t)| ahora_p.duration_since(*t) < Duration::from_secs(1));
+                        if contadores.len() > MAX_ENTRADAS_CONTADORES {
+                            contadores.clear();
+                        }
+                        continue;
+                    }
                     Err(_) => continue,
                 };
                 let ip = origen.ip();

@@ -15,8 +15,11 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos" | "nombre" | "ajustes";
 // VARIABLES DE SESIÓN — nunca van a window, se zeroizan al cerrar
 // ============================================================
-let _sesionPass = "";
-let _sesionMaestra = "";
+// M3: NO retenemos la llave maestra ni la contraseña en JS. Las strings de JS son
+// inmutables, así que "0".repeat(n) no borra la memoria original — guardarlas solo
+// aumentaba la superficie de exposición sin aportar nada. La subclave real vive en Rust
+// (mlock + zeroize). Aquí basta un flag de "sesión activa" para la lógica de la UI.
+let _sesionActiva = false;
 let _sesionUsuario = "";
 // Escapa caracteres HTML para prevenir XSS en innerHTML
 // Úsala siempre que metas datos de usuario o de red en el DOM
@@ -409,6 +412,22 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (barraEl) barraEl.style.width = `${Math.min(pct, 100)}%`;
   }).catch(() => {});
 
+  // Parche 1: bloquear la sesión al perder el foco de ventana (cambio de app, screen-lock
+  // del SO). Reduce la ventana en la que la subclave existe en RAM: bloquearPantalla() llama
+  // a cerrar_sesion_rust → limpiar(), que zeroiza la clave en el backend. Gracia de 20s para
+  // no bloquear en un alt-tab momentáneo; sólo bloquea si el foco sigue perdido al vencer.
+  getCurrentWindow().onFocusChanged(({ payload: enfocado }) => {
+    if (!enfocado && _sesionActiva) {
+      if (_blurLockTimer) clearTimeout(_blurLockTimer);
+      _blurLockTimer = setTimeout(() => {
+        if (!document.hasFocus() && _sesionActiva) bloquearPantalla();
+      }, 20_000);
+    } else if (enfocado && _blurLockTimer) {
+      clearTimeout(_blurLockTimer);
+      _blurLockTimer = null;
+    }
+  }).catch(() => {});
+
   // Badge NLLB: poll /ping cada 2s hasta que responda
   const badge = document.getElementById("nllb-badge");
   const checkNllb = setInterval(async () => {
@@ -504,8 +523,7 @@ async function intentarAcceso(): Promise<void> {
     });
 
     if (ok) {
-      _sesionPass = passUsuario;
-      _sesionMaestra = llaveMaestra;
+      _sesionActiva = true;
       limpiarCamposSensibles();
 
       const nombreGuardado = localStorage.getItem("babel-nombre-display");
@@ -724,9 +742,7 @@ async function cambiarCategoriaDiccionario(categoria: string): Promise<void> {
 async function cerrarSesion(): Promise<void> {
   limpiarCamposSensibles();
   borrarChat();
-  // Zeroizar credenciales de sesión
-  _sesionPass = "0".repeat(_sesionPass.length); _sesionPass = "";
-  _sesionMaestra = "0".repeat(_sesionMaestra.length); _sesionMaestra = "";
+  _sesionActiva = false;
   _sesionUsuario = "0".repeat(_sesionUsuario.length); _sesionUsuario = "";
   _firmaEmail = "0".repeat(_firmaEmail.length); _firmaEmail = "";
   _cuerpoEmailOriginal = "";
@@ -1081,8 +1097,35 @@ function seleccionarBuzonGuardados(id: string): void {
   cargarArchivosGuardados();
 }
 
-function abrirImportarGuardado(): void {
-  document.getElementById("input-archivo-guardado")?.click();
+// Importa un archivo mediante el diálogo de selección nativo (NSOpenPanel).
+// A diferencia del <input type="file">, este flujo devuelve la ruta real del
+// original, lo que permite —tras cifrarlo y guardarlo— ofrecer borrarlo de forma
+// segura. El backend pide confirmación "¿Eliminar el archivo original?" (sí/no)
+// y solo destruye la ruta exacta que el usuario eligió, sin tocar nada más.
+async function abrirImportarGuardado(): Promise<void> {
+  try {
+    const res = await invoke<{
+      ruta_cifrada: string;
+      nombre: string;
+      original_borrado: boolean;
+    } | null>("importar_archivo_dialogo");
+
+    if (!res) return; // el usuario canceló el diálogo de selección
+
+    if (buzonActivoGuardados !== "todos") {
+      try {
+        await invoke("mover_archivo_guardado", { ruta: res.ruta_cifrada, buzonDestino: buzonActivoGuardados });
+      } catch (e) {
+        console.error("Error moviendo al buzón:", e);
+      }
+    }
+
+    const sufijo = res.original_borrado ? " · original destruido de forma segura" : "";
+    mostrarToast(`✓ ${res.nombre} guardado y cifrado${sufijo}`, false);
+    await cargarArchivosGuardados();
+  } catch (error) {
+    mostrarToast(`Error importando: ${error}`, true);
+  }
 }
 
 
@@ -1295,39 +1338,6 @@ async function guardarArchivoSinTraducir(rutaArchivo: string): Promise<void> {
   }
 }
 
-
-// Maneja la selección de archivo desde el explorador del sistema para guardarlo cifrado
-async function manejarSeleccionGuardado(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const archivo = input.files?.[0];
-  if (!archivo) return;
-
-  if (archivo.name.endsWith(".babel")) {
-    mostrarToast("Los archivos .babel ya están cifrados", true);
-    input.value = "";
-    return;
-  }
-
-  try {
-    const bytes = Array.from(new Uint8Array(await archivo.arrayBuffer()));
-    const rutaCifrada = await invoke<string>("guardar_bytes_sin_traducir", {
-      nombreArchivo: archivo.name,
-      contenido: bytes,
-    });
-    if (buzonActivoGuardados !== "todos") {
-      try {
-        await invoke("mover_archivo_guardado", { ruta: rutaCifrada, buzonDestino: buzonActivoGuardados });
-      } catch (e) {
-        console.error("Error moviendo al buzón:", e);
-      }
-    }
-    mostrarToast(`✓ ${archivo.name} guardado y cifrado`, false);
-    await cargarArchivosGuardados();
-  } catch (error) {
-    mostrarToast(`Error guardando: ${error}`, true);
-  }
-  input.value = "";
-}
 
 async function irAArchivos(): Promise<void> {
   mostrarPantalla("archivos-guardados");
@@ -1802,6 +1812,7 @@ async function eliminarSeleccionados(): Promise<void> {
 // ============================================================
 let timerInactividad: ReturnType<typeof setTimeout> | null = null;
 let timerAvisoLock: ReturnType<typeof setTimeout> | null = null;
+let _blurLockTimer: ReturnType<typeof setTimeout> | null = null; // Parche 1: bloqueo al perder foco
 let _tiempoLockMs: number = 15 * 60 * 1000; // default hasta que carguen los ajustes
 
 function resetearTimerInactividad(): void {
@@ -1818,8 +1829,7 @@ function resetearTimerInactividad(): void {
 
 async function bloquearPantalla(): Promise<void> {
   desactivarTimerInactividad();
-  _sesionPass = "0".repeat(_sesionPass.length); _sesionPass = "";
-  _sesionMaestra = "0".repeat(_sesionMaestra.length); _sesionMaestra = "";
+  _sesionActiva = false;
   try { await invoke("cerrar_sesion_rust"); } catch { /* continúa bloqueando aunque falle */ }
   const overlay = document.getElementById("pantalla-bloqueo");
   if (overlay) {
@@ -1845,8 +1855,7 @@ async function desbloquearPantalla(): Promise<void> {
   try {
     const ok = await invoke<boolean>("verificar_login", { pass: maestra, passUsuario: pass });
     if (ok) {
-      _sesionPass = pass;
-      _sesionMaestra = maestra;
+      _sesionActiva = true;
       maestraEl.value = "";
       passEl.value = "";
       const msgEl = document.getElementById("bloqueo-msg");
@@ -2525,7 +2534,7 @@ async function cargarAjustesTraduccion(): Promise<void> {
 
   // Aplicar timeout al timer de inactividad (solo si hay sesión activa)
   _tiempoLockMs = timeoutMin * 60 * 1000;
-  if (_sesionPass) resetearTimerInactividad();
+  if (_sesionActiva) resetearTimerInactividad();
 
   // Sincronizar selector de timeout en ajustes si ya está visible
   const selectorTimeout = document.getElementById("selector-timeout") as HTMLSelectElement;
@@ -3156,48 +3165,14 @@ async function imprimirFrase(): Promise<void> {
   const grid = document.getElementById("frase-grid");
   if (!grid) return;
 
-  const palabras = Array.from(grid.querySelectorAll(".palabra-bip39")).map((el, i) => {
-    const texto = (el.querySelector(".palabra-texto") as HTMLElement)?.textContent?.trim() ?? "";
-    return `<div class="palabra"><span class="num">${i + 1}</span><span class="txt">${escapeHTML(texto)}</span></div>`;
-  });
-
-  const fechaHoy = new Date().toLocaleDateString("es-ES", { year: "numeric", month: "long", day: "numeric" });
-
-  const html = `<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<title>Babel Security — Frase de Recuperación</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Georgia, 'Times New Roman', serif; background: #fff; color: #1a1a1a; padding: 48px 56px; }
-  header { text-align: center; border-bottom: 2px solid #1a1a1a; padding-bottom: 20px; margin-bottom: 32px; }
-  h1 { font-size: 22px; letter-spacing: 6px; font-weight: 400; margin-bottom: 6px; }
-  .subtitle { font-size: 10px; letter-spacing: 3px; color: #555; text-transform: uppercase; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 40px; }
-  .palabra { display: flex; align-items: center; gap: 12px; border: 1px solid #ccc; padding: 12px 16px; }
-  .num { font-size: 10px; color: #999; min-width: 16px; text-align: right; font-family: 'Courier New', monospace; }
-  .txt { font-size: 15px; letter-spacing: 0.5px; }
-  footer { border-top: 1px solid #ccc; padding-top: 16px; display: flex; justify-content: space-between; }
-  .aviso { font-size: 9px; letter-spacing: 1.5px; color: #888; text-transform: uppercase; }
-  @media print { body { padding: 32px 40px; } }
-</style>
-</head>
-<body>
-  <header>
-    <h1>BABEL SECURITY</h1>
-    <p class="subtitle">Frase de recuperación BIP39 &mdash; Documento confidencial</p>
-  </header>
-  <div class="grid">${palabras.join("")}</div>
-  <footer>
-    <span class="aviso">⚠ Guarda este documento bajo llave &mdash; No compartas con nadie</span>
-    <span class="aviso">${fechaHoy}</span>
-  </footer>
-</body>
-</html>`;
+  // Solo pasamos las 12 palabras; Rust valida contra el diccionario BIP39 y construye
+  // la plantilla de impresión. No cruzamos HTML arbitrario por la frontera (sin superficie XSS).
+  const palabras = Array.from(grid.querySelectorAll(".palabra-bip39")).map((el) =>
+    (el.querySelector(".palabra-texto") as HTMLElement)?.textContent?.trim().toLowerCase() ?? ""
+  );
 
   try {
-    const ruta = await invoke<string>("guardar_html_frase", { html });
+    const ruta = await invoke<string>("guardar_html_frase", { palabras });
     await openPath(ruta);
     // Borrar el HTML con frase BIP39 tras 5s — tiempo suficiente para que Safari lo cargue
     setTimeout(() => invoke("borrar_html_frase").catch(() => {}), 5000);
@@ -3428,7 +3403,6 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).cancelarBuzonGuardado = cancelarBuzonGuardado;
 (window as any).borrarBuzonGuardado = borrarBuzonGuardado;
 (window as any).iniciarRenombradoGuardado = iniciarRenombradoGuardado;
-(window as any).manejarSeleccionGuardado = manejarSeleccionGuardado;
 (window as any).abrirImportarGuardado = abrirImportarGuardado;
 (window as any).moverArchivoGuardadoPopup = moverArchivoGuardadoPopup;
 (window as any).imprimirFrase = imprimirFrase;
