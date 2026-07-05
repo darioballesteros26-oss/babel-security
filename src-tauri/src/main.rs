@@ -1041,10 +1041,16 @@ fn traducir_documento_ruta(
         return Err(format!("Tipo de archivo no permitido: .{}", ext));
     }
 
-    // Restringir al directorio home del usuario — evita path traversal desde XSS
-    if let Some(home) = dirs::home_dir() {
-        validar_ruta_en(&ruta, home)?;
+    // En sandbox com.apple.security.app-sandbox dirs::home_dir() devuelve el contenedor
+    // (~/.../Containers/com.babel.seguridad/Data), no el home real.  El check starts_with
+    // rechazaría archivos legítimos del Escritorio/Descargas.  La seguridad la gestiona el
+    // OS via user-selected.read-write — igual que guardar_documento_sin_traducir.
+    // Solo verificamos que la ruta es accesible (canonicalize) y no tiene path traversal.
+    if ruta.contains("..") {
+        return Err("Ruta no autorizada.".into());
     }
+    let _ = std::fs::canonicalize(&ruta)
+        .map_err(|_| "Ruta no accesible o inválida.".to_string())?;
 
     // R-2: límite de tamaño antes de procesar
     let meta = std::fs::metadata(&ruta).map_err(|e| format!("Error accediendo archivo: {}", e))?;
