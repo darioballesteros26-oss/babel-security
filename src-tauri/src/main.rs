@@ -1013,92 +1013,80 @@ fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
 // ============================================================
 
 #[tauri::command]
-fn traducir_documento_ruta(
+async fn traducir_documento_ruta(
     app: tauri::AppHandle,
     ruta: String,
     nombre_archivo: String,
-    sesion: tauri::State<SesionActiva>,
+    sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
+    // Extraer datos de sesión ANTES de spawn_blocking — State no es Send.
     let subclave_hex = sesion.subclave_hex()?;
-
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa. Inicia sesión primero.".into());
     }
-
-    // Anti path-traversal
-    if ruta.contains("..") {
-        return Err("Ruta no autorizada.".into());
-    }
-
-    // Extensión antes de canonicalize para dar un error claro si el tipo no es válido.
-    let ext = Path::new(&ruta)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .unwrap_or_default();
-    if !["pdf", "docx", "txt"].contains(&ext.as_str()) {
-        return Err(format!("Tipo de archivo no permitido: .{}", ext));
-    }
-
-    // En sandbox, is_file() devuelve false para archivos arrastrados hasta que el OS
-    // resuelve el acceso user-selected.  Canonicalize abre el acceso y falla si la ruta
-    // no existe — igual que hace cifrar_y_guardar_desde_ruta para drag & drop.
-    let path_canon = std::fs::canonicalize(&ruta)
-        .map_err(|_| format!("Archivo no accesible: {}", ruta))?;
-
-    // R-2: límite de tamaño antes de procesar
-    let meta = std::fs::metadata(&path_canon).map_err(|e| format!("Error accediendo archivo: {}", e))?;
-    if meta.len() > 100 * 1024 * 1024 {
-        return Err("El archivo supera el límite de 100 MB.".into());
-    }
-
-    let id_usuario = sesion
-        .usuario
-        .lock()
-        .map_err(|_| "Error".to_string())?
-        .clone();
-
-    let _ts: u64 = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let nombre_base = std::path::Path::new(&nombre_archivo)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&nombre_archivo);
-
-    let dict = sesion
-        .diccionario
-        .lock()
-        .map_err(|_| "Error leyendo diccionario.".to_string())?
-        .clone();
-
-    let idioma = sesion
-        .idioma
-        .lock()
-        .map_err(|_| "Error leyendo idioma.".to_string())?
-        .clone();
-
+    let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
+    let dict = sesion.diccionario.lock().map_err(|_| "Error leyendo diccionario.".to_string())?.clone();
+    let idioma = sesion.idioma.lock().map_err(|_| "Error leyendo idioma.".to_string())?.clone();
     let par = idioma_a_par(&idioma);
 
-    let ruta_str = path_canon.to_str()
-        .ok_or_else(|| "Ruta contiene caracteres no permitidos (no-UTF8).".to_string())?;
+    // La traducción de un documento puede tardar decenas de segundos.  Ejecutar en el
+    // hilo principal bloquea el event-loop → la ventana deja de responder → macOS detecta
+    // pérdida de foco → el timer de 20s dispara bloquearPantalla().  spawn_blocking mueve
+    // todo el trabajo a un hilo dedicado y deja el hilo principal libre.
+    tauri::async_runtime::spawn_blocking(move || {
+        // Anti path-traversal
+        if ruta.contains("..") {
+            return Err("Ruta no autorizada.".into());
+        }
 
-    let progreso = |pct: u8, msg: &str| {
-        let _ = app.emit("progreso-traduccion", serde_json::json!({"pct": pct, "msg": msg}));
-    };
-    traductor::procesar_archivo_inteligente(
-        ruta_str,
-        &dict,
-        &subclave_hex,
-        &id_usuario,
-        par,
-        &progreso,
-    )?;
+        // Extensión antes de canonicalize para dar un error claro si el tipo no es válido.
+        let ext = Path::new(&ruta)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+        if !["pdf", "docx", "txt"].contains(&ext.as_str()) {
+            return Err(format!("Tipo de archivo no permitido: .{}", ext));
+        }
 
-    let ruta_real = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
-    Ok(ruta_real)
+        // En sandbox, is_file() devuelve false para archivos arrastrados hasta que el OS
+        // resuelve el acceso user-selected.  Canonicalize abre el acceso y falla si la ruta
+        // no existe — igual que hace cifrar_y_guardar_desde_ruta para drag & drop.
+        let path_canon = std::fs::canonicalize(&ruta)
+            .map_err(|_| format!("Archivo no accesible: {}", ruta))?;
+
+        let meta = std::fs::metadata(&path_canon)
+            .map_err(|e| format!("Error accediendo archivo: {}", e))?;
+        if meta.len() > 100 * 1024 * 1024 {
+            return Err("El archivo supera el límite de 100 MB.".into());
+        }
+
+        let nombre_base = std::path::Path::new(&nombre_archivo)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&nombre_archivo)
+            .to_string();
+
+        let ruta_str = path_canon.to_str()
+            .ok_or_else(|| "Ruta contiene caracteres no permitidos (no-UTF8).".to_string())?;
+
+        let progreso = |pct: u8, msg: &str| {
+            let _ = app.emit("progreso-traduccion", serde_json::json!({"pct": pct, "msg": msg}));
+        };
+        traductor::procesar_archivo_inteligente(
+            ruta_str,
+            &dict,
+            &subclave_hex,
+            &id_usuario,
+            par,
+            &progreso,
+        )?;
+
+        let ruta_real = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
+        Ok(ruta_real)
+    })
+    .await
+    .map_err(|e| format!("Error interno al traducir: {}", e))?
 }
 
 // ============================================================
