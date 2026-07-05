@@ -1232,7 +1232,7 @@ async function abrirImportarGuardado(): Promise<void> {
       ruta_cifrada: string;
       nombre: string;
       original_borrado: boolean;
-      ruta_original: string;
+      tiene_original: boolean;
     } | null>("importar_archivo_dialogo");
 
     if (!res) return;
@@ -1246,7 +1246,7 @@ async function abrirImportarGuardado(): Promise<void> {
     }
 
     let originalBorrado = false;
-    if (res.ruta_original) {
+    if (res.tiene_original) {
       const confirmar = await confirmarConCheckbox({
         titulo: "BORRAR ORIGINAL",
         msg: "¿Eliminar el archivo original del ordenador?",
@@ -1261,7 +1261,8 @@ async function abrirImportarGuardado(): Promise<void> {
       });
       if (confirmar) {
         try {
-          originalBorrado = await invoke<boolean>("borrar_archivo_original", { ruta: res.ruta_original });
+          // Sin parámetros: la ruta la gestiona Rust internamente
+          originalBorrado = await invoke<boolean>("borrar_archivo_original");
         } catch (e) {
           mostrarToast(`Error al eliminar original: ${e}`, true);
         }

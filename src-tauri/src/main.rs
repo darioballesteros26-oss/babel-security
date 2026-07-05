@@ -29,6 +29,11 @@ const MAX_ARCHIVOS: usize = 1000;
 // pueden perder actualizaciones (last-write-wins sobre estado obsoleto).
 static BUZON_INDEX_MUTEX: Mutex<()> = Mutex::new(());
 
+// Ruta del archivo original pendiente de borrado tras un import.
+// Se fija en importar_archivo_dialogo y se consume (→ None) en borrar_archivo_original.
+// Nunca se expone al frontend: el JS solo sabe si hay algo pendiente (bool).
+static PENDING_BORRAR_ORIGINAL: Mutex<Option<String>> = Mutex::new(None);
+
 // ============================================================
 // HELPER — Borrado seguro de archivos temporales
 // ============================================================
@@ -713,7 +718,7 @@ struct ImportarDialogoResultado {
     ruta_cifrada: String,
     nombre: String,
     original_borrado: bool,
-    ruta_original: String,
+    tiene_original: bool,
 }
 
 #[tauri::command]
@@ -765,17 +770,23 @@ async fn importar_archivo_dialogo(
             .ok_or("Nombre de archivo inválido")?
             .to_string();
 
-        // Cifrar y guardar. La confirmación de borrar el original la gestiona el frontend
-        // (modal con checkbox "no volver a preguntar"); si el usuario acepta, llama al
-        // comando borrar_archivo_original con la misma ruta que devolvemos aquí.
+        // Limpiar cualquier pendiente anterior antes de empezar
+        if let Ok(mut p) = PENDING_BORRAR_ORIGINAL.lock() { *p = None; }
+
         let ruta_cifrada =
             cifrar_y_guardar_desde_ruta(&nombre, &ruta_original_str, &subclave_hex, &id_usuario)?;
+
+        // Guardar la ruta en el mutex interno — el frontend NUNCA la ve.
+        // Solo recibe un bool para saber si debe ofrecer el borrado.
+        if let Ok(mut p) = PENDING_BORRAR_ORIGINAL.lock() {
+            *p = Some(ruta_original_str);
+        }
 
         Ok(Some(ImportarDialogoResultado {
             ruta_cifrada,
             nombre,
             original_borrado: false,
-            ruta_original: ruta_original_str,
+            tiene_original: true,
         }))
     })
     .await
@@ -784,16 +795,18 @@ async fn importar_archivo_dialogo(
 
 // ============================================================
 // COMANDO — Borrar de forma segura el archivo original tras importar.
-// El frontend pide confirmación (con opción "no volver a preguntar") y
-// solo llama aquí si el usuario acepta.  La ruta fue generada por el
-// propio backend en importar_archivo_dialogo — no es input libre del usuario.
+// No acepta parámetros del frontend: lee la ruta de PENDING_BORRAR_ORIGINAL
+// (fijada por importar_archivo_dialogo) y la limpia después de usarla.
+// Así el frontend nunca conoce la ruta y no puede usarla como vector de ataque.
 // ============================================================
 #[tauri::command]
-fn borrar_archivo_original(ruta: String) -> Result<bool, String> {
-    if ruta.contains("..") {
-        return Err("Ruta no autorizada.".into());
-    }
-    // Verificar que el archivo es accesible (el sandbox lo permite si viene de NSOpenPanel)
+fn borrar_archivo_original() -> Result<bool, String> {
+    let ruta = PENDING_BORRAR_ORIGINAL
+        .lock()
+        .map_err(|_| "Error interno.".to_string())?
+        .take()
+        .ok_or_else(|| "No hay archivo pendiente de borrado.".to_string())?;
+
     let path = std::fs::canonicalize(&ruta)
         .map_err(|_| "Archivo no accesible.".to_string())?;
     let ruta_canon = path.to_str().unwrap_or(&ruta).to_string();
@@ -1001,9 +1014,10 @@ fn mover_archivo_guardado(
 // ============================================================
 #[tauri::command]
 fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
-    // Señalizar al hilo del servidor P2P para que salga y libere su copia de la subclave
     babel_p2p::detener_servidor_p2p();
     sesion.limpiar();
+    // Limpiar ruta pendiente de borrado para que no persista entre sesiones
+    if let Ok(mut p) = PENDING_BORRAR_ORIGINAL.lock() { *p = None; }
     // Borrar temporales en claro con 3 pasadas (0x00, 0xFF, 0xAA) + fsync antes de eliminar
     let tmp = babel_dir().join("tmp");
     if let Ok(entradas) = fs::read_dir(&tmp) {
