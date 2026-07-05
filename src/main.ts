@@ -435,7 +435,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (_blurLockTimer) clearTimeout(_blurLockTimer);
       _blurLockTimer = setTimeout(() => {
         if (!document.hasFocus() && _sesionActiva) bloquearPantalla();
-      }, 20_000);
+      }, 120_000);
     } else if (enfocado && _blurLockTimer) {
       clearTimeout(_blurLockTimer);
       _blurLockTimer = null;
@@ -2656,7 +2656,7 @@ async function guardarAjustesTraduccion(): Promise<void> {
 }
 
 async function guardarTimeoutSesion(minutos: string): Promise<void> {
-  const min = Math.max(5, Math.min(60, parseInt(minutos, 10)));
+  const min = Math.max(2, Math.min(60, parseInt(minutos, 10)));
   _tiempoLockMs = min * 60 * 1000;
   resetearTimerInactividad();
   await guardarAjustesTraduccion();
@@ -2669,7 +2669,7 @@ async function cargarAjustesTraduccion(): Promise<void> {
   const destino = s.idioma_destino ?? "en";
   const categoria = s.categoria ?? "todos";
   const borradoAuto = s.borrar_al_salir ?? false;
-  const timeoutMin: number = Math.max(5, Math.min(60, s.timeout_sesion_minutos ?? 15));
+  const timeoutMin: number = Math.max(2, Math.min(60, s.timeout_sesion_minutos ?? 15));
 
   // Aplicar timeout al timer de inactividad (solo si hay sesión activa)
   _tiempoLockMs = timeoutMin * 60 * 1000;
