@@ -699,10 +699,36 @@ async function procesarRuta(ruta: string): Promise<void> {
 // DESCARGA
 // ============================================================
 
-async function descargarArchivo(ruta: string, nombre: string): Promise<void> {
+function detectarExtBytes(b: Uint8Array): string {
+  if (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return "pdf";
+  if (b[0] === 0x50 && b[1] === 0x4B) return "docx";
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return "png";
+  if (b[0] === 0xFF && b[1] === 0xD8) return "jpg";
+  return "txt";
+}
+
+function nombreLimpioDeRuta(ruta: string, ext: string): string {
+  const base = ruta.replace(/\\/g, "/").split("/").pop() ?? "archivo.babel";
+  const sinExt = base.endsWith(".babel") ? base.slice(0, -6) : base;
+  const partes = sinExt.split("_");
+  // Quitar prefijo de usuario (primer segmento)
+  const sinUsuario = partes.length > 1 ? partes.slice(1).join("_") : sinExt;
+  // Quitar sufijo timestamp (≥8 dígitos al final)
+  const p2 = sinUsuario.split("_");
+  const ultimo = p2[p2.length - 1];
+  const nombre = (p2.length > 1 && /^\d{8,}$/.test(ultimo))
+    ? p2.slice(0, -1).join("_")
+    : sinUsuario;
+  return `${nombre}.${ext}`;
+}
+
+async function descargarArchivo(ruta: string, _nombreHint: string): Promise<void> {
   try {
     const bytes = await invoke<number[]>("leer_resultado", { ruta });
-    const blob = new Blob([new Uint8Array(bytes)], { type: "application/octet-stream" });
+    const arr = new Uint8Array(bytes);
+    const ext = detectarExtBytes(arr);
+    const nombre = nombreLimpioDeRuta(ruta, ext);
+    const blob = new Blob([arr], { type: "application/octet-stream" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.download = nombre;

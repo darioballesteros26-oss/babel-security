@@ -1233,21 +1233,66 @@ async fn seleccionar_ruta_dialogo(app: tauri::AppHandle) -> Result<Option<String
 // ============================================================
 
 #[tauri::command]
+// Descifra un .babel y devuelve los bytes originales del documento.
+// Maneja dos casos: contenido comprimido en b64 (PDF, DOCX, binarios) y
+// texto plano directo (TXT translations guardados sin comprimir).
+fn descifrar_a_bytes(ruta: &str, subclave_hex: &str) -> Result<Vec<u8>, String> {
+    let cifrado = fs::read(ruta).map_err(|e| format!("Error leyendo: {}", e))?;
+    let contenido = seguridad::descifrar_documento(cifrado, subclave_hex)
+        .map_err(|e| format!("Error descifrando: {}", e))?;
+    if let Ok(raw) = traductor::descomprimir_b64(&contenido) {
+        return Ok(raw);
+    }
+    // Fallback: el contenido descifrado ya es el texto (TXT sin comprimir)
+    Ok(contenido.into_bytes())
+}
+
+// Detecta la extensión real de un archivo por sus magic bytes.
+fn detectar_ext(bytes: &[u8]) -> &'static str {
+    if bytes.len() >= 4 && &bytes[..4] == b"%PDF" { return "pdf"; }
+    if bytes.len() >= 2 && &bytes[..2] == b"PK" { return "docx"; }
+    if bytes.len() >= 4 && &bytes[..4] == b"\x89PNG" { return "png"; }
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8 { return "jpg"; }
+    "txt"
+}
+
+// Reconstruye un nombre de archivo limpio a partir de la ruta .babel interna.
+// Formato interno: "{usuario}_{nombre_base}.babel" o "{usuario}_{nombre}_{ts}.babel"
+fn nombre_exportacion(ruta: &str, ext: &str) -> String {
+    let stem = Path::new(ruta)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "archivo".into());
+    // Quitar prefijo de usuario
+    let sin_usuario = stem.splitn(2, '_').nth(1).unwrap_or(&stem).to_string();
+    // Quitar sufijo de timestamp (≥ 8 dígitos al final)
+    let nombre = if let Some(pos) = sin_usuario.rfind('_') {
+        let sufijo = &sin_usuario[pos + 1..];
+        if sufijo.len() >= 8 && sufijo.chars().all(|c| c.is_ascii_digit()) {
+            sin_usuario[..pos].to_string()
+        } else {
+            sin_usuario
+        }
+    } else {
+        sin_usuario
+    };
+    format!("{}.{}", nombre, ext)
+}
+
+#[tauri::command]
 fn leer_resultado(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Vec<u8>, String> {
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
-    // Seguridad: solo permitimos leer desde ~/Babel/archivos/
     validar_ruta_en(&ruta, archivos_dir())?;
 
-    // R-3: comprobar tamaño antes de leer en memoria
     let meta = fs::metadata(&ruta).map_err(|e| format!("Error accediendo archivo: {}", e))?;
     if meta.len() > 100 * 1024 * 1024 {
         return Err("Archivo supera el límite de 100 MB.".into());
     }
 
-    fs::read(&ruta).map_err(|e| format!("Error leyendo resultado: {}", e))
+    descifrar_a_bytes(&ruta, &subclave_hex)
 }
 
 // ============================================================
@@ -1460,34 +1505,19 @@ async fn exportar_archivo(
     app: tauri::AppHandle,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
-    if sesion.subclave_hex()?.is_empty() {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
 
-    // Igual que en importar: el save panel nativo (blocking_save_file) hace
-    // run_on_main_thread + espera en un canal. En un comando SÍNCRONO correría en el
-    // hilo principal y provocaría un DEADLOCK (UI congelada en "cargando"). Por eso el
-    // comando es async y el diálogo va en spawn_blocking, dejando el hilo principal libre.
     tauri::async_runtime::spawn_blocking(move || {
-        // Seguridad: solo permitimos exportar desde ~/Babel/archivos/ o ~/Babel/guardados/
         validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
-        if !Path::new(&ruta).exists() {
-            return Err(format!("Archivo no encontrado: {}", ruta));
-        }
+        // Descifrar y reconstruir el documento original
+        let raw = descifrar_a_bytes(&ruta, &subclave_hex)?;
+        let ext = detectar_ext(&raw);
+        let nombre = nombre_exportacion(&ruta, ext);
 
-        let nombre = Path::new(&ruta)
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        if nombre.is_empty() {
-            return Err("No se pudo extraer el nombre del archivo.".into());
-        }
-
-        // Muestra el save panel nativo del Finder — el usuario elige dónde guardar.
-        // user-selected.read-write concede acceso al destino elegido dentro del sandbox.
         use tauri_plugin_dialog::DialogExt;
         let destino_opt = app
             .dialog()
@@ -1500,8 +1530,8 @@ async fn exportar_archivo(
             None => return Err("Exportación cancelada.".into()),
         };
 
-        std::fs::copy(&ruta, &destino_path)
-            .map_err(|e| format!("Error al copiar: {}", e))?;
+        fs::write(&destino_path, &raw)
+            .map_err(|e| format!("Error al escribir: {}", e))?;
 
         Ok(destino_path.to_string_lossy().to_string())
     })
@@ -1525,6 +1555,11 @@ async fn exportar_archivos_a_carpeta(
 
     // async + spawn_blocking para que el folder picker nativo no deadlockee el hilo
     // principal (mismo motivo que exportar_archivo / importar_archivo_dialogo).
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+
     tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
         let carpeta_opt = app.dialog().file().blocking_pick_folder();
@@ -1541,12 +1576,14 @@ async fn exportar_archivos_a_carpeta(
             {
                 continue;
             }
-            let nombre = match Path::new(ruta).file_name() {
-                Some(n) => n.to_string_lossy().to_string(),
-                None => continue,
+            let raw = match descifrar_a_bytes(ruta, &subclave_hex) {
+                Ok(b) => b,
+                Err(_) => continue,
             };
+            let ext = detectar_ext(&raw);
+            let nombre = nombre_exportacion(ruta, ext);
             let destino = carpeta.join(&nombre);
-            if std::fs::copy(ruta, &destino).is_ok() {
+            if fs::write(&destino, &raw).is_ok() {
                 copiados += 1;
             }
         }
