@@ -1025,14 +1025,13 @@ fn traducir_documento_ruta(
         return Err("No hay sesión activa. Inicia sesión primero.".into());
     }
 
-    let path = Path::new(&ruta);
-    if !path.is_file() {
-        return Err(format!("Archivo no encontrado: {}", ruta));
+    // Anti path-traversal
+    if ruta.contains("..") {
+        return Err("Ruta no autorizada.".into());
     }
 
-    // Restringir a los tipos de documento que Babel procesa realmente.
-    // Evita que esta ruta abierta se use para leer ficheros arbitrarios del sistema.
-    let ext = path
+    // Extensión antes de canonicalize para dar un error claro si el tipo no es válido.
+    let ext = Path::new(&ruta)
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
@@ -1041,19 +1040,14 @@ fn traducir_documento_ruta(
         return Err(format!("Tipo de archivo no permitido: .{}", ext));
     }
 
-    // En sandbox com.apple.security.app-sandbox dirs::home_dir() devuelve el contenedor
-    // (~/.../Containers/com.babel.seguridad/Data), no el home real.  El check starts_with
-    // rechazaría archivos legítimos del Escritorio/Descargas.  La seguridad la gestiona el
-    // OS via user-selected.read-write — igual que guardar_documento_sin_traducir.
-    // Solo verificamos que la ruta es accesible (canonicalize) y no tiene path traversal.
-    if ruta.contains("..") {
-        return Err("Ruta no autorizada.".into());
-    }
-    let _ = std::fs::canonicalize(&ruta)
-        .map_err(|_| "Ruta no accesible o inválida.".to_string())?;
+    // En sandbox, is_file() devuelve false para archivos arrastrados hasta que el OS
+    // resuelve el acceso user-selected.  Canonicalize abre el acceso y falla si la ruta
+    // no existe — igual que hace cifrar_y_guardar_desde_ruta para drag & drop.
+    let path_canon = std::fs::canonicalize(&ruta)
+        .map_err(|_| format!("Archivo no accesible: {}", ruta))?;
 
     // R-2: límite de tamaño antes de procesar
-    let meta = std::fs::metadata(&ruta).map_err(|e| format!("Error accediendo archivo: {}", e))?;
+    let meta = std::fs::metadata(&path_canon).map_err(|e| format!("Error accediendo archivo: {}", e))?;
     if meta.len() > 100 * 1024 * 1024 {
         return Err("El archivo supera el límite de 100 MB.".into());
     }
@@ -1088,13 +1082,12 @@ fn traducir_documento_ruta(
 
     let par = idioma_a_par(&idioma);
 
-    let ruta_str = path.to_str()
+    let ruta_str = path_canon.to_str()
         .ok_or_else(|| "Ruta contiene caracteres no permitidos (no-UTF8).".to_string())?;
 
     let progreso = |pct: u8, msg: &str| {
         let _ = app.emit("progreso-traduccion", serde_json::json!({"pct": pct, "msg": msg}));
     };
-    // Procesamos desde la ruta original — sin crear ningún temporal
     traductor::procesar_archivo_inteligente(
         ruta_str,
         &dict,
