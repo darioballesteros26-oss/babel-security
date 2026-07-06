@@ -57,10 +57,12 @@ SMALL = {
 QWEN_REPO     = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
 QWEN_FILENAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 QWEN_DESTINO  = DIR_USB / "qwen.gguf"
+# El GGUF del servidor de desarrollo — se copia en vez de re-descargar
+QWEN_LOCAL    = DIR_BASE / "modelos" / "qwen-0.5b-q4.gguf"
 
 
 def convertir_modelo(nombre_hf: str, par: str) -> bool:
-    """Descarga y convierte un modelo a CTranslate2 int8. Devuelve True si OK."""
+    """Descarga (si no está en caché) y convierte un modelo a CTranslate2 int8."""
     dir_salida = DIR_MOD / par
     if dir_salida.exists() and any(dir_salida.iterdir()):
         print(f"  [ya existe] {par}")
@@ -68,40 +70,16 @@ def convertir_modelo(nombre_hf: str, par: str) -> bool:
 
     print(f"  [convirtiendo] {par} ← {nombre_hf}")
     dir_salida.mkdir(parents=True, exist_ok=True)
-
-    # ct2-opus-mt-converter es el CLI oficial de CTranslate2 para modelos Helsinki-NLP
-    cmd = [
-        sys.executable, "-m", "ctranslate2.converters.opus_mt",
-        "--model", nombre_hf,
-        "--output_dir", str(dir_salida),
-        "--quantization", "int8",
-        "--force",
-    ]
-    # Intentar con el CLI si el módulo no funciona directamente
-    cli = shutil.which("ct2-opus-mt-converter")
-    if cli:
-        cmd = [cli, "--model", nombre_hf, "--output_dir", str(dir_salida),
-               "--quantization", "int8", "--force"]
-
     try:
-        # Primero intentar con la API Python de ctranslate2
         import ctranslate2
         converter = ctranslate2.converters.OpusMTConverter(nombre_hf)
         converter.convert(str(dir_salida), quantization="int8", force=True)
         print(f"  [OK] {par} → {dir_salida}")
         return True
-    except (ImportError, AttributeError):
-        pass
-
-    # Fallback: subprocess con CLI
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"  [ERROR] {par}: {result.stderr[-300:]}")
+    except Exception as e:
+        print(f"  [ERROR] {par}: {e}")
         shutil.rmtree(dir_salida, ignore_errors=True)
         return False
-
-    print(f"  [OK] {par} → {dir_salida}")
-    return True
 
 
 def guardar_tokenizer(nombre_hf: str, par: str) -> bool:
@@ -127,6 +105,11 @@ def descargar_qwen() -> bool:
     if QWEN_DESTINO.exists():
         print("  [ya existe] qwen.gguf")
         return True
+    # Reusar el GGUF del servidor de desarrollo si existe (evita re-descarga)
+    if QWEN_LOCAL.exists():
+        shutil.copy2(str(QWEN_LOCAL), str(QWEN_DESTINO))
+        print(f"  [copiado] qwen.gguf desde servidor dev")
+        return True
     try:
         from huggingface_hub import hf_hub_download
     except ImportError:
@@ -146,6 +129,30 @@ def descargar_qwen() -> bool:
     except Exception as e:
         print(f"  [ERROR] Qwen: {e}")
         return False
+
+
+def verificar_prefijos():
+    """Imprime los códigos de idioma que acepta cada modelo multilingüe.
+    Ejecutar tras la descarga para confirmar que >>spa<< y >>rus<< son correctos."""
+    from transformers import MarianTokenizer
+    multilingues = {
+        "en-es": ">>spa<<",
+        "ar-es": ">>spa<<",
+        "es-ru": ">>rus<<",
+        "en-ru": ">>rus<<",
+    }
+    print("\n[Verificación de prefijos — modelos multilingüe]")
+    for par, prefijo_esperado in multilingues.items():
+        dir_tok = DIR_TOK / par
+        if not dir_tok.exists():
+            print(f"  {par}: tokenizer no descargado aún")
+            continue
+        tok = MarianTokenizer.from_pretrained(str(dir_tok))
+        vocab = tok.get_vocab()
+        codigos = sorted([k for k in vocab if k.startswith(">>") and k.endswith("<<")])
+        ok = prefijo_esperado in codigos
+        estado = "OK" if ok else "AVISO — prefijo puede ser incorrecto"
+        print(f"  {par}: {codigos[:8]}  →  usando {prefijo_esperado}  [{estado}]")
 
 
 if __name__ == "__main__":
@@ -168,6 +175,8 @@ if __name__ == "__main__":
 
     print(f"\n[{total+1}/{total+1}] Qwen-2.5-0.5B revisor:")
     qwen_ok = descargar_qwen()
+
+    verificar_prefijos()
 
     print(f"\n{'='*50}")
     print(f"Modelos: {ok}/{total} OK  |  Qwen: {'OK' if qwen_ok else 'FALLO'}")
