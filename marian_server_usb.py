@@ -79,7 +79,6 @@ _LANG_NAMES = {
 
 
 def cargar_modelos():
-    device = "auto"  # CTranslate2 elige CPU (USB no garantiza GPU)
     pares_cargados = 0
     for par in sorted(PARES_SOPORTADOS):
         dir_mod = DIR_MODELOS / par
@@ -174,7 +173,7 @@ def _verificar_calidad(original: str, resultado: str, par: str):
     if sum(c.isalpha() for c in resultado) < 4:
         raise RuntimeError("Sin suficientes letras")
 
-    palabras = [re.sub(r'[^a-zA-Z]', '', p).lower() for p in resultado.split()]
+    palabras = [re.sub(r'[^\w]', '', p, flags=re.UNICODE).lower() for p in resultado.split()]
     palabras = [p for p in palabras if p.isalpha() and len(p) > 3]
     if palabras and max(palabras.count(p) for p in set(palabras)) > 2:
         raise RuntimeError(f"Repetición en {par}")
