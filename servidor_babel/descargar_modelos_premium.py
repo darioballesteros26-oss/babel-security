@@ -62,7 +62,8 @@ def convertir_modelo(nombre_hf: str, par: str) -> bool:
     dir_salida.mkdir(parents=True, exist_ok=True)
     try:
         import ctranslate2
-        converter = ctranslate2.converters.OpusMTConverter(nombre_hf)
+        # TransformersConverter acepta IDs de HuggingFace y descarga automáticamente
+        converter = ctranslate2.converters.TransformersConverter(nombre_hf)
         converter.convert(str(dir_salida), quantization="int8", force=True)
         print(f"  [OK] {par} → {dir_salida}")
         return True
