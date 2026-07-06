@@ -145,6 +145,98 @@
       -webkit-backdrop-filter: blur(16px);
       border-bottom: 1px solid rgba(255,255,255,0.06);
     }
+
+    /* ── Spinner envío formulario ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 0.8s linear infinite; transform-origin: center; }
+
+    /* ── Tooltip términos técnicos ── */
+    .term-tip {
+      border-bottom: 1px dashed rgba(212,175,55,0.5);
+      cursor: help;
+      position: relative;
+      display: inline-block;
+    }
+    .term-tip::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1A2235;
+      border: 1px solid rgba(212,175,55,0.3);
+      color: #CBD5E1;
+      font-size: 11px;
+      font-weight: 400;
+      line-height: 1.4;
+      padding: 7px 11px;
+      border-radius: 8px;
+      width: max-content;
+      max-width: 220px;
+      white-space: normal;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+      z-index: 200;
+    }
+    .term-tip:hover::after,
+    .term-tip:focus::after { opacity: 1; }
+
+    /* ── Responsive: solo aplicar hover-lift en dispositivos con puntero ── */
+    @media (hover: none) {
+      .card-lift:hover { transform: none; box-shadow: none; }
+    }
+
+    /* ── Responsive: prevenir zoom en inputs iOS (mínimo 16px) ── */
+    @media (max-width: 768px) {
+      input, textarea, select { font-size: 16px !important; }
+    }
+
+    /* ── Touch: eliminar delay de 300ms en botones ── */
+    button, a { touch-action: manipulation; }
+
+    /* ── Modales legales ── */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      display: flex; align-items: center; justify-content: center;
+      padding: 1rem;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .modal-overlay.open { opacity: 1; pointer-events: auto; }
+    .modal-box {
+      background: #0F1525;
+      border: 1px solid rgba(212,175,55,0.2);
+      border-radius: 1.25rem;
+      max-width: 680px; width: 100%;
+      max-height: 85vh;
+      overflow-y: auto;
+      padding: 2rem 2.5rem 2.5rem;
+      position: relative;
+      scrollbar-width: thin;
+      scrollbar-color: #1E293B transparent;
+    }
+    .modal-box::-webkit-scrollbar { width: 4px; }
+    .modal-box::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 3px; }
+    .modal-close {
+      position: sticky; top: 0; float: right;
+      margin-left: 1rem; margin-bottom: 0.5rem;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #94A3B8; border-radius: 0.5rem;
+      width: 32px; height: 32px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: background 0.2s, color 0.2s;
+      flex-shrink: 0;
+    }
+    .modal-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
+    .modal-h1 { color: #D4AF37; font-size: 1.25rem; font-weight: 800; margin-bottom: 1.5rem; }
+    .modal-h2 { color: #F1F5F9; font-size: 0.875rem; font-weight: 700; margin: 1.25rem 0 0.5rem; }
+    .modal-p  { color: #94A3B8; font-size: 0.8125rem; line-height: 1.65; margin-bottom: 0.75rem; }
   </style>
 </head>
 
@@ -209,7 +301,7 @@
         </div>
 
         <!-- CTA download (glassmorphism) -->
-        <a href="#contacto" class="hidden sm:inline-flex items-center gap-2 glass px-4 py-2 rounded-xl text-sm font-semibold c-gold hover:text-white hover:bg-yellow-500/10 border border-gold transition-all duration-200" data-i18n="nav_download">
+        <a href="#precios" class="hidden sm:inline-flex items-center gap-2 glass px-4 py-2 rounded-xl text-sm font-semibold c-gold hover:text-white hover:bg-yellow-500/10 border border-gold transition-all duration-200" data-i18n="nav_download">
           Descargar App
         </a>
 
@@ -228,7 +320,7 @@
     <a href="#seguridad"     class="mobile-link block py-2.5 text-slate-300 hover:text-white text-sm font-medium transition-colors" data-i18n="nav_security">Seguridad GDPR</a>
     <a href="#precios"       class="mobile-link block py-2.5 text-slate-300 hover:text-white text-sm font-medium transition-colors" data-i18n="nav_pricing">Precios</a>
     <a href="#contacto"      class="mobile-link block py-2.5 text-slate-300 hover:text-white text-sm font-medium transition-colors" data-i18n="nav_contact">Contacto</a>
-    <a href="#contacto"      class="mobile-link block py-2.5 c-gold text-sm font-semibold transition-colors" data-i18n="nav_download">Descargar App</a>
+    <a href="#precios"       class="mobile-link block py-2.5 c-gold text-sm font-semibold transition-colors" data-i18n="nav_download">Descargar App</a>
   </div>
 </nav>
 
@@ -266,7 +358,7 @@
 
       <!-- CTA -->
       <div class="reveal r4 flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-        <a href="#contacto" class="btn-emerald inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl text-white font-semibold text-base shadow-lg">
+        <a href="#precios" class="btn-emerald inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl text-white font-semibold text-base shadow-lg">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           <span data-i18n="hero_cta">Comenzar en Local</span>
         </a>
@@ -310,7 +402,7 @@
             <div class="c-gold font-bold text-sm tracking-wide mb-1" data-i18n="hero_shield_label">Entorno Offline Seguro</div>
             <div class="flex items-center justify-center gap-1.5 mt-2">
               <span class="w-1.5 h-1.5 rounded-full animate-pulse" style="background:#D4AF37"></span>
-              <span class="text-xs text-slate-400 font-mono">AES-256-GCM</span>
+              <span class="text-xs text-slate-400 font-mono term-tip" data-i18n-tip="tooltip_aes" data-tip="Cifrado de grado militar. Tus archivos son ilegibles sin tu clave personal." tabindex="0">AES-256-GCM</span>
             </div>
           </div>
         </div>
@@ -445,7 +537,7 @@
           <tr>
             <td class="px-6 py-4 text-slate-300" data-i18n="cmp_r5">Cifrado AES-256 en tu dispositivo</td>
             <td class="px-6 py-4 text-center text-slate-400 text-xs font-medium" data-i18n="cmp_r5_no">Limitado</td>
-            <td class="px-6 py-4 text-center c-gold text-xs font-medium">AES-256-GCM</td>
+            <td class="px-6 py-4 text-center c-gold text-xs font-medium"><span class="term-tip" data-i18n-tip="tooltip_aes" data-tip="Cifrado de grado militar. Tus archivos son ilegibles sin tu clave personal." tabindex="0">AES-256-GCM</span></td>
           </tr>
         </tbody>
       </table>
@@ -789,6 +881,7 @@
       <button type="submit" id="submit-btn"
         class="btn-emerald w-full py-4 rounded-xl font-bold text-base text-white shadow-lg flex items-center justify-center gap-2.5 transition-all duration-200">
         <svg id="submit-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        <svg id="submit-spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="hidden spin" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/></svg>
         <span id="submit-text" data-i18n="contact_submit">Enviar mensaje</span>
       </button>
 
@@ -822,14 +915,13 @@
       <div class="flex items-center gap-5 mb-7">
         <div class="w-16 h-16 rounded-full flex-shrink-0 flex items-center justify-center text-xl font-black" style="background:linear-gradient(135deg,rgba(212,175,55,0.18),rgba(168,134,12,0.06));border:1px solid rgba(212,175,55,0.3);color:#D4AF37">SB</div>
         <div>
-          <div class="text-white font-bold text-lg" data-i18n="team_name">Equipo Security Babel</div>
-          <div class="text-slate-500 text-sm" data-i18n="team_loc">Madrid, España · Fundado en 2026</div>
+          <div class="text-white font-bold text-lg" data-i18n="team_name">Security Babel</div>
+          <div class="text-slate-500 text-sm" data-i18n="team_loc">Marbella, España · Fundado en 2026</div>
         </div>
       </div>
       <div class="space-y-4">
-        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="team_p1">Somos ingenieros de software y especialistas en privacidad que trabajamos con despachos legales y clínicas médicas durante años. Vimos de primera mano cómo documentos confidenciales pasaban por Google Translate, DeepL y ChatGPT sin que nadie lo cuestionara.</p>
-        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="team_p2">Security Babel nació de una pregunta muy concreta: ¿por qué tiene que salir un contrato confidencial de tu ordenador para ser traducido? La respuesta es que no tiene que hacerlo. La tecnología para hacerlo en local ya existe — solo había que empaquetar bien.</p>
-        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="team_p3">Construimos el software que quisiéramos que usaran nuestros propios abogados. Sin inversores que exijan monetizar tus datos. Sin hoja de ruta que dependa de vender tu información a terceros.</p>
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="team_p1">Security Babel nació de una pregunta muy concreta: ¿por qué tiene que salir un contrato confidencial de tu ordenador para ser traducido? La respuesta es que no tiene que hacerlo. La tecnología para hacerlo en local ya existe — solo había que empaquetar bien.</p>
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="team_p2">Construido desde cero por un desarrollador independiente, con la convicción de que la privacidad no debería ser un lujo reservado a quien puede pagar soluciones enterprise. Sin inversores que exijan monetizar tus datos. Sin hoja de ruta que dependa de vender tu información a terceros.</p>
       </div>
     </div>
   </div>
@@ -928,8 +1020,8 @@
 
       <!-- Links legales -->
       <div class="flex items-center gap-6">
-        <a href="#" class="text-slate-500 hover:text-slate-300 text-sm transition-colors" data-i18n="footer_privacy">Política de Privacidad</a>
-        <a href="#" class="text-slate-500 hover:text-slate-300 text-sm transition-colors" data-i18n="footer_terms">Términos de Uso</a>
+        <a href="#" data-modal="privacy" class="text-slate-500 hover:text-slate-300 text-sm transition-colors" data-i18n="footer_privacy">Política de Privacidad</a>
+        <a href="#" data-modal="terms"   class="text-slate-500 hover:text-slate-300 text-sm transition-colors" data-i18n="footer_terms">Términos de Uso</a>
       </div>
     </div>
   </div>
@@ -1012,9 +1104,11 @@ const translations = {
     contact_name_ph:    "Tu nombre",
     contact_email_ph:   "correo@ejemplo.com",
     contact_message_ph: "¿Qué pasó? ¿En qué parte de la app? ¿Con qué sistema operativo? Cuanta más información mejor.",
-    contact_submit: "Enviar mensaje",
-    contact_sent:   "¡Recibido! Me pondré en contacto contigo para solucionarlo.",
-    contact_error:  "Error al enviar. Por favor inténtalo de nuevo.",
+    contact_submit:  "Enviar mensaje",
+    contact_sending: "Enviando...",
+    contact_sent:    "¡Recibido! Me pondré en contacto contigo para solucionarlo.",
+    contact_error:   "Error al enviar. Por favor inténtalo de nuevo.",
+    tooltip_aes: "Cifrado de grado militar. Tus archivos son ilegibles sin tu clave personal.",
     faq_title: "Preguntas frecuentes",
     faq_q1: "¿Qué ocurre con mis documentos si dejo de pagar?",
     faq_a1: "Tus documentos te pertenecen siempre. Están cifrados en tu disco local y seguirán siendo accesibles. Solo se desactivarán las funciones de traducción automática y las actualizaciones del software.",
@@ -1062,10 +1156,9 @@ const translations = {
     roi_note: "Con el plan Standard (50€/mes), el retorno se alcanza con un solo contrato al mes.",
     /* equipo */
     team_badge: "El equipo", team_title: "Quién está detrás",
-    team_name: "Equipo Security Babel", team_loc: "Madrid, España · Fundado en 2026",
-    team_p1: "Somos ingenieros de software y especialistas en privacidad que trabajamos con despachos legales y clínicas médicas durante años. Vimos de primera mano cómo documentos confidenciales pasaban por Google Translate, DeepL y ChatGPT sin que nadie lo cuestionara.",
-    team_p2: "Security Babel nació de una pregunta muy concreta: ¿por qué tiene que salir un contrato confidencial de tu ordenador para ser traducido? La respuesta es que no tiene que hacerlo. La tecnología para hacerlo en local ya existe — solo había que empaquetar bien.",
-    team_p3: "Construimos el software que quisiéramos que usaran nuestros propios abogados. Sin inversores que exijan monetizar tus datos. Sin hoja de ruta que dependa de vender tu información a terceros.",
+    team_name: "Security Babel", team_loc: "Marbella, España · Fundado en 2026",
+    team_p1: "Security Babel nació de una pregunta muy concreta: ¿por qué tiene que salir un contrato confidencial de tu ordenador para ser traducido? La respuesta es que no tiene que hacerlo. La tecnología para hacerlo en local ya existe — solo había que empaquetar bien.",
+    team_p2: "Construido desde cero por un desarrollador independiente, con la convicción de que la privacidad no debería ser un lujo reservado a quien puede pagar soluciones enterprise. Sin inversores que exijan monetizar tus datos. Sin hoja de ruta que dependa de vender tu información a terceros.",
     footer_privacy: "Política de Privacidad",
     footer_terms:   "Términos de Uso",
     footer_copy:    "© 2026 Security Babel. Todos los derechos reservados.",
@@ -1131,9 +1224,11 @@ const translations = {
     contact_name_ph:    "Your name",
     contact_email_ph:   "you@example.com",
     contact_message_ph: "What happened? Which part of the app? Which OS? The more detail the better.",
-    contact_submit: "Send message",
-    contact_sent:   "Received! I'll get back to you to fix it.",
-    contact_error:  "Send failed. Please try again.",
+    contact_submit:  "Send message",
+    contact_sending: "Sending...",
+    contact_sent:    "Received! I'll get back to you to fix it.",
+    contact_error:   "Send failed. Please try again.",
+    tooltip_aes: "Military-grade encryption. Your files are unreadable without your personal key.",
     faq_title: "Frequently Asked Questions",
     faq_q1: "What happens to my documents if I stop paying?",
     faq_a1: "Your documents always belong to you. They are encrypted on your local disk and will remain accessible. Only automatic translation and software updates will be deactivated.",
@@ -1176,10 +1271,9 @@ const translations = {
     roi_h4: "Saving per contract vs. manual translation",
     roi_note: "With the Standard plan (€50/month), return is achieved with just one contract per month.",
     team_badge: "The team", team_title: "Who is behind it",
-    team_name: "Security Babel Team", team_loc: "Madrid, Spain · Founded 2026",
-    team_p1: "We are software engineers and privacy specialists who worked with law firms and medical clinics for years. We saw first-hand how confidential documents passed through Google Translate, DeepL and ChatGPT without anyone questioning it.",
-    team_p2: "Security Babel was born from a simple question: why does a confidential contract have to leave your computer to be translated? It doesn't. The technology to do it locally already exists — it just needed to be packaged well.",
-    team_p3: "We built the software we'd want our own lawyers to use. No investors demanding to monetize your data. No roadmap that depends on selling your information to third parties.",
+    team_name: "Security Babel", team_loc: "Marbella, Spain · Founded 2026",
+    team_p1: "Security Babel was born from a simple question: why does a confidential contract have to leave your computer to be translated? It doesn't. The technology to do it locally already exists — it just needed to be packaged well.",
+    team_p2: "Built from scratch by an independent developer, with the conviction that privacy shouldn't be a luxury reserved for those who can afford enterprise solutions. No investors demanding to monetize your data. No roadmap that depends on selling your information to third parties.",
     footer_privacy: "Privacy Policy",
     footer_terms:   "Terms of Use",
     footer_copy:    "© 2026 Security Babel. All rights reserved.",
@@ -1245,9 +1339,11 @@ const translations = {
     contact_name_ph:    "Ваше имя",
     contact_email_ph:   "вы@пример.com",
     contact_message_ph: "Что произошло? В какой части приложения? Какая ОС? Чем подробнее, тем лучше.",
-    contact_submit: "Отправить сообщение",
-    contact_sent:   "Получено! Свяжусь с вами, чтобы решить проблему.",
-    contact_error:  "Ошибка отправки. Пожалуйста, попробуйте снова.",
+    contact_submit:  "Отправить сообщение",
+    contact_sending: "Отправка...",
+    contact_sent:    "Получено! Свяжусь с вами, чтобы решить проблему.",
+    contact_error:   "Ошибка отправки. Пожалуйста, попробуйте снова.",
+    tooltip_aes: "Военное шифрование. Ваши файлы нечитаемы без вашего личного ключа.",
     faq_title: "Часто задаваемые вопросы",
     faq_q1: "Что происходит с моими документами, если я перестаю платить?",
     faq_a1: "Ваши документы всегда принадлежат вам. Они зашифрованы на вашем локальном диске и останутся доступными. Отключатся только автоматический перевод и обновления программы.",
@@ -1290,10 +1386,9 @@ const translations = {
     roi_h4: "Экономия на контракт по сравнению с ручным переводом",
     roi_note: "При тарифе Standard (€50/мес.) окупаемость достигается уже с одного контракта в месяц.",
     team_badge: "Команда", team_title: "Кто стоит за проектом",
-    team_name: "Команда Security Babel", team_loc: "Мадрид, Испания · Основан в 2026",
-    team_p1: "Мы — инженеры-программисты и специалисты по конфиденциальности, которые годами работали с юридическими фирмами и медицинскими клиниками. Мы воочию наблюдали, как конфиденциальные документы проходили через Google Translate и ChatGPT, и никто этого не оспаривал.",
-    team_p2: "Security Babel возник из простого вопроса: зачем конфиденциальному контракту покидать ваш компьютер для перевода? Не нужно. Технология для локальной работы уже существует — просто требовала правильной упаковки.",
-    team_p3: "Мы создали программное обеспечение, которым хотели бы пользоваться наши собственные адвокаты. Без инвесторов, требующих монетизировать ваши данные. Без дорожной карты, зависящей от продажи вашей информации.",
+    team_name: "Security Babel", team_loc: "Марбелья, Испания · Основан в 2026",
+    team_p1: "Security Babel возник из простого вопроса: зачем конфиденциальному контракту покидать ваш компьютер для перевода? Не нужно. Технология для локальной работы уже существует — просто требовала правильной упаковки.",
+    team_p2: "Создан с нуля независимым разработчиком с убеждением, что конфиденциальность не должна быть роскошью для тех, кто может позволить себе корпоративные решения. Без инвесторов, требующих монетизировать ваши данные. Без дорожной карты, зависящей от продажи вашей информации.",
     footer_privacy: "Политика конфиденциальности",
     footer_terms:   "Условия использования",
     footer_copy:    "© 2026 Security Babel. Все права защищены.",
@@ -1359,9 +1454,11 @@ const translations = {
     contact_name_ph:    "اسمك",
     contact_email_ph:   "أنت@مثال.com",
     contact_message_ph: "ماذا حدث؟ في أي جزء من التطبيق؟ أي نظام تشغيل؟ كلما زادت التفاصيل كان أفضل.",
-    contact_submit: "إرسال الرسالة",
-    contact_sent:   "تم الاستلام! سأتواصل معك لحل المشكلة.",
-    contact_error:  "فشل الإرسال. يرجى المحاولة مرة أخرى.",
+    contact_submit:  "إرسال الرسالة",
+    contact_sending: "جارٍ الإرسال...",
+    contact_sent:    "تم الاستلام! سأتواصل معك لحل المشكلة.",
+    contact_error:   "فشل الإرسال. يرجى المحاولة مرة أخرى.",
+    tooltip_aes: "تشفير عسكري الدرجة. ملفاتك غير قابلة للقراءة بدون مفتاحك الشخصي.",
     faq_title: "الأسئلة الشائعة",
     faq_q1: "ماذا يحدث لوثائقي إذا توقفت عن الدفع؟",
     faq_a1: "وثائقك تخصك دائماً. إنها مشفرة على قرصك المحلي وستظل في متناولك. سيتم تعطيل الترجمة التلقائية وتحديثات البرنامج فقط.",
@@ -1404,10 +1501,9 @@ const translations = {
     roi_h4: "التوفير لكل عقد مقارنة بالترجمة اليدوية",
     roi_note: "مع خطة Standard (50 يورو/شهر)، يتحقق العائد بعقد واحد فقط في الشهر.",
     team_badge: "الفريق", team_title: "من يقف وراء المشروع",
-    team_name: "فريق Security Babel", team_loc: "مدريد، إسبانيا · تأسس 2026",
-    team_p1: "نحن مهندسو برمجيات ومتخصصون في الخصوصية عملنا مع مكاتب المحاماة والعيادات الطبية لسنوات. رأينا بأم أعيننا كيف تمر المستندات السرية عبر Google Translate وChatGPT دون أن يشكك أحد في ذلك.",
-    team_p2: "ولد Security Babel من سؤال بسيط: لماذا يجب أن يغادر العقد السري جهازك لترجمته؟ لا يجب. التكنولوجيا للقيام بذلك محلياً موجودة بالفعل — كانت تحتاج فقط إلى تغليف جيد.",
-    team_p3: "بنينا البرنامج الذي نريد محامينا أنفسهم استخدامه. بدون مستثمرين يطالبون بتحقيق الدخل من بياناتك. بدون خارطة طريق تعتمد على بيع معلوماتك لأطراف ثالثة.",
+    team_name: "Security Babel", team_loc: "ماربيا، إسبانيا · تأسس 2026",
+    team_p1: "ولد Security Babel من سؤال بسيط: لماذا يجب أن يغادر العقد السري جهازك لترجمته؟ لا يجب. التكنولوجيا للقيام بذلك محلياً موجودة بالفعل — كانت تحتاج فقط إلى تغليف جيد.",
+    team_p2: "بُني من الصفر من قِبل مطور مستقل، مع قناعة بأن الخصوصية لا ينبغي أن تكون رفاهية محجوزة لمن يستطيع دفع تكاليف الحلول المؤسسية. بدون مستثمرين يطالبون بتحقيق الدخل من بياناتك. بدون خارطة طريق تعتمد على بيع معلوماتك لأطراف ثالثة.",
     footer_privacy: "سياسة الخصوصية",
     footer_terms:   "شروط الاستخدام",
     footer_copy:    "© 2026 Security Babel. جميع الحقوق محفوظة.",
@@ -1446,6 +1542,12 @@ function setLanguage(lang) {
   document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
     const key = el.getAttribute('data-i18n-placeholder');
     if (t[key] !== undefined) el.setAttribute('placeholder', t[key]);
+  });
+
+  // ── Actualizar tooltips de términos técnicos ──
+  document.querySelectorAll('[data-i18n-tip]').forEach(el => {
+    const key = el.getAttribute('data-i18n-tip');
+    if (t[key] !== undefined) el.setAttribute('data-tip', t[key]);
   });
 
   // ── Actualizar label del selector ──
@@ -1570,7 +1672,9 @@ form.addEventListener('submit', async (e) => {
 
   // Estado "enviando"
   submitBtn.disabled = true;
-  submitText.textContent = translations[currentLang]['contact_submit'] + '...';
+  submitText.textContent = translations[currentLang]['contact_sending'];
+  document.getElementById('submit-icon').classList.add('hidden');
+  document.getElementById('submit-spinner').classList.remove('hidden');
 
   try {
     const res = await fetch(form.action, {
@@ -1590,11 +1694,41 @@ form.addEventListener('submit', async (e) => {
     setTimeout(() => errorDiv.classList.add('hidden'), 4000);
     submitBtn.disabled = false;
     submitText.textContent = translations[currentLang]['contact_submit'];
+    document.getElementById('submit-icon').classList.remove('hidden');
+    document.getElementById('submit-spinner').classList.add('hidden');
   }
 });
 
 // ──────────────────────────────────────────────────────────
-// 8. INICIALIZACIÓN
+// 8. MODALES LEGALES (Privacidad y Términos)
+// ──────────────────────────────────────────────────────────
+function openModal(id) {
+  const m = document.getElementById('modal-' + id);
+  if (!m) return;
+  m.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  m.querySelector('.modal-close').focus();
+}
+function closeModal(overlay) {
+  overlay.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.querySelectorAll('[data-modal]').forEach(el => {
+  el.addEventListener('click', e => { e.preventDefault(); openModal(el.getAttribute('data-modal')); });
+});
+document.querySelectorAll('.modal-close').forEach(btn => {
+  btn.addEventListener('click', () => closeModal(btn.closest('.modal-overlay')));
+});
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(overlay); });
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(closeModal);
+});
+
+// ──────────────────────────────────────────────────────────
+// 9. INICIALIZACIÓN
 // Leer idioma guardado o detectar el del navegador.
 // ──────────────────────────────────────────────────────────
 (function init() {
@@ -1609,6 +1743,65 @@ form.addEventListener('submit', async (e) => {
   setLanguage(saved || detected);
 })();
 </script>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MODAL — POLÍTICA DE PRIVACIDAD
+═══════════════════════════════════════════════════════════ -->
+<div id="modal-privacy" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-privacy-title">
+  <div class="modal-box">
+    <button class="modal-close" aria-label="Cerrar">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <h2 id="modal-privacy-title" class="modal-h1">Política de Privacidad</h2>
+
+    <p class="modal-p"><strong style="color:#F1F5F9">Responsable:</strong> Darío Ballesteros Sánchez<br>
+    <strong style="color:#F1F5F9">Contacto:</strong> darioballesteros26@gmail.com</p>
+
+    <h3 class="modal-h2">1. Datos que recopilamos</h3>
+    <p class="modal-p">Esta web no utiliza cookies ni herramientas de analítica de ningún tipo. No rastreamos tu navegación ni recopilamos datos automáticamente al visitar esta página.</p>
+    <p class="modal-p">Los únicos datos que recibimos son los que tú nos envías voluntariamente a través del formulario de contacto: nombre, email y descripción del problema. Estos datos se usan exclusivamente para responder a tu solicitud y no se comparten con terceros bajo ningún concepto.</p>
+
+    <h3 class="modal-h2">2. Software Security Babel</h3>
+    <p class="modal-p">Security Babel, como aplicación de escritorio, no recopila ni transmite tus documentos ni su contenido a ningún servidor. Todo el procesamiento (cifrado, traducción, almacenamiento) ocurre localmente en tu dispositivo.</p>
+
+    <h3 class="modal-h2">3. Tus derechos</h3>
+    <p class="modal-p">Puedes solicitar en cualquier momento acceder a los datos que nos hayas enviado por el formulario, corregirlos o solicitar su eliminación, escribiendo a <a href="mailto:darioballesteros26@gmail.com" style="color:#D4AF37">darioballesteros26@gmail.com</a>.</p>
+
+    <h3 class="modal-h2">4. Jurisdicción</h3>
+    <p class="modal-p">Esta política se rige por la legislación española y el Reglamento General de Protección de Datos (RGPD).</p>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     MODAL — TÉRMINOS DE USO
+═══════════════════════════════════════════════════════════ -->
+<div id="modal-terms" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-terms-title">
+  <div class="modal-box">
+    <button class="modal-close" aria-label="Cerrar">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <h2 id="modal-terms-title" class="modal-h1">Términos de Uso</h2>
+
+    <h3 class="modal-h2">1. Sobre el servicio</h3>
+    <p class="modal-p">Security Babel es un software de cifrado, gestión documental y traducción local, desarrollado y operado por Darío Ballesteros Sánchez.</p>
+
+    <h3 class="modal-h2">2. Licencia de uso</h3>
+    <p class="modal-p">El uso de Security Babel se rige por los términos de la licencia contratada (Standard o Enterprise). El acceso es personal e intransferible según el número de usuarios contratados.</p>
+
+    <h3 class="modal-h2">3. Política de reembolso</h3>
+    <p class="modal-p">Si no quedas satisfecho con Security Babel, dispones de 10 días naturales desde la fecha de contratación para solicitar el reembolso completo, escribiendo a <a href="mailto:darioballesteros26@gmail.com" style="color:#D4AF37">darioballesteros26@gmail.com</a>.</p>
+
+    <h3 class="modal-h2">4. Limitación de responsabilidad</h3>
+    <p class="modal-p">Security Babel no se responsabiliza de la pérdida de datos derivada de la pérdida u olvido de la contraseña maestra o la frase de recuperación por parte del usuario, ni de daños derivados del uso incorrecto del software.</p>
+
+    <h3 class="modal-h2">5. Modificaciones</h3>
+    <p class="modal-p">Estos términos pueden actualizarse. Se notificará cualquier cambio significativo a los usuarios activos.</p>
+
+    <h3 class="modal-h2">6. Jurisdicción</h3>
+    <p class="modal-p">Estos términos se rigen por la legislación española. Cualquier disputa se someterá a los tribunales competentes de Marbella, España.</p>
+  </div>
+</div>
 
 </body>
 </html>
