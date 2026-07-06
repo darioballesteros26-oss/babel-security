@@ -3164,8 +3164,12 @@ fn main() {
         .setup(|app| {
             // Modo USB: si Resources/ contiene python + servidor, arrancarlo
             if let Ok(res) = app.path().resource_dir() {
-                let py_bin   = res.join("python").join("bin").join("python3");
-                let servidor = res.join("servidor").join("nllb_server_usb.py");
+                let py_bin = res.join("python").join("bin").join("python3");
+                // Preferir servidor MarianMT (tier premium); fallback a NLLB para USBs antiguos
+                let servidor = {
+                    let nuevo = res.join("servidor").join("marian_server_usb.py");
+                    if nuevo.exists() { nuevo } else { res.join("servidor").join("nllb_server_usb.py") }
+                };
                 if py_bin.exists() && servidor.exists() {
                     let mut rng_bytes = [0u8; 16];
                     rand::rngs::OsRng.fill_bytes(&mut rng_bytes);
