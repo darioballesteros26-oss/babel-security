@@ -27,8 +27,8 @@ DIR_USB  = DIR_BASE / "modelos_usb"
 DIR_MOD  = DIR_USB / "modelos"
 DIR_TOK  = DIR_USB / "tokenizers"
 
-# --- Modelos tc-big (mayor calidad, ~114 MB cada uno cuantizado) ---
-TC_BIG = {
+# Todos tc-big, ~114 MB cada uno cuantizado a int8 (de 444 MB float32)
+MODELOS = {
     "es-en": "Helsinki-NLP/opus-mt-tc-big-cat_oci_spa-en",
     "en-es": "Helsinki-NLP/opus-mt-tc-big-en-cat_oci_spa",
     "es-ar": "Helsinki-NLP/opus-mt-tc-big-itc-ar",
@@ -42,16 +42,6 @@ TC_BIG = {
     "ru-es": "Helsinki-NLP/opus-mt-tc-big-zle-es",
     "en-ru": "Helsinki-NLP/opus-mt-tc-big-en-zle",
     "ru-en": "Helsinki-NLP/opus-mt-tc-big-zle-en",
-}
-
-# --- Modelos small fallback (pares sin tc-big, ~77 MB cada uno) ---
-SMALL = {
-    "es-fr": "Helsinki-NLP/opus-mt-es-fr",
-    "fr-es": "Helsinki-NLP/opus-mt-fr-es",
-    "de-en": "Helsinki-NLP/opus-mt-de-en",
-    "en-de": "Helsinki-NLP/opus-mt-en-de",
-    "zh-en": "Helsinki-NLP/opus-mt-zh-en",
-    "en-zh": "Helsinki-NLP/opus-mt-en-zh",
 }
 
 QWEN_REPO     = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
@@ -159,17 +149,11 @@ if __name__ == "__main__":
     DIR_MOD.mkdir(parents=True, exist_ok=True)
     DIR_TOK.mkdir(parents=True, exist_ok=True)
 
-    todos = list(TC_BIG.items()) + list(SMALL.items())
-    total = len(todos)
+    total = len(MODELOS)
     ok = 0
 
-    print(f"\n[1/{total+1}] Modelos MarianMT tc-big (13 pares, ~114 MB c/u cuantizado):")
-    for par, hf in TC_BIG.items():
-        if convertir_modelo(hf, par) and guardar_tokenizer(hf, par):
-            ok += 1
-
-    print(f"\n[2/{total+1}] Modelos MarianMT small fallback (6 pares, ~77 MB c/u):")
-    for par, hf in SMALL.items():
+    print(f"\nModelos MarianMT tc-big — {total} pares, ~114 MB c/u cuantizado a int8:")
+    for par, hf in MODELOS.items():
         if convertir_modelo(hf, par) and guardar_tokenizer(hf, par):
             ok += 1
 

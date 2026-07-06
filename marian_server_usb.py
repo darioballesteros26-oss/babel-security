@@ -56,14 +56,11 @@ _TARGET_PREFIX = {
     "en-ru": ">>rus<<",   # en-zle        → ruso
 }
 
-# Todos los pares soportados (tc-big + small fallback)
+# 13 pares tc-big, todos cuantizados a int8 (~114 MB c/u)
 PARES_SOPORTADOS = {
-    # tc-big
     "es-en", "en-es", "es-ar", "ar-es",
     "fr-en", "en-fr", "ar-en", "en-ar",
     "de-es", "es-ru", "ru-es", "en-ru", "ru-en",
-    # small fallback
-    "es-fr", "fr-es", "de-en", "en-de", "zh-en", "en-zh",
 }
 
 # ---------------------------------------------------------------------------
