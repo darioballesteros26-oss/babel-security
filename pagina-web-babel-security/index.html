@@ -1,0 +1,1614 @@
+<!DOCTYPE html>
+<html lang="es" dir="ltr" id="root">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Security Babel — Soberanía Digital Documental</title>
+  <meta name="description" content="Software de traducción y gestión documental 100% local. Sin servidores, sin terceros. Diseñado para reducir el riesgo de incumplimiento GDPR." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bunker: { 950: '#0B0F19', 900: '#0F1525', 800: '#141A2E', 700: '#1A2235' },
+          },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+        },
+      },
+    }
+  </script>
+  <style>
+    /* ── Base ── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { background-color: #0B0F19; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #0B0F19; }
+    ::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 3px; }
+
+    /* ── Reveal de texto en el hero (fade + rise) ── */
+    .reveal { opacity: 0; transform: translateY(18px); }
+    .reveal.r1 { animation: rise 0.7s ease-out 0.15s forwards; }
+    .reveal.r2 { animation: rise 0.7s ease-out 0.40s forwards; }
+    .reveal.r3 { animation: rise 0.7s ease-out 0.65s forwards; }
+    .reveal.r4 { animation: rise 0.7s ease-out 0.85s forwards; }
+    @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+    /* ── Flotación del documento en el hero ── */
+    .float-doc { animation: floatDoc 4s ease-in-out infinite; }
+    @keyframes floatDoc {
+      0%, 100% { transform: translateY(0) rotate(-2deg); }
+      50%       { transform: translateY(-12px) rotate(2deg); }
+    }
+
+    /* ── Línea de escaneo en el escudo ── */
+    .scan-line {
+      position: absolute; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, transparent, #D4AF37, transparent);
+      animation: scan 2s linear infinite;
+    }
+    @keyframes scan { from { top: 0%; opacity: 0.9; } to { top: 100%; opacity: 0; } }
+
+    /* ── Brillo pulsante del escudo ── */
+    .shield-glow { animation: glow 2.5s ease-in-out infinite; }
+    @keyframes glow {
+      0%, 100% { box-shadow: 0 0 20px rgba(212,175,55,0.3), 0 0 40px rgba(212,175,55,0.1); }
+      50%       { box-shadow: 0 0 35px rgba(212,175,55,0.55), 0 0 70px rgba(212,175,55,0.2); }
+    }
+
+    /* ── Scroll reveal: aparecen al entrar en viewport ── */
+    .sr { opacity: 0; transform: translateY(22px); transition: opacity 0.5s ease, transform 0.5s ease; }
+    .sr.visible { opacity: 1; transform: translateY(0); }
+    /* Retardo escalonado para grupos de tarjetas */
+    .sr.d1 { transition-delay: 0.05s; }
+    .sr.d2 { transition-delay: 0.15s; }
+    .sr.d3 { transition-delay: 0.25s; }
+
+    /* ── Glassmorphism ── */
+    .glass {
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    /* ── Hover sutil en tarjetas ── */
+    .card-lift { transition: transform 0.25s ease, box-shadow 0.25s ease; }
+    .card-lift:hover { transform: translateY(-4px); box-shadow: 0 16px 48px rgba(0,0,0,0.45); }
+
+    /* ── Botón CTA glow ── */
+    .btn-emerald {
+      background: linear-gradient(135deg, #D4AF37, #A8860C);
+      transition: box-shadow 0.25s ease, transform 0.2s ease;
+    }
+    .btn-emerald:hover {
+      box-shadow: 0 0 22px rgba(212,175,55,0.5), 0 0 48px rgba(212,175,55,0.15);
+      transform: translateY(-1px);
+    }
+    .btn-emerald:active { transform: translateY(0); }
+
+    /* ── Clases doradas (reemplazan emerald/blue de Tailwind) ── */
+    .c-gold        { color: #D4AF37; }
+    .c-gold-dim    { color: #A8860C; }
+    .bg-gold-faint { background: rgba(212,175,55,0.1); }
+    .border-gold   { border-color: rgba(212,175,55,0.25) !important; }
+    .faq-trigger:hover { color: #D4AF37; }
+
+    /* ── Acordeón FAQ: transición de altura ── */
+    .faq-body {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.3s ease;
+    }
+    .faq-body.open { grid-template-rows: 1fr; }
+    .faq-body > div { overflow: hidden; }
+
+    /* ── Dropdown de idioma ── */
+    .lang-dropdown {
+      opacity: 0; transform: translateY(-6px) scale(0.97);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      pointer-events: none;
+    }
+    .lang-dropdown.open {
+      opacity: 1; transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    /* ── Gradiente de borde en tarjeta Enterprise (destacada) ── */
+    .enterprise-border {
+      border: 1.5px solid transparent;
+      background-clip: padding-box;
+      position: relative;
+    }
+    .enterprise-border::before {
+      content: '';
+      position: absolute; inset: -1.5px; z-index: -1;
+      border-radius: inherit;
+      background: linear-gradient(135deg, #D4AF37, #A8860C);
+    }
+
+    /* ── Input focus ── */
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: #D4AF37 !important;
+      box-shadow: 0 0 0 2px rgba(212,175,55,0.2);
+    }
+
+    /* ── Navbar backdrop ── */
+    .nav-blur {
+      background: rgba(11,15,25,0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+  </style>
+</head>
+
+<body class="min-h-screen">
+
+<!-- ═══════════════════════════════════════════════════════════
+     NAVBAR
+═══════════════════════════════════════════════════════════ -->
+<nav class="nav-blur fixed top-0 inset-x-0 z-50">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between h-16">
+
+      <!-- Logo -->
+      <a href="#" class="flex items-center gap-2.5 flex-shrink-0">
+        <!-- SVG: candado fusionado con carpeta -->
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect x="2" y="12" width="28" height="18" rx="3" fill="#D4AF37" opacity="0.15"/>
+          <rect x="2" y="12" width="28" height="18" rx="3" stroke="#D4AF37" stroke-width="1.5"/>
+          <path d="M2 16h28" stroke="#D4AF37" stroke-width="1" opacity="0.4"/>
+          <path d="M8 12V9a8 8 0 0116 0v3" stroke="#D4AF37" stroke-width="1.8" stroke-linecap="round"/>
+          <rect x="13" y="19" width="6" height="5" rx="1" fill="#D4AF37"/>
+          <circle cx="16" cy="21" r="1.2" fill="#0B0F19"/>
+        </svg>
+        <span class="text-white font-bold text-lg tracking-tight">Security Babel</span>
+      </a>
+
+      <!-- Links (desktop) -->
+      <div class="hidden md:flex items-center gap-7">
+        <a href="#como-funciona" class="text-slate-400 hover:text-white text-sm font-medium transition-colors duration-200" data-i18n="nav_features">Características</a>
+        <a href="#seguridad"     class="text-slate-400 hover:text-white text-sm font-medium transition-colors duration-200" data-i18n="nav_security">Seguridad GDPR</a>
+        <a href="#precios"       class="text-slate-400 hover:text-white text-sm font-medium transition-colors duration-200" data-i18n="nav_pricing">Precios</a>
+        <a href="#contacto"      class="text-slate-400 hover:text-white text-sm font-medium transition-colors duration-200" data-i18n="nav_contact">Contacto</a>
+      </div>
+
+      <!-- Derecha: selector idioma + CTA -->
+      <div class="flex items-center gap-3">
+
+        <!-- Selector de idioma (dropdown) -->
+        <div class="relative" id="lang-wrapper">
+          <button id="lang-btn"
+            class="flex items-center gap-1.5 text-slate-300 hover:text-white text-sm font-medium px-3 py-1.5 rounded-lg glass transition-all duration-200"
+            aria-haspopup="listbox" aria-expanded="false" aria-label="Seleccionar idioma">
+            <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.93 4.93A7 7 0 0110 3v7H3a7 7 0 011.93-5.07zM3 11h7v7a7 7 0 01-7-7zm8 7v-7h7a7 7 0 01-7 7zm0-8V3a7 7 0 017 7h-7z" clip-rule="evenodd"/></svg>
+            <span id="lang-label">ES</span>
+            <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor" class="opacity-60" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+          </button>
+          <!-- Dropdown -->
+          <div id="lang-dropdown" class="lang-dropdown absolute top-full mt-2 right-0 w-36 rounded-xl glass shadow-2xl shadow-black/50 overflow-hidden" role="listbox">
+            <button class="lang-option w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-2" data-lang="es" role="option">
+              <span class="text-base">🇪🇸</span> Español
+            </button>
+            <button class="lang-option w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-2" data-lang="en" role="option">
+              <span class="text-base">🇬🇧</span> English
+            </button>
+            <button class="lang-option w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-2" data-lang="ru" role="option">
+              <span class="text-base">🇷🇺</span> Русский
+            </button>
+            <button class="lang-option w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-2" data-lang="ar" role="option">
+              <span class="text-base">🇸🇦</span> العربية
+            </button>
+          </div>
+        </div>
+
+        <!-- CTA download (glassmorphism) -->
+        <a href="#contacto" class="hidden sm:inline-flex items-center gap-2 glass px-4 py-2 rounded-xl text-sm font-semibold c-gold hover:text-white hover:bg-yellow-500/10 border border-gold transition-all duration-200" data-i18n="nav_download">
+          Descargar App
+        </a>
+
+        <!-- Hamburguesa (móvil) -->
+        <button id="menu-btn" class="md:hidden p-2 text-slate-400 hover:text-white transition-colors" aria-label="Abrir menú">
+          <svg id="icon-open"  width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6"  x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          <svg id="icon-close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="hidden"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Menú móvil -->
+  <div id="mobile-menu" class="hidden md:hidden border-t border-white/5 px-4 py-4 space-y-1">
+    <a href="#como-funciona" class="mobile-link block py-2.5 text-slate-300 hover:text-white text-sm font-medium transition-colors" data-i18n="nav_features">Características</a>
+    <a href="#seguridad"     class="mobile-link block py-2.5 text-slate-300 hover:text-white text-sm font-medium transition-colors" data-i18n="nav_security">Seguridad GDPR</a>
+    <a href="#precios"       class="mobile-link block py-2.5 text-slate-300 hover:text-white text-sm font-medium transition-colors" data-i18n="nav_pricing">Precios</a>
+    <a href="#contacto"      class="mobile-link block py-2.5 text-slate-300 hover:text-white text-sm font-medium transition-colors" data-i18n="nav_contact">Contacto</a>
+    <a href="#contacto"      class="mobile-link block py-2.5 c-gold text-sm font-semibold transition-colors" data-i18n="nav_download">Descargar App</a>
+  </div>
+</nav>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     HERO
+═══════════════════════════════════════════════════════════ -->
+<section id="hero" class="relative min-h-screen flex items-center overflow-hidden pt-16">
+
+  <!-- Fondo: gradiente radial + grid sutil -->
+  <div class="absolute inset-0 pointer-events-none" aria-hidden="true">
+    <div class="absolute inset-0" style="background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(212,175,55,0.07) 0%, transparent 70%);"></div>
+    <div class="absolute inset-0 opacity-30" style="background-image: linear-gradient(rgba(212,175,55,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(212,175,55,0.05) 1px, transparent 1px); background-size: 48px 48px;"></div>
+  </div>
+
+  <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 lg:py-32 grid lg:grid-cols-2 gap-16 items-center">
+
+    <!-- Texto izquierda -->
+    <div class="text-center lg:text-start">
+      <!-- Pre-título gancho -->
+      <p class="reveal r1 c-gold text-sm sm:text-base font-medium leading-relaxed max-w-xl mx-auto lg:mx-0 mb-6" data-i18n="hero_pretitle">
+        No dejes que los servidores controlen tus datos. El control es tuyo. Recupera tu soberanía digital con Security Babel.
+      </p>
+
+      <!-- H1 -->
+      <h1 class="reveal r2 text-3xl sm:text-4xl lg:text-5xl xl:text-6xl font-black text-white leading-tight tracking-tight mb-6" data-i18n="hero_h1">
+        Tus documentos más privados, <span class="c-gold">blindados.</span><br class="hidden sm:block"/>
+        Traducción y gestión 100% local.
+      </h1>
+
+      <!-- H2 -->
+      <p class="reveal r3 text-slate-400 text-base sm:text-lg leading-relaxed max-w-xl mx-auto lg:mx-0 mb-10" data-i18n="hero_h2">
+        Diseñado para reducir el riesgo de incumplimiento del RGPD/GDPR. Sin servidores, sin terceros. Todo el procesamiento ocurre dentro de tu ordenador.
+      </p>
+
+      <!-- CTA -->
+      <div class="reveal r4 flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
+        <a href="#contacto" class="btn-emerald inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl text-white font-semibold text-base shadow-lg">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span data-i18n="hero_cta">Comenzar en Local</span>
+        </a>
+        <a href="#como-funciona" class="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl text-slate-300 hover:text-white font-semibold text-base glass transition-all duration-200">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+          <span data-i18n="hero_how">Cómo funciona</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- Animación visual derecha: documento → escudo -->
+    <div class="flex justify-center items-center">
+      <div class="relative w-64 h-80 sm:w-72 sm:h-96">
+
+        <!-- Documento flotante -->
+        <div class="float-doc absolute top-0 left-1/2 -translate-x-1/2 z-10" aria-hidden="true">
+          <div class="w-20 h-24 rounded-xl glass flex flex-col items-center justify-center shadow-xl" style="border-color: rgba(212,175,55,0.3);">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="1.5" class="mb-2">
+              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="8" y1="13" x2="16" y2="13"/>
+              <line x1="8" y1="17" x2="13" y2="17"/>
+            </svg>
+            <div class="text-xs c-gold font-mono font-bold">DOC</div>
+          </div>
+        </div>
+
+        <!-- Escudo central (receptor) -->
+        <div class="shield-glow absolute bottom-4 left-1/2 -translate-x-1/2 w-52 h-56 rounded-2xl glass flex flex-col items-center justify-center overflow-hidden" style="border-color: rgba(212,175,55,0.35);" aria-label="Entorno Offline Seguro">
+          <!-- Línea de escaneo -->
+          <div class="scan-line" aria-hidden="true"></div>
+
+          <!-- Ícono escudo -->
+          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" aria-hidden="true" class="mb-3">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="rgba(212,175,55,0.15)" stroke="#D4AF37" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M9 12l2 2 4-4" stroke="#D4AF37" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+
+          <!-- Etiqueta -->
+          <div class="text-center px-4">
+            <div class="c-gold font-bold text-sm tracking-wide mb-1" data-i18n="hero_shield_label">Entorno Offline Seguro</div>
+            <div class="flex items-center justify-center gap-1.5 mt-2">
+              <span class="w-1.5 h-1.5 rounded-full animate-pulse" style="background:#D4AF37"></span>
+              <span class="text-xs text-slate-400 font-mono">AES-256-GCM</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Indicadores laterales -->
+        <div class="absolute left-0 top-1/2 -translate-y-1/2 space-y-2" aria-hidden="true">
+          <div class="w-1.5 h-8 rounded-full rounded-full" style="background:rgba(212,175,55,0.15);border:1px solid rgba(212,175,55,0.3)"></div>
+          <div class="w-1.5 h-5 rounded-full rounded-full" style="background:rgba(212,175,55,0.08);border:1px solid rgba(212,175,55,0.2)"></div>
+        </div>
+        <div class="absolute right-0 top-1/2 -translate-y-1/2 space-y-2" aria-hidden="true">
+          <div class="w-1.5 h-5 rounded-full rounded-full" style="background:rgba(212,175,55,0.08);border:1px solid rgba(212,175,55,0.2)"></div>
+          <div class="w-1.5 h-8 rounded-full rounded-full" style="background:rgba(212,175,55,0.15);border:1px solid rgba(212,175,55,0.3)"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Separador degradado -->
+  <div class="absolute bottom-0 inset-x-0 h-24 pointer-events-none" style="background: linear-gradient(to bottom, transparent, #0B0F19);" aria-hidden="true"></div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     CÓMO FUNCIONA
+═══════════════════════════════════════════════════════════ -->
+<section id="como-funciona" class="py-24 lg:py-32 relative">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+    <!-- Cabecera -->
+    <div class="text-center mb-16 sr">
+      <div class="inline-flex items-center gap-2 glass px-4 py-1.5 rounded-full text-xs c-gold font-semibold uppercase tracking-widest mb-5">
+        <span class="w-1.5 h-1.5 rounded-full bg-gold-faint"></span>
+        <span data-i18n="how_badge">100% Local</span>
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-black text-white mb-4" data-i18n="how_title">Cómo funciona</h2>
+      <p class="text-slate-400 text-lg max-w-2xl mx-auto" data-i18n="how_subtitle">Procesamiento 100% local. Ningún dato abandona tu máquina.</p>
+    </div>
+
+    <!-- Tres pasos -->
+    <div class="grid md:grid-cols-3 gap-6 lg:gap-8 mb-12">
+
+      <!-- Paso 1: Entorno aislado -->
+      <div class="sr d1 card-lift rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-6" style="background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="1.8" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </div>
+        <div class="text-xs c-gold font-semibold uppercase tracking-widest mb-2">01</div>
+        <h3 class="text-white font-bold text-lg mb-3" data-i18n="how_step1_title">Entorno aislado de internet</h3>
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="how_step1_desc">Security Babel opera en un contenedor completamente desconectado de la red. Ninguna información se transmite a servidores externos en ningún momento.</p>
+      </div>
+
+      <!-- Paso 2: Motor de traducción -->
+      <div class="sr d2 card-lift rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-6" style="background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="1.8" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+          </svg>
+        </div>
+        <div class="text-xs c-gold font-semibold uppercase tracking-widest mb-2">02</div>
+        <h3 class="text-white font-bold text-lg mb-3" data-i18n="how_step2_title">Motor de traducción local</h3>
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="how_step2_desc">Los modelos MarianMT y Qwen corren directamente en tu CPU o GPU. Tus documentos se traducen con IA de calidad profesional sin salir de tu ordenador.</p>
+      </div>
+
+      <!-- Paso 3: Cifrado -->
+      <div class="sr d3 card-lift rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-6" style="background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="1.8" aria-hidden="true">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+          </svg>
+        </div>
+        <div class="text-xs c-gold font-semibold uppercase tracking-widest mb-2">03</div>
+        <h3 class="text-white font-bold text-lg mb-3" data-i18n="how_step3_title">Cifrado AES-256-GCM</h3>
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="how_step3_desc">Todos los archivos se almacenan cifrados con AES-256-GCM en tu disco local. Solo tú tienes la clave. Ni siquiera nosotros podemos acceder a tus datos.</p>
+      </div>
+    </div>
+
+    <!-- Nota "próximamente" -->
+    <div class="sr text-center">
+      <div class="inline-flex items-center gap-2 glass px-5 py-2.5 rounded-full text-sm text-slate-400">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-500" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+        <span data-i18n="how_coming_soon">Envío seguro entre dispositivos — próximamente</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     COMPARATIVA VS. NUBE TRADICIONAL
+═══════════════════════════════════════════════════════════ -->
+<section id="comparativa" class="py-24 lg:py-32" style="background:#0B0F19">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12 sr">
+      <h2 class="text-3xl sm:text-4xl font-black text-white mb-4" data-i18n="cmp_title">Security Babel vs. la nube tradicional</h2>
+      <p class="text-slate-400 text-lg" data-i18n="cmp_subtitle">La diferencia es estructural, no cosmética.</p>
+    </div>
+
+    <div class="sr overflow-x-auto rounded-2xl" style="border:1px solid rgba(212,175,55,0.18)">
+      <table class="w-full text-sm">
+        <thead>
+          <tr style="background:#141A2E;border-bottom:1px solid rgba(255,255,255,0.07)">
+            <th class="text-left px-6 py-4 text-slate-400 font-semibold w-1/2" data-i18n="cmp_col_feature">Característica</th>
+            <th class="px-6 py-4 text-slate-400 font-semibold text-center" data-i18n="cmp_col_cloud">Nube tradicional</th>
+            <th class="px-6 py-4 font-semibold text-center c-gold" data-i18n="cmp_col_babel">Security Babel</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
+            <td class="px-6 py-4 text-slate-300" data-i18n="cmp_r1">Tus datos pasan por servidores externos</td>
+            <td class="px-6 py-4 text-center text-red-400 font-bold text-base">✗</td>
+            <td class="px-6 py-4 text-center c-gold font-bold text-base">✓</td>
+          </tr>
+          <tr style="background:rgba(255,255,255,0.02);border-bottom:1px solid rgba(255,255,255,0.04)">
+            <td class="px-6 py-4 text-slate-300" data-i18n="cmp_r2">Funciona sin conexión a internet</td>
+            <td class="px-6 py-4 text-center text-red-400 font-bold text-base">✗</td>
+            <td class="px-6 py-4 text-center c-gold font-bold text-base">✓</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
+            <td class="px-6 py-4 text-slate-300" data-i18n="cmp_r3">Riesgo de brecha en el proveedor</td>
+            <td class="px-6 py-4 text-center text-slate-400 text-xs font-medium" data-i18n="cmp_r3_no">Alto</td>
+            <td class="px-6 py-4 text-center c-gold text-xs font-medium" data-i18n="cmp_r3_yes">Nulo</td>
+          </tr>
+          <tr style="background:rgba(255,255,255,0.02);border-bottom:1px solid rgba(255,255,255,0.04)">
+            <td class="px-6 py-4 text-slate-300" data-i18n="cmp_r4">El proveedor IA aprende de tus documentos</td>
+            <td class="px-6 py-4 text-center text-red-400 font-bold text-base">✓</td>
+            <td class="px-6 py-4 text-center c-gold font-bold text-base">✗</td>
+          </tr>
+          <tr>
+            <td class="px-6 py-4 text-slate-300" data-i18n="cmp_r5">Cifrado AES-256 en tu dispositivo</td>
+            <td class="px-6 py-4 text-center text-slate-400 text-xs font-medium" data-i18n="cmp_r5_no">Limitado</td>
+            <td class="px-6 py-4 text-center c-gold text-xs font-medium">AES-256-GCM</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     SEGURIDAD & CUMPLIMIENTO GDPR
+═══════════════════════════════════════════════════════════ -->
+<section id="seguridad" class="py-24 lg:py-32" style="background: linear-gradient(180deg, #0B0F19 0%, #0F1525 50%, #0B0F19 100%);">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+    <!-- Cabecera -->
+    <div class="text-center mb-16 sr">
+      <div class="inline-flex items-center gap-2 glass px-4 py-1.5 rounded-full text-xs c-gold font-semibold uppercase tracking-widest mb-5">
+        <span class="w-1.5 h-1.5 rounded-full" style="background:#D4AF37"></span>
+        <span>GDPR / RGPD</span>
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-black text-white mb-4" data-i18n="gdpr_title">Diseñado para el cumplimiento normativo</h2>
+      <p class="text-slate-400 text-lg max-w-2xl mx-auto" data-i18n="gdpr_subtitle">Una arquitectura pensada para reducir tu exposición legal.</p>
+    </div>
+
+    <!-- Tres tarjetas -->
+    <div class="grid md:grid-cols-3 gap-6 lg:gap-8">
+
+      <!-- Tarjeta 1: Soberanía -->
+      <div class="sr d1 card-lift rounded-2xl p-8 relative overflow-hidden" style="background: #0F1525; border: 1px solid rgba(212,175,55,0.15);">
+        <div class="absolute top-0 right-0 w-32 h-32 rounded-full opacity-5 -translate-y-8 translate-x-8" style="background: radial-gradient(circle, #D4AF37, transparent);" aria-hidden="true"></div>
+        <div class="c-gold mb-5">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h3 class="text-white font-bold text-xl mb-3" data-i18n="gdpr_card1_title">Soberanía de Datos Absoluta</h3>
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="gdpr_card1_desc">Tus archivos nunca abandonan tu máquina. Sin transferencias a la nube, sin copias en servidores de terceros. El dato nace, vive y muere en tu infraestructura.</p>
+      </div>
+
+      <!-- Tarjeta 2: GDPR -->
+      <div class="sr d2 card-lift rounded-2xl p-8 relative overflow-hidden" style="background: #0F1525; border: 1px solid rgba(212,175,55,0.15);">
+        <div class="absolute top-0 right-0 w-32 h-32 rounded-full opacity-5 -translate-y-8 translate-x-8" style="background: radial-gradient(circle, #D4AF37, transparent);" aria-hidden="true"></div>
+        <div class="c-gold mb-5">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/>
+          </svg>
+        </div>
+        <h3 class="text-white font-bold text-xl mb-3" data-i18n="gdpr_card2_title">Riesgo de incumplimiento GDPR reducido</h3>
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="gdpr_card2_desc">Al eliminar las transferencias internacionales de datos a servicios en la nube, se elimina ese vector de riesgo regulatorio concreto. Más control significa menos exposición.</p>
+      </div>
+
+      <!-- Tarjeta 3: IA local -->
+      <div class="sr d3 card-lift rounded-2xl p-8 relative overflow-hidden" style="background: #0F1525; border: 1px solid rgba(212,175,55,0.15);">
+        <div class="absolute top-0 right-0 w-32 h-32 rounded-full opacity-5 -translate-y-8 translate-x-8" style="background: radial-gradient(circle, #D4AF37, transparent);" aria-hidden="true"></div>
+        <div class="c-gold mb-5">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+        </div>
+        <h3 class="text-white font-bold text-xl mb-3" data-i18n="gdpr_card3_title">IA local y privada</h3>
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="gdpr_card3_desc">El motor de traducción corre íntegramente en tu dispositivo. Ningún modelo externo procesa ni aprende de tus documentos confidenciales.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     CASO DE USO REAL
+═══════════════════════════════════════════════════════════ -->
+<section id="caso-uso" class="py-24 lg:py-32" style="background:linear-gradient(180deg,#0B0F19 0%,#0F1525 60%,#0B0F19 100%)">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12 sr">
+      <div class="inline-flex items-center gap-2 glass px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-widest mb-5" style="color:#D4AF37">
+        <span class="w-1.5 h-1.5 rounded-full" style="background:#D4AF37"></span>
+        <span data-i18n="case_badge">Ejemplo ilustrativo</span>
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-black text-white mb-4" data-i18n="case_title">Un abogado traduce un contrato en 30 segundos. Nadie más lo ve.</h2>
+    </div>
+
+    <div class="sr rounded-2xl overflow-hidden" style="background:#0F1525;border:1px solid rgba(212,175,55,0.18)">
+      <div class="grid lg:grid-cols-2">
+
+        <!-- Escenario ilustrativo -->
+        <div class="p-8 lg:p-10" style="border-bottom:1px solid rgba(255,255,255,0.05)">
+          <div class="text-xs font-semibold c-gold uppercase tracking-widest mb-5" data-i18n="case_scenario_label">Escenario de uso típico</div>
+          <div class="space-y-3.5 border-l-2 pl-5" style="border-color:rgba(212,175,55,0.3)">
+            <p class="text-slate-300 text-sm leading-relaxed" data-i18n="case_q1">Recibes un contrato de 18 páginas en árabe de un cliente de Dubai. Antes lo pegabas en Google Translate, sabiendo que esos datos acababan en los servidores de Google.</p>
+            <p class="text-slate-300 text-sm leading-relaxed" data-i18n="case_q2">Con Security Babel lo arrastras a la app, seleccionas árabe → español, y en 30 segundos tienes la traducción completa. El contrato nunca salió de tu ordenador.</p>
+            <p class="text-slate-300 text-sm leading-relaxed" data-i18n="case_q3">Luego lo cifras y lo compartes cifrado con tu cliente. Sin email sin proteger, sin Dropbox, sin terceros que puedan interceptarlo.</p>
+          </div>
+        </div>
+
+        <!-- Métricas -->
+        <div class="p-8 lg:p-10 grid grid-cols-2 gap-8 content-center" style="border-left:1px solid rgba(255,255,255,0.05)">
+          <div class="text-center">
+            <div class="text-4xl font-black c-gold mb-1">30<span class="text-xl">s</span></div>
+            <div class="text-slate-500 text-xs leading-snug" data-i18n="case_m1">Tiempo de traducción</div>
+          </div>
+          <div class="text-center">
+            <div class="text-4xl font-black c-gold mb-1">0</div>
+            <div class="text-slate-500 text-xs leading-snug" data-i18n="case_m2">Datos enviados a terceros</div>
+          </div>
+          <div class="text-center">
+            <div class="text-4xl font-black c-gold mb-1">18</div>
+            <div class="text-slate-500 text-xs leading-snug" data-i18n="case_m3">Páginas traducidas</div>
+          </div>
+          <div class="text-center">
+            <div class="text-4xl font-black c-gold mb-1">0€</div>
+            <div class="text-slate-500 text-xs leading-snug" data-i18n="case_m4">Riesgo GDPR añadido</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     PRECIOS
+═══════════════════════════════════════════════════════════ -->
+<section id="precios" class="py-24 lg:py-32">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+
+    <!-- Cabecera -->
+    <div class="text-center mb-16 sr">
+      <h2 class="text-3xl sm:text-4xl font-black text-white mb-4" data-i18n="pricing_title">Planes diseñados para la soberanía de tus datos.</h2>
+      <p class="text-slate-400 text-lg" data-i18n="pricing_subtitle">Sin sorpresas. Sin datos en la nube. Sin letra pequeña.</p>
+    </div>
+
+    <!-- Dos tarjetas -->
+    <div class="grid md:grid-cols-2 gap-6 lg:gap-8 items-start">
+
+      <!-- Plan Standard -->
+      <div class="sr d1 card-lift rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.08);">
+        <div class="mb-8">
+          <div class="text-slate-400 text-sm font-semibold uppercase tracking-widest mb-2" data-i18n="pricing_pro_name">Standard</div>
+          <div class="flex items-end gap-1 mb-1">
+            <span class="text-5xl font-black text-white" data-i18n="pricing_pro_price">50€</span>
+            <span class="text-slate-400 text-base mb-1.5" data-i18n="pricing_pro_period">/mes</span>
+          </div>
+          <div class="text-slate-500 text-sm" data-i18n="pricing_pro_users">1 usuario</div>
+        </div>
+
+        <ul class="space-y-3.5 mb-8">
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span class="text-slate-300 text-sm" data-i18n="pricing_pro_f1">Contenedor Local 100% offline</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span class="text-slate-300 text-sm" data-i18n="pricing_pro_f2">Traducción Offline (ES-EN, ES-FR)</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span class="text-slate-300 text-sm" data-i18n="pricing_pro_f3">Gestión documental cifrada AES-256-GCM</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span class="text-slate-300 text-sm" data-i18n="pricing_pro_f4">Soporte prioritario</span>
+          </li>
+        </ul>
+
+        <a href="#contacto" class="block text-center w-full py-3.5 rounded-xl font-semibold text-sm c-gold glass border border-gold hover:bg-yellow-500/10 transition-all duration-200" data-i18n="pricing_pro_cta">
+          Comenzar ahora
+        </a>
+      </div>
+
+      <!-- Plan Enterprise (destacado) -->
+      <div class="sr d2 enterprise-border card-lift rounded-2xl p-8 relative" style="background: #0F1525;">
+        <!-- Badge -->
+        <div class="absolute -top-3.5 left-1/2 -translate-x-1/2">
+          <span class="inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-bold text-white" style="background: linear-gradient(135deg, #D4AF37, #A8860C);" data-i18n="pricing_ent_badge">Para despachos grandes</span>
+        </div>
+
+        <div class="mb-8 mt-2">
+          <div class="text-slate-400 text-sm font-semibold uppercase tracking-widest mb-2" data-i18n="pricing_ent_name">Enterprise</div>
+          <div class="flex items-end gap-1 mb-1">
+            <span class="text-5xl font-black text-white" data-i18n="pricing_ent_price">80€</span>
+            <span class="text-slate-400 text-base mb-1.5" data-i18n="pricing_ent_period">/mes por usuario</span>
+          </div>
+          <div class="text-slate-500 text-sm" data-i18n="pricing_ent_users">Usuarios ilimitados</div>
+        </div>
+
+        <ul class="space-y-3.5 mb-8">
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span class="text-slate-300 text-sm" data-i18n="pricing_ent_f1">Todo lo del Plan Standard</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span class="text-slate-300 text-sm" data-i18n="pricing_ent_f2">Gestión de licencias centralizada</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span class="text-slate-300 text-sm" data-i18n="pricing_ent_f3">Despliegue prioritario asistido</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span class="text-slate-300 text-sm" data-i18n="pricing_ent_f4">Soporte multiusuario dedicado</span>
+          </li>
+        </ul>
+
+        <a href="#contacto" class="btn-emerald block text-center w-full py-3.5 rounded-xl font-semibold text-sm text-white shadow-lg" data-i18n="pricing_ent_cta">
+          Contactar con Ventas
+        </a>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     COSTE GDPR VS. PRECIO
+═══════════════════════════════════════════════════════════ -->
+<section id="coste-gdpr" class="py-24 lg:py-32">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-14 sr">
+      <h2 class="text-3xl sm:text-4xl font-black text-white mb-4" data-i18n="roi_title">¿Cuánto cuesta realmente <em class="not-italic c-gold">no</em> usar Security Babel?</h2>
+      <p class="text-slate-400 text-lg" data-i18n="roi_subtitle">Una multa GDPR puede ser existencial. La cuenta es sencilla.</p>
+    </div>
+
+    <!-- Multa vs suscripción -->
+    <div class="sr grid md:grid-cols-2 gap-6 mb-8">
+
+      <div class="rounded-2xl p-8" style="background:#0F1525;border:1px solid rgba(239,68,68,0.2)">
+        <div class="text-red-400 text-xs font-semibold uppercase tracking-widest mb-5" data-i18n="roi_fine_label">Multa GDPR por brecha de datos</div>
+        <div class="mb-4">
+          <div class="text-slate-400 text-sm mb-1" data-i18n="roi_fine_minor_label">Infracción menor (Art. 83.4)</div>
+          <div class="text-2xl font-black text-white">Hasta <span class="text-red-400">10 M€</span> <span class="text-slate-500 text-sm font-normal" data-i18n="roi_or_pct">o 2% facturación anual</span></div>
+        </div>
+        <div class="mb-5">
+          <div class="text-slate-400 text-sm mb-1" data-i18n="roi_fine_major_label">Infracción grave (Art. 83.5)</div>
+          <div class="text-2xl font-black text-white">Hasta <span class="text-red-400">20 M€</span> <span class="text-slate-500 text-sm font-normal" data-i18n="roi_or_pct2">o 4% facturación anual</span></div>
+        </div>
+        <div class="rounded-xl p-4" style="background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15)">
+          <p class="text-xs text-slate-400 leading-relaxed" data-i18n="roi_fine_example">Ejemplo real: Meta (2023) — <strong class="text-white">1.200 M€</strong> por transferir datos a EE.UU. Marriott (2019) — <strong class="text-white">18,4 M£</strong> por brecha en servidor cloud.</p>
+        </div>
+      </div>
+
+      <div class="rounded-2xl p-8 relative enterprise-border" style="background:#0F1525">
+        <div class="c-gold text-xs font-semibold uppercase tracking-widest mb-5" data-i18n="roi_sb_label">Security Babel — 100 usuarios</div>
+        <div class="mb-4">
+          <div class="text-slate-400 text-sm mb-1" data-i18n="roi_sb_month_label">Coste mensual</div>
+          <div class="text-2xl font-black text-white">8.000€ <span class="text-slate-500 text-sm font-normal">/mes</span></div>
+        </div>
+        <div class="mb-5">
+          <div class="text-slate-400 text-sm mb-1" data-i18n="roi_sb_year_label">Coste anual</div>
+          <div class="text-2xl font-black text-white">96.000€ <span class="text-slate-500 text-sm font-normal">/año</span></div>
+        </div>
+        <div class="rounded-xl p-4" style="background:rgba(212,175,55,0.06);border:1px solid rgba(212,175,55,0.15)">
+          <p class="text-xs text-slate-400 leading-relaxed" data-i18n="roi_sb_calc">Una multa mínima de 10 M€ equivale a <strong class="c-gold">104 años</strong> de Security Babel para 100 usuarios. La seguridad no es un gasto — es la alternativa más barata.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ROI por traducción ahorrada -->
+    <div class="sr rounded-2xl p-8 lg:p-10" style="background:#0F1525;border:1px solid rgba(212,175,55,0.12)">
+      <h3 class="text-white font-bold text-lg text-center mb-8" data-i18n="roi_hour_title">Retorno por traducción manual ahorrada</h3>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-6 text-center mb-6">
+        <div>
+          <div class="text-3xl font-black c-gold mb-2">200€</div>
+          <div class="text-slate-500 text-xs leading-snug" data-i18n="roi_h1">Coste/hora de un abogado socio (estimación media)</div>
+        </div>
+        <div>
+          <div class="text-3xl font-black c-gold mb-2">3h</div>
+          <div class="text-slate-500 text-xs leading-snug" data-i18n="roi_h2">Tiempo medio de traducción manual de un contrato de 15 páginas</div>
+        </div>
+        <div>
+          <div class="text-3xl font-black c-gold mb-2">30s</div>
+          <div class="text-slate-500 text-xs leading-snug" data-i18n="roi_h3">Tiempo con Security Babel (mismo contrato)</div>
+        </div>
+        <div>
+          <div class="text-3xl font-black c-gold mb-2">600€</div>
+          <div class="text-slate-500 text-xs leading-snug" data-i18n="roi_h4">Ahorro por contrato frente a traducción manual</div>
+        </div>
+      </div>
+      <p class="text-slate-500 text-xs text-center" data-i18n="roi_note">Con el plan Standard (50€/mes), el retorno se alcanza con un solo contrato al mes.</p>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     CONTACTO
+═══════════════════════════════════════════════════════════ -->
+<section id="contacto" class="py-24 lg:py-32" style="background: linear-gradient(180deg, #0B0F19 0%, #0F1525 100%);">
+  <div class="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
+
+    <!-- Cabecera -->
+    <div class="text-center mb-12 sr">
+      <h2 class="text-3xl sm:text-4xl font-black text-white mb-4" data-i18n="contact_title">¿Encontraste un bug o problema?</h2>
+      <p class="text-slate-400 text-lg" data-i18n="contact_subtitle">Cuéntame qué ocurrió y lo soluciono personalmente.</p>
+    </div>
+
+    <!-- Formulario
+         ┌─────────────────────────────────────────────────────┐
+         │ IMPORTANTE: sustituye el action por tu endpoint     │
+         │ real de Formspree o Web3Forms.                      │
+         │ Formspree:  action="https://formspree.io/f/XXXXXX"  │
+         │ Web3Forms:  action="https://api.web3forms.com/submit"│
+         └─────────────────────────────────────────────────────┘ -->
+    <form id="contact-form"
+          action="https://formspree.io/f/TU_ID_AQUI"
+          method="POST"
+          class="sr space-y-5"
+          novalidate>
+
+      <!-- Nombre + Email -->
+      <div class="grid sm:grid-cols-2 gap-5">
+        <div>
+          <label for="f-name" class="block text-xs text-slate-400 font-medium mb-1.5" data-i18n="contact_name">Nombre</label>
+          <input id="f-name" type="text" name="name" required autocomplete="name"
+            class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 transition-all duration-200"
+            data-i18n-placeholder="contact_name_ph" placeholder="Tu nombre" />
+        </div>
+        <div>
+          <label for="f-email" class="block text-xs text-slate-400 font-medium mb-1.5" data-i18n="contact_email">Email de contacto</label>
+          <input id="f-email" type="email" name="email" required autocomplete="email"
+            class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 transition-all duration-200"
+            data-i18n-placeholder="contact_email_ph" placeholder="correo@ejemplo.com" />
+        </div>
+      </div>
+
+      <!-- Descripción del bug -->
+      <div>
+        <label for="f-message" class="block text-xs text-slate-400 font-medium mb-1.5" data-i18n="contact_message">Describe el problema</label>
+        <textarea id="f-message" name="message" rows="6" required
+          class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 transition-all duration-200 resize-none"
+          data-i18n-placeholder="contact_message_ph" placeholder="¿Qué pasó? ¿En qué parte de la app? ¿Con qué sistema operativo? Cuanta más información mejor."></textarea>
+      </div>
+
+      <!-- Botón envío -->
+      <button type="submit" id="submit-btn"
+        class="btn-emerald w-full py-4 rounded-xl font-bold text-base text-white shadow-lg flex items-center justify-center gap-2.5 transition-all duration-200">
+        <svg id="submit-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        <span id="submit-text" data-i18n="contact_submit">Enviar mensaje</span>
+      </button>
+
+      <!-- Estado enviado -->
+      <div id="form-success" class="hidden text-center py-4 rounded-xl c-gold font-semibold glass border border-gold" data-i18n="contact_sent">
+        ¡Recibido! Me pondré en contacto contigo para solucionarlo.
+      </div>
+      <div id="form-error" class="hidden text-center py-4 rounded-xl text-red-400 font-semibold glass border border-red-500/30" data-i18n="contact_error">
+        Error al enviar. Por favor inténtalo de nuevo.
+      </div>
+    </form>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     QUIÉN ESTÁ DETRÁS
+═══════════════════════════════════════════════════════════ -->
+<section id="equipo" class="py-24 lg:py-32">
+  <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12 sr">
+      <div class="inline-flex items-center gap-2 glass px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-widest mb-5" style="color:#D4AF37">
+        <span class="w-1.5 h-1.5 rounded-full" style="background:#D4AF37"></span>
+        <span data-i18n="team_badge">El equipo</span>
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-black text-white mb-4" data-i18n="team_title">Quién está detrás</h2>
+    </div>
+
+    <div class="sr rounded-2xl p-8 lg:p-10" style="background:#0F1525;border:1px solid rgba(212,175,55,0.15)">
+      <div class="flex items-center gap-5 mb-7">
+        <div class="w-16 h-16 rounded-full flex-shrink-0 flex items-center justify-center text-xl font-black" style="background:linear-gradient(135deg,rgba(212,175,55,0.18),rgba(168,134,12,0.06));border:1px solid rgba(212,175,55,0.3);color:#D4AF37">SB</div>
+        <div>
+          <div class="text-white font-bold text-lg" data-i18n="team_name">Equipo Security Babel</div>
+          <div class="text-slate-500 text-sm" data-i18n="team_loc">Madrid, España · Fundado en 2026</div>
+        </div>
+      </div>
+      <div class="space-y-4">
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="team_p1">Somos ingenieros de software y especialistas en privacidad que trabajamos con despachos legales y clínicas médicas durante años. Vimos de primera mano cómo documentos confidenciales pasaban por Google Translate, DeepL y ChatGPT sin que nadie lo cuestionara.</p>
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="team_p2">Security Babel nació de una pregunta muy concreta: ¿por qué tiene que salir un contrato confidencial de tu ordenador para ser traducido? La respuesta es que no tiene que hacerlo. La tecnología para hacerlo en local ya existe — solo había que empaquetar bien.</p>
+        <p class="text-slate-400 text-sm leading-relaxed" data-i18n="team_p3">Construimos el software que quisiéramos que usaran nuestros propios abogados. Sin inversores que exijan monetizar tus datos. Sin hoja de ruta que dependa de vender tu información a terceros.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     FAQ
+═══════════════════════════════════════════════════════════ -->
+<section id="faq" class="py-24 lg:py-32">
+  <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+
+    <div class="text-center mb-12 sr">
+      <h2 class="text-3xl sm:text-4xl font-black text-white" data-i18n="faq_title">Preguntas frecuentes</h2>
+    </div>
+
+    <!-- Acordeón de tres preguntas -->
+    <div class="space-y-4 sr">
+
+      <!-- Pregunta 1 -->
+      <div class="rounded-2xl overflow-hidden" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+        <button class="faq-trigger w-full text-left flex items-center justify-between gap-4 px-6 py-5 text-white font-semibold text-sm sm:text-base transition-colors hover:c-gold" aria-expanded="false">
+          <span data-i18n="faq_q1">¿Qué ocurre con mis documentos si dejo de pagar?</span>
+          <svg class="faq-icon flex-shrink-0 w-5 h-5 text-slate-400 transition-transform duration-300" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+        </button>
+        <div class="faq-body">
+          <div><p class="px-6 pb-5 text-slate-400 text-sm leading-relaxed" data-i18n="faq_a1">Tus documentos te pertenecen siempre. Están cifrados en tu disco local y seguirán siendo accesibles. Solo se desactivarán las funciones de traducción automática y las actualizaciones del software.</p></div>
+        </div>
+      </div>
+
+      <!-- Pregunta 2 -->
+      <div class="rounded-2xl overflow-hidden" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+        <button class="faq-trigger w-full text-left flex items-center justify-between gap-4 px-6 py-5 text-white font-semibold text-sm sm:text-base transition-colors hover:c-gold" aria-expanded="false">
+          <span data-i18n="faq_q2">¿Cómo sé que mis datos están realmente seguros?</span>
+          <svg class="faq-icon flex-shrink-0 w-5 h-5 text-slate-400 transition-transform duration-300" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+        </button>
+        <div class="faq-body">
+          <div><p class="px-6 pb-5 text-slate-400 text-sm leading-relaxed" data-i18n="faq_a2">Security Babel no tiene acceso a tus datos en ningún momento. El cifrado AES-256-GCM ocurre en tu máquina con una clave que solo tú conoces.</p></div>
+        </div>
+      </div>
+
+      <!-- Pregunta 3 -->
+      <div class="rounded-2xl overflow-hidden" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+        <button class="faq-trigger w-full text-left flex items-center justify-between gap-4 px-6 py-5 text-white font-semibold text-sm sm:text-base transition-colors hover:c-gold" aria-expanded="false">
+          <span data-i18n="faq_q3">¿Cómo se instala Security Babel?</span>
+          <svg class="faq-icon flex-shrink-0 w-5 h-5 text-slate-400 transition-transform duration-300" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+        </button>
+        <div class="faq-body">
+          <div><p class="px-6 pb-5 text-slate-400 text-sm leading-relaxed" data-i18n="faq_a3">Descarga el instalador para macOS o Windows desde esta página. La instalación es guiada y no requiere conocimientos técnicos. El motor de traducción local se configura automáticamente en el primer arranque.</p></div>
+        </div>
+      </div>
+
+      <!-- Pregunta 4 -->
+      <div class="rounded-2xl overflow-hidden" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+        <button class="faq-trigger w-full text-left flex items-center justify-between gap-4 px-6 py-5 text-white font-semibold text-sm sm:text-base transition-colors hover:c-gold" aria-expanded="false">
+          <span data-i18n="faq_q4">¿Qué pasa si necesito ayuda o algo no funciona?</span>
+          <svg class="faq-icon flex-shrink-0 w-5 h-5 text-slate-400 transition-transform duration-300" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+        </button>
+        <div class="faq-body">
+          <div><p class="px-6 pb-5 text-slate-400 text-sm leading-relaxed" data-i18n="faq_a4">Puedes escribirme a través del formulario de contacto de esta página. Respondo en un plazo de 24-48 horas según disponibilidad. El soporte es directo — sin tickets, sin bots, sin intermediarios.</p></div>
+        </div>
+      </div>
+
+      <!-- Pregunta 5 -->
+      <div class="rounded-2xl overflow-hidden" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+        <button class="faq-trigger w-full text-left flex items-center justify-between gap-4 px-6 py-5 text-white font-semibold text-sm sm:text-base transition-colors hover:c-gold" aria-expanded="false">
+          <span data-i18n="faq_q5">¿Puedo probar Security Babel antes de contratarlo?</span>
+          <svg class="faq-icon flex-shrink-0 w-5 h-5 text-slate-400 transition-transform duration-300" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+        </button>
+        <div class="faq-body">
+          <div><p class="px-6 pb-5 text-slate-400 text-sm leading-relaxed" data-i18n="faq_a5">Por el momento no hay un periodo de prueba automático. Si quieres valorarlo antes de decidir, escríbeme a través del formulario y lo acordamos.</p></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     FOOTER
+═══════════════════════════════════════════════════════════ -->
+<footer style="background: #0B0F19; border-top: 1px solid rgba(255,255,255,0.05);">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+
+      <!-- Logo + copyright -->
+      <div class="flex items-center gap-2.5">
+        <svg width="24" height="24" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <rect x="2" y="12" width="28" height="18" rx="3" stroke="#D4AF37" stroke-width="1.5" opacity="0.5"/>
+          <path d="M8 12V9a8 8 0 0116 0v3" stroke="#D4AF37" stroke-width="1.8" stroke-linecap="round" opacity="0.5"/>
+          <rect x="13" y="19" width="6" height="5" rx="1" fill="#D4AF37" opacity="0.5"/>
+        </svg>
+        <span class="text-slate-500 text-sm" data-i18n="footer_copy">© 2026 Security Babel. Todos los derechos reservados.</span>
+      </div>
+
+      <!-- Links legales -->
+      <div class="flex items-center gap-6">
+        <a href="#" class="text-slate-500 hover:text-slate-300 text-sm transition-colors" data-i18n="footer_privacy">Política de Privacidad</a>
+        <a href="#" class="text-slate-500 hover:text-slate-300 text-sm transition-colors" data-i18n="footer_terms">Términos de Uso</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     JAVASCRIPT
+     1. Diccionarios i18n completos (ES, EN, RU, AR)
+     2. setLanguage(): actualiza textos + dir/lang del root
+     3. FAQ acordeón
+     4. Menú móvil
+     5. Dropdown idioma
+     6. Scroll reveal (IntersectionObserver)
+     7. Formulario (Formspree fetch)
+═══════════════════════════════════════════════════════════ -->
+<script>
+// ──────────────────────────────────────────────────────────
+// 1. DICCIONARIOS i18n
+// ──────────────────────────────────────────────────────────
+const translations = {
+
+  /* ── ESPAÑOL ── */
+  es: {
+    nav_features: "Características",
+    nav_security: "Seguridad GDPR",
+    nav_pricing:  "Precios",
+    nav_contact:  "Contacto",
+    nav_download: "Descargar App",
+    hero_pretitle: "No dejes que los servidores controlen tus datos. El control es tuyo. Recupera tu soberanía digital con Security Babel.",
+    hero_h1: "Tus documentos más privados, blindados. Traducción y gestión 100% local.",
+    hero_h2: "Diseñado para reducir el riesgo de incumplimiento del RGPD/GDPR. Sin servidores, sin terceros. Todo el procesamiento ocurre dentro de tu ordenador.",
+    hero_cta:  "Comenzar en Local",
+    hero_how:  "Cómo funciona",
+    hero_shield_label: "Entorno Offline Seguro",
+    how_badge:    "100% Local",
+    how_title:    "Cómo funciona",
+    how_subtitle: "Procesamiento 100% local. Ningún dato abandona tu máquina.",
+    how_step1_title: "Entorno aislado de internet",
+    how_step1_desc:  "Security Babel opera en un contenedor completamente desconectado de la red. Ninguna información se transmite a servidores externos en ningún momento.",
+    how_step2_title: "Motor de traducción local",
+    how_step2_desc:  "Los modelos MarianMT y Qwen corren directamente en tu CPU o GPU. Tus documentos se traducen con IA de calidad profesional sin salir de tu ordenador.",
+    how_step3_title: "Cifrado AES-256-GCM",
+    how_step3_desc:  "Todos los archivos se almacenan cifrados con AES-256-GCM en tu disco local. Solo tú tienes la clave. Ni siquiera nosotros podemos acceder a tus datos.",
+    how_coming_soon: "Envío seguro entre dispositivos — próximamente",
+    gdpr_title:    "Diseñado para el cumplimiento normativo",
+    gdpr_subtitle: "Una arquitectura pensada para reducir tu exposición legal.",
+    gdpr_card1_title: "Soberanía de Datos Absoluta",
+    gdpr_card1_desc:  "Tus archivos nunca abandonan tu máquina. Sin transferencias a la nube, sin copias en servidores de terceros. El dato nace, vive y muere en tu infraestructura.",
+    gdpr_card2_title: "Riesgo de incumplimiento GDPR reducido",
+    gdpr_card2_desc:  "Al eliminar las transferencias internacionales de datos a servicios en la nube, se elimina ese vector de riesgo regulatorio concreto. Más control significa menos exposición.",
+    gdpr_card3_title: "IA local y privada",
+    gdpr_card3_desc:  "El motor de traducción corre íntegramente en tu dispositivo. Ningún modelo externo procesa ni aprende de tus documentos confidenciales.",
+    pricing_title:    "Planes diseñados para la soberanía de tus datos.",
+    pricing_subtitle: "Sin sorpresas. Sin datos en la nube. Sin letra pequeña.",
+    pricing_pro_name:   "Standard",
+    pricing_pro_price:  "50€",
+    pricing_pro_period: "/mes",
+    pricing_pro_users:  "1 usuario",
+    pricing_pro_f1: "Contenedor Local 100% offline",
+    pricing_pro_f2: "Traducción Offline (ES-EN, ES-FR)",
+    pricing_pro_f3: "Gestión documental cifrada AES-256-GCM",
+    pricing_pro_f4: "Soporte prioritario",
+    pricing_pro_cta:    "Comenzar ahora",
+    pricing_ent_name:   "Enterprise",
+    pricing_ent_badge:  "Para despachos grandes",
+    pricing_ent_price:  "80€",
+    pricing_ent_period: "/mes por usuario",
+    pricing_ent_users:  "Usuarios ilimitados",
+    pricing_ent_f1: "Todo lo del Plan Standard",
+    pricing_ent_f2: "Gestión de licencias centralizada",
+    pricing_ent_f3: "Despliegue prioritario asistido",
+    pricing_ent_f4: "Soporte multiusuario dedicado",
+    pricing_ent_cta: "Contactar con Ventas",
+    contact_title:    "¿Encontraste un bug o problema?",
+    contact_subtitle: "Cuéntame qué ocurrió y lo soluciono personalmente.",
+    contact_name:     "Nombre",
+    contact_email:    "Email de contacto",
+    contact_message:  "Describe el problema",
+    contact_name_ph:    "Tu nombre",
+    contact_email_ph:   "correo@ejemplo.com",
+    contact_message_ph: "¿Qué pasó? ¿En qué parte de la app? ¿Con qué sistema operativo? Cuanta más información mejor.",
+    contact_submit: "Enviar mensaje",
+    contact_sent:   "¡Recibido! Me pondré en contacto contigo para solucionarlo.",
+    contact_error:  "Error al enviar. Por favor inténtalo de nuevo.",
+    faq_title: "Preguntas frecuentes",
+    faq_q1: "¿Qué ocurre con mis documentos si dejo de pagar?",
+    faq_a1: "Tus documentos te pertenecen siempre. Están cifrados en tu disco local y seguirán siendo accesibles. Solo se desactivarán las funciones de traducción automática y las actualizaciones del software.",
+    faq_q2: "¿Cómo sé que mis datos están realmente seguros?",
+    faq_a2: "Security Babel no tiene acceso a tus datos en ningún momento. El cifrado AES-256-GCM ocurre en tu máquina con una clave que solo tú conoces.",
+    faq_q3: "¿Cómo se instala Security Babel?",
+    faq_a3: "Descarga el instalador para macOS o Windows desde esta página. La instalación es guiada y no requiere conocimientos técnicos. El motor de traducción local se configura automáticamente en el primer arranque.",
+    faq_q4: "¿Qué pasa si necesito ayuda o algo no funciona?",
+    faq_a4: "Puedes escribirme a través del formulario de contacto de esta página. Respondo en un plazo de 24-48 horas según disponibilidad. El soporte es directo — sin tickets, sin bots, sin intermediarios.",
+    faq_q5: "¿Puedo probar Security Babel antes de contratarlo?",
+    faq_a5: "Por el momento no hay un periodo de prueba automático. Si quieres valorarlo antes de decidir, escríbeme a través del formulario y lo acordamos.",
+    /* comparativa */
+    cmp_title: "Security Babel vs. la nube tradicional",
+    cmp_subtitle: "La diferencia es estructural, no cosmética.",
+    cmp_col_feature: "Característica", cmp_col_cloud: "Nube tradicional", cmp_col_babel: "Security Babel",
+    cmp_r1: "Tus datos pasan por servidores externos",
+    cmp_r2: "Funciona sin conexión a internet",
+    cmp_r3: "Riesgo de brecha en el proveedor", cmp_r3_no: "Alto", cmp_r3_yes: "Nulo",
+    cmp_r4: "El proveedor IA aprende de tus documentos",
+    cmp_r5: "Cifrado AES-256 en tu dispositivo", cmp_r5_no: "Limitado",
+    /* caso de uso */
+    case_badge: "Ejemplo ilustrativo",
+    case_title: "Un abogado traduce un contrato en 30 segundos. Nadie más lo ve.",
+    case_scenario_label: "Escenario de uso típico",
+    case_q1: "Recibes un contrato de 18 páginas en árabe de un cliente de Dubai. Antes lo pegabas en Google Translate, sabiendo que esos datos acababan en los servidores de Google.",
+    case_q2: "Con Security Babel lo arrastras a la app, seleccionas árabe → español, y en 30 segundos tienes la traducción completa. El contrato nunca salió de tu ordenador.",
+    case_q3: "Luego lo cifras y lo compartes cifrado con tu cliente. Sin email sin proteger, sin Dropbox, sin terceros que puedan interceptarlo.",
+    case_m1: "Tiempo de traducción", case_m2: "Datos enviados a terceros",
+    case_m3: "Páginas traducidas",   case_m4: "Riesgo GDPR añadido",
+    /* ROI */
+    roi_title: "¿Cuánto cuesta realmente no usar Security Babel?",
+    roi_subtitle: "Una multa GDPR puede ser existencial. La cuenta es sencilla.",
+    roi_fine_label: "Multa GDPR por brecha de datos",
+    roi_fine_minor_label: "Infracción menor (Art. 83.4)", roi_or_pct: "o 2% facturación anual",
+    roi_fine_major_label: "Infracción grave (Art. 83.5)", roi_or_pct2: "o 4% facturación anual",
+    roi_fine_example: "Ejemplo real: Meta (2023) — 1.200 M€ por transferir datos a EE.UU. Marriott (2019) — 18,4 M£ por brecha en servidor cloud.",
+    roi_sb_label: "Security Babel — 100 usuarios",
+    roi_sb_month_label: "Coste mensual", roi_sb_year_label: "Coste anual",
+    roi_sb_calc: "Una multa mínima de 10 M€ equivale a 104 años de Security Babel para 100 usuarios. La seguridad no es un gasto — es la alternativa más barata.",
+    roi_hour_title: "Retorno por traducción manual ahorrada",
+    roi_h1: "Coste/hora de un abogado socio (estimación media)",
+    roi_h2: "Tiempo medio de traducción manual de un contrato de 15 páginas",
+    roi_h3: "Tiempo con Security Babel (mismo contrato)",
+    roi_h4: "Ahorro por contrato frente a traducción manual",
+    roi_note: "Con el plan Standard (50€/mes), el retorno se alcanza con un solo contrato al mes.",
+    /* equipo */
+    team_badge: "El equipo", team_title: "Quién está detrás",
+    team_name: "Equipo Security Babel", team_loc: "Madrid, España · Fundado en 2026",
+    team_p1: "Somos ingenieros de software y especialistas en privacidad que trabajamos con despachos legales y clínicas médicas durante años. Vimos de primera mano cómo documentos confidenciales pasaban por Google Translate, DeepL y ChatGPT sin que nadie lo cuestionara.",
+    team_p2: "Security Babel nació de una pregunta muy concreta: ¿por qué tiene que salir un contrato confidencial de tu ordenador para ser traducido? La respuesta es que no tiene que hacerlo. La tecnología para hacerlo en local ya existe — solo había que empaquetar bien.",
+    team_p3: "Construimos el software que quisiéramos que usaran nuestros propios abogados. Sin inversores que exijan monetizar tus datos. Sin hoja de ruta que dependa de vender tu información a terceros.",
+    footer_privacy: "Política de Privacidad",
+    footer_terms:   "Términos de Uso",
+    footer_copy:    "© 2026 Security Babel. Todos los derechos reservados.",
+  },
+
+  /* ── ENGLISH ── */
+  en: {
+    nav_features: "Features",
+    nav_security: "GDPR Security",
+    nav_pricing:  "Pricing",
+    nav_contact:  "Contact",
+    nav_download: "Download App",
+    hero_pretitle: "Don't let servers control your data. The control is yours. Reclaim your digital sovereignty with Security Babel.",
+    hero_h1: "Your most private documents, shielded. 100% local translation and management.",
+    hero_h2: "Designed to reduce the risk of GDPR non-compliance. No servers, no third parties. All processing happens inside your computer.",
+    hero_cta:  "Start Locally",
+    hero_how:  "How it works",
+    hero_shield_label: "Secure Offline Environment",
+    how_badge:    "100% Local",
+    how_title:    "How It Works",
+    how_subtitle: "100% local processing. No data ever leaves your machine.",
+    how_step1_title: "Internet-isolated environment",
+    how_step1_desc:  "Security Babel operates in a container completely disconnected from the network. No information is ever transmitted to external servers.",
+    how_step2_title: "Local translation engine",
+    how_step2_desc:  "MarianMT and Qwen models run directly on your CPU or GPU. Your documents are translated with professional-grade AI without leaving your computer.",
+    how_step3_title: "AES-256-GCM Encryption",
+    how_step3_desc:  "All files are stored encrypted with AES-256-GCM on your local disk. Only you hold the key. Not even we can access your data.",
+    how_coming_soon: "Secure device-to-device transfer — coming soon",
+    gdpr_title:    "Built for Regulatory Compliance",
+    gdpr_subtitle: "An architecture designed to reduce your legal exposure.",
+    gdpr_card1_title: "Absolute Data Sovereignty",
+    gdpr_card1_desc:  "Your files never leave your machine. No cloud transfers, no third-party server copies. Data is born, lives, and stays within your infrastructure.",
+    gdpr_card2_title: "Reduced GDPR Non-Compliance Risk",
+    gdpr_card2_desc:  "By eliminating international data transfers to cloud services, that specific regulatory risk vector is removed. More control means less exposure.",
+    gdpr_card3_title: "Local and Private AI",
+    gdpr_card3_desc:  "The translation engine runs entirely on your device. No external model processes or learns from your confidential documents.",
+    pricing_title:    "Plans designed for your data sovereignty.",
+    pricing_subtitle: "No surprises. No cloud data. No fine print.",
+    pricing_pro_name:   "Standard",
+    pricing_pro_price:  "€50",
+    pricing_pro_period: "/month",
+    pricing_pro_users:  "1 user",
+    pricing_pro_f1: "100% offline Local Container",
+    pricing_pro_f2: "Offline Translation (ES-EN, ES-FR)",
+    pricing_pro_f3: "AES-256-GCM encrypted document management",
+    pricing_pro_f4: "Priority support",
+    pricing_pro_cta:    "Get Started",
+    pricing_ent_name:   "Enterprise",
+    pricing_ent_badge:  "For large firms",
+    pricing_ent_price:  "€80",
+    pricing_ent_period: "/month per user",
+    pricing_ent_users:  "Unlimited users",
+    pricing_ent_f1: "Everything in Standard",
+    pricing_ent_f2: "Centralized license management",
+    pricing_ent_f3: "Priority assisted deployment",
+    pricing_ent_f4: "Dedicated multi-user support",
+    pricing_ent_cta: "Contact Sales",
+    contact_title:    "Found a bug or issue?",
+    contact_subtitle: "Tell me what happened and I'll fix it personally.",
+    contact_name:     "Name",
+    contact_email:    "Contact email",
+    contact_message:  "Describe the problem",
+    contact_name_ph:    "Your name",
+    contact_email_ph:   "you@example.com",
+    contact_message_ph: "What happened? Which part of the app? Which OS? The more detail the better.",
+    contact_submit: "Send message",
+    contact_sent:   "Received! I'll get back to you to fix it.",
+    contact_error:  "Send failed. Please try again.",
+    faq_title: "Frequently Asked Questions",
+    faq_q1: "What happens to my documents if I stop paying?",
+    faq_a1: "Your documents always belong to you. They are encrypted on your local disk and will remain accessible. Only automatic translation and software updates will be deactivated.",
+    faq_q2: "How do I know my data is truly secure?",
+    faq_a2: "Security Babel never has access to your data. AES-256-GCM encryption happens on your machine with a key only you know.",
+    faq_q3: "How is Security Babel installed?",
+    faq_a3: "Download the macOS or Windows installer from this page. Installation is guided and requires no technical knowledge. The local translation engine is configured automatically on first launch.",
+    faq_q4: "What if I need help or something isn't working?",
+    faq_a4: "You can write to me via the contact form on this page. I respond within 24-48 hours depending on availability. Support is direct — no tickets, no bots, no middlemen.",
+    faq_q5: "Can I try Security Babel before subscribing?",
+    faq_a5: "There is no automatic trial period at the moment. If you'd like to evaluate it before deciding, get in touch via the contact form and we'll work something out.",
+    cmp_title: "Security Babel vs. traditional cloud", cmp_subtitle: "The difference is structural, not cosmetic.",
+    cmp_col_feature: "Feature", cmp_col_cloud: "Traditional cloud", cmp_col_babel: "Security Babel",
+    cmp_r1: "Your data passes through external servers",
+    cmp_r2: "Works without internet connection",
+    cmp_r3: "Risk of provider breach", cmp_r3_no: "High", cmp_r3_yes: "None",
+    cmp_r4: "AI provider learns from your documents",
+    cmp_r5: "AES-256 encryption on your device", cmp_r5_no: "Limited",
+    case_badge: "Illustrative example",
+    case_title: "A lawyer translates a contract in 30 seconds. No one else sees it.",
+    case_scenario_label: "Typical use scenario",
+    case_q1: "You receive an 18-page contract in Arabic from a client in Dubai. Before, you would paste it into Google Translate — knowing that data ended up on Google's servers.",
+    case_q2: "With Security Babel you drag it into the app, select Arabic → Spanish, and in 30 seconds you have the full translation. The contract never left your computer.",
+    case_q3: "Then you encrypt it and share it encrypted with your client. No unprotected email, no Dropbox, no third parties who could intercept it.",
+    case_m1: "Translation time", case_m2: "Data sent to third parties",
+    case_m3: "Pages translated",   case_m4: "GDPR risk added",
+    roi_title: "How much does it really cost NOT to use Security Babel?",
+    roi_subtitle: "A GDPR fine can be existential. The math is simple.",
+    roi_fine_label: "GDPR fine for data breach",
+    roi_fine_minor_label: "Minor infringement (Art. 83.4)", roi_or_pct: "or 2% of annual turnover",
+    roi_fine_major_label: "Serious infringement (Art. 83.5)", roi_or_pct2: "or 4% of annual turnover",
+    roi_fine_example: "Real example: Meta (2023) — €1.2B for transferring data to the US. Marriott (2019) — £18.4M for a cloud server breach.",
+    roi_sb_label: "Security Babel — 100 users",
+    roi_sb_month_label: "Monthly cost", roi_sb_year_label: "Annual cost",
+    roi_sb_calc: "A minimum fine of €10M equals 104 years of Security Babel for 100 users. Security is not a cost — it's the cheapest alternative.",
+    roi_hour_title: "Return on manual translation saved",
+    roi_h1: "Cost/hour of a partner lawyer (average estimate)",
+    roi_h2: "Average manual translation time for a 15-page contract",
+    roi_h3: "Time with Security Babel (same contract)",
+    roi_h4: "Saving per contract vs. manual translation",
+    roi_note: "With the Standard plan (€50/month), return is achieved with just one contract per month.",
+    team_badge: "The team", team_title: "Who is behind it",
+    team_name: "Security Babel Team", team_loc: "Madrid, Spain · Founded 2026",
+    team_p1: "We are software engineers and privacy specialists who worked with law firms and medical clinics for years. We saw first-hand how confidential documents passed through Google Translate, DeepL and ChatGPT without anyone questioning it.",
+    team_p2: "Security Babel was born from a simple question: why does a confidential contract have to leave your computer to be translated? It doesn't. The technology to do it locally already exists — it just needed to be packaged well.",
+    team_p3: "We built the software we'd want our own lawyers to use. No investors demanding to monetize your data. No roadmap that depends on selling your information to third parties.",
+    footer_privacy: "Privacy Policy",
+    footer_terms:   "Terms of Use",
+    footer_copy:    "© 2026 Security Babel. All rights reserved.",
+  },
+
+  /* ── РУССКИЙ ── */
+  ru: {
+    nav_features: "Возможности",
+    nav_security: "Безопасность GDPR",
+    nav_pricing:  "Тарифы",
+    nav_contact:  "Контакт",
+    nav_download: "Скачать приложение",
+    hero_pretitle: "Не позволяйте серверам контролировать ваши данные. Контроль принадлежит вам. Верните цифровой суверенитет с Security Babel.",
+    hero_h1: "Ваши конфиденциальные документы под надёжной защитой. Перевод и управление на 100% локально.",
+    hero_h2: "Разработан для снижения риска несоответствия GDPR. Без серверов, без третьих сторон. Вся обработка происходит внутри вашего компьютера.",
+    hero_cta:  "Начать локально",
+    hero_how:  "Как это работает",
+    hero_shield_label: "Безопасная офлайн-среда",
+    how_badge:    "100% локально",
+    how_title:    "Как это работает",
+    how_subtitle: "100% локальная обработка. Никакие данные не покидают вашу машину.",
+    how_step1_title: "Среда, изолированная от интернета",
+    how_step1_desc:  "Security Babel работает в контейнере, полностью отключённом от сети. Никакая информация не передаётся на внешние серверы.",
+    how_step2_title: "Локальный движок перевода",
+    how_step2_desc:  "Модели MarianMT и Qwen работают непосредственно на вашем процессоре или GPU. Ваши документы переводятся с помощью профессионального ИИ без выхода за пределы вашего компьютера.",
+    how_step3_title: "Шифрование AES-256-GCM",
+    how_step3_desc:  "Все файлы хранятся зашифрованными с AES-256-GCM на вашем локальном диске. Только вы владеете ключом. Даже мы не можем получить доступ к вашим данным.",
+    how_coming_soon: "Безопасная передача между устройствами — скоро",
+    gdpr_title:    "Создан для соответствия нормативным требованиям",
+    gdpr_subtitle: "Архитектура, разработанная для снижения вашей правовой ответственности.",
+    gdpr_card1_title: "Абсолютный суверенитет данных",
+    gdpr_card1_desc:  "Ваши файлы никогда не покидают вашу машину. Без передачи в облако, без копий на серверах третьих сторон. Данные рождаются, живут и остаются в вашей инфраструктуре.",
+    gdpr_card2_title: "Сниженный риск несоответствия GDPR",
+    gdpr_card2_desc:  "Устраняя международные передачи данных в облачные сервисы, этот конкретный вектор регуляторного риска исключается. Больше контроля — меньше ответственности.",
+    gdpr_card3_title: "Локальный и приватный ИИ",
+    gdpr_card3_desc:  "Движок перевода работает полностью на вашем устройстве. Никакие внешние модели не обрабатывают ваши конфиденциальные документы и не обучаются на них.",
+    pricing_title:    "Тарифы, разработанные для суверенитета ваших данных.",
+    pricing_subtitle: "Без сюрпризов. Без данных в облаке. Без мелкого шрифта.",
+    pricing_pro_name:   "Standard",
+    pricing_pro_price:  "50€",
+    pricing_pro_period: "/месяц",
+    pricing_pro_users:  "1 пользователь",
+    pricing_pro_f1: "Локальный контейнер 100% офлайн",
+    pricing_pro_f2: "Офлайн-перевод (ES-EN, ES-FR)",
+    pricing_pro_f3: "Зашифрованное управление документами AES-256-GCM",
+    pricing_pro_f4: "Приоритетная поддержка",
+    pricing_pro_cta:    "Начать сейчас",
+    pricing_ent_name:   "Enterprise",
+    pricing_ent_badge:  "Для крупных компаний",
+    pricing_ent_price:  "80€",
+    pricing_ent_period: "/месяц на пользователя",
+    pricing_ent_users:  "Неограниченное число пользователей",
+    pricing_ent_f1: "Всё включено в Standard",
+    pricing_ent_f2: "Централизованное управление лицензиями",
+    pricing_ent_f3: "Приоритетное сопровождение при развёртывании",
+    pricing_ent_f4: "Выделенная поддержка для нескольких пользователей",
+    pricing_ent_cta: "Связаться с отделом продаж",
+    contact_title:    "Нашли баг или проблему?",
+    contact_subtitle: "Опишите, что произошло, и я исправлю лично.",
+    contact_name:     "Имя",
+    contact_email:    "Контактный email",
+    contact_message:  "Опишите проблему",
+    contact_name_ph:    "Ваше имя",
+    contact_email_ph:   "вы@пример.com",
+    contact_message_ph: "Что произошло? В какой части приложения? Какая ОС? Чем подробнее, тем лучше.",
+    contact_submit: "Отправить сообщение",
+    contact_sent:   "Получено! Свяжусь с вами, чтобы решить проблему.",
+    contact_error:  "Ошибка отправки. Пожалуйста, попробуйте снова.",
+    faq_title: "Часто задаваемые вопросы",
+    faq_q1: "Что происходит с моими документами, если я перестаю платить?",
+    faq_a1: "Ваши документы всегда принадлежат вам. Они зашифрованы на вашем локальном диске и останутся доступными. Отключатся только автоматический перевод и обновления программы.",
+    faq_q2: "Как я могу быть уверен, что мои данные действительно в безопасности?",
+    faq_a2: "Security Babel никогда не имеет доступа к вашим данным. Шифрование AES-256-GCM происходит на вашей машине с ключом, известным только вам.",
+    faq_q3: "Как установить Security Babel?",
+    faq_a3: "Загрузите установщик для macOS или Windows с этой страницы. Установка проходит в пошаговом режиме и не требует технических знаний. Движок перевода настраивается автоматически при первом запуске.",
+    faq_q4: "Что делать, если мне нужна помощь или что-то не работает?",
+    faq_a4: "Вы можете написать мне через форму обратной связи на этой странице. Отвечаю в течение 24-48 часов при наличии возможности. Поддержка прямая — без тикетов, без ботов, без посредников.",
+    faq_q5: "Могу ли я попробовать Security Babel перед подпиской?",
+    faq_a5: "На данный момент автоматического пробного периода нет. Если вы хотите оценить продукт перед принятием решения, напишите мне через форму и договоримся.",
+    cmp_title: "Security Babel против облачных сервисов", cmp_subtitle: "Разница структурная, а не косметическая.",
+    cmp_col_feature: "Характеристика", cmp_col_cloud: "Традиционное облако", cmp_col_babel: "Security Babel",
+    cmp_r1: "Ваши данные проходят через внешние серверы",
+    cmp_r2: "Работает без подключения к интернету",
+    cmp_r3: "Риск утечки у провайдера", cmp_r3_no: "Высокий", cmp_r3_yes: "Нулевой",
+    cmp_r4: "ИИ-провайдер обучается на ваших документах",
+    cmp_r5: "Шифрование AES-256 на вашем устройстве", cmp_r5_no: "Ограниченное",
+    case_badge: "Иллюстративный пример",
+    case_title: "Адвокат переводит контракт за 30 секунд. Больше никто его не видит.",
+    case_scenario_label: "Типичный сценарий использования",
+    case_q1: "Вы получаете контракт на 18 страниц на арабском от клиента из Дубая. Раньше вы вставляли его в Google Translate, зная, что данные оседают на серверах Google.",
+    case_q2: "С Security Babel вы перетаскиваете его в приложение, выбираете арабский → испанский, и через 30 секунд получаете полный перевод. Контракт никогда не покидал ваш компьютер.",
+    case_q3: "Затем вы шифруете его и отправляете зашифрованным клиенту. Без незащищённой почты, без Dropbox, без третьих лиц, которые могут перехватить.",
+    case_m1: "Время перевода", case_m2: "Данных отправлено третьим лицам",
+    case_m3: "Страниц переведено", case_m4: "Добавленный риск GDPR",
+    roi_title: "Сколько на самом деле стоит НЕ использовать Security Babel?",
+    roi_subtitle: "Штраф GDPR может быть экзистенциальным. Расчёт прост.",
+    roi_fine_label: "Штраф GDPR за утечку данных",
+    roi_fine_minor_label: "Незначительное нарушение (ст. 83.4)", roi_or_pct: "или 2% годового оборота",
+    roi_fine_major_label: "Серьёзное нарушение (ст. 83.5)", roi_or_pct2: "или 4% годового оборота",
+    roi_fine_example: "Реальные примеры: Meta (2023) — €1,2 млрд за передачу данных в США. Marriott (2019) — £18,4 млн за утечку на облачном сервере.",
+    roi_sb_label: "Security Babel — 100 пользователей",
+    roi_sb_month_label: "Ежемесячная стоимость", roi_sb_year_label: "Годовая стоимость",
+    roi_sb_calc: "Минимальный штраф в €10 млн равен 104 годам Security Babel для 100 пользователей. Безопасность — это не расход, это самая дешёвая альтернатива.",
+    roi_hour_title: "Окупаемость за счёт сэкономленного ручного перевода",
+    roi_h1: "Стоимость/час партнёра-адвоката (средняя оценка)",
+    roi_h2: "Среднее время ручного перевода контракта на 15 страниц",
+    roi_h3: "Время с Security Babel (тот же контракт)",
+    roi_h4: "Экономия на контракт по сравнению с ручным переводом",
+    roi_note: "При тарифе Standard (€50/мес.) окупаемость достигается уже с одного контракта в месяц.",
+    team_badge: "Команда", team_title: "Кто стоит за проектом",
+    team_name: "Команда Security Babel", team_loc: "Мадрид, Испания · Основан в 2026",
+    team_p1: "Мы — инженеры-программисты и специалисты по конфиденциальности, которые годами работали с юридическими фирмами и медицинскими клиниками. Мы воочию наблюдали, как конфиденциальные документы проходили через Google Translate и ChatGPT, и никто этого не оспаривал.",
+    team_p2: "Security Babel возник из простого вопроса: зачем конфиденциальному контракту покидать ваш компьютер для перевода? Не нужно. Технология для локальной работы уже существует — просто требовала правильной упаковки.",
+    team_p3: "Мы создали программное обеспечение, которым хотели бы пользоваться наши собственные адвокаты. Без инвесторов, требующих монетизировать ваши данные. Без дорожной карты, зависящей от продажи вашей информации.",
+    footer_privacy: "Политика конфиденциальности",
+    footer_terms:   "Условия использования",
+    footer_copy:    "© 2026 Security Babel. Все права защищены.",
+  },
+
+  /* ── العربية (RTL) ── */
+  ar: {
+    nav_features: "المميزات",
+    nav_security: "أمان GDPR",
+    nav_pricing:  "الأسعار",
+    nav_contact:  "التواصل",
+    nav_download: "تنزيل التطبيق",
+    hero_pretitle: "لا تدع الخوادم تتحكم في بياناتك. السيطرة لك. استعد سيادتك الرقمية مع Security Babel.",
+    hero_h1: "وثائقك الأكثر سرية محمية بالكامل. الترجمة والإدارة 100% محلية.",
+    hero_h2: "مصمم لتقليل مخاطر عدم الامتثال لـ GDPR. بدون خوادم، بدون أطراف ثالثة. تتم جميع عمليات المعالجة داخل جهاز الكمبيوتر الخاص بك.",
+    hero_cta:  "ابدأ محلياً",
+    hero_how:  "كيف يعمل",
+    hero_shield_label: "بيئة آمنة غير متصلة",
+    how_badge:    "100% محلي",
+    how_title:    "كيف يعمل",
+    how_subtitle: "معالجة 100% محلية. لا تغادر أي بيانات جهازك.",
+    how_step1_title: "بيئة معزولة عن الإنترنت",
+    how_step1_desc:  "يعمل Security Babel في حاوية منفصلة تماماً عن الشبكة. لا يتم نقل أي معلومات إلى خوادم خارجية في أي وقت.",
+    how_step2_title: "محرك الترجمة المحلي",
+    how_step2_desc:  "تعمل نماذج MarianMT وQwen مباشرة على معالجك أو وحدة معالجة الرسومات. تُترجم مستنداتك بذكاء اصطناعي احترافي دون مغادرة جهازك.",
+    how_step3_title: "تشفير AES-256-GCM",
+    how_step3_desc:  "تُخزَّن جميع الملفات مشفرة بـ AES-256-GCM على قرصك المحلي. أنت وحدك تمتلك المفتاح. حتى نحن لا يمكننا الوصول إلى بياناتك.",
+    how_coming_soon: "النقل الآمن بين الأجهزة — قريباً",
+    gdpr_title:    "مبني للامتثال التنظيمي",
+    gdpr_subtitle: "بنية معمارية مصممة لتقليل مخاطرك القانونية.",
+    gdpr_card1_title: "سيادة مطلقة على البيانات",
+    gdpr_card1_desc:  "ملفاتك لا تغادر جهازك أبداً. بدون نقل إلى السحابة، بدون نسخ على خوادم الأطراف الثالثة. تولد البيانات وتعيش وتبقى داخل بنيتك التحتية.",
+    gdpr_card2_title: "تقليل مخاطر عدم الامتثال لـ GDPR",
+    gdpr_card2_desc:  "بإزالة عمليات النقل الدولية للبيانات إلى الخدمات السحابية، يتم القضاء على هذا المتجه المحدد للمخاطر التنظيمية. مزيد من التحكم يعني تقليل التعرض.",
+    gdpr_card3_title: "ذكاء اصطناعي محلي وخاص",
+    gdpr_card3_desc:  "يعمل محرك الترجمة بالكامل على جهازك. لا يعالج أي نموذج خارجي وثائقك السرية ولا يتدرب عليها.",
+    pricing_title:    "خطط مصممة لسيادة بياناتك.",
+    pricing_subtitle: "بدون مفاجآت. بدون بيانات في السحابة. بدون حروف دقيقة.",
+    pricing_pro_name:   "Standard",
+    pricing_pro_price:  "50€",
+    pricing_pro_period: "/شهر",
+    pricing_pro_users:  "مستخدم واحد",
+    pricing_pro_f1: "حاوية محلية 100% غير متصلة بالإنترنت",
+    pricing_pro_f2: "ترجمة غير متصلة (ES-EN, ES-FR)",
+    pricing_pro_f3: "إدارة وثائق مشفرة AES-256-GCM",
+    pricing_pro_f4: "دعم ذو أولوية",
+    pricing_pro_cta:    "ابدأ الآن",
+    pricing_ent_name:   "Enterprise",
+    pricing_ent_badge:  "للمكاتب الكبيرة",
+    pricing_ent_price:  "80€",
+    pricing_ent_period: "/شهر لكل مستخدم",
+    pricing_ent_users:  "مستخدمون غير محدودون",
+    pricing_ent_f1: "كل ما في خطة Standard",
+    pricing_ent_f2: "إدارة مركزية للتراخيص",
+    pricing_ent_f3: "نشر سريع بمساعدة متخصصة",
+    pricing_ent_f4: "دعم مخصص متعدد المستخدمين",
+    pricing_ent_cta: "التواصل مع المبيعات",
+    contact_title:    "وجدت خطأً أو مشكلة؟",
+    contact_subtitle: "أخبرني بما حدث وسأحلها شخصياً.",
+    contact_name:     "الاسم",
+    contact_email:    "بريد التواصل",
+    contact_message:  "صف المشكلة",
+    contact_name_ph:    "اسمك",
+    contact_email_ph:   "أنت@مثال.com",
+    contact_message_ph: "ماذا حدث؟ في أي جزء من التطبيق؟ أي نظام تشغيل؟ كلما زادت التفاصيل كان أفضل.",
+    contact_submit: "إرسال الرسالة",
+    contact_sent:   "تم الاستلام! سأتواصل معك لحل المشكلة.",
+    contact_error:  "فشل الإرسال. يرجى المحاولة مرة أخرى.",
+    faq_title: "الأسئلة الشائعة",
+    faq_q1: "ماذا يحدث لوثائقي إذا توقفت عن الدفع؟",
+    faq_a1: "وثائقك تخصك دائماً. إنها مشفرة على قرصك المحلي وستظل في متناولك. سيتم تعطيل الترجمة التلقائية وتحديثات البرنامج فقط.",
+    faq_q2: "كيف أعرف أن بياناتي آمنة حقاً؟",
+    faq_a2: "لا يمكن لـ Security Babel الوصول إلى بياناتك في أي وقت. يحدث تشفير AES-256-GCM على جهازك بمفتاح تعرفه أنت وحدك.",
+    faq_q3: "كيف يتم تثبيت Security Babel؟",
+    faq_a3: "قم بتنزيل برنامج التثبيت لـ macOS أو Windows من هذه الصفحة. التثبيت مُوجَّه ولا يتطلب معرفة تقنية. يتم تكوين محرك الترجمة المحلي تلقائياً عند التشغيل الأول.",
+    faq_q4: "ماذا أفعل إذا احتجت مساعدة أو لم يعمل شيء ما؟",
+    faq_a4: "يمكنك مراسلتي عبر نموذج التواصل في هذه الصفحة. أرد خلال 24-48 ساعة حسب التوفر. الدعم مباشر — بدون تذاكر، بدون بوتات، بدون وسطاء.",
+    faq_q5: "هل يمكنني تجربة Security Babel قبل الاشتراك؟",
+    faq_a5: "لا توجد فترة تجريبية تلقائية في الوقت الحالي. إذا أردت تقييم التطبيق قبل اتخاذ قرارك، راسلني عبر النموذج وسنرتب شيئاً.",
+    cmp_title: "Security Babel مقابل السحابة التقليدية", cmp_subtitle: "الفرق هيكلي، وليس مجرد مظهر.",
+    cmp_col_feature: "الميزة", cmp_col_cloud: "السحابة التقليدية", cmp_col_babel: "Security Babel",
+    cmp_r1: "بياناتك تمر عبر خوادم خارجية",
+    cmp_r2: "يعمل بدون اتصال بالإنترنت",
+    cmp_r3: "خطر اختراق المزود", cmp_r3_no: "مرتفع", cmp_r3_yes: "معدوم",
+    cmp_r4: "مزود الذكاء الاصطناعي يتعلم من مستنداتك",
+    cmp_r5: "تشفير AES-256 على جهازك", cmp_r5_no: "محدود",
+    case_badge: "مثال توضيحي",
+    case_title: "محامٍ يترجم عقداً في 30 ثانية. لا أحد آخر يراه.",
+    case_scenario_label: "سيناريو استخدام نموذجي",
+    case_q1: "تتلقى عقداً من 18 صفحة بالعربية من عميل في دبي. في السابق كنت تضعه في Google Translate، مع علمك أن تلك البيانات تنتهي في خوادم Google.",
+    case_q2: "مع Security Babel تسحبه إلى التطبيق، تختار عربي → إسباني، وفي 30 ثانية لديك الترجمة الكاملة. العقد لم يغادر جهاز الكمبيوتر الخاص بك أبداً.",
+    case_q3: "ثم تشفره وتشاركه مشفراً مع عميلك. بدون بريد إلكتروني غير محمي، بدون Dropbox، بدون أطراف ثالثة يمكنها اعتراضه.",
+    case_m1: "وقت الترجمة", case_m2: "البيانات المرسلة لأطراف ثالثة",
+    case_m3: "الصفحات المترجمة", case_m4: "مخاطر GDPR المضافة",
+    roi_title: "كم تكلف حقاً عدم استخدام Security Babel؟",
+    roi_subtitle: "غرامة GDPR قد تكون وجودية. الحساب بسيط.",
+    roi_fine_label: "غرامة GDPR عن اختراق البيانات",
+    roi_fine_minor_label: "مخالفة طفيفة (المادة 83.4)", roi_or_pct: "أو 2٪ من حجم الأعمال السنوي",
+    roi_fine_major_label: "مخالفة جسيمة (المادة 83.5)", roi_or_pct2: "أو 4٪ من حجم الأعمال السنوي",
+    roi_fine_example: "أمثلة حقيقية: Meta (2023) — 1.2 مليار يورو لنقل البيانات إلى الولايات المتحدة. Marriott (2019) — 18.4 مليون جنيه لاختراق خادم سحابي.",
+    roi_sb_label: "Security Babel — 100 مستخدم",
+    roi_sb_month_label: "التكلفة الشهرية", roi_sb_year_label: "التكلفة السنوية",
+    roi_sb_calc: "غرامة بحد أدنى 10 مليون يورو تعادل 104 سنة من Security Babel لـ 100 مستخدم. الأمان ليس نفقة — إنه البديل الأرخص.",
+    roi_hour_title: "العائد من توفير وقت الترجمة اليدوية",
+    roi_h1: "تكلفة/ساعة للمحامي الشريك (تقدير متوسط)",
+    roi_h2: "متوسط وقت الترجمة اليدوية لعقد من 15 صفحة",
+    roi_h3: "الوقت مع Security Babel (نفس العقد)",
+    roi_h4: "التوفير لكل عقد مقارنة بالترجمة اليدوية",
+    roi_note: "مع خطة Standard (50 يورو/شهر)، يتحقق العائد بعقد واحد فقط في الشهر.",
+    team_badge: "الفريق", team_title: "من يقف وراء المشروع",
+    team_name: "فريق Security Babel", team_loc: "مدريد، إسبانيا · تأسس 2026",
+    team_p1: "نحن مهندسو برمجيات ومتخصصون في الخصوصية عملنا مع مكاتب المحاماة والعيادات الطبية لسنوات. رأينا بأم أعيننا كيف تمر المستندات السرية عبر Google Translate وChatGPT دون أن يشكك أحد في ذلك.",
+    team_p2: "ولد Security Babel من سؤال بسيط: لماذا يجب أن يغادر العقد السري جهازك لترجمته؟ لا يجب. التكنولوجيا للقيام بذلك محلياً موجودة بالفعل — كانت تحتاج فقط إلى تغليف جيد.",
+    team_p3: "بنينا البرنامج الذي نريد محامينا أنفسهم استخدامه. بدون مستثمرين يطالبون بتحقيق الدخل من بياناتك. بدون خارطة طريق تعتمد على بيع معلوماتك لأطراف ثالثة.",
+    footer_privacy: "سياسة الخصوصية",
+    footer_terms:   "شروط الاستخدام",
+    footer_copy:    "© 2026 Security Babel. جميع الحقوق محفوظة.",
+  },
+};
+
+// ──────────────────────────────────────────────────────────
+// 2. CAMBIO DE IDIOMA
+// Actualiza todos los elementos con data-i18n y data-i18n-placeholder.
+// Para árabe: cambia dir="rtl" y lang="ar" en el elemento raíz.
+// ──────────────────────────────────────────────────────────
+let currentLang = 'es';
+
+function setLanguage(lang) {
+  const t = translations[lang];
+  if (!t) return;
+  currentLang = lang;
+
+  // ── RTL / LTR: cambiar dirección y lengua en el elemento raíz ──
+  const root = document.getElementById('root');
+  if (lang === 'ar') {
+    root.setAttribute('dir', 'rtl');
+    root.setAttribute('lang', 'ar');
+  } else {
+    root.setAttribute('dir', 'ltr');
+    root.setAttribute('lang', lang);
+  }
+
+  // ── Actualizar textos ──
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (t[key] !== undefined) el.textContent = t[key];
+  });
+
+  // ── Actualizar placeholders ──
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    if (t[key] !== undefined) el.setAttribute('placeholder', t[key]);
+  });
+
+  // ── Actualizar label del selector ──
+  document.getElementById('lang-label').textContent = lang.toUpperCase();
+
+  // ── Guardar preferencia ──
+  try { localStorage.setItem('sb_lang', lang); } catch(e) {}
+}
+
+// ──────────────────────────────────────────────────────────
+// 3. DROPDOWN DE IDIOMA
+// ──────────────────────────────────────────────────────────
+const langBtn      = document.getElementById('lang-btn');
+const langDropdown = document.getElementById('lang-dropdown');
+let dropdownOpen   = false;
+
+function toggleDropdown(open) {
+  dropdownOpen = open;
+  langDropdown.classList.toggle('open', open);
+  langBtn.setAttribute('aria-expanded', String(open));
+}
+
+langBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleDropdown(!dropdownOpen);
+});
+
+document.querySelectorAll('.lang-option').forEach(btn => {
+  btn.addEventListener('click', () => {
+    setLanguage(btn.getAttribute('data-lang'));
+    toggleDropdown(false);
+  });
+});
+
+// Cerrar al hacer click fuera
+document.addEventListener('click', () => { if (dropdownOpen) toggleDropdown(false); });
+langDropdown.addEventListener('click', e => e.stopPropagation());
+
+// ──────────────────────────────────────────────────────────
+// 4. MENÚ MÓVIL
+// ──────────────────────────────────────────────────────────
+const menuBtn     = document.getElementById('menu-btn');
+const mobileMenu  = document.getElementById('mobile-menu');
+const iconOpen    = document.getElementById('icon-open');
+const iconClose   = document.getElementById('icon-close');
+
+menuBtn.addEventListener('click', () => {
+  const isOpen = !mobileMenu.classList.contains('hidden');
+  mobileMenu.classList.toggle('hidden', isOpen);
+  iconOpen.classList.toggle('hidden', !isOpen);
+  iconClose.classList.toggle('hidden', isOpen);
+});
+
+// Cerrar menú móvil al hacer click en un enlace
+document.querySelectorAll('.mobile-link').forEach(link => {
+  link.addEventListener('click', () => {
+    mobileMenu.classList.add('hidden');
+    iconOpen.classList.remove('hidden');
+    iconClose.classList.add('hidden');
+  });
+});
+
+// ──────────────────────────────────────────────────────────
+// 5. FAQ ACORDEÓN
+// Usa CSS grid-template-rows 0fr→1fr para transición fluida.
+// ──────────────────────────────────────────────────────────
+document.querySelectorAll('.faq-trigger').forEach(trigger => {
+  trigger.addEventListener('click', () => {
+    const body = trigger.nextElementSibling;   // div.faq-body
+    const icon = trigger.querySelector('.faq-icon');
+    const isOpen = body.classList.contains('open');
+
+    // Cerrar todos los demás primero
+    document.querySelectorAll('.faq-body.open').forEach(b => {
+      b.classList.remove('open');
+      b.previousElementSibling.querySelector('.faq-icon').style.transform = '';
+      b.previousElementSibling.setAttribute('aria-expanded', 'false');
+    });
+
+    // Abrir/cerrar el actual
+    if (!isOpen) {
+      body.classList.add('open');
+      icon.style.transform = 'rotate(180deg)';
+      trigger.setAttribute('aria-expanded', 'true');
+    }
+  });
+});
+
+// ──────────────────────────────────────────────────────────
+// 6. SCROLL REVEAL (IntersectionObserver)
+// Los elementos con clase .sr aparecen cuando entran en viewport.
+// ──────────────────────────────────────────────────────────
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+      observer.unobserve(entry.target); // una sola vez
+    }
+  });
+}, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+
+document.querySelectorAll('.sr').forEach(el => observer.observe(el));
+
+// ──────────────────────────────────────────────────────────
+// 7. FORMULARIO DE CONTACTO (Formspree / Web3Forms)
+// Envío asíncrono con estados de éxito y error.
+// ──────────────────────────────────────────────────────────
+const form       = document.getElementById('contact-form');
+const submitBtn  = document.getElementById('submit-btn');
+const submitText = document.getElementById('submit-text');
+const successDiv = document.getElementById('form-success');
+const errorDiv   = document.getElementById('form-error');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  // Validación básica client-side
+  const name    = form.querySelector('[name="name"]').value.trim();
+  const email   = form.querySelector('[name="email"]').value.trim();
+  const message = form.querySelector('[name="message"]').value.trim();
+  if (!name || !email || !message) return;
+
+  // Estado "enviando"
+  submitBtn.disabled = true;
+  submitText.textContent = translations[currentLang]['contact_submit'] + '...';
+
+  try {
+    const res = await fetch(form.action, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json' },
+      body: new FormData(form),
+    });
+
+    if (res.ok) {
+      form.classList.add('hidden');
+      successDiv.classList.remove('hidden');
+    } else {
+      throw new Error('bad response');
+    }
+  } catch {
+    errorDiv.classList.remove('hidden');
+    setTimeout(() => errorDiv.classList.add('hidden'), 4000);
+    submitBtn.disabled = false;
+    submitText.textContent = translations[currentLang]['contact_submit'];
+  }
+});
+
+// ──────────────────────────────────────────────────────────
+// 8. INICIALIZACIÓN
+// Leer idioma guardado o detectar el del navegador.
+// ──────────────────────────────────────────────────────────
+(function init() {
+  let saved = null;
+  try { saved = localStorage.getItem('sb_lang'); } catch(e) {}
+
+  // Detectar idioma del navegador (solo los soportados)
+  const supported  = ['es', 'en', 'ru', 'ar'];
+  const browserLang = (navigator.language || 'es').split('-')[0].toLowerCase();
+  const detected   = supported.includes(browserLang) ? browserLang : 'es';
+
+  setLanguage(saved || detected);
+})();
+</script>
+
+</body>
+</html>
