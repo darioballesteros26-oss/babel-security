@@ -1,6 +1,7 @@
 from transformers import MarianMTModel, MarianTokenizer
 import torch
 import os
+import re
 
 # Pares directos principales
 PARES = ["es-en", "en-es", "es-fr", "fr-es", "es-ar", "ar-es"]
@@ -54,6 +55,35 @@ CADENAS = {
 _modelos: dict = {}
 _tokenizers: dict = {}
 _device = "mps" if torch.backends.mps.is_available() else "cpu"
+
+# Límite de caracteres por segmento enviado a MarianMT.
+# El modelo tiene ventana de 512 tokens (~380 chars en español/inglés).
+_MAX_CHARS_SEGMENTO = 380
+
+
+def dividir_frases(texto: str) -> list:
+    """Divide texto en frases de hasta _MAX_CHARS_SEGMENTO caracteres.
+    Corta en límites de oración (., !, ?, ؟) para que cada segmento
+    llegue completo a MarianMT y no se trunque en mitad de una frase."""
+    if len(texto) <= _MAX_CHARS_SEGMENTO:
+        return [texto]
+    # Dividir en oraciones en límites de puntuación seguidos de espacio
+    oraciones = re.split(r'(?<=[.!?؟])\s+', texto)
+    chunks = []
+    actual = ""
+    for oracion in oraciones:
+        if not oracion:
+            continue
+        if not actual:
+            actual = oracion
+        elif len(actual) + 1 + len(oracion) <= _MAX_CHARS_SEGMENTO:
+            actual += " " + oracion
+        else:
+            chunks.append(actual)
+            actual = oracion
+    if actual:
+        chunks.append(actual)
+    return chunks if chunks else [texto]
 
 
 def cargar_modelos():
@@ -111,12 +141,13 @@ def _traducir_directo(texto: str, par: str) -> str:
         raise RuntimeError("Sin suficientes letras")
 
     # Repetición: alguna palabra significativa (>3 chars) aparece más de 2 veces.
-    # Excluimos palabras cortas (artículos, preposiciones) que repiten naturalmente.
-    palabras = [p for p in resultado.lower().split() if p.isalpha() and len(p) > 3]
+    # Strips punctuation first so "date," and "date" count as the same word.
+    palabras = [re.sub(r'[^a-zA-Z]', '', p).lower() for p in resultado.split()]
+    palabras = [p for p in palabras if p.isalpha() and len(p) > 3]
     if palabras and max(palabras.count(p) for p in set(palabras)) > 2:
         raise RuntimeError(f"Repetición en modelo {par}")
 
-    # Garble fonético: 5+ palabras con el mismo prefijo de 2 letras
+    # Garble fonético: mayoría de palabras con el mismo prefijo de 2 letras
     # Solo aplica en textos largos para evitar falsos positivos en frases cortas
     palabras_resultado = resultado.split()
     if len(palabras_resultado) >= 5:
@@ -125,29 +156,43 @@ def _traducir_directo(texto: str, par: str) -> str:
             for w in palabras_resultado
             if sum(c.isalpha() for c in w) >= 2
         ]
-        if len(prefijos) >= 5 and len(set(prefijos)) <= 1:
-            raise RuntimeError(f"Garble fonético en modelo {par}")
+        if len(prefijos) >= 5:
+            # Regla de mayoría: si >= 70% comparten el mismo prefijo es garble
+            conteo_pref = {}
+            for p in prefijos:
+                conteo_pref[p] = conteo_pref.get(p, 0) + 1
+            max_pref = max(conteo_pref.values())
+            if max_pref / len(prefijos) >= 0.70:
+                raise RuntimeError(f"Garble fonético en modelo {par}")
+
+    # Garble de tokenización: demasiados tokens de 1 carácter alfabético en el output
+    # (síntoma de ALL CAPS no normalizado o fallo del tokenizer)
+    if len(palabras_resultado) >= 5:
+        tokens_1char = sum(1 for w in palabras_resultado if len(w) == 1 and w.isalpha())
+        if tokens_1char / len(palabras_resultado) > 0.25:
+            raise RuntimeError(f"Garble de tokenización en modelo {par}")
+
+    # Traducción truncada: para frases cortas (≤5 palabras), si el output tiene
+    # menos de la mitad de palabras que el input, es probable que sea incompleto
+    n_in = len(texto.split())
+    n_out = len(palabras_resultado)
+    if n_in <= 5 and n_in >= 3 and n_out / n_in < 0.5:
+        raise RuntimeError(f"Traducción truncada en modelo {par}")
 
     return resultado
 
 
-def traducir(texto: str, par: str) -> str:
-    """
-    Traduce texto con el modelo directo.
-    Si el par tiene cadena definida y el directo falla, intenta la cadena.
-    Si todo falla, lanza RuntimeError para que Rust use el diccionario.
-    """
+def _traducir_con_cadena(texto: str, par: str) -> str:
+    """Traduce un segmento con el modelo directo o la cadena de rescate."""
     if par not in _modelos and par not in CADENAS:
         raise ValueError(f"Par no soportado: {par}")
 
-    # Intentar modelo directo
-    error_directo: Exception | None = None
+    error_directo = None
     try:
         return _traducir_directo(texto, par)
     except RuntimeError as e:
         error_directo = e
 
-    # Intentar cadena de rescate (solo si está definida)
     cadena = CADENAS.get(par)
     if not cadena:
         raise RuntimeError(str(error_directo))
@@ -169,3 +214,25 @@ def traducir(texto: str, par: str) -> str:
             f"Traducción {par} no disponible "
             f"(directo: {error_directo}; cadena: {e_cadena})"
         )
+
+
+def traducir(texto: str, par: str) -> str:
+    """Traduce texto dividiéndolo en frases si es largo.
+    Normaliza all-caps a title case antes de traducir para evitar
+    garble de tokenización con modelos MarianMT."""
+    # ALL CAPS → minúsculas (title case genera "De" etc. que confunden al tokenizador)
+    era_mayusculas = (
+        texto == texto.upper()
+        and sum(c.isalpha() for c in texto) >= 4
+    )
+    texto_norm = texto.lower() if era_mayusculas else texto
+
+    frases = dividir_frases(texto_norm)
+    if len(frases) == 1:
+        return _traducir_con_cadena(texto_norm, par)
+    partes = []
+    for frase in frases:
+        if not frase.strip():
+            continue
+        partes.append(_traducir_con_cadena(frase, par))
+    return " ".join(partes)

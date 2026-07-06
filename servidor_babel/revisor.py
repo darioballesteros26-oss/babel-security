@@ -6,7 +6,8 @@ DIR_MODELOS = os.path.join(os.path.dirname(__file__), "modelos")
 RUTA_GGUF = os.path.join(DIR_MODELOS, "qwen-0.5b-q4.gguf")
 
 LANG_NAMES = {
-    "es": "Spanish", "en": "English", "fr": "French", "ar": "Arabic"
+    "es": "Spanish", "en": "English", "fr": "French", "ar": "Arabic",
+    "de": "German", "ru": "Russian", "zh": "Chinese",
 }
 
 _llm = None
@@ -37,6 +38,9 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
     nombre_orig = LANG_NAMES.get(lang_orig, lang_orig)
     nombre_dest = LANG_NAMES.get(lang_dest, lang_dest)
 
+    # Truncar contexto para no sobrepasar n_ctx=2048 con documentos largos
+    ctx_truncado = contexto[-200:].strip() if contexto else ""
+
     messages = [
         {
             "role": "system",
@@ -53,7 +57,7 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
             "content": (
                 f"Source language: {nombre_orig}\n"
                 f"Target language: {nombre_dest}\n"
-                f"Context: {contexto or '(none)'}\n"
+                f"Context: {ctx_truncado or '(none)'}\n"
                 f"Source: {original}\n"
                 f"Translation: {traduccion}\n"
                 f"Corrected translation:"

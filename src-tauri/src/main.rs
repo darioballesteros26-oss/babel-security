@@ -815,6 +815,34 @@ fn borrar_archivo_original() -> Result<bool, String> {
 }
 
 // ============================================================
+// COMANDO — Verificar herramientas opcionales para PDF
+// ============================================================
+#[derive(serde::Serialize)]
+struct HerramientasPdf {
+    pdf2docx: bool,
+    libreoffice: bool,
+}
+
+#[tauri::command]
+fn verificar_herramientas_pdf() -> HerramientasPdf {
+    let pdf2docx = std::process::Command::new("python3")
+        .args(["-c", "import pdf2docx"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let libreoffice = [
+        "/opt/homebrew/bin/soffice",
+        "/usr/local/bin/soffice",
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    ]
+    .iter()
+    .any(|&p| std::path::Path::new(p).exists());
+
+    HerramientasPdf { pdf2docx, libreoffice }
+}
+
+// ============================================================
 // COMANDO — Listar archivos guardados (sin traducir)
 // ============================================================
 
@@ -3268,6 +3296,7 @@ fn main() {
             guardar_documento_sin_traducir,
             importar_archivo_dialogo,
             borrar_archivo_original,
+            verificar_herramientas_pdf,
             listar_archivos_guardados,
             crear_buzon_guardado,
             listar_buzones_guardados,

@@ -322,11 +322,12 @@ pub fn procesar_archivo_inteligente(
             let _ = fs::write(&salida_orig, cifrado_orig);
         }
 
-        // Traducir párrafo a párrafo para evitar bucles en NLLB
+        // Traducir párrafo a párrafo con contexto del anterior para coherencia
         let parrafos: Vec<&str> = texto.split('\n').collect();
         let total_p = parrafos.iter().filter(|p| !p.trim().is_empty()).count().max(1);
         let mut traducidos_p = 0usize;
         let mut traducido_final = String::new();
+        let mut ultimo_trad = String::new();
         for parrafo in &parrafos {
             if parrafo.trim().is_empty() {
                 traducido_final.push('\n');
@@ -335,7 +336,8 @@ pub fn procesar_archivo_inteligente(
             let pct = (10 + traducidos_p * 80 / total_p).min(90) as u8;
             progreso(pct, &format!("TRADUCIENDO... {}%", pct));
             traducidos_p += 1;
-            let traducido = match traducir_con_marian(parrafo, par) {
+            let ctx_prev = if ultimo_trad.is_empty() { None } else { Some(ultimo_trad.clone()) };
+            let traducido = match traducir_con_marian(parrafo, par, ctx_prev.as_deref()) {
                 Ok(t) => t,
                 Err(_) => {
                     let (t, _) =
@@ -343,6 +345,7 @@ pub fn procesar_archivo_inteligente(
                     t
                 }
             };
+            ultimo_trad = traducido.clone();
             traducido_final.push_str(&traducido);
             traducido_final.push('\n');
         }
@@ -406,6 +409,7 @@ fn traducir_xml_directo(
     let mut resultado = String::with_capacity(xml.len() * 2);
     let mut resto = xml;
     let mut ultimo_pct = pct_inicio;
+    let mut ultimo_traducido = String::new();
 
     loop {
         // Progreso continuo basado en posición de caracteres procesados
@@ -444,7 +448,8 @@ fn traducir_xml_directo(
             break;
         };
         let parrafo_xml = &desde_p[..fin_rel + 6];
-        resultado.push_str(&traducir_parrafo_xml(parrafo_xml, dict, subclave_hex, par));
+        let ctx_prev = if ultimo_traducido.is_empty() { None } else { Some(ultimo_traducido.clone()) };
+        resultado.push_str(&traducir_parrafo_xml(parrafo_xml, dict, subclave_hex, par, ctx_prev.as_deref(), &mut ultimo_traducido));
         resto = &desde_p[fin_rel + 6..];
     }
 
@@ -467,22 +472,27 @@ fn encontrar_wp(xml: &str) -> Option<usize> {
 
 /// Traduce un párrafo completo: extrae todo el texto, lo traduce como unidad
 /// y pone el resultado en el primer <w:t>, vaciando los demás.
+/// `contexto` es la traducción del párrafo anterior (para coherencia).
+/// `ultimo_traducido` se actualiza con la traducción de este párrafo.
 fn traducir_parrafo_xml(
     parrafo: &str,
     dict: &HashMap<String, String>,
     subclave_hex: &str,
     par: &str,
+    contexto: Option<&str>,
+    ultimo_traducido: &mut String,
 ) -> String {
     let texto = extraer_texto_wt(parrafo);
     if texto.trim().is_empty() {
         return parrafo.to_string();
     }
 
-    let traducido = match traducir_con_marian(&texto, par) {
+    let traducido = match traducir_con_marian(&texto, par, contexto) {
         Ok(t) => t,
         Err(_) => motor_atomico(&texto, dict, subclave_hex).0,
     };
 
+    *ultimo_traducido = traducido.clone();
     reconstruir_parrafo(parrafo, &traducido)
 }
 
@@ -814,11 +824,12 @@ pub fn procesar_pdf(
             *texto = ocr_total;
         }
         progreso(15, "EXTRAYENDO TEXTO...");
-        // Traducir párrafo a párrafo con NLLB (fallback a diccionario)
+        // Traducir párrafo a párrafo con contexto del anterior para coherencia
         let parrafos: Vec<String> = texto.lines().map(String::from).collect();
         let total_p = parrafos.iter().filter(|p| !p.trim().is_empty()).count().max(1);
         let mut traducidos_p = 0usize;
         let mut traducido = String::new();
+        let mut ultimo_trad_pdf = String::new();
         for parrafo in &parrafos {
             if parrafo.trim().is_empty() {
                 traducido.push('\n');
@@ -827,13 +838,15 @@ pub fn procesar_pdf(
             let pct = (20 + traducidos_p * 70 / total_p).min(90) as u8;
             progreso(pct, &format!("TRADUCIENDO... {}%", pct));
             traducidos_p += 1;
-            let t = match traducir_con_marian(parrafo, par) {
+            let ctx_prev = if ultimo_trad_pdf.is_empty() { None } else { Some(ultimo_trad_pdf.clone()) };
+            let t = match traducir_con_marian(parrafo, par, ctx_prev.as_deref()) {
                 Ok(t) => t,
                 Err(_) => {
                     let (t, _) = motor_atomico(parrafo, dict, subclave_hex);
                     t
                 }
             };
+            ultimo_trad_pdf = t.clone();
             traducido.push_str(&t);
             traducido.push('\n');
         }
@@ -905,8 +918,7 @@ pub fn procesar_pdf(
                     let pdf_out = tmp_dir.join(format!("{}_trad.pdf", nombre));
                     if pdf_out.exists() {
                         if let Ok(pdf_bytes) = fs::read(&pdf_out) {
-                            let b64_pdf = base64::engine::general_purpose::STANDARD
-                                .encode(&pdf_bytes);
+                            let b64_pdf = comprimir_b64(&pdf_bytes);
                             match seguridad::blindar_documento(&b64_pdf, subclave_hex) {
                                 Ok(cifrado_pdf) => {
                                     let _ = fs::write(&ruta_docx_trad, cifrado_pdf);
@@ -1590,18 +1602,19 @@ fn agente_http() -> &'static ureq::Agent {
 }
 
 /// Llama al servidor Python MarianMT en localhost:5002.
-/// Incluye token de seguridad — Flask rechaza sin él.
-pub fn traducir_con_marian(texto: &str, par: &str) -> Result<String, String> {
+/// `contexto` es el párrafo anterior traducido: el revisor Qwen lo usa
+/// para corregir concordancia de pronombres y tiempos verbales entre párrafos.
+pub fn traducir_con_marian(texto: &str, par: &str, contexto: Option<&str>) -> Result<String, String> {
     const MAX_BYTES: usize = 50_000;
     if texto.len() > MAX_BYTES {
         return Err(format!("Texto demasiado grande ({} bytes, máx {} KB)", texto.len(), MAX_BYTES / 1000));
     }
     let url = "http://127.0.0.1:5002/traducir";
     let token = token_efectivo();
-    let body = serde_json::json!({
-        "texto": texto,
-        "par": par
-    });
+    let body = match contexto.filter(|c| !c.is_empty()) {
+        Some(ctx) => serde_json::json!({ "texto": texto, "par": par, "contexto": ctx }),
+        None      => serde_json::json!({ "texto": texto, "par": par }),
+    };
 
     let respuesta = agente_http()
         .post(url)
@@ -1633,7 +1646,7 @@ pub fn traducir_inteligente(
     subclave_hex: &str,
     par: &str,
 ) -> (String, usize) {
-    match traducir_con_marian(texto, par) {
+    match traducir_con_marian(texto, par, None) {
         Ok(traduccion) => (traduccion, 0),
         Err(_) => motor_atomico(texto, dict, subclave_hex),
     }

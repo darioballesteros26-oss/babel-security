@@ -652,6 +652,7 @@ function manejarSeleccion(event: Event): void {
 async function procesarArchivo(archivo: File): Promise<void> {
   const pesoKB = (archivo.size / 1024).toFixed(0);
   const ext = archivo.name.split(".").pop()?.toUpperCase() ?? "FILE";
+  await advertirCalidadPdf(archivo.name);
   añadirMensajeArchivo(archivo.name, `${pesoKB} KB · ${ext}`);
   mostrarProcesando(true);
 
@@ -674,11 +675,27 @@ async function procesarArchivo(archivo: File): Promise<void> {
 // TRADUCCIÓN — VÍA DRAG & DROP NATIVO
 // ============================================================
 
+async function advertirCalidadPdf(nombreArchivo: string): Promise<void> {
+  if (!nombreArchivo.toLowerCase().endsWith(".pdf")) return;
+  try {
+    const h = await invoke<{ pdf2docx: boolean; libreoffice: boolean }>("verificar_herramientas_pdf");
+    if (!h.pdf2docx || !h.libreoffice) {
+      const falta = [!h.pdf2docx ? "pdf2docx" : "", !h.libreoffice ? "LibreOffice" : ""]
+        .filter(Boolean).join(" y ");
+      añadirMensajeBabel(
+        `PDF sin ${falta}: se guardará solo el texto traducido, sin formato. Instálalos para conservar maquetación.`,
+        "BABEL · aviso"
+      );
+    }
+  } catch { /* silencioso */ }
+}
+
 async function procesarRuta(ruta: string): Promise<void> {
   const partes = ruta.replace(/\\/g, "/").split("/");
   const nombreArchivo = partes[partes.length - 1];
   const ext = nombreArchivo.split(".").pop()?.toUpperCase() ?? "FILE";
 
+  await advertirCalidadPdf(nombreArchivo);
   añadirMensajeArchivo(nombreArchivo, `Arrastrado · ${ext}`);
   mostrarProcesando(true);
 
