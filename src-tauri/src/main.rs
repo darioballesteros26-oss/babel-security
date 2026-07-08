@@ -1159,7 +1159,8 @@ async fn traducir_archivo_guardado(
     ruta: String,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
-    validar_ruta_en(&ruta, guardados_dir())?;
+    validar_ruta_en(&ruta, archivos_dir())
+        .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
@@ -1214,6 +1215,13 @@ async fn traducir_archivo_guardado(
         if let Some(s) = tmp_path.to_str() { borrar_seguro(s); }
 
         resultado?;
+
+        // El traductor siempre guarda un __orig.babel propio, pero aquí el original
+        // ya está preservado en GUARDADO — eliminar la copia redundante.
+        let orig_redundante = archivos_path(&format!("{}_{}_{}__orig.babel", id_usuario, par, nombre_sin_ext));
+        if std::path::Path::new(&orig_redundante).exists() {
+            borrar_seguro(&orig_redundante);
+        }
 
         let ruta_resultado = archivos_path(&format!("{}_{}_{}.babel", id_usuario, par, nombre_sin_ext));
         Ok(ruta_resultado)
