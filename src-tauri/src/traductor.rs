@@ -406,6 +406,70 @@ pub fn motor_atomico(
     }
     (resultado, n)
 }
+/// Traduce los tags <a:t> (DrawingML) de un XML — usado en charts de DOCX.
+/// Números puros y textos vacíos se dejan intactos.
+fn traducir_xml_at(
+    xml: &str,
+    dict: &HashMap<String, String>,
+    subclave_hex: &str,
+    par: &str,
+) -> String {
+    let mut resultado = String::with_capacity(xml.len() * 2);
+    let mut resto = xml;
+    loop {
+        // Buscar <a:t> o <a:t con atributos
+        let tag_pos = {
+            let mut p = usize::MAX;
+            let mut off = 0;
+            while let Some(rel) = resto[off..].find("<a:t") {
+                let abs = off + rel;
+                let after = resto.get(abs + 4..abs + 5).unwrap_or("");
+                if after == ">" || after == " " { p = abs; break; }
+                off = abs + 4;
+            }
+            p
+        };
+        if tag_pos == usize::MAX {
+            resultado.push_str(resto);
+            break;
+        }
+        resultado.push_str(&resto[..tag_pos]);
+        let desde_tag = &resto[tag_pos..];
+        let Some(j) = desde_tag.find('>') else {
+            resultado.push_str(desde_tag);
+            break;
+        };
+        let tag = &desde_tag[..j + 1];
+        let tras_tag = &desde_tag[j + 1..];
+        let Some(k) = tras_tag.find("</a:t>") else {
+            resultado.push_str(desde_tag);
+            break;
+        };
+        let contenido = &tras_tag[..k];
+        let dec = contenido
+            .replace("&amp;", "&").replace("&lt;", "<")
+            .replace("&gt;", ">").replace("&apos;", "'").replace("&quot;", "\"");
+
+        let trad = if dec.trim().is_empty() || dec.trim().parse::<f64>().is_ok() {
+            dec
+        } else {
+            match traducir_con_marian(dec.trim(), par, None) {
+                Ok(t) => t,
+                Err(_) => {
+                    let (fallback, _) = motor_atomico(dec.trim(), dict, subclave_hex);
+                    fallback
+                }
+            }
+        };
+        let esc = trad.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        resultado.push_str(tag);
+        resultado.push_str(&esc);
+        resultado.push_str("</a:t>");
+        resto = &tras_tag[k + 6..];
+    }
+    resultado
+}
+
 fn traducir_xml_directo(
     xml: &str,
     dict: &HashMap<String, String>,
@@ -500,10 +564,24 @@ fn partir_en_oraciones(texto: &str) -> Vec<String> {
         if matches!(chars[i], '.' | '!' | '?') {
             let sig = chars.get(i + 1).copied().unwrap_or('\0');
             if sig == ' ' || sig == '\0' {
-                let s = actual.trim().to_string();
-                if !s.is_empty() { oraciones.push(s); }
-                actual = String::new();
-                if sig == ' ' { i += 1; }
+                // No partir si la palabra antes del punto es una abreviatura:
+                // ≤4 letras puras (Art., Sr., Dr., Núm., Fig., Ref., etc.)
+                // o termina en dígito (ej. "5.") — en ambos casos MarianMT
+                // necesita el contexto siguiente para traducir bien.
+                let previa = actual
+                    .trim_end_matches(|c: char| matches!(c, '.' | '!' | '?'))
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or("");
+                let es_abrev = !previa.is_empty()
+                    && (previa.chars().last().map_or(false, |c| c.is_ascii_digit())
+                        || (previa.len() <= 4 && previa.chars().all(|c| c.is_alphabetic())));
+                if !es_abrev {
+                    let s = actual.trim().to_string();
+                    if !s.is_empty() { oraciones.push(s); }
+                    actual = String::new();
+                    if sig == ' ' { i += 1; }
+                }
             }
         }
         i += 1;
@@ -839,6 +917,13 @@ pub fn clonar_y_traducir(
                     traducir_xml_directo(&xml_sub, dict, subclave_hex, par, 88, 95, progreso);
                 zip_out.start_file(&name, opts_deflate)?;
                 zip_out.write_all(xml_sub_trad.as_bytes())?;
+            } else if name.starts_with("word/charts/") && name.ends_with(".xml") {
+                // Gráficos — títulos, etiquetas de ejes y series (<a:t>)
+                let mut xml_chart = String::new();
+                file.read_to_string(&mut xml_chart)?;
+                let xml_chart_trad = traducir_xml_at(&xml_chart, dict, subclave_hex, par);
+                zip_out.start_file(&name, opts_deflate)?;
+                zip_out.write_all(xml_chart_trad.as_bytes())?;
             } else {
                 // Imágenes, estilos, fuentes, relaciones — copiar intacto
                 let es_xml = name.ends_with(".xml") || name.ends_with(".rels");
