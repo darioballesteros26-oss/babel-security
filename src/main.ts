@@ -2766,7 +2766,7 @@ async function cargarBandejaEmail(): Promise<void> {
       const visto = emailsVistos.has(email.id) || email.leido;
       if (!visto) noLeidos++;
       return `
-      <div class="email-item${visto ? "" : " no-leido"}" onclick="seleccionarEmail(${email.id})" data-id="${email.id}">
+      <div class="email-item${visto ? "" : " no-leido"}" data-action="seleccionar-email" data-id="${Number(email.id)}">
         <div class="email-item-cabecera">
           <div class="email-item-remitente">${escapeHTML(email.remitente)}</div>
           ${!visto ? '<span class="email-punto-nuevo"></span>' : ""}
@@ -2779,6 +2779,15 @@ async function cargarBandejaEmail(): Promise<void> {
         </div>
       </div>`;
     }).join("");
+
+    // Event delegation — evita onclick inline con IDs sin sanitizar
+    lista.onclick = (e: MouseEvent) => {
+      const item = (e.target as HTMLElement).closest("[data-action='seleccionar-email']") as HTMLElement | null;
+      if (!item) return;
+      const id = parseInt(item.dataset.id ?? "", 10);
+      if (!Number.isFinite(id)) return;
+      seleccionarEmail(id);
+    };
 
     // Actualizar contador en el título y badge en botón EMAIL
     const tituloSidebar = document.querySelector(".email-sidebar-titulo");

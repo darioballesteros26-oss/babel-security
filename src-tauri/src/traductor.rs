@@ -1383,13 +1383,15 @@ pub struct EmailResumen {
     pub snippet: String,
 }
 
-/// Rechaza cualquier campo IMAP que contenga \r o \n — previene inyección de comandos.
+/// Rechaza campos IMAP con caracteres de control o demasiado largos.
 fn validar_campo_imap(valor: &str, _campo: &str) -> Result<(), Box<dyn std::error::Error>> {
     if valor.len() > 320 {
         return Err("Parámetro de conexión demasiado largo.".into());
     }
-    if valor.contains('\r') || valor.contains('\n') || valor.contains('\0') {
-        return Err("Parámetro de conexión inválido.".into());
+    // Rechazar cualquier carácter de control ASCII (0x00-0x1F, 0x7F) incluyendo
+    // \r \n \t y otros que podrían inyectarse en cabeceras IMAP/SMTP.
+    if valor.chars().any(|c| c.is_ascii_control()) {
+        return Err("Parámetro de conexión contiene caracteres no permitidos.".into());
     }
     Ok(())
 }
