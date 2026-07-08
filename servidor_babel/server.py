@@ -7,7 +7,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import traductor
+import traductor_usb
 import revisor
+
+# True si los modelos tc-big están disponibles en modelos_usb/
+_USAR_USB = traductor_usb.disponible()
 
 app = Flask(__name__)
 # Solo orígenes legítimos: Tauri en producción y localhost en desarrollo
@@ -80,7 +84,10 @@ def traducir_endpoint():
         return jsonify({"error": f"Texto demasiado largo (máx {MAX_INPUT_CHARS} caracteres)"}), 400
 
     try:
-        traduccion_base = traductor.traducir(texto, par)
+        if _USAR_USB:
+            traduccion_base = traductor_usb.traducir(texto, par)
+        else:
+            traduccion_base = traductor.traducir(texto, par)
         traduccion_final = revisor.revisar(texto, traduccion_base, par, contexto)
         return jsonify({"traduccion": traduccion_final, "revisada": True})
     except ValueError as e:
@@ -93,6 +100,11 @@ def traducir_endpoint():
 
 
 if __name__ == "__main__":
-    traductor.cargar_modelos()
+    if _USAR_USB:
+        print("[server] Modelos tc-big detectados — usando traductor USB (mayor calidad)")
+        traductor_usb.cargar_modelos()
+    else:
+        print("[server] Usando modelos MarianMT estándar")
+        traductor.cargar_modelos()
     revisor.cargar_modelo()
     app.run(host="127.0.0.1", port=5002, debug=False)

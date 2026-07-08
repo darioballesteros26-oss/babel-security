@@ -44,11 +44,11 @@ MODELOS = {
     "ru-en": "Helsinki-NLP/opus-mt-tc-big-zle-en",
 }
 
-QWEN_REPO     = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
-QWEN_FILENAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+QWEN_REPO     = "Qwen/Qwen2.5-1.5B-Instruct-GGUF"
+QWEN_FILENAME = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
 QWEN_DESTINO  = DIR_USB / "qwen.gguf"
 # El GGUF del servidor de desarrollo — se copia en vez de re-descargar
-QWEN_LOCAL    = DIR_BASE / "modelos" / "qwen-0.5b-q4.gguf"
+QWEN_LOCAL    = DIR_BASE / "modelos" / "qwen-1.5b-q4.gguf"
 
 
 def convertir_modelo(nombre_hf: str, par: str) -> bool:

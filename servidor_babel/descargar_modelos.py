@@ -35,7 +35,7 @@ def descargar_marian():
 
 
 def descargar_qwen():
-    ruta_destino = os.path.join(DIR_MODELOS, "qwen-0.5b-q4.gguf")
+    ruta_destino = os.path.join(DIR_MODELOS, "qwen-1.5b-q4.gguf")
     if os.path.isfile(ruta_destino):
         print("  [OK ya existe] Qwen GGUF")
         return
@@ -46,10 +46,10 @@ def descargar_qwen():
         print("ERROR: huggingface_hub no instalado.")
         sys.exit(1)
 
-    print("  [Descargando] Qwen2.5-0.5B-Instruct GGUF ...")
+    print("  [Descargando] Qwen2.5-1.5B-Instruct GGUF (~1 GB)...")
     descargado = hf_hub_download(
-        repo_id="Qwen/Qwen2.5-0.5B-Instruct-GGUF",
-        filename="qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        repo_id="Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+        filename="qwen2.5-1.5b-instruct-q4_k_m.gguf",
         local_dir=DIR_MODELOS,
     )
     shutil.move(descargado, ruta_destino)

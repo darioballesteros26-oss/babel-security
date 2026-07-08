@@ -1,9 +1,23 @@
 import os
+import re
 import threading
 from llama_cpp import Llama
 
+# Detectores de script para validar que la revisión de Qwen está en el idioma correcto
+_RE_ARABE  = re.compile(r'[؀-ۿ]')
+_RE_LATIN  = re.compile(r'[a-zA-Z]')
+_RE_CIRIL  = re.compile(r'[Ѐ-ӿ]')
+_RE_HAN    = re.compile(r'[一-鿿]')
+
+# Script esperado por idioma destino (None = no se verifica)
+_SCRIPT_DEST = {
+    "ar": _RE_ARABE,
+    "ru": _RE_CIRIL,
+    "zh": _RE_HAN,
+}
+
 DIR_MODELOS = os.path.join(os.path.dirname(__file__), "modelos")
-RUTA_GGUF = os.path.join(DIR_MODELOS, "qwen-0.5b-q4.gguf")
+RUTA_GGUF = os.path.join(DIR_MODELOS, "qwen-1.5b-q4.gguf")
 
 LANG_NAMES = {
     "es": "Spanish", "en": "English", "fr": "French", "ar": "Arabic",
@@ -19,7 +33,7 @@ def cargar_modelo():
     print("[QWEN] Cargando revisor...")
     _llm = Llama(
         model_path=RUTA_GGUF,
-        n_ctx=2048,
+        n_ctx=4096,
         n_gpu_layers=-1,  # offload todo a Metal en M3
         verbose=False,
     )
@@ -30,8 +44,8 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
     if _llm is None:
         return traduccion
 
-    # Qwen 0.5B entra en bucles con frases muy cortas — no hay contexto que revisar
-    if len(original.split()) < 8:
+    # Qwen 1.5B maneja bien frases a partir de 5 palabras
+    if len(original.split()) < 5:
         return traduccion
 
     lang_orig, lang_dest = par.split("-")
@@ -68,7 +82,7 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
     with _lock:
         out = _llm.create_chat_completion(
             messages,
-            max_tokens=min(len(traduccion.split()) * 3, 256),
+            max_tokens=min(len(traduccion.split()) * 3, 512),
             temperature=0.1,
             repeat_penalty=1.3,
             stop=["Source:", "Context:"],
@@ -79,5 +93,17 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
     # Descartar si Qwen repite o alucina (más del doble de tokens que la traducción base)
     if not revisada or len(revisada) > len(traduccion) * 2:
         return traduccion
+
+    # Validar script: si el idioma destino requiere un script no latino (árabe, ruso, chino)
+    detector = _SCRIPT_DEST.get(lang_dest)
+    if detector:
+        # Rechazar si Qwen no produjo ni un solo carácter del script correcto
+        if not detector.search(revisada):
+            return traduccion
+        # Para árabe: rechazar si Qwen introdujo tokens mixtos árabe-latino (re-garble)
+        if lang_dest == "ar":
+            for tok in revisada.split():
+                if _RE_ARABE.search(tok) and _RE_LATIN.search(tok):
+                    return traduccion
 
     return revisada

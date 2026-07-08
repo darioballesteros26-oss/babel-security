@@ -986,7 +986,7 @@ async function cargarArchivosGuardados(): Promise<void> {
       <div class="archivo-card-nombre" style="display:flex;align-items:center;gap:8px;">${nombre}
         <button type="button" data-action="renombrar" style="background:none;border:none;color:var(--dorado);cursor:pointer;font-size:0.85rem;padding:0;opacity:0.7;">✎</button>
       </div>
-      <div class="archivo-card-meta">${kb} KB · <span style="color:var(--dorado);">${escapeHTML(idioma)} · TRAD</span> · AES-256</div>
+      <div class="archivo-card-meta">${kb} KB · <span style="color:var(--dorado);">${escapeHTML(idioma)} · TRAD</span> · AES-256${g.trad.fecha ? ' · ' + escapeHTML(g.trad.fecha) : ''}</div>
     </div>
   </div>
   <div class="archivo-card-botones">
@@ -1008,7 +1008,7 @@ async function cargarArchivosGuardados(): Promise<void> {
       <div class="archivo-card-nombre" style="display:flex;align-items:center;gap:8px;">${nombre}
         <button type="button" data-action="renombrar" style="background:none;border:none;color:var(--dorado);cursor:pointer;font-size:0.85rem;padding:0;opacity:0.7;">✎</button>
       </div>
-      <div class="archivo-card-meta">${kb} KB · GUARDADO · AES-256</div>
+      <div class="archivo-card-meta">${kb} KB · GUARDADO · AES-256${a.fecha ? ' · ' + escapeHTML(a.fecha) : ''}</div>
     </div>
   </div>
   <div class="archivo-card-botones">
