@@ -521,12 +521,79 @@ fn extraer_texto_wt(xml: &str) -> String {
 
 /// Reescribe el XML del párrafo: pone `traduccion` en el primer <w:t>
 /// con texto y vacía los demás, conservando el formato/estilo intacto.
-fn reconstruir_parrafo(parrafo: &str, traduccion: &str) -> String {
-    let esc = traduccion.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    let mut resultado = String::with_capacity(parrafo.len() + esc.len());
-    let mut resto = parrafo;
-    let mut puesto = false;
+// Reparte las palabras de `trad` entre N runs proporcionalmente a la longitud original de cada uno.
+fn distribuir_por_runs(trad: &str, orig_lens: &[usize]) -> Vec<String> {
+    let n = orig_lens.len();
+    if n == 0 { return vec![]; }
+    if n == 1 { return vec![trad.to_string()]; }
 
+    let total_orig: usize = orig_lens.iter().sum();
+    let words: Vec<&str> = trad.split_whitespace().collect();
+    let nw = words.len();
+
+    if total_orig == 0 || nw == 0 {
+        let mut v = vec![String::new(); n];
+        if !trad.is_empty() { v[0] = trad.to_string(); }
+        return v;
+    }
+
+    let mut counts: Vec<usize> = orig_lens
+        .iter()
+        .map(|&l| ((l as f64 / total_orig as f64) * nw as f64).round() as usize)
+        .collect();
+
+    let sum: usize = counts.iter().sum();
+    if sum < nw {
+        counts[n - 1] += nw - sum;
+    } else if sum > nw {
+        let mut excess = sum - nw;
+        while excess > 0 {
+            if let Some(i) = (0..n).filter(|&i| counts[i] > 0).max_by_key(|&i| counts[i]) {
+                counts[i] -= 1;
+                excess -= 1;
+            } else { break; }
+        }
+    }
+
+    let mut result = Vec::with_capacity(n);
+    let mut cur = 0;
+    for (i, &c) in counts.iter().enumerate() {
+        let end = if i == n - 1 { nw } else { (cur + c).min(nw) };
+        result.push(words[cur..end].join(" "));
+        cur = end;
+    }
+    result
+}
+
+fn reconstruir_parrafo(parrafo: &str, traduccion: &str) -> String {
+    // PASO 1 — recoger longitudes de runs no vacíos
+    let mut orig_lens: Vec<usize> = Vec::new();
+    {
+        let mut scan = parrafo;
+        loop {
+            let Some(pos) = scan.find("<w:t") else { break };
+            let after = scan.get(pos + 4..pos + 5).unwrap_or("");
+            if after != ">" && after != " " { scan = &scan[pos + 4..]; continue; }
+            let desde = &scan[pos..];
+            let Some(j) = desde.find('>') else { break };
+            let tras = &desde[j + 1..];
+            let Some(k) = tras.find("</w:t>") else { break };
+            let dec = tras[..k]
+                .replace("&amp;", "&").replace("&lt;", "<")
+                .replace("&gt;", ">").replace("&apos;", "'").replace("&quot;", "\"");
+            if !dec.trim().is_empty() {
+                orig_lens.push(dec.trim().len());
+            }
+            scan = &tras[k + 6..];
+        }
+    }
+
+    let trad_parts = distribuir_por_runs(traduccion, &orig_lens);
+    let mut run_idx = 0usize;
+
+    // PASO 2 — reconstruir con el fragmento proporcional por run
+    let mut resultado = String::with_capacity(parrafo.len() + traduccion.len());
+    let mut resto = parrafo;
     loop {
         let Some(pos) = resto.find("<w:t") else {
             resultado.push_str(resto);
@@ -538,7 +605,6 @@ fn reconstruir_parrafo(parrafo: &str, traduccion: &str) -> String {
             resto = &resto[pos + 4..];
             continue;
         }
-
         resultado.push_str(&resto[..pos]);
         let desde_tag = &resto[pos..];
         let Some(j) = desde_tag.find('>') else {
@@ -552,29 +618,30 @@ fn reconstruir_parrafo(parrafo: &str, traduccion: &str) -> String {
             break;
         };
         let contenido = &tras_tag[..k];
-        let contenido_dec = contenido.replace("&amp;", "&").replace("&lt;", "<")
-                                     .replace("&gt;", ">").replace("&apos;", "'").replace("&quot;", "\"");
+        let dec = contenido
+            .replace("&amp;", "&").replace("&lt;", "<")
+            .replace("&gt;", ">").replace("&apos;", "'").replace("&quot;", "\"");
 
-        if !contenido_dec.trim().is_empty() && !puesto {
-            // Primer <w:t> con texto: escribir la traducción completa
-            resultado.push_str("<w:t xml:space=\"preserve\">");
+        if !dec.trim().is_empty() {
+            let chunk = if run_idx < trad_parts.len() { &trad_parts[run_idx] } else { "" };
+            run_idx += 1;
+            let esc = chunk.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+            // Preservar espacios si el chunk limita con espacio o el tag ya usaba preserve
+            if chunk.starts_with(' ') || chunk.ends_with(' ') || tag.contains("preserve") {
+                resultado.push_str("<w:t xml:space=\"preserve\">");
+            } else {
+                resultado.push_str("<w:t>");
+            }
             resultado.push_str(&esc);
             resultado.push_str("</w:t>");
-            puesto = true;
-        } else if !contenido_dec.trim().is_empty() {
-            // Resto de <w:t> con texto: vaciar (ya pusimos la traducción)
-            resultado.push_str(tag);
-            resultado.push_str("</w:t>");
         } else {
-            // Espacios / vacíos: conservar tal cual
+            // Runs vacíos/espacios: conservar tal cual (pueden ser separadores tipográficos)
             resultado.push_str(tag);
             resultado.push_str(contenido);
             resultado.push_str("</w:t>");
         }
-
         resto = &tras_tag[k + 6..];
     }
-
     resultado
 }
 
@@ -761,8 +828,28 @@ pub fn procesar_pdf(
     progreso(5, "CONVIRTIENDO PDF...");
     // PASO 1: PDF → DOCX con pdf2docx (timeout 120 s)
     let ruta_docx_tmp = tmp_dir.join(format!("{}_tmp.docx", nombre));
+    // Buscar el python que tenga pdf2docx: babel_env primero, luego rutas estándar
+    let python3 = [
+        "/Users/georgina/Desktop/Babel/babel_env/bin/python3",
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        "/usr/bin/python3",
+        "python3",
+    ]
+    .iter()
+    .copied()
+    .find(|&p| {
+        if p == "python3" { return true; }
+        std::process::Command::new(p)
+            .args(["-c", "import pdf2docx"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    })
+    .unwrap_or("python3");
+
     let ok = {
-        let mut child = std::process::Command::new("python3")
+        let mut child = std::process::Command::new(python3)
             .args([
                 "-c",
                 "import sys; from pdf2docx import Converter; cv=Converter(sys.argv[1]); cv.convert(sys.argv[2]); cv.close()",
@@ -853,7 +940,7 @@ pub fn procesar_pdf(
         progreso(93, "CIFRANDO RESULTADO...");
         let cifrado = seguridad::blindar_documento(&traducido, subclave_hex)?;
         fs::write(
-            archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre)),
+            archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre)),
             cifrado,
         )?;
         return Ok(());
@@ -888,7 +975,7 @@ pub fn procesar_pdf(
 
         // PASO 3: DOCX traducido → PDF vía LibreOffice
         let ruta_docx_trad =
-            archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
+            archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre));
         if let Ok(bytes_cifrados) = fs::read(&ruta_docx_trad) {
             if let Ok(b64) = seguridad::descifrar_documento(bytes_cifrados, subclave_hex) {
                 if let Ok(docx_bytes) = descomprimir_b64(&b64) {
