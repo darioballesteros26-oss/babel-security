@@ -12,8 +12,10 @@ dist
 dist-ssr
 *.local
 
-# Modelos de traducción (binarios grandes, no van al repo)
+# Modelos de traducción y binarios de build (no van al repo)
 servidor_babel/modelos/
+servidor_babel/modelos_usb/
+src-tauri/binaries/
 
 # Editor directories and files
 .vscode/*
