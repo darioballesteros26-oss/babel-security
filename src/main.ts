@@ -1963,18 +1963,58 @@ function desactivarTimerInactividad(): void {
 // ============================================================
 
 async function traducirArchivoGuardado(ruta: string): Promise<void> {
+  // Navegar al chat y mostrar el flujo normal (burbuja TÚ + spinner)
+  irATraduccion();
+  const nombreOrig = ruta.replace(/\\/g, "/").split("/").pop() ?? "archivo.babel";
+  const nombreMostrado = nombreOrig.replace(/\.babel$/, "").replace(/^\d+_/, "");
+  añadirMensajeArchivo(nombreMostrado, "GUARDADO · babel");
   mostrarProcesando(true);
   try {
     const rutaResultado = await invoke<string>("traducir_archivo_guardado", { ruta });
     mostrarProcesando(false);
-    mostrarToast("Traducción completada", false);
-    const partes = rutaResultado.replace(/\\/g, "/").split("/");
-    añadirResultadoArchivo(partes[partes.length - 1], rutaResultado);
-    await cargarArchivosGuardados();
+    const nombreTrad = rutaResultado.replace(/\\/g, "/").split("/").pop() ?? rutaResultado;
+    añadirResultadoDual(nombreOrig, ruta, nombreTrad, rutaResultado);
+    scrollAlFinal();
   } catch (error) {
     mostrarProcesando(false);
-    mostrarToast("Error al traducir: " + String(error), true);
+    añadirMensajeBabel("Error al traducir: " + String(error), "BABEL · error");
   }
+}
+
+function añadirResultadoDual(nombreOrig: string, rutaOrig: string, nombreTrad: string, rutaTrad: string): void {
+  const contenedor = document.getElementById("chat-mensajes");
+  if (!contenedor) return;
+
+  const limpiar = (n: string) => n.replace(/\.babel$/, "").replace(/^\d+_[a-z]{2}-[a-z]{2}_/, "").replace(/^\d+_/, "");
+
+  const burbuja = document.createElement("div");
+  burbuja.className = "chat-burbuja babel";
+  burbuja.innerHTML = `
+    <div class="burbuja-icono">B</div>
+    <div class="burbuja-contenido">
+      <p class="burbuja-texto">Documento traducido y cifrado.</p>
+      <div class="burbuja-resultado" style="flex-direction:column;gap:0;padding:0;background:none;border:1px solid rgba(255,215,0,0.18);border-radius:8px;overflow:hidden;">
+        <div class="burbuja-dual-fila" style="display:flex;align-items:center;gap:8px;padding:8px 10px;">
+          <span style="font-size:0.7rem;color:var(--gris-claro);min-width:64px;letter-spacing:0.06em;">ORIGINAL</span>
+          <span class="archivo-nombre" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:0.82rem;" title="${escapeHTML(limpiar(nombreOrig))}">${escapeHTML(limpiar(nombreOrig))}</span>
+          <button type="button" class="btn-descargar btn-ver-orig" title="Ver original">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+        <div style="height:1px;background:rgba(255,215,0,0.12);"></div>
+        <div class="burbuja-dual-fila" style="display:flex;align-items:center;gap:8px;padding:8px 10px;">
+          <span style="font-size:0.7rem;color:var(--dorado);min-width:64px;letter-spacing:0.06em;">TRADUCIDO</span>
+          <span class="archivo-nombre" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:0.82rem;" title="${escapeHTML(limpiar(nombreTrad))}">${escapeHTML(limpiar(nombreTrad))}</span>
+          <button type="button" class="btn-descargar btn-ver-trad" title="Ver traducido">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </div>
+      <span class="burbuja-hora">BABEL · Este documento no ha salido de tu ordenador</span>
+    </div>`;
+  burbuja.querySelector(".btn-ver-orig")?.addEventListener("click", () => verArchivo(rutaOrig));
+  burbuja.querySelector(".btn-ver-trad")?.addEventListener("click", () => verArchivo(rutaTrad));
+  contenedor.appendChild(burbuja);
 }
 
 async function verArchivo(ruta: string): Promise<void> {
