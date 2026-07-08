@@ -1016,6 +1016,44 @@ fn borrar_seguro_local(ruta: &str) {
     crate::borrar_seguro(ruta);
 }
 
+/// Envía los bloques extraídos por pymupdf al endpoint /limpiar_pdf de Qwen.
+/// Si el servidor no está disponible o falla, devuelve el texto original sin modificar.
+fn limpiar_bloques_con_qwen(texto: &str, subclave_hex: &str) -> String {
+    let bloques: Vec<serde_json::Value> = texto
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::Value::String(l.to_string()))
+        .collect();
+    if bloques.is_empty() {
+        return texto.to_string();
+    }
+    let body = serde_json::json!({ "bloques": bloques });
+    let token = token_efectivo();
+    let resp = agente_http()
+        .post("http://127.0.0.1:5002/limpiar_pdf")
+        .set("X-Babel-Token", &token)
+        .set("Content-Type", "application/json")
+        .send_string(&body.to_string());
+    match resp {
+        Ok(r) if r.status() == 200 => {
+            if let Ok(json) = r.into_json::<serde_json::Value>() {
+                if let Some(arr) = json["bloques"].as_array() {
+                    let lineas: Vec<&str> = arr
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .collect();
+                    if !lineas.is_empty() {
+                        let _ = subclave_hex; // sin uso, coherencia con otras fns
+                        return lineas.join("\n");
+                    }
+                }
+            }
+            texto.to_string()
+        }
+        _ => texto.to_string(),
+    }
+}
+
 pub fn procesar_pdf(
     ruta: &str,
     dict: &HashMap<String, String>,
@@ -1089,40 +1127,130 @@ pub fn procesar_pdf(
     };
 
     if !ok {
-        // PASO 2: pymupdf — extrae bloques con orden de lectura real (multi-columna, tablas)
-        // Mucho mejor que pdftotext para PDFs complejos; no añade espacio al USB.
+        // PASO 2: pymupdf — extrae bloques con estructura semántica:
+        // rawdict da tamaño de fuente (headings) y flags (bold/italic).
+        // Unión de fragmentos: si un bloque no cierra oración y el siguiente
+        // empieza en minúscula → misma frase. Dehifenación inline.
         let script_pymupdf = r#"
-import sys
+import sys, re
 try:
     import fitz
     doc = fitz.open(sys.argv[1])
     out = []
+
     for page in doc:
         h = page.rect.height
-        blocks = page.get_text("blocks", sort=True)
-        for b in blocks:
-            if b[6] != 0:
+
+        # rawdict: tamaño y flags de fuente por span
+        rd = page.get_text("rawdict", sort=True)
+        all_sizes = [
+            sp["size"]
+            for blk in rd.get("blocks", []) if blk.get("type") == 0
+            for ln in blk.get("lines", [])
+            for sp in ln.get("spans", [])
+            if sp["text"].strip()
+        ]
+        if not all_sizes:
+            continue
+        all_sizes.sort()
+        dominant = all_sizes[len(all_sizes) // 2]   # mediana = cuerpo de texto
+
+        # Bloques con posición y texto limpio
+        raw_blocks = []
+        for blk in rd.get("blocks", []):
+            if blk.get("type") != 0:
                 continue
-            y_mid = (b[1] + b[3]) / 2
-            text = b[4].replace('\n', ' ').strip()
+            bx0, by0, bx1, by1 = blk["bbox"]
+            y_mid = (by0 + by1) / 2
+            # Encabezado / pie de página: texto corto en márgenes
+            if (y_mid < h * 0.07 or y_mid > h * 0.93):
+                raw = " ".join(
+                    sp["text"] for ln in blk["lines"] for sp in ln["spans"]
+                ).strip()
+                if len(raw) < 35:
+                    continue
+
+            lines_text = []
+            blk_max_size = 0.0
+            for ln in blk["lines"]:
+                line_parts = []
+                for sp in ln["spans"]:
+                    t = sp["text"]
+                    if t:
+                        line_parts.append(t)
+                        if sp["size"] > blk_max_size:
+                            blk_max_size = sp["size"]
+                if line_parts:
+                    lines_text.append("".join(line_parts))
+
+            if not lines_text:
+                continue
+
+            # Dehifenación entre líneas del mismo bloque
+            merged_lines = []
+            buf = ""
+            for lt in lines_text:
+                if buf.endswith("-") and lt and lt[0].islower():
+                    buf = buf[:-1] + lt      # une sin guion
+                else:
+                    if buf:
+                        merged_lines.append(buf)
+                    buf = lt
+            if buf:
+                merged_lines.append(buf)
+
+            text = " ".join(merged_lines).strip()
+            text = re.sub(r"\s+", " ", text)
             if not text:
                 continue
-            # Omitir números de página (texto muy corto en márgenes superior/inferior)
-            if (y_mid < h * 0.08 or y_mid > h * 0.92) and len(text) < 25:
-                continue
-            out.append(text)
-    sys.stdout.buffer.write('\n'.join(out).encode('utf-8'))
+
+            is_heading = blk_max_size > dominant * 1.15
+            raw_blocks.append({"text": text, "heading": is_heading})
+
+        # Unión de fragmentos de párrafo entre bloques consecutivos
+        merged_blocks = []
+        i = 0
+        while i < len(raw_blocks):
+            cur = raw_blocks[i]
+            txt = cur["text"]
+            # Si este bloque no cierra oración y el siguiente empieza en minúscula
+            # (y ninguno es heading) → misma frase
+            while (
+                not cur.get("heading")
+                and i + 1 < len(raw_blocks)
+                and not raw_blocks[i + 1].get("heading")
+                and txt
+                and txt[-1] not in ".!?:;»"
+                and raw_blocks[i + 1]["text"]
+                and raw_blocks[i + 1]["text"][0].islower()
+            ):
+                i += 1
+                txt = txt + " " + raw_blocks[i]["text"]
+            merged_blocks.append(txt)
+            i += 1
+
+        out.extend(merged_blocks)
+
+    sys.stdout.buffer.write("\n".join(out).encode("utf-8"))
 except Exception as e:
     sys.stderr.write(str(e))
     sys.exit(1)
 "#;
-        let texto_pymupdf = std::process::Command::new(python3)
+        let texto_pymupdf_raw = std::process::Command::new(python3)
             .args(["-c", script_pymupdf, ruta])
             .output()
             .ok()
             .filter(|o| o.status.success())
             .and_then(|o| String::from_utf8(o.stdout).ok())
             .unwrap_or_default();
+
+        // Pasar los bloques por Qwen para limpiar fragmentos residuales
+        // (solo si el servidor ya está arriba y hay texto suficiente)
+        let texto_pymupdf = if texto_pymupdf_raw.split_whitespace().count() > 20 {
+            limpiar_bloques_con_qwen(&texto_pymupdf_raw, subclave_hex)
+        } else {
+            texto_pymupdf_raw
+        };
 
         // PASO 3: pdftotext — si pymupdf no extrajo texto suficiente
         let texto_base = if texto_pymupdf.split_whitespace().count() > 20 {

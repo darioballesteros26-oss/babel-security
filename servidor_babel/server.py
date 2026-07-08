@@ -105,6 +105,28 @@ def traducir_endpoint():
         return jsonify({"error": f"Error interno: {e}"}), 500
 
 
+@app.route("/limpiar_pdf", methods=["POST"])
+def limpiar_pdf_endpoint():
+    err = _verificar_token()
+    if err:
+        return err
+
+    data = request.json or {}
+    bloques = data.get("bloques", [])
+
+    if not isinstance(bloques, list) or not bloques:
+        return jsonify({"bloques": []})
+
+    # Rechazar bloques individuales demasiado grandes
+    bloques = [b[:2000] for b in bloques if isinstance(b, str)]
+
+    try:
+        limpios = revisor.limpiar_bloques_pdf(bloques)
+        return jsonify({"bloques": limpios})
+    except Exception as e:
+        return jsonify({"bloques": bloques, "aviso": str(e)})
+
+
 if __name__ == "__main__":
     if _USAR_USB:
         print("[server] Modelos tc-big detectados — usando traductor USB (mayor calidad)")

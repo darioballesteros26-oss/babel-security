@@ -134,6 +134,52 @@ def _revisar_cached(original: str, traduccion: str, par: str) -> str:
     return revisada
 
 
+def limpiar_bloques_pdf(bloques: list[str]) -> list[str]:
+    """Usa Qwen para limpiar texto extraído de PDF: une fragmentos, quita artefactos.
+    Solo actúa si el modelo está cargado; en caso contrario devuelve los bloques tal cual."""
+    if _llm is None or not bloques:
+        return bloques
+
+    texto = "\n".join(bloques)
+    # Limitar para no desbordar el contexto
+    if len(texto) > 3000:
+        return bloques
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a PDF text cleanup tool. "
+                "Fix ONLY structural issues in the extracted text:\n"
+                "1. Join lines that are clearly part of the same sentence.\n"
+                "2. Remove lone numbers or letters that are page artifacts.\n"
+                "3. Fix hyphenation splits (word- + continuation).\n"
+                "Do NOT translate, add, or remove actual content. "
+                "Return one paragraph per line. Return ONLY the cleaned text."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"PDF text:\n{texto}\n\nCleaned:",
+        },
+    ]
+
+    with _lock:
+        out = _llm.create_chat_completion(
+            messages,
+            max_tokens=min(len(texto.split()) * 2, 800),
+            temperature=0.05,
+            stop=["PDF text:", "\n\n\n"],
+        )
+
+    result = out["choices"][0]["message"]["content"].strip()
+    # Rechazar si Qwen eliminó más del 30 % del contenido (posible alucinación)
+    if not result or len(result) < len(texto) * 0.7:
+        return bloques
+
+    return [l for l in result.split("\n") if l.strip()]
+
+
 def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str:
     if _llm is None:
         return traduccion
