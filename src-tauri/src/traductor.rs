@@ -1,6 +1,20 @@
 use base64;
 use base64::Engine;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tesseract::Tesseract;
+
+// Flag global para cancelar la traducción en curso.
+// El frontend lo activa via `cancelar_traduccion()`; los bucles de traducción
+// lo comprueban entre párrafos/trozos y abortan devolviendo Err("cancelada").
+pub static CANCELAR_TRADUCCION: AtomicBool = AtomicBool::new(false);
+
+pub fn cancelar_traduccion() {
+    CANCELAR_TRADUCCION.store(true, Ordering::Relaxed);
+}
+
+pub fn resetear_cancelacion() {
+    CANCELAR_TRADUCCION.store(false, Ordering::Relaxed);
+}
 pub const ZSTD_MAGIC: &[u8] = b"BZ1:";
 
 pub fn comprimir_b64(data: &[u8]) -> String {
@@ -329,6 +343,9 @@ pub fn procesar_archivo_inteligente(
         let mut traducido_final = String::new();
         let mut ultimo_trad = String::new();
         for parrafo in &parrafos {
+            if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
+                return Err("Traducción cancelada.".into());
+            }
             if parrafo.trim().is_empty() {
                 traducido_final.push('\n');
                 continue;
@@ -435,6 +452,10 @@ fn traducir_xml_directo(
             continue;
         }
 
+        if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
+            resultado.push_str(resto);
+            break;
+        }
         // Encontrar el cierre del párrafo
         let Some(fin_rel) = desde_p.find("</w:p>") else {
             resultado.push_str(desde_p);
@@ -527,6 +548,9 @@ fn traducir_texto_largo(
     let mut resultado_partes: Vec<String> = Vec::with_capacity(trozos.len());
     let mut ctx_local: Option<String> = contexto.map(|s| s.to_string());
     for trozo in &trozos {
+        if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
+            return "[[CANCELADA]]".to_string();
+        }
         let t = match traducir_con_marian(trozo, par, ctx_local.as_deref()) {
             Ok(t) => t,
             Err(_) => motor_atomico(trozo, dict, subclave_hex).0,
@@ -978,6 +1002,9 @@ pub fn procesar_pdf(
         let mut traducido = String::new();
         let mut ultimo_trad_pdf = String::new();
         for parrafo in &parrafos {
+            if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
+                return Err("Traducción cancelada.".into());
+            }
             if parrafo.trim().is_empty() {
                 traducido.push('\n');
                 continue;

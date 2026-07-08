@@ -442,19 +442,32 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }).catch(() => {});
 
-  // Badge NLLB: poll /ping cada 2s hasta que responda
+  // Badge servidor: monitoreo continuo cada 5 s (verde=activo, rojo=caído)
   const badge = document.getElementById("nllb-badge");
-  const checkNllb = setInterval(async () => {
+  let servidorEstabaActivo = false;
+  setInterval(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:5002/ping");
-      if (res.ok && badge) {
-        badge.style.background = "#22c55e";
+      const res = await fetch("http://127.0.0.1:5002/ping", { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        if (badge) {
+          badge.style.background = "#22c55e";
+          badge.style.opacity = "1";
+          badge.title = "Servidor activo";
+        }
+        servidorEstabaActivo = true;
+      } else { throw new Error(); }
+    } catch {
+      if (badge) {
+        badge.style.background = "var(--error, #ef4444)";
         badge.style.opacity = "1";
-        badge.title = "NLLB activo";
-        clearInterval(checkNllb);
+        badge.title = "Servidor caído";
       }
-    } catch { }
-  }, 2000);
+      if (servidorEstabaActivo) {
+        mostrarToast("Servidor de traducción desconectado", true);
+        servidorEstabaActivo = false;
+      }
+    }
+  }, 5000);
 
 
   try {
@@ -3714,6 +3727,18 @@ function guardarNombreDisplay(): void {
 // Cargar ajustes al arrancar
 document.addEventListener("DOMContentLoaded", cargarAjustesGuardados);
 document.addEventListener("DOMContentLoaded", () => cargarAjustesTraduccion().catch(() => {}));
+
+// Botón cancelar traducción en curso
+document.addEventListener("DOMContentLoaded", () => {
+  const btnCancelar = document.getElementById("btn-cancelar-traduccion");
+  btnCancelar?.addEventListener("click", async () => {
+    try {
+      await invoke("cancelar_traduccion_activa");
+      mostrarProcesando(false);
+      añadirMensajeBabel("Traducción cancelada.", "BABEL · cancelada");
+    } catch { /* silencioso */ }
+  });
+});
 
 // ============================================================
 // UX GLOBAL — Escape cierra modales, Enter navega recovery, paste BIP39

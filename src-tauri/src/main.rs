@@ -1093,6 +1093,7 @@ async fn traducir_documento_ruta(
     // pérdida de foco → el timer de 20s dispara bloquearPantalla().  spawn_blocking mueve
     // todo el trabajo a un hilo dedicado y deja el hilo principal libre.
     tauri::async_runtime::spawn_blocking(move || {
+        traductor::resetear_cancelacion();
         // Anti path-traversal
         if Path::new(&ruta).components().any(|c| c == std::path::Component::ParentDir) {
             return Err("Ruta no autorizada.".into());
@@ -1172,6 +1173,7 @@ async fn traducir_archivo_guardado(
     let par = idioma_a_par(&idioma);
 
     tauri::async_runtime::spawn_blocking(move || {
+        traductor::resetear_cancelacion();
         let bytes = descifrar_a_bytes(&ruta, &subclave_hex)?;
 
         if bytes.len() > 100 * 1024 * 1024 {
@@ -1272,6 +1274,7 @@ async fn traducir_documento_dialogo(
             Some(fp) => fp,
             None => return Ok(None), // usuario canceló — sin error
         };
+        traductor::resetear_cancelacion();
         let ruta = ruta_fp
             .into_path()
             .map_err(|e| format!("Ruta de origen inválida: {}", e))?;
@@ -1436,6 +1439,11 @@ fn nombre_exportacion(ruta: &str, ext: &str) -> String {
     };
 
     format!("{}.{}", nombre, ext)
+}
+
+#[tauri::command]
+fn cancelar_traduccion_activa() {
+    traductor::cancelar_traduccion();
 }
 
 #[tauri::command]
@@ -3403,6 +3411,7 @@ fn main() {
             traducir_documento_ruta,
             traducir_archivo_guardado,
             traducir_documento_dialogo,
+            cancelar_traduccion_activa,
             seleccionar_ruta_dialogo,
             leer_resultado,
             traducir_texto,
