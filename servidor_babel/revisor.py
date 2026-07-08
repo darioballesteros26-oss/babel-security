@@ -1,6 +1,7 @@
 import os
 import re
 import threading
+from functools import lru_cache
 from llama_cpp import Llama
 
 # Detectores de script para validar que la revisión de Qwen está en el idioma correcto
@@ -16,11 +17,12 @@ _SCRIPT_DEST = {
     "zh": _RE_HAN,
 }
 
-# Idiomas de escritura latina — aplicar guardias semánticas adicionales
-_IDIOMAS_LATIN = {"es", "en", "fr", "de", "pt", "it"}
+# Idiomas donde Qwen 1.5B aporta mejoras reales.
+# Para el resto (árabe, chino, ruso, japonés…) Qwen es poco fiable y los guards
+# lo rechazarían de todas formas — saltamos la llamada para ahorrar ~2-3 s/párrafo.
+_IDIOMAS_CON_REVISION = {"es", "en", "fr", "de", "pt", "it"}
 
 # Palabras que cambian la polaridad/sentido de una frase (por idioma destino).
-# Si Qwen añade o elimina alguna, la revisión se rechaza.
 _RE_POLAR = {
     "es": re.compile(r'\b(no|sin|contra|nunca|jamás|tampoco|ni|excepto|salvo)\b', re.IGNORECASE),
     "en": re.compile(r'\b(not|without|against|never|except|unless|nor)\b', re.IGNORECASE),
@@ -37,7 +39,8 @@ RUTA_GGUF = os.path.join(DIR_MODELOS, "qwen-1.5b-q4.gguf")
 
 LANG_NAMES = {
     "es": "Spanish", "en": "English", "fr": "French", "ar": "Arabic",
-    "de": "German", "ru": "Russian", "zh": "Chinese",
+    "de": "German", "ru": "Russian", "zh": "Chinese", "pt": "Portuguese",
+    "it": "Italian",
 }
 
 _llm = None
@@ -50,26 +53,18 @@ def cargar_modelo():
     _llm = Llama(
         model_path=RUTA_GGUF,
         n_ctx=4096,
-        n_gpu_layers=-1,  # offload todo a Metal en M3
+        n_gpu_layers=-1,
         verbose=False,
     )
     print("[QWEN] Revisor listo.")
 
 
-def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str:
-    if _llm is None:
-        return traduccion
-
-    # Qwen 1.5B maneja bien frases a partir de 5 palabras
-    if len(original.split()) < 5:
-        return traduccion
-
+@lru_cache(maxsize=512)
+def _revisar_cached(original: str, traduccion: str, par: str) -> str:
+    """Núcleo cacheado — misma entrada produce mismo resultado sin llamar a Qwen de nuevo."""
     lang_orig, lang_dest = par.split("-")
     nombre_orig = LANG_NAMES.get(lang_orig, lang_orig)
     nombre_dest = LANG_NAMES.get(lang_dest, lang_dest)
-
-    # Truncar contexto para no sobrepasar n_ctx=2048 con documentos largos
-    ctx_truncado = contexto[-200:].strip() if contexto else ""
 
     messages = [
         {
@@ -88,7 +83,6 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
             "content": (
                 f"Source language: {nombre_orig}\n"
                 f"Target language: {nombre_dest}\n"
-                f"Context: {ctx_truncado or '(none)'}\n"
                 f"Source: {original}\n"
                 f"Translation: {traduccion}\n"
                 f"Corrected translation:"
@@ -99,51 +93,60 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
     with _lock:
         out = _llm.create_chat_completion(
             messages,
-            max_tokens=min(len(traduccion.split()) * 3, 512),
+            max_tokens=min(len(traduccion.split()) * 2 + 20, 400),
             temperature=0.1,
             repeat_penalty=1.3,
-            stop=["Source:", "Context:"],
+            stop=["Source:", "Context:", "\n\n"],
         )
 
     revisada = out["choices"][0]["message"]["content"].strip()
 
-    # Descartar si Qwen repite o alucina (más del doble de tokens que la traducción base)
+    # Descartar si Qwen alucina (más del doble de tokens que la base)
     if not revisada or len(revisada) > len(traduccion) * 2:
         return traduccion
 
-    # Validar script: si el idioma destino requiere un script no latino (árabe, ruso, chino)
+    # Guardia de script
     detector = _SCRIPT_DEST.get(lang_dest)
     if detector:
-        # Rechazar si Qwen no produjo ni un solo carácter del script correcto
         if not detector.search(revisada):
             return traduccion
-        # Para árabe: rechazar si Qwen introdujo tokens mixtos árabe-latino (re-garble)
         if lang_dest == "ar":
             for tok in revisada.split():
                 if _RE_ARABE.search(tok) and _RE_LATIN.search(tok):
                     return traduccion
 
-    # Para idiomas de escritura latina: guardias semánticas anti-alucinación
-    if lang_dest in _IDIOMAS_LATIN:
-        # Guardia 1 — polaridad: rechazar si Qwen añade o elimina palabras que invierten
-        # el sentido ("contra", "no", "sin", "nunca"…). Un cambio en su recuento indica
-        # que la revisión puede haber invertido o matizado el significado de forma errónea.
-        pat_pol = _RE_POLAR.get(lang_dest)
-        if pat_pol:
-            if len(pat_pol.findall(traduccion)) != len(pat_pol.findall(revisada)):
-                return traduccion
-
-        # Guardia 2 — palabras de contenido añadidas: rechazar si Qwen introduce palabras
-        # (≥5 letras) que no estaban ni en la traducción base ni en el texto original.
-        # Esto previene alucinaciones del tipo "alegremente", "tristemente", etc.
-        orig_norm = _palabras_norm(original)
-        base_norm = _palabras_norm(traduccion)
-        rev_norm  = _palabras_norm(revisada)
-        nuevas_contenido = {
-            w for w in (rev_norm - base_norm - orig_norm)
-            if len(w) >= 5 and w.isalpha()
-        }
-        if nuevas_contenido:
+    # Guardias semánticas para idiomas latinos
+    pat_pol = _RE_POLAR.get(lang_dest)
+    if pat_pol:
+        if len(pat_pol.findall(traduccion)) != len(pat_pol.findall(revisada)):
             return traduccion
 
+    orig_norm = _palabras_norm(original)
+    base_norm = _palabras_norm(traduccion)
+    rev_norm  = _palabras_norm(revisada)
+    nuevas_contenido = {
+        w for w in (rev_norm - base_norm - orig_norm)
+        if len(w) >= 5 and w.isalpha()
+    }
+    if nuevas_contenido:
+        return traduccion
+
     return revisada
+
+
+def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str:
+    if _llm is None:
+        return traduccion
+
+    # Frases muy cortas no mejoran con Qwen
+    if len(original.split()) < 5:
+        return traduccion
+
+    lang_dest = par.split("-")[1] if "-" in par else par
+
+    # Short-circuit para idiomas donde Qwen no es fiable:
+    # árabe, chino, ruso, japonés, coreano → saltar la llamada completamente.
+    if lang_dest not in _IDIOMAS_CON_REVISION:
+        return traduccion
+
+    return _revisar_cached(original, traduccion, par)

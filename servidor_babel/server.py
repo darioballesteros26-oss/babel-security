@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from functools import lru_cache
 import traductor
 import traductor_usb
 import revisor
@@ -62,6 +63,14 @@ def ping():
     return jsonify({"ok": True})
 
 
+@lru_cache(maxsize=1024)
+def _traducir_base(texto: str, par: str) -> str:
+    """Cache de traducción base (MarianMT/USB). Párrafos idénticos no se traducen dos veces."""
+    if _USAR_USB:
+        return traductor_usb.traducir(texto, par)
+    return traductor.traducir(texto, par)
+
+
 @app.route("/traducir", methods=["POST"])
 def traducir_endpoint():
     err = _verificar_token()
@@ -84,10 +93,7 @@ def traducir_endpoint():
         return jsonify({"error": f"Texto demasiado largo (máx {MAX_INPUT_CHARS} caracteres)"}), 400
 
     try:
-        if _USAR_USB:
-            traduccion_base = traductor_usb.traducir(texto, par)
-        else:
-            traduccion_base = traductor.traducir(texto, par)
+        traduccion_base = _traducir_base(texto, par)
         traduccion_final = revisor.revisar(texto, traduccion_base, par, contexto)
         return jsonify({"traduccion": traduccion_final, "revisada": True})
     except ValueError as e:

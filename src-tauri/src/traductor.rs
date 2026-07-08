@@ -585,20 +585,41 @@ fn extraer_texto_wt(xml: &str) -> String {
     let mut texto = String::new();
     let mut resto = xml;
     loop {
-        let Some(pos) = resto.find("<w:t") else { break };
-        let after = resto.get(pos + 4..pos + 5).unwrap_or("");
-        if after != ">" && after != " " {
-            resto = &resto[pos + 4..];
-            continue;
+        // Buscar <w:br o <w:t — lo que llegue primero
+        let br_pos = resto.find("<w:br").unwrap_or(usize::MAX);
+        let wt_pos = {
+            let mut p = usize::MAX;
+            let mut off = 0;
+            while let Some(rel) = resto[off..].find("<w:t") {
+                let abs = off + rel;
+                let after = resto.get(abs + 4..abs + 5).unwrap_or("");
+                if after == ">" || after == " " { p = abs; break; }
+                off = abs + 4;
+            }
+            p
+        };
+
+        if br_pos == usize::MAX && wt_pos == usize::MAX { break; }
+
+        if br_pos < wt_pos {
+            // Salto de línea dentro del párrafo — insertar espacio como límite de palabra
+            if !texto.is_empty() && !texto.ends_with(' ') {
+                texto.push(' ');
+            }
+            let end = resto[br_pos..].find('>').unwrap_or(0);
+            resto = &resto[br_pos + end + 1..];
+        } else {
+            // <w:t> — extraer contenido
+            let pos = wt_pos;
+            let Some(j) = resto[pos..].find('>') else { break };
+            let ini = pos + j + 1;
+            let Some(k) = resto[ini..].find("</w:t>") else { break };
+            let t = resto[ini..ini + k]
+                .replace("&amp;", "&").replace("&lt;", "<")
+                .replace("&gt;", ">").replace("&apos;", "'").replace("&quot;", "\"");
+            texto.push_str(&t);
+            resto = &resto[ini + k + 6..];
         }
-        let Some(j) = resto[pos..].find('>') else { break };
-        let contenido_ini = pos + j + 1;
-        let Some(k) = resto[contenido_ini..].find("</w:t>") else { break };
-        let t = &resto[contenido_ini..contenido_ini + k];
-        let t_dec = t.replace("&amp;", "&").replace("&lt;", "<")
-                     .replace("&gt;", ">").replace("&apos;", "'").replace("&quot;", "\"");
-        texto.push_str(&t_dec);
-        resto = &resto[contenido_ini + k + 6..];
     }
     texto
 }
@@ -626,13 +647,24 @@ fn distribuir_por_runs(trad: &str, orig_lens: &[usize]) -> Vec<String> {
         .map(|&l| ((l as f64 / total_orig as f64) * nw as f64).round() as usize)
         .collect();
 
+    // Garantizar ≥1 palabra por run que tenía texto original
+    // (evita hipervínculos o palabras en negrita cortas que queden vacíos)
+    for i in 0..n {
+        if orig_lens[i] > 0 && counts[i] == 0 {
+            if let Some(j) = (0..n).filter(|&j| counts[j] > 1).max_by_key(|&j| counts[j]) {
+                counts[j] -= 1;
+                counts[i] = 1;
+            }
+        }
+    }
+
     let sum: usize = counts.iter().sum();
     if sum < nw {
         counts[n - 1] += nw - sum;
     } else if sum > nw {
         let mut excess = sum - nw;
         while excess > 0 {
-            if let Some(i) = (0..n).filter(|&i| counts[i] > 0).max_by_key(|&i| counts[i]) {
+            if let Some(i) = (0..n).filter(|&i| counts[i] > 1).max_by_key(|&i| counts[i]) {
                 counts[i] -= 1;
                 excess -= 1;
             } else { break; }
@@ -643,7 +675,15 @@ fn distribuir_por_runs(trad: &str, orig_lens: &[usize]) -> Vec<String> {
     let mut cur = 0;
     for (i, &c) in counts.iter().enumerate() {
         let end = if i == n - 1 { nw } else { (cur + c).min(nw) };
-        result.push(words[cur..end].join(" "));
+        let chunk = words[cur..end].join(" ");
+        // Espacio separador al final de cada run no-último con contenido:
+        // sin él, dos runs adyacentes se mostrarían pegados ("Holamundo").
+        let chunk = if i < n - 1 && !chunk.is_empty() {
+            format!("{} ", chunk)
+        } else {
+            chunk
+        };
+        result.push(chunk);
         cur = end;
     }
     result
