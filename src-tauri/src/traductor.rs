@@ -337,14 +337,7 @@ pub fn procesar_archivo_inteligente(
             progreso(pct, &format!("TRADUCIENDO... {}%", pct));
             traducidos_p += 1;
             let ctx_prev = if ultimo_trad.is_empty() { None } else { Some(ultimo_trad.clone()) };
-            let traducido = match traducir_con_marian(parrafo, par, ctx_prev.as_deref()) {
-                Ok(t) => t,
-                Err(_) => {
-                    let (t, _) =
-                        traducir_inteligente(parrafo, dict, subclave_hex, par);
-                    t
-                }
-            };
+            let traducido = traducir_texto_largo(parrafo, par, ctx_prev.as_deref(), dict, subclave_hex);
             ultimo_trad = traducido.clone();
             traducido_final.push_str(&traducido);
             traducido_final.push('\n');
@@ -474,6 +467,76 @@ fn encontrar_wp(xml: &str) -> Option<usize> {
 /// y pone el resultado en el primer <w:t>, vaciando los demás.
 /// `contexto` es la traducción del párrafo anterior (para coherencia).
 /// `ultimo_traducido` se actualiza con la traducción de este párrafo.
+// Divide el texto en oraciones individuales separando en [.!?] seguido de espacio.
+fn partir_en_oraciones(texto: &str) -> Vec<String> {
+    let mut oraciones: Vec<String> = Vec::new();
+    let mut actual = String::new();
+    let chars: Vec<char> = texto.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+    while i < n {
+        actual.push(chars[i]);
+        if matches!(chars[i], '.' | '!' | '?') {
+            let sig = chars.get(i + 1).copied().unwrap_or('\0');
+            if sig == ' ' || sig == '\0' {
+                let s = actual.trim().to_string();
+                if !s.is_empty() { oraciones.push(s); }
+                actual = String::new();
+                if sig == ' ' { i += 1; }
+            }
+        }
+        i += 1;
+    }
+    let resto = actual.trim().to_string();
+    if !resto.is_empty() { oraciones.push(resto); }
+    oraciones
+}
+
+// Traduce texto potencialmente largo partiéndolo en trozos de máx. MAX_CHARS caracteres
+// respetando límites de oración para no cortar MarianMT a mitad de frase.
+fn traducir_texto_largo(
+    texto: &str,
+    par: &str,
+    contexto: Option<&str>,
+    dict: &HashMap<String, String>,
+    subclave_hex: &str,
+) -> String {
+    const MAX_CHARS: usize = 1800;
+    if texto.len() <= MAX_CHARS {
+        return match traducir_con_marian(texto, par, contexto) {
+            Ok(t) => t,
+            Err(_) => motor_atomico(texto, dict, subclave_hex).0,
+        };
+    }
+
+    let oraciones = partir_en_oraciones(texto);
+    let mut trozos: Vec<String> = Vec::new();
+    let mut trozo = String::new();
+
+    for oracion in &oraciones {
+        if trozo.len() + oracion.len() + 1 > MAX_CHARS && !trozo.is_empty() {
+            trozos.push(trozo.clone());
+            trozo = oracion.clone();
+        } else {
+            if !trozo.is_empty() { trozo.push(' '); }
+            trozo.push_str(oracion);
+        }
+    }
+    if !trozo.is_empty() { trozos.push(trozo); }
+
+    let mut resultado_partes: Vec<String> = Vec::with_capacity(trozos.len());
+    let mut ctx_local: Option<String> = contexto.map(|s| s.to_string());
+    for trozo in &trozos {
+        let t = match traducir_con_marian(trozo, par, ctx_local.as_deref()) {
+            Ok(t) => t,
+            Err(_) => motor_atomico(trozo, dict, subclave_hex).0,
+        };
+        ctx_local = Some(t.clone());
+        resultado_partes.push(t);
+    }
+    resultado_partes.join(" ")
+}
+
 fn traducir_parrafo_xml(
     parrafo: &str,
     dict: &HashMap<String, String>,
@@ -487,10 +550,7 @@ fn traducir_parrafo_xml(
         return parrafo.to_string();
     }
 
-    let traducido = match traducir_con_marian(&texto, par, contexto) {
-        Ok(t) => t,
-        Err(_) => motor_atomico(&texto, dict, subclave_hex).0,
-    };
+    let traducido = traducir_texto_largo(&texto, par, contexto, dict, subclave_hex);
 
     *ultimo_traducido = traducido.clone();
     reconstruir_parrafo(parrafo, &traducido)
@@ -926,13 +986,7 @@ pub fn procesar_pdf(
             progreso(pct, &format!("TRADUCIENDO... {}%", pct));
             traducidos_p += 1;
             let ctx_prev = if ultimo_trad_pdf.is_empty() { None } else { Some(ultimo_trad_pdf.clone()) };
-            let t = match traducir_con_marian(parrafo, par, ctx_prev.as_deref()) {
-                Ok(t) => t,
-                Err(_) => {
-                    let (t, _) = motor_atomico(parrafo, dict, subclave_hex);
-                    t
-                }
-            };
+            let t = traducir_texto_largo(parrafo, par, ctx_prev.as_deref(), dict, subclave_hex);
             ultimo_trad_pdf = t.clone();
             traducido.push_str(&t);
             traducido.push('\n');

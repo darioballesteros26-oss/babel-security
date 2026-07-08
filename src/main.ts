@@ -214,18 +214,28 @@ function añadirResultadoArchivo(nombreResultado: string, ruta: string): void {
           <span class="archivo-nombre" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px;" title="${escapeHTML(nombreLimpio)}">${escapeHTML(nombreLimpio)}</span>
           <span class="archivo-peso">Cifrado AES-256-GCM</span>
         </div>
-   <button type="button" class="btn-descargar btn-ver-resultado" title="Ver documento">
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-    <circle cx="12" cy="12" r="3"/>
-  </svg>
-</button>
-
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          <button type="button" class="btn-descargar btn-ver-resultado" title="Ver documento">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+          <button type="button" class="btn-descargar btn-exportar-resultado" title="Exportar documento">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <span class="burbuja-hora">BABEL · Este documento no ha salido de tu ordenador</span>
     </div>`;
   const btnVer = burbuja.querySelector(".btn-ver-resultado") as HTMLButtonElement;
   btnVer?.addEventListener("click", () => verArchivo(ruta));
+  const btnExportar = burbuja.querySelector(".btn-exportar-resultado") as HTMLButtonElement;
+  btnExportar?.addEventListener("click", () => exportarArchivo(ruta));
   contenedor.appendChild(burbuja);
 }
 

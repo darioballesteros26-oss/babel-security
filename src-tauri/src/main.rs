@@ -1397,19 +1397,44 @@ fn nombre_exportacion(ruta: &str, ext: &str) -> String {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "archivo".into());
-    // Quitar prefijo de usuario
+
+    // Quitar prefijo de usuario (primer segmento numérico: "1_…" → "…")
     let sin_usuario = stem.splitn(2, '_').nth(1).unwrap_or(&stem).to_string();
-    // Quitar sufijo de timestamp (≥ 8 dígitos al final)
-    let nombre = if let Some(pos) = sin_usuario.rfind('_') {
-        let sufijo = &sin_usuario[pos + 1..];
-        if sufijo.len() >= 8 && sufijo.chars().all(|c| c.is_ascii_digit()) {
-            sin_usuario[..pos].to_string()
+
+    // Quitar prefijo de par de idioma ("es-en_…" → "…")
+    let sin_par = {
+        let b = sin_usuario.as_bytes();
+        if b.len() > 6
+            && b[0].is_ascii_lowercase() && b[1].is_ascii_lowercase()
+            && b[2] == b'-'
+            && b[3].is_ascii_lowercase() && b[4].is_ascii_lowercase()
+            && b[5] == b'_'
+        {
+            sin_usuario[6..].to_string()
         } else {
             sin_usuario
         }
-    } else {
-        sin_usuario
     };
+
+    // Quitar sufijo __orig
+    let sin_orig = if sin_par.ends_with("__orig") {
+        sin_par[..sin_par.len() - 6].to_string()
+    } else {
+        sin_par
+    };
+
+    // Quitar sufijo de timestamp (≥ 8 dígitos al final)
+    let nombre = if let Some(pos) = sin_orig.rfind('_') {
+        let sufijo = &sin_orig[pos + 1..];
+        if sufijo.len() >= 8 && sufijo.chars().all(|c| c.is_ascii_digit()) {
+            sin_orig[..pos].to_string()
+        } else {
+            sin_orig
+        }
+    } else {
+        sin_orig
+    };
+
     format!("{}.{}", nombre, ext)
 }
 
