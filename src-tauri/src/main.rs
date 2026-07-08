@@ -3269,7 +3269,15 @@ fn main() {
                     && res.join("servidor").join("marian_server_usb.py").exists()
             }).unwrap_or(false);
 
-            if sidecar_exists || legacy_exists {
+            // Si el puerto 5002 ya está ocupado (servidor externo en modo dev),
+            // no lanzar el sidecar ni generar token aleatorio — se usará el token
+            // por defecto que comparte tanto el servidor externo como el código Rust.
+            let puerto_libre = std::net::TcpStream::connect_timeout(
+                &"127.0.0.1:5002".parse::<std::net::SocketAddr>().unwrap(),
+                std::time::Duration::from_millis(300),
+            ).is_err();
+
+            if puerto_libre && (sidecar_exists || legacy_exists) {
                 let mut rng_bytes = [0u8; 16];
                 rand::rngs::OsRng.fill_bytes(&mut rng_bytes);
                 let token = format!("babel_{}", hex::encode(rng_bytes));
