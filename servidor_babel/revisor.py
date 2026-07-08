@@ -16,6 +16,22 @@ _SCRIPT_DEST = {
     "zh": _RE_HAN,
 }
 
+# Idiomas de escritura latina — aplicar guardias semánticas adicionales
+_IDIOMAS_LATIN = {"es", "en", "fr", "de", "pt", "it"}
+
+# Palabras que cambian la polaridad/sentido de una frase (por idioma destino).
+# Si Qwen añade o elimina alguna, la revisión se rechaza.
+_RE_POLAR = {
+    "es": re.compile(r'\b(no|sin|contra|nunca|jamás|tampoco|ni|excepto|salvo)\b', re.IGNORECASE),
+    "en": re.compile(r'\b(not|without|against|never|except|unless|nor)\b', re.IGNORECASE),
+    "fr": re.compile(r'\b(pas|sans|contre|jamais|sauf|ni)\b', re.IGNORECASE),
+    "de": re.compile(r'\b(nicht|ohne|gegen|niemals|außer)\b', re.IGNORECASE),
+}
+
+
+def _palabras_norm(texto: str) -> set:
+    return set(re.sub(r'[^\w]', ' ', texto.lower()).split())
+
 DIR_MODELOS = os.path.join(os.path.dirname(__file__), "modelos")
 RUTA_GGUF = os.path.join(DIR_MODELOS, "qwen-1.5b-q4.gguf")
 
@@ -59,11 +75,12 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
         {
             "role": "system",
             "content": (
-                "You are a professional translation post-editor. "
-                "Given a source text, a machine translation, and optional surrounding context, "
-                "return ONLY the corrected translation. "
-                "If the translation is already correct, return it unchanged. "
-                "Never add explanations."
+                "You are a professional legal translation post-editor. "
+                "Fix ONLY clear grammatical errors or obvious mistranslations. "
+                "Do NOT add words, adverbs, adjectives, or phrases not implied by the source. "
+                "Do NOT change the polarity or meaning of the sentence. "
+                "If the translation is already acceptable, return it UNCHANGED. "
+                "Return ONLY the corrected translation. Never add explanations."
             ),
         },
         {
@@ -105,5 +122,28 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
             for tok in revisada.split():
                 if _RE_ARABE.search(tok) and _RE_LATIN.search(tok):
                     return traduccion
+
+    # Para idiomas de escritura latina: guardias semánticas anti-alucinación
+    if lang_dest in _IDIOMAS_LATIN:
+        # Guardia 1 — polaridad: rechazar si Qwen añade o elimina palabras que invierten
+        # el sentido ("contra", "no", "sin", "nunca"…). Un cambio en su recuento indica
+        # que la revisión puede haber invertido o matizado el significado de forma errónea.
+        pat_pol = _RE_POLAR.get(lang_dest)
+        if pat_pol:
+            if len(pat_pol.findall(traduccion)) != len(pat_pol.findall(revisada)):
+                return traduccion
+
+        # Guardia 2 — palabras de contenido añadidas: rechazar si Qwen introduce palabras
+        # (≥5 letras) que no estaban ni en la traducción base ni en el texto original.
+        # Esto previene alucinaciones del tipo "alegremente", "tristemente", etc.
+        orig_norm = _palabras_norm(original)
+        base_norm = _palabras_norm(traduccion)
+        rev_norm  = _palabras_norm(revisada)
+        nuevas_contenido = {
+            w for w in (rev_norm - base_norm - orig_norm)
+            if len(w) >= 5 and w.isalpha()
+        }
+        if nuevas_contenido:
+            return traduccion
 
     return revisada
