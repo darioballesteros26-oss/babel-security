@@ -200,8 +200,12 @@ fn tmp_path(nombre: &str) -> String {
 // Valida que una ruta pertenece a una carpeta autorizada usando paths canónicos
 // Previene path traversal con ../../../etc/passwd
 fn validar_ruta_en(ruta: &str, base: std::path::PathBuf) -> Result<(), String> {
-    // Prevenir path traversal
-    if ruta.contains("..") {
+    // Prevenir path traversal — solo ".." como componente de ruta, no como subcadena
+    // de nombre de archivo (ej: "fichero..babel" es válido y no debe bloquearse).
+    if std::path::Path::new(ruta)
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return Err("Ruta no autorizada.".into());
     }
     // Verificar existencia
@@ -969,7 +973,14 @@ fn listar_archivos_guardados(
             let idioma = if nombre.contains("__orig") {
                 "original".to_string()
             } else {
-                nombre.split('_').nth(1).unwrap_or("").to_string()
+                // Formato nuevo: {usuario}_{par}_{nombre}.babel — par en posición [1]
+                // Formato antiguo (sin par): se muestra vacío en UI
+                let seg = nombre.split('_').nth(1).unwrap_or("");
+                if seg.len() == 5 && seg.as_bytes().get(2) == Some(&b'-') {
+                    seg.to_string()
+                } else {
+                    String::new()
+                }
             };
 
             let nombre_buzon = if buzon_archivo == "todos" || buzon_archivo.is_empty() {
@@ -1083,7 +1094,7 @@ async fn traducir_documento_ruta(
     // todo el trabajo a un hilo dedicado y deja el hilo principal libre.
     tauri::async_runtime::spawn_blocking(move || {
         // Anti path-traversal
-        if ruta.contains("..") {
+        if Path::new(&ruta).components().any(|c| c == std::path::Component::ParentDir) {
             return Err("Ruta no autorizada.".into());
         }
 
@@ -1130,8 +1141,82 @@ async fn traducir_documento_ruta(
             &progreso,
         )?;
 
-        let ruta_real = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
+        let ruta_real = archivos_path(&format!("{}_{}_{}.babel", id_usuario, par, nombre_base));
         Ok(ruta_real)
+    })
+    .await
+    .map_err(|e| format!("Error interno al traducir: {}", e))?
+}
+
+// ============================================================
+// COMANDO — Traducir archivo .babel guardado (sin traducir)
+// Descifra el .babel, escribe bytes a tmp/, llama al pipeline normal de
+// traducción y devuelve la ruta del .babel resultante en archivos/.
+// ============================================================
+#[tauri::command]
+async fn traducir_archivo_guardado(
+    app: tauri::AppHandle,
+    ruta: String,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<String, String> {
+    validar_ruta_en(&ruta, guardados_dir())?;
+
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
+    let dict = sesion.diccionario.lock().map_err(|_| "Error leyendo diccionario.".to_string())?.clone();
+    let idioma = sesion.idioma.lock().map_err(|_| "Error leyendo idioma.".to_string())?.clone();
+    let par = idioma_a_par(&idioma);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = descifrar_a_bytes(&ruta, &subclave_hex)?;
+
+        if bytes.len() > 100 * 1024 * 1024 {
+            return Err("El archivo supera el límite de 100 MB.".into());
+        }
+
+        let ext = detectar_ext(&bytes);
+        if !["pdf", "docx", "txt"].contains(&ext) {
+            return Err(format!("Tipo de archivo no soportado para traducción: .{}", ext));
+        }
+
+        // Nombre base desde la ruta .babel interna
+        let nombre_base = nombre_exportacion(&ruta, ext);
+        let nombre_sin_ext = Path::new(&nombre_base)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("archivo")
+            .to_string();
+
+        // Escribir a tmp/ y traducir
+        let tmp_path = tmp_dir().join(&nombre_base);
+        fs::write(&tmp_path, &bytes).map_err(|e| format!("Error escribiendo temporal: {}", e))?;
+
+        let progreso = |pct: u8, msg: &str| {
+            let _ = app.emit("progreso-traduccion", serde_json::json!({"pct": pct, "msg": msg}));
+        };
+        let tmp_str = tmp_path.to_str()
+            .ok_or_else(|| "Ruta temporal con caracteres inválidos".to_string())?;
+
+        let resultado = traductor::procesar_archivo_inteligente(
+            tmp_str,
+            &dict,
+            &subclave_hex,
+            &id_usuario,
+            par,
+            &progreso,
+        );
+
+        // Limpiar temporal con 3 pasadas (igual que borrar_seguro) — el archivo
+        // contiene bytes descifrados de un documento confidencial.
+        if let Some(s) = tmp_path.to_str() { borrar_seguro(s); }
+
+        resultado?;
+
+        let ruta_resultado = archivos_path(&format!("{}_{}_{}.babel", id_usuario, par, nombre_sin_ext));
+        Ok(ruta_resultado)
     })
     .await
     .map_err(|e| format!("Error interno al traducir: {}", e))?
@@ -1232,7 +1317,7 @@ async fn traducir_documento_dialogo(
             &progreso,
         )?;
 
-        let ruta_real = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
+        let ruta_real = archivos_path(&format!("{}_{}_{}.babel", id_usuario, par, nombre_base));
         Ok(Some(ruta_real))
     })
     .await
@@ -1274,7 +1359,6 @@ async fn seleccionar_ruta_dialogo(app: tauri::AppHandle) -> Result<Option<String
 // COMANDO 8 — Leer resultado para descarga
 // ============================================================
 
-#[tauri::command]
 // Descifra un .babel y devuelve los bytes originales del documento.
 // Maneja dos casos: contenido comprimido en b64 (PDF, DOCX, binarios) y
 // texto plano directo (TXT translations guardados sin comprimir).
@@ -3162,51 +3246,66 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            // Modo USB: si Resources/ contiene python + servidor, arrancarlo
-            if let Ok(res) = app.path().resource_dir() {
-                let py_bin = res.join("python").join("bin").join("python3");
-                // Preferir servidor MarianMT (tier premium); fallback a NLLB para USBs antiguos
-                let servidor = {
-                    let nuevo = res.join("servidor").join("marian_server_usb.py");
-                    if nuevo.exists() { nuevo } else { res.join("servidor").join("nllb_server_usb.py") }
-                };
-                if py_bin.exists() && servidor.exists() {
-                    let mut rng_bytes = [0u8; 16];
-                    rand::rngs::OsRng.fill_bytes(&mut rng_bytes);
-                    let token = format!("babel_{}", hex::encode(rng_bytes));
+            // Modo producción: lanzar el sidecar servidor_babel (PyInstaller) si existe
+            // en el directorio del ejecutable (empaquetado por Tauri en bundle/macOS/).
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
 
-                    // B7/B8: token en OnceLock (no en env), resto vía Command::env()
-                    // — evita set_var() UB y evita que el token aparezca en `ps aux`
-                    traductor::inicializar_nllb_token(token.clone());
+            let sidecar_path = exe_dir.as_ref().map(|d| d.join("servidor_babel"));
+            let sidecar_exists = sidecar_path.as_ref().map(|p| p.exists()).unwrap_or(false);
 
-                    if let Ok(child) = std::process::Command::new(&py_bin)
-                        .arg(&servidor)
+            // Fallback legacy: buscar python + script en Resources/ (USBs anteriores)
+            let legacy_exists = app.path().resource_dir().ok().map(|res| {
+                res.join("python").join("bin").join("python3").exists()
+                    && res.join("servidor").join("marian_server_usb.py").exists()
+            }).unwrap_or(false);
+
+            if sidecar_exists || legacy_exists {
+                let mut rng_bytes = [0u8; 16];
+                rand::rngs::OsRng.fill_bytes(&mut rng_bytes);
+                let token = format!("babel_{}", hex::encode(rng_bytes));
+                traductor::inicializar_nllb_token(token.clone());
+
+                let child_result = if sidecar_exists {
+                    let bin = sidecar_path.unwrap();
+                    std::process::Command::new(&bin)
                         .env("BABEL_NLLB_TOKEN", &token)
-                        .env("TESSDATA_PREFIX", res.join("tessdata"))
                         .env("TRANSFORMERS_OFFLINE", "1")
                         .env("HF_DATASETS_OFFLINE", "1")
                         .env("TOKENIZERS_PARALLELISM", "false")
                         .spawn()
-                    {
-                        *USB_CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
-                    }
+                } else {
+                    let res = app.path().resource_dir().unwrap();
+                    let py_bin = res.join("python").join("bin").join("python3");
+                    let servidor = res.join("servidor").join("marian_server_usb.py");
+                    std::process::Command::new(&py_bin)
+                        .arg(&servidor)
+                        .env("BABEL_NLLB_TOKEN", &token)
+                        .env("TRANSFORMERS_OFFLINE", "1")
+                        .env("HF_DATASETS_OFFLINE", "1")
+                        .env("TOKENIZERS_PARALLELISM", "false")
+                        .spawn()
+                };
 
-                    // Hilo en background: cuando el servidor acepte conexiones,
-                    // emite el evento "servidor-usb-listo" al frontend
-                    let handle = app.handle().clone();
-                    std::thread::spawn(move || {
-                        let addr: std::net::SocketAddr =
-                            "127.0.0.1:5002".parse().unwrap();
-                        let timeout = std::time::Duration::from_secs(1);
-                        for _ in 0..90 {
-                            std::thread::sleep(std::time::Duration::from_secs(2));
-                            if std::net::TcpStream::connect_timeout(&addr, timeout).is_ok() {
-                                let _ = handle.emit("servidor-usb-listo", ());
-                                break;
-                            }
-                        }
-                    });
+                if let Ok(child) = child_result {
+                    *USB_CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
                 }
+
+                // Hilo en background: cuando el servidor acepte conexiones,
+                // emite el evento "servidor-usb-listo" al frontend
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let addr: std::net::SocketAddr = "127.0.0.1:5002".parse().unwrap();
+                    let timeout = std::time::Duration::from_secs(1);
+                    for _ in 0..120 {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        if std::net::TcpStream::connect_timeout(&addr, timeout).is_ok() {
+                            let _ = handle.emit("servidor-usb-listo", ());
+                            break;
+                        }
+                    }
+                });
             }
 
             // Modo dev / servidor externo: si NO estamos en modo USB, el bloque de arriba
@@ -3261,6 +3360,7 @@ fn main() {
             traducir_documento,
             cerrar_sesion_rust,
             traducir_documento_ruta,
+            traducir_archivo_guardado,
             traducir_documento_dialogo,
             seleccionar_ruta_dialogo,
             leer_resultado,

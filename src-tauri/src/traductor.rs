@@ -318,7 +318,7 @@ pub fn procesar_archivo_inteligente(
         // Guardar original cifrado
         if let Ok(cifrado_orig) = seguridad::blindar_documento(&texto, subclave_hex) {
             let salida_orig =
-                archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre));
+                archivos_dir.join(format!("{}_{}_{}__orig.babel", id_usuario, par, nombre));
             let _ = fs::write(&salida_orig, cifrado_orig);
         }
 
@@ -352,7 +352,7 @@ pub fn procesar_archivo_inteligente(
         progreso(93, "CIFRANDO RESULTADO...");
         // Guardar traducción cifrada
         if let Ok(cifrado) = seguridad::blindar_documento(&traducido_final, subclave_hex) {
-            let salida = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
+            let salida = archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre));
             let _ = fs::write(&salida, cifrado);
         }
     } else {
@@ -608,7 +608,7 @@ pub fn clonar_y_traducir(
     // Texto plano original para el visor
     let b64_orig = comprimir_b64(&raw_bytes);
     if let Ok(cifrado_orig) = seguridad::blindar_documento(&b64_orig, subclave_hex) {
-        let salida_orig = archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre));
+        let salida_orig = archivos_dir.join(format!("{}_{}_{}__orig.babel", id_usuario, par, nombre));
         let _ = fs::write(&salida_orig, cifrado_orig);
     }
 
@@ -664,7 +664,7 @@ pub fn clonar_y_traducir(
     // Cifrar y guardar
     let b64 = comprimir_b64(&docx_bytes);
     let cifrado = seguridad::blindar_documento(&b64, subclave_hex)?;
-    let salida = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
+    let salida = archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre));
     fs::write(&salida, &cifrado)?;
 
     registrar_evento(&format!("Word procesado: {}", ruta), subclave_hex);
@@ -873,15 +873,15 @@ pub fn procesar_pdf(
             progreso,
         )?;
         // Renombrar _tmp → nombre final (clonar_y_traducir usa el stem del DOCX temporal)
-        let salida_tmp = archivos_dir.join(format!("{}_{}_tmp.babel", id_usuario, nombre));
-        let salida_final = archivos_dir.join(format!("{}_{}.babel", id_usuario, nombre));
+        let salida_tmp = archivos_dir.join(format!("{}_{}_{}_tmp.babel", id_usuario, par, nombre));
+        let salida_final = archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre));
         if salida_tmp.exists() {
             let _ = fs::rename(&salida_tmp, &salida_final);
         }
         let orig_tmp =
-            archivos_dir.join(format!("{}_{}_tmp__orig.babel", id_usuario, nombre));
+            archivos_dir.join(format!("{}_{}_{}_tmp__orig.babel", id_usuario, par, nombre));
         let orig_final =
-            archivos_dir.join(format!("{}_{}__orig.babel", id_usuario, nombre));
+            archivos_dir.join(format!("{}_{}_{}__orig.babel", id_usuario, par, nombre));
         if orig_tmp.exists() {
             let _ = fs::rename(&orig_tmp, &orig_final);
         }

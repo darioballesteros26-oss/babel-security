@@ -36,7 +36,6 @@ let _renombraViejo = "";
 let _renombraViejoG = "";
 let _renombraArchivoRuta = "";
 let _renombraEsGuardado = false;
-let buzonParentPendiente: string | null = null;
 let buzonParentPendienteG: string | null = null;
 
 // Tipo compartido para nodos de buzón con árbol jerárquico
@@ -51,9 +50,7 @@ function toggleColapso(id: string, sistema: string): void {
   } else {
     buzonesColapsados.add(id);
   }
-  if (sistema === "trad") {
-    cargarBuzones();
-  } else {
+  if (sistema !== "trad") {
     cargarBuzonesGuardados();
   }
 }
@@ -139,7 +136,6 @@ function limpiarCamposSensibles(): void {
 // CHAT — SISTEMA DE MENSAJES
 // ============================================================
 
-let ultimaRutaResultado: string = "";
 
 function añadirMensajeUsuario(texto: string): void {
   const contenedor = document.getElementById("chat-mensajes");
@@ -272,7 +268,6 @@ function borrarChat(): void {
     contenedor.removeChild(contenedor.lastChild!);
   }
 
-  ultimaRutaResultado = "";
 
   // Zeroize del input
   const input = document.getElementById("chat-input") as HTMLTextAreaElement;
@@ -329,11 +324,6 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "limpiar-input": limpiarInputTraduccion(); break;
     case "borrar-chat": borrarChat(); break;
     case "eliminar-seleccionados": eliminarSeleccionados(); break;
-    // Buzones de traducción
-    case "mostrar-input-buzon": mostrarInputBuzon(); break;
-    case "confirmar-buzon": confirmarBuzon(); break;
-    case "cancelar-buzon": cancelarBuzon(); break;
-    case "seleccionar-buzon": seleccionarBuzon(el.dataset.buzon!); break;
     // Archivos guardados
     case "ver-archivo-guardado": verArchivoGuardado(); break;
     case "eliminar-sel-guardados": eliminarSeleccionadosGuardados(); break;
@@ -634,7 +624,6 @@ async function seleccionarArchivo(): Promise<void> {
     const ruta = await invoke<string | null>("traducir_documento_dialogo");
     if (!ruta) return;
     mostrarProcesando(false);
-    ultimaRutaResultado = ruta;
     const partes = ruta.replace(/\\/g, "/").split("/");
     añadirResultadoArchivo(partes[partes.length - 1], ruta);
   } catch (error) {
@@ -662,7 +651,6 @@ async function procesarArchivo(archivo: File): Promise<void> {
       contenido: Array.from(new Uint8Array(await archivo.arrayBuffer()))
     });
     mostrarProcesando(false);
-    ultimaRutaResultado = rutaResultado;
     const partes = rutaResultado.replace(/\\/g, "/").split("/");
     añadirResultadoArchivo(partes[partes.length - 1], rutaResultado);
   } catch (error) {
@@ -702,7 +690,6 @@ async function procesarRuta(ruta: string): Promise<void> {
   try {
     const rutaResultado = await invoke<string>("traducir_documento_ruta", { ruta, nombreArchivo });
     mostrarProcesando(false);
-    ultimaRutaResultado = rutaResultado;
     const partesRes = rutaResultado.replace(/\\/g, "/").split("/");
     añadirResultadoArchivo(partesRes[partesRes.length - 1], rutaResultado);
     scrollAlFinal();
@@ -713,56 +700,6 @@ async function procesarRuta(ruta: string): Promise<void> {
 }
 
 // ============================================================
-// DESCARGA
-// ============================================================
-
-function detectarExtBytes(b: Uint8Array): string {
-  if (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return "pdf";
-  if (b[0] === 0x50 && b[1] === 0x4B) return "docx";
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return "png";
-  if (b[0] === 0xFF && b[1] === 0xD8) return "jpg";
-  return "txt";
-}
-
-function nombreLimpioDeRuta(ruta: string, ext: string): string {
-  const base = ruta.replace(/\\/g, "/").split("/").pop() ?? "archivo.babel";
-  const sinExt = base.endsWith(".babel") ? base.slice(0, -6) : base;
-  const partes = sinExt.split("_");
-  // Quitar prefijo de usuario (primer segmento)
-  const sinUsuario = partes.length > 1 ? partes.slice(1).join("_") : sinExt;
-  // Quitar sufijo timestamp (≥8 dígitos al final)
-  const p2 = sinUsuario.split("_");
-  const ultimo = p2[p2.length - 1];
-  const nombre = (p2.length > 1 && /^\d{8,}$/.test(ultimo))
-    ? p2.slice(0, -1).join("_")
-    : sinUsuario;
-  return `${nombre}.${ext}`;
-}
-
-async function descargarArchivo(ruta: string, _nombreHint: string): Promise<void> {
-  try {
-    const bytes = await invoke<number[]>("leer_resultado", { ruta });
-    const arr = new Uint8Array(bytes);
-    const ext = detectarExtBytes(arr);
-    const nombre = nombreLimpioDeRuta(ruta, ext);
-    const blob = new Blob([arr], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.download = nombre;
-    a.href = url;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (error) {
-    añadirMensajeBabel("Error al descargar: " + String(error), "BABEL · error");
-  }
-}
-
-async function descargarResultado(): Promise<void> {
-  if (!ultimaRutaResultado) return;
-  const partes = ultimaRutaResultado.replace(/\\/g, "/").split("/");
-  await descargarArchivo(ultimaRutaResultado, partes[partes.length - 1]);
-}
-
 // ============================================================
 // SESIÓN Y NAVEGACIÓN
 // ============================================================
@@ -920,7 +857,6 @@ async function cambiarIdioma(idioma: string): Promise<void> {
 // ============================================================
 
 // Variable global — buzón activo
-let buzonActivo: string = "todos";
 let buzonActivoGuardados: string = "todos";
 let _smtpConfigurado: boolean = false;
 // Tipo que refleja el struct Rust MetadatosArchivo
@@ -1013,6 +949,7 @@ async function cargarArchivosGuardados(): Promise<void> {
   </div>
   <div class="archivo-card-botones">
     <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver">VER</button>
+    <button type="button" class="btn-archivo" data-action="traducir-guardado" style="color:var(--dorado);border-color:var(--dorado);">TRADUCIR</button>
     <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar">EXPORTAR</button>
     <button type="button" class="btn-archivo" data-action="mover" style="opacity:0.7;">MOVER</button>
     <button type="button" class="btn-archivo" data-action="enviar" style="opacity:0.7;">✉</button>
@@ -1033,6 +970,7 @@ async function cargarArchivosGuardados(): Promise<void> {
       switch (accion) {
         case "ver-comparacion": verComparacionRutas(rutaOrig, ruta); break;
         case "ver": verArchivo(ruta); break;
+        case "traducir-guardado": traducirArchivoGuardado(ruta); break;
         case "exportar": exportarArchivo(ruta); break;
         case "mover": moverArchivoGuardadoPopup(ruta, e); break;
         case "enviar": enviarArchivoDesdeArchivos(ruta); break;
@@ -1466,7 +1404,6 @@ async function abrirCarpetaBabelGuardados(): Promise<void> {
 function irATraduccion(): void {
   mostrarPantalla("traduccion");
   setTimeout(() => iniciarDropZone(), 100);
-  cargarBuzones().catch(() => {});
 }
 
 // Cifra y guarda un archivo arrastrado sin traducirlo (solo cifrado)
@@ -1522,24 +1459,6 @@ async function irAArchivos(): Promise<void> {
 // BUZONES DE TRADUCCIONES — CREAR, CANCELAR, CONFIRMAR
 // ============================================================
 
-// Muestra el input para escribir el nombre del nuevo buzón de traducciones
-// Si se pasa parentId, el buzón se creará como hijo de ese buzón
-function mostrarInputBuzon(parentId: string | null = null): void {
-  buzonParentPendiente = parentId;
-  const input = document.getElementById("input-buzon-nuevo");
-  const campo = document.getElementById("nombre-buzon-input") as HTMLInputElement;
-  input?.classList.remove("hidden");
-  campo?.focus();
-}
-
-// Oculta el input y limpia el campo sin crear el buzón
-function cancelarBuzon(): void {
-  buzonParentPendiente = null;
-  const input = document.getElementById("input-buzon-nuevo");
-  const campo = document.getElementById("nombre-buzon-input") as HTMLInputElement;
-  input?.classList.add("hidden");
-  if (campo) campo.value = "";
-}
 // ============================================================
 // BUZONES DE GUARDADOS — CREAR, CARGAR, BORRAR, RENOMBRAR
 // ============================================================
@@ -1602,22 +1521,6 @@ async function borrarBuzonGuardado(id: string): Promise<void> {
   }
 }
 
-// Carga el árbol de buzones de traducciones y los renderiza con soporte de drag & drop
-async function cargarBuzones(): Promise<void> {
-  try {
-    const nodos = await invoke<BuzonNodo[]>("listar_buzones");
-    const lista = document.getElementById("lista-buzones");
-    if (!lista) return;
-    lista.innerHTML = `
-      <div class="buzon-item ${buzonActivo === "todos" ? "activo" : ""}" onclick="seleccionarBuzon('todos')"
-        ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="soltarEnBuzon(event,'todos')"
-        style="border:1px solid transparent;border-radius:3px;transition:background 0.2s,border-color 0.2s;">
-        <span class="buzon-icono">◫</span><span class="buzon-nombre">TODOS</span>
-      </div>` + renderArbolBuzones(nodos, null, 0, buzonActivo, "trad");
-  } catch (error) {
-    console.error("Error cargando buzones:", error);
-  }
-}
 // ============================================================
 // MOVER ARCHIVOS GUARDADOS — popup selector de buzón destino
 // ============================================================
@@ -1712,7 +1615,6 @@ async function confirmarRenombrar(): Promise<void> {
       await cargarBuzonesGuardados();
     } else {
       await invoke("renombrar_buzon", { id: _renombraViejo, nombreNuevo });
-      await cargarBuzones();
     }
   } catch (e) {
     console.error("Error renombrando:", e);
@@ -1724,24 +1626,6 @@ async function confirmarRenombrar(): Promise<void> {
 function cerrarModalRenombrar(): void {
   document.getElementById("modal-renombrar")?.classList.add("hidden");
   _renombraEsGuardado = false;
-}
-
-// Elimina un buzón de traducciones (y todos sus hijos) y vuelve a "todos" si era el activo
-async function borrarBuzon(id: string): Promise<void> {
-  try {
-    await invoke("eliminar_buzon", { id });
-    if (buzonActivo === id) buzonActivo = "todos";
-    await cargarBuzones();
-  } catch (error) {
-    console.error("Error borrando buzón:", error);
-  }
-}
-
-// Activa un buzón de traducciones (afecta al guardar la siguiente traducción)
-async function seleccionarBuzon(id: string): Promise<void> {
-  buzonActivo = id;
-  localStorage.setItem("babel-buzon-activo", id);
-  await cargarBuzones();
 }
 
 // Descifra y exporta un archivo .babel — el usuario elige dónde guardarlo
@@ -2078,6 +1962,21 @@ function desactivarTimerInactividad(): void {
 // VISOR INDIVIDUAL — modal simple
 // ============================================================
 
+async function traducirArchivoGuardado(ruta: string): Promise<void> {
+  mostrarProcesando(true);
+  try {
+    const rutaResultado = await invoke<string>("traducir_archivo_guardado", { ruta });
+    mostrarProcesando(false);
+    mostrarToast("Traducción completada", false);
+    const partes = rutaResultado.replace(/\\/g, "/").split("/");
+    añadirResultadoArchivo(partes[partes.length - 1], rutaResultado);
+    await cargarArchivosGuardados();
+  } catch (error) {
+    mostrarProcesando(false);
+    mostrarToast("Error al traducir: " + String(error), true);
+  }
+}
+
 async function verArchivo(ruta: string): Promise<void> {
   try {
     const texto = await invoke<string>("ver_archivo", { ruta });
@@ -2119,7 +2018,8 @@ function renderizarEnContenedor(
     // HTML generado por el backend Rust (docx_a_html) — confiable, se permite style
     contenedor.innerHTML = DOMPurify.sanitize(texto.slice(5), {
       ALLOWED_TAGS: ["p", "div", "br", "span", "b", "i", "u", "strong", "em", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "a", "img", "h1", "h2", "h3", "h4", "blockquote", "pre", "code"],
-      ALLOWED_ATTR: ["href", "src", "alt", "title", "class", "width", "height", "style"],
+      ALLOWED_ATTR: ["href", "alt", "title", "class", "width", "height", "style"],
+      FORBID_ATTR: ["src", "onerror", "onload"],
       ALLOW_DATA_ATTR: false,
       FORCE_BODY: true,
     });
@@ -2741,7 +2641,6 @@ async function cargarAjustesTraduccion(): Promise<void> {
     if (sidebarAbierto) sidebar.classList.remove("hidden");
     else sidebar.classList.add("hidden");
   }
-  buzonActivo = localStorage.getItem("babel-buzon-activo") ?? "todos";
   const savedBuzonG = localStorage.getItem("babel-buzon-activo-g");
   if (savedBuzonG && savedBuzonG !== "todos") {
     const nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados");
@@ -2797,7 +2696,6 @@ interface EmailResumen {
 }
 
 // Email seleccionado actualmente
-let emailSeleccionado: EmailResumen | null = null;
 const emailsVistos = new Set<number>();
 let emailVisorActualId: number | null = null;
 let _firmaEmail: string = "";
@@ -3383,12 +3281,6 @@ async function intentarRecuperacion(): Promise<void> {
   try {
     const [maestra, passUsuario, aviso] = await invoke<[string, string, string]>("recuperar_con_frase", { palabras });
 
-    // Rellenar los campos del login con las credenciales recuperadas
-    const campoPass = document.getElementById("login-pass-usuario") as HTMLInputElement;
-    if (campoPass) campoPass.value = passUsuario;
-    const campoMaestra = document.getElementById("login-pass") as HTMLInputElement;
-    if (campoMaestra) campoMaestra.value = maestra;
-
     if (aviso) {
       mostrarMensaje("recovery-msg", `⚠ ${aviso}`, true);
     } else {
@@ -3399,7 +3291,6 @@ async function intentarRecuperacion(): Promise<void> {
     for (let i = 1; i <= 12; i++) {
       const input = document.getElementById(`rec-palabra-${i}`) as HTMLInputElement;
       if (input) {
-        // Zeroize manual
         input.value = "0".repeat(input.value.length);
         input.value = "";
       }
@@ -3407,10 +3298,11 @@ async function intentarRecuperacion(): Promise<void> {
 
     setTimeout(() => {
       mostrarPantalla("login");
-      // Enfocar el campo de contraseña de usuario para que sea lo único que falta
-      setTimeout(() => {
-        document.getElementById("login-pass-usuario")?.focus();
-      }, 100);
+      // Rellenar credenciales solo al mostrar el login — minimiza tiempo en DOM
+      const campoMaestra = document.getElementById("login-pass") as HTMLInputElement;
+      if (campoMaestra) campoMaestra.value = maestra;
+      const campoPass = document.getElementById("login-pass-usuario") as HTMLInputElement;
+      if (campoPass) { campoPass.value = passUsuario; campoPass.focus(); }
     }, 1500);
 
   } catch (error) {
@@ -3452,20 +3344,6 @@ function cerrarVerFrase(): void {
 // (función principal del flujo crear buzón de traducción)
 // ============================================================
 
-// Lee el nombre del input y llama a Rust para crear el buzón en .buzones.babel
-async function confirmarBuzon(): Promise<void> {
-  const campo = document.getElementById("nombre-buzon-input") as HTMLInputElement;
-  const nombre = campo?.value?.trim().toLowerCase() ?? "";
-  if (!nombre) return;
-  try {
-    await invoke("crear_buzon", { nombre, parent: buzonParentPendiente });
-    buzonParentPendiente = null;
-    cancelarBuzon();
-    await cargarBuzones();
-  } catch (error) {
-    console.error("Error creando buzón:", error);
-  }
-}
 // ============================================================
 // TÉRMINOS DE USO
 // ============================================================
@@ -3510,7 +3388,6 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).seleccionarArchivo = seleccionarArchivo;
 (window as any).manejarSeleccion = manejarSeleccion;
 (window as any).enviarMensaje = enviarMensaje;
-(window as any).descargarResultado = descargarResultado;
 (window as any).borrarChat = borrarChat;
 (window as any).toggleSidebar = toggleSidebar;
 (window as any).toggleBorradoAutomatico = toggleBorradoAutomatico;
@@ -3520,17 +3397,12 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).cambiarCategoriaDiccionario = cambiarCategoriaDiccionario;
 (window as any).toggleContraseña = toggleContraseña;
 
-(window as any).seleccionarBuzon = seleccionarBuzon;
 (window as any).exportarArchivo = exportarArchivo;
 (window as any).verArchivo = verArchivo;
 (window as any).cerrarVisor = cerrarVisor;
 
-(window as any).mostrarInputBuzon = mostrarInputBuzon;
-(window as any).cancelarBuzon = cancelarBuzon;
-(window as any).confirmarBuzon = confirmarBuzon;
 (window as any).actualizarSeleccion = actualizarSeleccion;
 (window as any).eliminarSeleccionados = eliminarSeleccionados;
-(window as any).borrarBuzon = borrarBuzon;
 (window as any).mostrarSelectorBuzon = mostrarSelectorBuzon;
 (window as any).cambiarModoP2P = cambiarModoP2P;
 (window as any).volverDeP2P = volverDeP2P;
@@ -3558,12 +3430,10 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).mostrarModalTerminos = mostrarModalTerminos;
 (window as any).cargarBandejaEmail = cargarBandejaEmail;
 (window as any).seleccionarEmail = seleccionarEmail;
-(window as any).emailSeleccionado = emailSeleccionado;
 (window as any).sincronizarEmail = sincronizarEmail;
 (window as any).responderEmail = responderEmail;
 (window as any).eliminarEmailActual = eliminarEmailActual;
 (window as any).abrirCarpetaBabel = abrirCarpetaBabel;
-(window as any).iniciarPollMensajes = iniciarPollMensajes;
 (window as any).iniciarRenombrado = iniciarRenombrado;
 (window as any).confirmarRenombrar = confirmarRenombrar;
 (window as any).cerrarModalRenombrar = cerrarModalRenombrar;
@@ -3753,7 +3623,6 @@ function cambiarIdiomaUI(idioma: string): void {
     "ui-importar": t.importar,
     "ui-tema": t.tema,
     "ui-idioma-interfaz": t.idiomaInterfaz,
-    "ui-bienvenido": t.bienvenido,
     "ui-bienvenido-sistema": t.bienvenidoSistema,
     "ui-acceder-bunker": t.accederBunker,
     "ui-autenticacion-requerida": t.autenticacion,
@@ -3763,7 +3632,6 @@ function cambiarIdiomaUI(idioma: string): void {
     "ui-recuperar-bunker": t.recuperarBunker,
     "ui-traducidos-guardados": t.traducidosGuardados,
     "ui-buzones": t.buzones,
-    "ui-buzones-trad": t.buzonesTord,
     "ui-finder": t.finder,
     "ui-archivos-titulo": t.archivosTitulo,
     "ui-no-archivos": t.noArchivos,
@@ -3809,7 +3677,6 @@ function cargarAjustesGuardados(): void {
 (window as any).destruirSesionP2P = destruirSesionP2P;
 (window as any).guardarAjustesTraduccion = guardarAjustesTraduccion;
 (window as any).toggleTraduccionP2P = toggleTraduccionP2P;
-(window as any).manejarMensajeEntrante = manejarMensajeEntrante;
 (window as any).guardarNombreDisplay = guardarNombreDisplay;
 
 function guardarNombreDisplay(): void {

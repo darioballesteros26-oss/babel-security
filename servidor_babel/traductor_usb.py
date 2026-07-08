@@ -15,7 +15,10 @@ except ImportError:
     _CT2_DISPONIBLE = False
 
 DIR_BASE = os.path.dirname(__file__)
-DIR_USB  = os.path.join(DIR_BASE, "modelos_usb")
+# En producción (PyInstaller), BABEL_DIR_USB apunta al volumen del USB.
+# En desarrollo, usa modelos_usb/ junto al script.
+_usb_env = os.environ.get("BABEL_DIR_USB")
+DIR_USB  = _usb_env if _usb_env else os.path.join(DIR_BASE, "modelos_usb")
 DIR_MOD  = os.path.join(DIR_USB, "modelos")
 DIR_TOK  = os.path.join(DIR_USB, "tokenizers")
 
