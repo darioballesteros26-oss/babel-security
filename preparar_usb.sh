@@ -287,6 +287,7 @@ PAQUETES=(
   "sentencepiece>=0.1.99"
   "numpy>=1.24"
   "protobuf>=3.20"
+  "pymupdf>=1.23"
 )
 STAMP_CONTENT="${PAQUETES[*]}"
 STAMP_FILE="$CACHE_DIR/python_env_${ARCH}.stamp"
@@ -483,7 +484,7 @@ fi
 find "$RESOURCES/python" -name '._*' -delete 2>/dev/null || true
 echo "  Comprobando importaciones Python..."
 if "$RESOURCES/python/bin/python3" -c \
-     "import flask, ctranslate2, transformers, sentencepiece; print('OK')" \
+     "import flask, ctranslate2, transformers, sentencepiece, fitz; print('OK')" \
      2>/dev/null | grep -q "OK"; then
   echo "  ✓ Paquetes Python importan correctamente"
 else

@@ -1004,38 +1004,80 @@ pub fn procesar_pdf(
     };
 
     if !ok {
-        // Fallback: pdftotext → si vacío, OCR página a página (máx. 50)
-        let pdftotext = [
-            "/opt/homebrew/bin/pdftotext",
-            "/usr/local/bin/pdftotext",
-            "/usr/bin/pdftotext",
-            "pdftotext",
-        ]
-        .iter()
-        .copied()
-        .find(|&p| p == "pdftotext" || std::path::Path::new(p).exists())
-        .unwrap_or("pdftotext");
-        let mut texto = Zeroizing::new(
+        // PASO 2: pymupdf — extrae bloques con orden de lectura real (multi-columna, tablas)
+        // Mucho mejor que pdftotext para PDFs complejos; no añade espacio al USB.
+        let script_pymupdf = r#"
+import sys
+try:
+    import fitz
+    doc = fitz.open(sys.argv[1])
+    out = []
+    for page in doc:
+        h = page.rect.height
+        blocks = page.get_text("blocks", sort=True)
+        for b in blocks:
+            if b[6] != 0:
+                continue
+            y_mid = (b[1] + b[3]) / 2
+            text = b[4].replace('\n', ' ').strip()
+            if not text:
+                continue
+            # Omitir números de página (texto muy corto en márgenes superior/inferior)
+            if (y_mid < h * 0.08 or y_mid > h * 0.92) and len(text) < 25:
+                continue
+            out.append(text)
+    sys.stdout.buffer.write('\n'.join(out).encode('utf-8'))
+except Exception as e:
+    sys.stderr.write(str(e))
+    sys.exit(1)
+"#;
+        let texto_pymupdf = std::process::Command::new(python3)
+            .args(["-c", script_pymupdf, ruta])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .unwrap_or_default();
+
+        // PASO 3: pdftotext — si pymupdf no extrajo texto suficiente
+        let texto_base = if texto_pymupdf.split_whitespace().count() > 20 {
+            progreso(12, "ESTRUCTURANDO TEXTO...");
+            texto_pymupdf
+        } else {
+            progreso(12, "EXTRAYENDO TEXTO...");
+            let pdftotext = [
+                "/opt/homebrew/bin/pdftotext",
+                "/usr/local/bin/pdftotext",
+                "/usr/bin/pdftotext",
+                "pdftotext",
+            ]
+            .iter()
+            .copied()
+            .find(|&p| p == "pdftotext" || std::path::Path::new(p).exists())
+            .unwrap_or("pdftotext");
             std::process::Command::new(pdftotext)
                 .args([ruta, "-"])
                 .output()
                 .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-                .unwrap_or_default(),
-        );
-        if texto.trim().is_empty() {
+                .unwrap_or_default()
+        };
+
+        // PASO 4: OCR Tesseract — último recurso para PDFs escaneados
+        let mut texto = Zeroizing::new(if texto_base.trim().is_empty() {
+            progreso(13, "OCR PÁGINA A PÁGINA...");
             let mut ocr_total = String::new();
             for pag in 1u32..=50 {
                 let pag_text = ocr_pagina_pdf(ruta, pag);
-                if pag_text.trim().is_empty() {
-                    break;
-                }
+                if pag_text.trim().is_empty() { break; }
                 ocr_total.push_str(&pag_text);
                 ocr_total.push('\n');
             }
-            *texto = ocr_total;
-        }
-        progreso(15, "EXTRAYENDO TEXTO...");
-        // Traducir párrafo a párrafo con contexto del anterior para coherencia
+            ocr_total
+        } else {
+            texto_base
+        });
+
+        progreso(15, "TRADUCIENDO...");
         let parrafos: Vec<String> = texto.lines().map(String::from).collect();
         let total_p = parrafos.iter().filter(|p| !p.trim().is_empty()).count().max(1);
         let mut traducidos_p = 0usize;
