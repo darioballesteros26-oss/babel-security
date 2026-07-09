@@ -573,9 +573,11 @@ fn partir_en_oraciones(texto: &str) -> Vec<String> {
                     .split_whitespace()
                     .last()
                     .unwrap_or("");
+                // Abreviatura: ≤4 letras puras antes del punto (Art., Sr., Dr., Núm., Fig.)
+                // Números como "5." SÍ cierran oración → no se protegen.
                 let es_abrev = !previa.is_empty()
-                    && (previa.chars().last().map_or(false, |c| c.is_ascii_digit())
-                        || (previa.len() <= 4 && previa.chars().all(|c| c.is_alphabetic())));
+                    && previa.len() <= 4
+                    && previa.chars().all(|c| c.is_alphabetic());
                 if !es_abrev {
                     let s = actual.trim().to_string();
                     if !s.is_empty() { oraciones.push(s); }
@@ -1276,7 +1278,7 @@ except Exception as e:
         };
 
         // PASO 4: OCR Tesseract — último recurso para PDFs escaneados
-        let mut texto = Zeroizing::new(if texto_base.trim().is_empty() {
+        let texto = Zeroizing::new(if texto_base.trim().is_empty() {
             progreso(13, "OCR PÁGINA A PÁGINA...");
             let mut ocr_total = String::new();
             for pag in 1u32..=50 {
