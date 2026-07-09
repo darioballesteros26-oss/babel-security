@@ -1,0 +1,121 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Instalar dependencias npm
+        run: npm ci
+
+      - name: Build Mac (.dmg)
+        run: npm run tauri build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Subir DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dmg
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # El sidecar servidor_babel es un binario macOS — en Windows se omite.
+      # La app Windows usa el servidor Python externo lanzado por LANZAR_BABEL.bat.
+      - name: Parchear tauri.conf.json — quitar externalBin en Windows
+        shell: pwsh
+        run: |
+          $conf = Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json
+          $conf.bundle.PSObject.Properties.Remove('externalBin')
+          $conf | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
+
+      - name: Instalar dependencias npm
+        run: npm ci
+
+      - name: Build Windows (.msi + setup.exe)
+        run: npm run tauri build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Subir instaladores Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+
+  release:
+    needs: [build-mac, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Descargar artifacts Mac
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-dmg
+          path: dist/mac
+
+      - name: Descargar artifacts Windows
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installers
+          path: dist/win
+
+      - name: Crear GitHub Release y subir instaladores
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Babel Security ${{ github.ref_name }}"
+          body: |
+            ## Babel Security ${{ github.ref_name }}
+
+            ### Descargas
+
+            | Plataforma | Archivo |
+            |---|---|
+            | macOS (Apple Silicon) | `Babel Security_*_aarch64.dmg` |
+            | Windows (64-bit) | `Babel Security_*_x64-setup.exe` o `.msi` |
+
+            ### Instalación Mac
+            1. Descarga el `.dmg` y ábrelo
+            2. Arrastra **Babel Security** a Aplicaciones
+            3. En el primer arranque: clic derecho → Abrir (para pasar Gatekeeper)
+
+            ### Instalación Windows
+            1. Descarga el `.exe` (NSIS) o `.msi`
+            2. Ejecuta el instalador como administrador
+            3. Abre **Babel Security** desde el menú inicio
+          files: |
+            dist/mac/*.dmg
+            dist/win/*.msi
+            dist/win/*.exe
+          draft: false
+          prerelease: false
