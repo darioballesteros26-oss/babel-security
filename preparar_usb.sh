@@ -394,26 +394,31 @@ print(hits[0] if hits else '')
   "$PYBIN" -m pip install --quiet --no-warn-script-location \
     "${PAQUETES[@]}" 2>&1 | tail -5
 
-  # ── Limpieza para reducir ~75 MB del entorno Python ──────────────────
-  echo "  Limpiando entorno Python (~75 MB de archivos innecesarios)..."
-  # 1. __pycache__ y .pyc — nunca necesarios en producción (~25 MB)
+  # ── Limpieza: ~83 MB de archivos no necesarios en runtime ────────────
+  echo "  Limpiando entorno Python (~83 MB de archivos innecesarios)..."
+  # 1. __pycache__ y .pyc (~25 MB)
   find "$PY_CACHE_ENV" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
   find "$PY_CACHE_ENV" -name "*.pyc" -delete 2>/dev/null || true
-  # 2. Implementaciones de modelos de transformers que NO usamos (~46 MB)
-  #    Solo conservamos marian (MarianMT), auto (imports dinámicos) y utils
+  # 2. Modelos transformers no usados — solo conservar marian y auto (~46 MB)
   TRANS_MODELS="$PY_CACHE_ENV/lib/python3.*/site-packages/transformers/models"
   for model_dir in $TRANS_MODELS/*/; do
     model_name=$(basename "$model_dir")
     case "$model_name" in
-      marian|auto|__pycache__|__init__.py) ;;  # conservar
+      marian|auto) ;;  # conservar
       *) rm -rf "$model_dir" 2>/dev/null || true ;;
     esac
   done
-  # 3. PyInstaller (herramienta de empaquetado, no runtime) (~4 MB)
+  # 3. PyInstaller — herramienta de empaquetado, no runtime (~4 MB)
   find "$PY_CACHE_ENV" -type d -name "PyInstaller" -exec rm -rf {} + 2>/dev/null || true
   find "$PY_CACHE_ENV" -name "PyInstaller*" -maxdepth 4 -exec rm -rf {} + 2>/dev/null || true
-  # 4. hf_xet (protocolo HuggingFace para subidas, no necesario offline) (~7 MB)
+  # 4. hf_xet — protocolo de subida a HuggingFace, inútil offline (~7 MB)
   find "$PY_CACHE_ENV" -type d -name "hf_xet*" -exec rm -rf {} + 2>/dev/null || true
+  # 5. pip y setuptools — gestores de paquetes, innecesarios en runtime (~8 MB)
+  #    Nota: se borran DESPUÉS de instalar todo lo necesario
+  find "$PY_CACHE_ENV" -maxdepth 4 -type d -name "pip" -exec rm -rf {} + 2>/dev/null || true
+  find "$PY_CACHE_ENV" -maxdepth 4 -type d -name "setuptools" -exec rm -rf {} + 2>/dev/null || true
+  find "$PY_CACHE_ENV" -name "pip-*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
+  find "$PY_CACHE_ENV" -name "setuptools-*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
   PY_SIZE_CLEAN=$(du -sh "$PY_CACHE_ENV" 2>/dev/null | cut -f1)
   echo "  ✓ Entorno limpio: $PY_SIZE_CLEAN"
   # ── Fin limpieza ──────────────────────────────────────────────────────
