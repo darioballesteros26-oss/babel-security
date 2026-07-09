@@ -705,7 +705,8 @@
           </li>
         </ul>
 
-        <a href="#contacto" class="block text-center w-full py-3.5 rounded-xl font-semibold text-sm c-gold glass border border-gold hover:bg-yellow-500/10 transition-all duration-200" data-i18n="pricing_pro_cta">
+        <!-- Más adelante se integrará Stripe para pago directo desde estos botones — por ahora dirigen al formulario de contacto para gestionar la compra manualmente. -->
+        <a href="#contacto-ventas" class="block text-center w-full py-3.5 rounded-xl font-semibold text-sm c-gold glass border border-gold hover:bg-yellow-500/10 transition-all duration-200" data-i18n="pricing_pro_cta">
           Comenzar ahora
         </a>
       </div>
@@ -745,7 +746,8 @@
           </li>
         </ul>
 
-        <a href="#contacto" class="btn-emerald block text-center w-full py-3.5 rounded-xl font-semibold text-sm text-white shadow-lg" data-i18n="pricing_ent_cta">
+        <!-- Más adelante se integrará Stripe para pago directo desde estos botones — por ahora dirigen al formulario de contacto para gestionar la compra manualmente. -->
+        <a href="#contacto-ventas" class="btn-emerald block text-center w-full py-3.5 rounded-xl font-semibold text-sm text-white shadow-lg" data-i18n="pricing_ent_cta">
           Contactar con Ventas
         </a>
       </div>
@@ -1002,6 +1004,54 @@
 
 
 <!-- ═══════════════════════════════════════════════════════════
+     CONTACTO VENTAS — Dudas y compra (distinto del formulario de bugs)
+═══════════════════════════════════════════════════════════ -->
+<section id="contacto-ventas" class="py-24 lg:py-32" style="background: #080C17;">
+  <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+
+    <!-- Icono -->
+    <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-8" style="background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2);">
+      <svg class="w-8 h-8 c-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+      </svg>
+    </div>
+
+    <h2 class="text-3xl sm:text-4xl font-black text-white mb-4" data-i18n="sales_title">¿Tienes alguna duda o quieres comprar Security Babel?</h2>
+    <p class="text-slate-400 text-lg mb-10" data-i18n="sales_subtitle">Nuestro equipo estará encantado de responderte todas las preguntas que tengas.</p>
+
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
+
+      <!-- Email -->
+      <a href="mailto:darioballesteros26@gmail.com"
+         class="inline-flex items-center gap-3 px-7 py-3.5 rounded-xl font-semibold text-sm text-white shadow-lg transition-all duration-200 hover:opacity-90"
+         style="background: linear-gradient(135deg, #D4AF37, #A8860C);"
+         data-i18n="sales_btn_email">
+        <svg class="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        Escríbenos por email
+      </a>
+
+      <!-- LinkedIn — reemplaza la URL con tu perfil real antes de publicar -->
+      <a href="https://www.linkedin.com/in/dario-ballesteros-7507bb3a4"
+         target="_blank" rel="noopener noreferrer"
+         class="inline-flex items-center gap-3 px-7 py-3.5 rounded-xl font-semibold text-sm glass border border-gold c-gold hover:bg-yellow-500/10 transition-all duration-200"
+         data-i18n="sales_btn_linkedin">
+        <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+        </svg>
+        Mensaje en LinkedIn
+      </a>
+
+    </div>
+
+    <p class="text-slate-500 text-sm" data-i18n="sales_response_time">Te respondemos en menos de 48 horas.</p>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
      FOOTER
 ═══════════════════════════════════════════════════════════ -->
 <footer style="background: #0B0F19; border-top: 1px solid rgba(255,255,255,0.05);">
@@ -1159,6 +1209,11 @@ const translations = {
     team_name: "Security Babel", team_loc: "Marbella, España · Fundado en 2026",
     team_p1: "Security Babel nació de una pregunta muy concreta: ¿por qué tiene que salir un contrato confidencial de tu ordenador para ser traducido? La respuesta es que no tiene que hacerlo. La tecnología para hacerlo en local ya existe — solo había que empaquetar bien.",
     team_p2: "Construido desde cero por un desarrollador independiente, con la convicción de que la privacidad no debería ser un lujo reservado a quien puede pagar soluciones enterprise. Sin inversores que exijan monetizar tus datos. Sin hoja de ruta que dependa de vender tu información a terceros.",
+    sales_title:         "¿Tienes alguna duda o quieres comprar Security Babel?",
+    sales_subtitle:      "Nuestro equipo estará encantado de responderte todas las preguntas que tengas.",
+    sales_btn_email:     "Escríbenos por email",
+    sales_btn_linkedin:  "Mensaje en LinkedIn",
+    sales_response_time: "Te respondemos en menos de 48 horas.",
     footer_privacy: "Política de Privacidad",
     footer_terms:   "Términos de Uso",
     footer_copy:    "© 2026 Security Babel. Todos los derechos reservados.",
@@ -1274,6 +1329,11 @@ const translations = {
     team_name: "Security Babel", team_loc: "Marbella, Spain · Founded 2026",
     team_p1: "Security Babel was born from a simple question: why does a confidential contract have to leave your computer to be translated? It doesn't. The technology to do it locally already exists — it just needed to be packaged well.",
     team_p2: "Built from scratch by an independent developer, with the conviction that privacy shouldn't be a luxury reserved for those who can afford enterprise solutions. No investors demanding to monetize your data. No roadmap that depends on selling your information to third parties.",
+    sales_title:         "Got questions or want to buy Security Babel?",
+    sales_subtitle:      "Our team will be happy to answer all your questions.",
+    sales_btn_email:     "Email us",
+    sales_btn_linkedin:  "Message on LinkedIn",
+    sales_response_time: "We reply within 48 hours.",
     footer_privacy: "Privacy Policy",
     footer_terms:   "Terms of Use",
     footer_copy:    "© 2026 Security Babel. All rights reserved.",
@@ -1389,6 +1449,11 @@ const translations = {
     team_name: "Security Babel", team_loc: "Марбелья, Испания · Основан в 2026",
     team_p1: "Security Babel возник из простого вопроса: зачем конфиденциальному контракту покидать ваш компьютер для перевода? Не нужно. Технология для локальной работы уже существует — просто требовала правильной упаковки.",
     team_p2: "Создан с нуля независимым разработчиком с убеждением, что конфиденциальность не должна быть роскошью для тех, кто может позволить себе корпоративные решения. Без инвесторов, требующих монетизировать ваши данные. Без дорожной карты, зависящей от продажи вашей информации.",
+    sales_title:         "Есть вопросы или хотите купить Security Babel?",
+    sales_subtitle:      "Наша команда с удовольствием ответит на все ваши вопросы.",
+    sales_btn_email:     "Написать по email",
+    sales_btn_linkedin:  "Написать в LinkedIn",
+    sales_response_time: "Отвечаем в течение 48 часов.",
     footer_privacy: "Политика конфиденциальности",
     footer_terms:   "Условия использования",
     footer_copy:    "© 2026 Security Babel. Все права защищены.",
@@ -1504,6 +1569,11 @@ const translations = {
     team_name: "Security Babel", team_loc: "ماربيا، إسبانيا · تأسس 2026",
     team_p1: "ولد Security Babel من سؤال بسيط: لماذا يجب أن يغادر العقد السري جهازك لترجمته؟ لا يجب. التكنولوجيا للقيام بذلك محلياً موجودة بالفعل — كانت تحتاج فقط إلى تغليف جيد.",
     team_p2: "بُني من الصفر من قِبل مطور مستقل، مع قناعة بأن الخصوصية لا ينبغي أن تكون رفاهية محجوزة لمن يستطيع دفع تكاليف الحلول المؤسسية. بدون مستثمرين يطالبون بتحقيق الدخل من بياناتك. بدون خارطة طريق تعتمد على بيع معلوماتك لأطراف ثالثة.",
+    sales_title:         "هل لديك أسئلة أو تريد شراء Security Babel؟",
+    sales_subtitle:      "فريقنا سيكون سعيداً بالإجابة على جميع أسئلتك.",
+    sales_btn_email:     "راسلنا عبر البريد الإلكتروني",
+    sales_btn_linkedin:  "رسالة عبر LinkedIn",
+    sales_response_time: "نرد خلال 48 ساعة.",
     footer_privacy: "سياسة الخصوصية",
     footer_terms:   "شروط الاستخدام",
     footer_copy:    "© 2026 Security Babel. جميع الحقوق محفوظة.",

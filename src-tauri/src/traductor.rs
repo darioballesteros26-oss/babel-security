@@ -849,6 +849,18 @@ fn reconstruir_parrafo(parrafo: &str, traduccion: &str) -> String {
     resultado
 }
 
+// PRESERVACIÓN DE FORMATO (DOCX):
+// El DOCX es un ZIP con XML interno. Esta función abre el ZIP en memoria,
+// traduce ÚNICAMENTE el texto de los nodos <w:t> en word/document.xml
+// (y <a:t> en charts), y reempaqueta el ZIP byte a byte conservando:
+//   - Imágenes, fuentes, estilos, temas, relaciones (.rels)
+//   - Formato de párrafo: negrita, cursiva, tamaño, color, alineación
+//   - Tablas, listas, encabezados, pies de página, secciones
+//   - Hipervínculos, comentarios, marcadores
+// El texto se redistribuye entre los runs originales del párrafo de forma
+// proporcional a su longitud para no romper el estilo run a run.
+// Limitación conocida: el texto traducido puede ser más largo/corto que el
+// original; si desborda un cuadro de texto con tamaño fijo, Word lo recorta.
 pub fn clonar_y_traducir(
     ruta: &str,
     dict: &HashMap<String, String>,
@@ -1018,17 +1030,15 @@ fn borrar_seguro_local(ruta: &str) {
     crate::borrar_seguro(ruta);
 }
 
-/// Envía los bloques extraídos por pymupdf al endpoint /limpiar_pdf de Qwen.
-/// Si el servidor no está disponible o falla, devuelve el texto original sin modificar.
-/// Localiza nougat_extract.py relativo al intérprete Python detectado.
-/// En USB: python en Resources/python/bin/ → Resources/servidor/nougat_extract.py
-/// En dev: python en babel_env/bin/ → Babel/babel-interfaz/servidor_babel/nougat_extract.py
-fn encontrar_nougat_script(python3: &str) -> Option<String> {
+/// Localiza un script de servidor relativo al intérprete Python detectado.
+/// En USB: python en Resources/python/bin/ → Resources/servidor/<script>
+/// En dev: python en babel_env/bin/ → Babel/babel-interfaz/servidor_babel/<script>
+fn encontrar_script_servidor(python3: &str, nombre_script: &str) -> Option<String> {
     let py = std::path::Path::new(python3);
     let base = py.parent()?.parent()?.parent()?;
     let candidatos = [
-        base.join("servidor/nougat_extract.py"),
-        base.join("babel-interfaz/servidor_babel/nougat_extract.py"),
+        base.join(format!("servidor/{}", nombre_script)),
+        base.join(format!("babel-interfaz/servidor_babel/{}", nombre_script)),
     ];
     for c in &candidatos {
         if c.exists() {
@@ -1147,191 +1157,43 @@ pub fn procesar_pdf(
     };
 
     if !ok {
-        // PASO 2: Nougat — si el modelo está disponible, produce Markdown estructurado
-        // (encabezados, párrafos, tablas) mucho mejor que extracción de texto plano.
-        // Solo se usa si nougat_extract.py y el modelo nougat-small existen.
-        if let Some(script_nougat) = encontrar_nougat_script(python3) {
-            progreso(8, "ANALIZANDO PDF (Nougat)...");
-            let nougat_out = std::process::Command::new(python3)
-                .args([script_nougat.as_str(), ruta])
+        // Ejecuta un script Python externo con la ruta del PDF y devuelve su stdout.
+        let ejecutar_script = |script: &str| -> String {
+            std::process::Command::new(python3)
+                .args([script, ruta])
                 .output()
                 .ok()
                 .filter(|o| o.status.success())
                 .and_then(|o| String::from_utf8(o.stdout).ok())
-                .unwrap_or_default();
-
-            let nougat_words = nougat_out.split_whitespace().count();
-            if nougat_words > 30 {
-                // Nougat tuvo éxito — traducir el Markdown resultante
-                progreso(15, "TRADUCIENDO...");
-                let parrafos: Vec<String> = nougat_out
-                    .lines()
-                    .map(String::from)
-                    .collect();
-                let total_p = parrafos.iter().filter(|p| !p.trim().is_empty()).count().max(1);
-                let mut traducidos_p = 0usize;
-                let mut traducido = String::new();
-                let mut ultimo = String::new();
-                for parrafo in &parrafos {
-                    if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
-                        return Err("Traducción cancelada.".into());
-                    }
-                    if parrafo.trim().is_empty() {
-                        traducido.push('\n');
-                        continue;
-                    }
-                    let pct = (20 + traducidos_p * 70 / total_p).min(90) as u8;
-                    progreso(pct, &format!("TRADUCIENDO... {}%", pct));
-                    traducidos_p += 1;
-                    let ctx = if ultimo.is_empty() { None } else { Some(ultimo.clone()) };
-                    let t = traducir_texto_largo(parrafo, par, ctx.as_deref(), dict, subclave_hex);
-                    ultimo = t.clone();
-                    traducido.push_str(&t);
-                    traducido.push('\n');
-                }
-                progreso(93, "CIFRANDO RESULTADO...");
-                let cifrado = seguridad::blindar_documento(&traducido, subclave_hex)?;
-                fs::write(
-                    archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre)),
-                    cifrado,
-                )?;
-                return Ok(());
-            }
-            // Nougat sin suficiente texto → continuar con pymupdf
-        }
-
-        // PASO 3: pymupdf — extrae bloques con estructura semántica:
-        // rawdict da tamaño de fuente (headings) y flags (bold/italic).
-        // Unión de fragmentos: si un bloque no cierra oración y el siguiente
-        // empieza en minúscula → misma frase. Dehifenación inline.
-        let script_pymupdf = r#"
-import sys, re
-try:
-    import fitz
-    doc = fitz.open(sys.argv[1])
-    out = []
-
-    for page in doc:
-        h = page.rect.height
-
-        # rawdict: tamaño y flags de fuente por span
-        rd = page.get_text("rawdict", sort=True)
-        all_sizes = [
-            sp["size"]
-            for blk in rd.get("blocks", []) if blk.get("type") == 0
-            for ln in blk.get("lines", [])
-            for sp in ln.get("spans", [])
-            if sp["text"].strip()
-        ]
-        if not all_sizes:
-            continue
-        all_sizes.sort()
-        dominant = all_sizes[len(all_sizes) // 2]   # mediana = cuerpo de texto
-
-        # Bloques con posición y texto limpio
-        raw_blocks = []
-        for blk in rd.get("blocks", []):
-            if blk.get("type") != 0:
-                continue
-            bx0, by0, bx1, by1 = blk["bbox"]
-            y_mid = (by0 + by1) / 2
-            # Encabezado / pie de página: texto corto en márgenes
-            if (y_mid < h * 0.07 or y_mid > h * 0.93):
-                raw = " ".join(
-                    sp["text"] for ln in blk["lines"] for sp in ln["spans"]
-                ).strip()
-                if len(raw) < 35:
-                    continue
-
-            lines_text = []
-            blk_max_size = 0.0
-            for ln in blk["lines"]:
-                line_parts = []
-                for sp in ln["spans"]:
-                    t = sp["text"]
-                    if t:
-                        line_parts.append(t)
-                        if sp["size"] > blk_max_size:
-                            blk_max_size = sp["size"]
-                if line_parts:
-                    lines_text.append("".join(line_parts))
-
-            if not lines_text:
-                continue
-
-            # Dehifenación entre líneas del mismo bloque
-            merged_lines = []
-            buf = ""
-            for lt in lines_text:
-                if buf.endswith("-") and lt and lt[0].islower():
-                    buf = buf[:-1] + lt      # une sin guion
-                else:
-                    if buf:
-                        merged_lines.append(buf)
-                    buf = lt
-            if buf:
-                merged_lines.append(buf)
-
-            text = " ".join(merged_lines).strip()
-            text = re.sub(r"\s+", " ", text)
-            if not text:
-                continue
-
-            is_heading = blk_max_size > dominant * 1.15
-            raw_blocks.append({"text": text, "heading": is_heading})
-
-        # Unión de fragmentos de párrafo entre bloques consecutivos
-        merged_blocks = []
-        i = 0
-        while i < len(raw_blocks):
-            cur = raw_blocks[i]
-            txt = cur["text"]
-            # Si este bloque no cierra oración y el siguiente empieza en minúscula
-            # (y ninguno es heading) → misma frase
-            while (
-                not cur.get("heading")
-                and i + 1 < len(raw_blocks)
-                and not raw_blocks[i + 1].get("heading")
-                and txt
-                and txt[-1] not in ".!?:;»"
-                and raw_blocks[i + 1]["text"]
-                and raw_blocks[i + 1]["text"][0].islower()
-            ):
-                i += 1
-                txt = txt + " " + raw_blocks[i]["text"]
-            merged_blocks.append(txt)
-            i += 1
-
-        out.extend(merged_blocks)
-
-    sys.stdout.buffer.write("\n".join(out).encode("utf-8"))
-except Exception as e:
-    sys.stderr.write(str(e))
-    sys.exit(1)
-"#;
-        let texto_pymupdf_raw = std::process::Command::new(python3)
-            .args(["-c", script_pymupdf, ruta])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .unwrap_or_default();
-
-        // Pasar los bloques por Qwen para limpiar fragmentos residuales
-        // (solo si el servidor ya está arriba y hay texto suficiente)
-        let texto_pymupdf = if texto_pymupdf_raw.split_whitespace().count() > 20 {
-            limpiar_bloques_con_qwen(&texto_pymupdf_raw, subclave_hex)
-        } else {
-            texto_pymupdf_raw
+                .unwrap_or_default()
         };
 
-        // PASO 3: pdftotext — si pymupdf no extrajo texto suficiente
-        let texto_base = if texto_pymupdf.split_whitespace().count() > 20 {
-            progreso(12, "ESTRUCTURANDO TEXTO...");
-            texto_pymupdf
-        } else {
-            progreso(12, "EXTRAYENDO TEXTO...");
-            let pdftotext = [
+        // Seleccionar el mejor texto disponible en orden de calidad decreciente.
+        let texto_extraido: String = 'extraccion: {
+            // PASO 2: pymupdf4llm — Markdown estructurado (encabezados, tablas, listas).
+            // Rápido, sin GPU, alta calidad para PDFs con texto nativo o digital.
+            if let Some(s) = encontrar_script_servidor(python3, "pymupdf4llm_extract.py") {
+                progreso(8, "ANALIZANDO PDF (PyMuPDF4LLM)...");
+                let out = ejecutar_script(&s);
+                if out.split_whitespace().count() >= 50 {
+                    break 'extraccion out;
+                }
+            }
+
+            // PASO 3: PaddleOCR-VL-1.5 — segunda pasada para PDFs escaneados o con tablas
+            // complejas que PyMuPDF4LLM no pudo extraer bien (text < 50 palabras).
+            // Modelo Apache 2.0: PaddlePaddle/PaddleOCR-VL-1.5-GGUF vía llama-cpp-python.
+            // Solo activa si el modelo está descargado en modelos/paddleocr-vl/ (~1.8 GB).
+            if let Some(s) = encontrar_script_servidor(python3, "paddleocr_extract.py") {
+                progreso(9, "OCR AVANZADO (PaddleOCR-VL)...");
+                let out = ejecutar_script(&s);
+                if out.split_whitespace().count() >= 30 {
+                    break 'extraccion out;
+                }
+            }
+
+            // PASO 4: pdftotext — fallback ligero para PDFs con texto nativo sin estructura
+            let pdftotext_bin = [
                 "/opt/homebrew/bin/pdftotext",
                 "/usr/local/bin/pdftotext",
                 "/usr/bin/pdftotext",
@@ -1341,30 +1203,35 @@ except Exception as e:
             .copied()
             .find(|&p| p == "pdftotext" || std::path::Path::new(p).exists())
             .unwrap_or("pdftotext");
-            std::process::Command::new(pdftotext)
+
+            let texto_pdftotext = std::process::Command::new(pdftotext_bin)
                 .args([ruta, "-"])
                 .output()
                 .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-                .unwrap_or_default()
-        };
+                .unwrap_or_default();
 
-        // PASO 4: OCR Tesseract — último recurso para PDFs escaneados
-        let texto = Zeroizing::new(if texto_base.trim().is_empty() {
+            if texto_pdftotext.split_whitespace().count() > 20 {
+                progreso(12, "ESTRUCTURANDO TEXTO...");
+                break 'extraccion limpiar_bloques_con_qwen(&texto_pdftotext, subclave_hex);
+            }
+
+            // PASO 5: Tesseract OCR — último recurso para PDFs completamente escaneados
             progreso(13, "OCR PÁGINA A PÁGINA...");
             let mut ocr_total = String::new();
             for pag in 1u32..=50 {
                 let pag_text = ocr_pagina_pdf(ruta, pag);
-                if pag_text.trim().is_empty() { break; }
+                if pag_text.trim().is_empty() {
+                    break;
+                }
                 ocr_total.push_str(&pag_text);
                 ocr_total.push('\n');
             }
-            ocr_total
-        } else {
-            texto_base
-        });
+            limpiar_bloques_con_qwen(&ocr_total, subclave_hex)
+        };
 
+        // Bucle de traducción único para todos los métodos de extracción
         progreso(15, "TRADUCIENDO...");
-        let parrafos: Vec<String> = texto.lines().map(String::from).collect();
+        let parrafos: Vec<String> = texto_extraido.lines().map(String::from).collect();
         let total_p = parrafos.iter().filter(|p| !p.trim().is_empty()).count().max(1);
         let mut traducidos_p = 0usize;
         let mut traducido = String::new();
@@ -1380,7 +1247,11 @@ except Exception as e:
             let pct = (20 + traducidos_p * 70 / total_p).min(90) as u8;
             progreso(pct, &format!("TRADUCIENDO... {}%", pct));
             traducidos_p += 1;
-            let ctx_prev = if ultimo_trad_pdf.is_empty() { None } else { Some(ultimo_trad_pdf.clone()) };
+            let ctx_prev = if ultimo_trad_pdf.is_empty() {
+                None
+            } else {
+                Some(ultimo_trad_pdf.clone())
+            };
             let t = traducir_texto_largo(parrafo, par, ctx_prev.as_deref(), dict, subclave_hex);
             ultimo_trad_pdf = t.clone();
             traducido.push_str(&t);

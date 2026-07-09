@@ -13,13 +13,14 @@
 # PREREQUISITO (solo una vez):
 #   cd ~/Desktop/Babel/babel-interfaz && npm run tauri -- build
 #
-# Contenido del USB (total ~4.5 GB):
-#   App:            ~26 MB  (babel Security.app + dylibs)
-#   tessdata:       ~150 MB (8 idiomas Tesseract)
-#   Python + pkgs:  ~450 MB (Flask, CTranslate2, Qwen, pymupdf, pdf2docx…)
-#   MarianMT:       ~2.9 GB (13 pares tc-big int8)
-#   Qwen 1.5B Q4:   ~1.0 GB (revisor/limpiador)
-#   Tokenizadores:  ~46 MB
+# Contenido del USB (total ~5.6 GB incluyendo PaddleOCR-VL cuantizado):
+#   App:               ~26 MB  (babel Security.app + dylibs)
+#   tessdata:          ~150 MB (8 idiomas Tesseract)
+#   Python + pkgs:     ~450 MB (Flask, CTranslate2, Qwen, pymupdf, pdf2docx, pymupdf4llm…)
+#   MarianMT:          ~2.9 GB (13 pares tc-big int8)
+#   Qwen 1.5B Q4:      ~1.0 GB (revisor/limpiador/PDF cleanup)
+#   Tokenizadores:     ~46 MB
+#   PaddleOCR-VL-1.5:  ~1.1 GB (LM Q4_K_M 286 MB + mmproj BF16 841 MB, Apache 2.0)
 #
 # Tiempos esperados:
 #   1ª vez (descarga Python + paquetes + modelos): ~15-25 min
@@ -105,10 +106,12 @@ check_ruta "$SERVIDOR_SRC/modelos_usb/tokenizers" \
            "tokenizadores MarianMT (modelos_usb/tokenizers/)" \
            "Ejecuta: python3 $SERVIDOR_SRC/descargar_modelos_premium.py"
 
-check_ruta "$SERVIDOR_SRC/server.py"      "server.py"
-check_ruta "$SERVIDOR_SRC/revisor.py"     "revisor.py"
-check_ruta "$SERVIDOR_SRC/traductor_usb.py" "traductor_usb.py"
-check_ruta "$SERVIDOR_SRC/traductor.py"   "traductor.py (fallback)"
+check_ruta "$SERVIDOR_SRC/server.py"              "server.py"
+check_ruta "$SERVIDOR_SRC/revisor.py"             "revisor.py"
+check_ruta "$SERVIDOR_SRC/traductor_usb.py"       "traductor_usb.py"
+check_ruta "$SERVIDOR_SRC/traductor.py"           "traductor.py (fallback)"
+check_ruta "$SERVIDOR_SRC/pymupdf4llm_extract.py" "pymupdf4llm_extract.py (primera pasada PDF)"
+check_ruta "$SERVIDOR_SRC/paddleocr_extract.py"   "paddleocr_extract.py (segunda pasada PDF OCR)"
 
 if [[ $_prereq_ok -eq 0 ]]; then
   echo ""
@@ -275,41 +278,60 @@ PID_TOK=$!
 ) &
 PID_QWEN=$!
 
-# Código del servidor (instantáneo)
-for f in server.py revisor.py traductor_usb.py traductor.py nougat_extract.py; do
+# Código del servidor (7 archivos: pipeline PDF de doble pasada incluido)
+for f in server.py revisor.py traductor_usb.py traductor.py \
+          pymupdf4llm_extract.py paddleocr_extract.py; do
   [[ -f "$SERVIDOR_SRC/$f" ]] && cp "$SERVIDOR_SRC/$f" "$RESOURCES/servidor/"
 done
-echo "  ✓ código servidor (5 archivos, incluye nougat_extract.py)"
+echo "  ✓ código servidor (6 archivos, pipeline PDF doble pasada)"
 
 wait $PID_TESS
-wait $PID_TOD || true 2>/dev/null
 wait $PID_TOK
 wait $PID_QWEN
 wait $PID_MOD
 
-# Modelo Nougat-small (~250 MB) — solo si no está ya descargado
-NOUGAT_DEST="$RESOURCES/servidor/modelos/nougat-small"
-if [[ ! -d "$NOUGAT_DEST" || ! -f "$NOUGAT_DEST/config.json" ]]; then
+# PaddleOCR-VL-1.5 (~1.1 GB tras cuantización) — copia si está descargado localmente,
+# o descarga la primera vez. Licencia: Apache 2.0.
+# LM cuantizado localmente a Q4_K_M (286 MB); mmproj BF16 (841 MB, CLIP — no cuantizable).
+# Fuente LM original: noctrex/PaddleOCR-VL-1.5-GGUF (Q8_0 → Q4_K_M local)
+# Fuente mmproj: PaddlePaddle/PaddleOCR-VL-1.5-GGUF
+PADDLE_SRC="$SERVIDOR_SRC/modelos/paddleocr-vl"
+PADDLE_DEST="$RESOURCES/servidor/modelos/paddleocr-vl"
+mkdir -p "$PADDLE_DEST"
+
+_paddle_lm_src=""
+for f in "PaddleOCR-VL-1.5-Q4_K_M.gguf" "PaddleOCR-VL-1.5-Q8_0.gguf" "PaddleOCR-VL-1.5.gguf" "PaddleOCR-VL-1.5-BF16.gguf"; do
+  [[ -f "$PADDLE_SRC/$f" ]] && _paddle_lm_src="$PADDLE_SRC/$f" && break
+done
+_paddle_mm_src=""
+for f in "PaddleOCR-VL-1.5-mmproj.gguf" "mmproj-BF16.gguf" "mmproj-F16.gguf"; do
+  [[ -f "$PADDLE_SRC/$f" ]] && _paddle_mm_src="$PADDLE_SRC/$f" && break
+done
+
+if [[ -n "$_paddle_lm_src" && -n "$_paddle_mm_src" ]]; then
   echo ""
-  echo "  Descargando modelo Nougat-small (~250 MB, solo la primera vez)..."
-  mkdir -p "$NOUGAT_DEST"
-  "$BABEL/babel_env/bin/python3" -c "
-from huggingface_hub import snapshot_download
-import sys
-try:
-    snapshot_download(
-        'facebook/nougat-small',
-        local_dir='$NOUGAT_DEST',
-        ignore_patterns=['*.msgpack', 'flax_model*', 'tf_model*', 'rust_model*'],
-    )
-    print('OK')
-except Exception as e:
-    sys.stderr.write(str(e))
-    sys.exit(1)
-" && echo "  ✓ Nougat-small ($(du -sh "$NOUGAT_DEST" | cut -f1))" \
-  || echo "  ⚠ Nougat no descargado — PDF usará pymupdf como respaldo"
+  echo "  Copiando PaddleOCR-VL-1.5 (~1.1 GB)..."
+  cp "$_paddle_lm_src" "$PADDLE_DEST/"
+  cp "$_paddle_mm_src" "$PADDLE_DEST/"
+  [[ -f "$PADDLE_SRC/chat_template.jinja" ]] && cp "$PADDLE_SRC/chat_template.jinja" "$PADDLE_DEST/"
+  echo "  ✓ PaddleOCR-VL-1.5 ($(du -sh "$PADDLE_DEST" | cut -f1))"
 else
-  echo "  ✓ Nougat-small ya presente ($(du -sh "$NOUGAT_DEST" | cut -f1))"
+  echo ""
+  echo "  PaddleOCR-VL no presente localmente — descargando (~1.1 GB, solo 1ª vez)..."
+  if "$BABEL/babel_env/bin/python3" -c "
+from huggingface_hub import hf_hub_download
+DEST = r'$PADDLE_DEST'
+# LM: Q4_K_M local preferido; si no hay, descargar BF16 oficial
+import os
+if not any(os.path.exists(os.path.join(DEST, f)) for f in ['PaddleOCR-VL-1.5-Q4_K_M.gguf','PaddleOCR-VL-1.5-Q8_0.gguf']):
+    hf_hub_download(repo_id='PaddlePaddle/PaddleOCR-VL-1.5-GGUF', filename='PaddleOCR-VL-1.5.gguf', local_dir=DEST)
+hf_hub_download(repo_id='PaddlePaddle/PaddleOCR-VL-1.5-GGUF', filename='PaddleOCR-VL-1.5-mmproj.gguf', local_dir=DEST)
+hf_hub_download(repo_id='PaddlePaddle/PaddleOCR-VL-1.5-GGUF', filename='chat_template.jinja', local_dir=DEST)
+" 2>/dev/null; then
+    echo "  ✓ PaddleOCR-VL-1.5 ($(du -sh "$PADDLE_DEST" | cut -f1))"
+  else
+    echo "  ⚠ PaddleOCR-VL no descargado — PDF usará pymupdf4llm como primera pasada"
+  fi
 fi
 
 echo "└─ Todos los recursos copiados ($(( SECONDS - T3 ))s)"
@@ -338,10 +360,9 @@ PAQUETES=(
   "numpy>=1.24"
   "protobuf>=3.20"
   "pymupdf>=1.23"
+  "pymupdf4llm>=0.0.20"
   "llama-cpp-python>=0.3.0"
   "pdf2docx>=0.5.0"
-  "nougat-ocr>=0.1.0"
-  "torch>=2.0"
   "pypdfium2>=4.0"
 )
 STAMP_CONTENT="${PAQUETES[*]}"
@@ -538,30 +559,38 @@ else
   echo "  ✓ tessdata ($TDATA_COUNT idiomas)"
 fi
 
-# Python: importar paquetes clave
+# Python: importar paquetes clave incluyendo pymupdf4llm (primera pasada PDF)
 find "$RESOURCES/python" -name '._*' -delete 2>/dev/null || true
 if "$RESOURCES/python/bin/python3" -c \
-     "import flask, ctranslate2, transformers, sentencepiece, fitz, llama_cpp, pdf2docx; print('OK')" \
+     "import flask, ctranslate2, transformers, sentencepiece, fitz, pymupdf4llm, llama_cpp, pdf2docx; print('OK')" \
      2>/dev/null | grep -q "OK"; then
-  echo "  ✓ Paquetes Python OK (flask, ctranslate2, fitz, llama_cpp, pdf2docx)"
+  echo "  ✓ Paquetes Python OK (flask, ctranslate2, fitz, pymupdf4llm, llama_cpp, pdf2docx)"
 else
   echo "  ✗ Error importando paquetes Python"
   echo "    → Prueba: $0 $USB --reset-cache"
   _smoke_ok=0
 fi
 
-# Nougat (opcional — si está no verificar como error)
-if [[ -f "$RESOURCES/servidor/modelos/nougat-small/config.json" ]]; then
-  NOUGAT_MB=$(du -m "$RESOURCES/servidor/modelos/nougat-small" | cut -f1)
-  echo "  ✓ Nougat-small presente (${NOUGAT_MB}MB)"
-  if "$RESOURCES/python/bin/python3" -c "import nougat, torch, pypdfium2; print('OK')" \
-       2>/dev/null | grep -q "OK"; then
-    echo "  ✓ nougat + torch + pypdfium2 importan correctamente"
+# PaddleOCR-VL-1.5 (opcional — segunda pasada para PDFs escaneados)
+_paddle_dest="$RESOURCES/servidor/modelos/paddleocr-vl"
+_paddle_lm_ok=0
+for _pf in "PaddleOCR-VL-1.5-Q4_K_M.gguf" "PaddleOCR-VL-1.5-Q8_0.gguf" "PaddleOCR-VL-1.5.gguf" "PaddleOCR-VL-1.5-BF16.gguf"; do
+  [[ -f "$_paddle_dest/$_pf" ]] && _paddle_lm_ok=1 && break
+done
+_paddle_mm_ok=0
+for _pf in "PaddleOCR-VL-1.5-mmproj.gguf" "mmproj-BF16.gguf" "mmproj-F16.gguf"; do
+  [[ -f "$_paddle_dest/$_pf" ]] && _paddle_mm_ok=1 && break
+done
+
+if [[ $_paddle_lm_ok -eq 1 && $_paddle_mm_ok -eq 1 ]]; then
+  PADDLE_MB=$(du -m "$_paddle_dest" 2>/dev/null | cut -f1)
+  if [[ $PADDLE_MB -lt 1000 ]]; then
+    echo "  ⚠ PaddleOCR-VL parece incompleto (${PADDLE_MB}MB, esperado ≥1000MB)"
   else
-    echo "  ⚠ nougat/torch/pypdfium2 no importan — PDF usará pymupdf como respaldo"
+    echo "  ✓ PaddleOCR-VL-1.5 presente (${PADDLE_MB}MB) — OCR avanzado disponible"
   fi
 else
-  echo "  ℹ Nougat no descargado — PDF usará pymupdf (normal si no se descargó)"
+  echo "  ℹ PaddleOCR-VL no descargado — PDF usará pymupdf4llm (normal si no se descargó)"
 fi
 
 # Archivos servidor

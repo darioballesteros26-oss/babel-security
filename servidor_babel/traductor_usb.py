@@ -1,6 +1,25 @@
 """
-Traductor USB — modelos MarianMT tc-big en formato CTranslate2 int8.
-Cargados desde modelos_usb/ sin necesidad de HuggingFace online.
+Traductor USB — MarianMT tc-big (Helsinki-NLP) cuantizados a int8 con CTranslate2.
+Funcionan sin conexión, cargados desde modelos_usb/.
+
+PARES DIRECTOS (un solo modelo tc-big):
+  ar↔en, ar↔es, de→es, en↔ar, en↔es, en↔fr, en↔ru, es↔en, es→ru, fr↔en, ru↔en, ru↔es
+
+PARES POR CADENA (dos pasos tc-big, calidad ligeramente menor):
+  fr↔es (vía en), fr↔ar (vía en), de→en (vía es), de→ru (vía es→ru), ru→fr (vía en)
+  es→ar usa cadena es→en→ar como rescate si el modelo itc-ar produce garble
+
+CALIDAD GENERAL:
+  - tc-big son los modelos más grandes de Helsinki-NLP para cada par: calidad profesional
+    en documentos formales, legales y técnicos en los pares principales.
+  - Pares directos ≈ 8.5/10. Cadenas de dos pasos ≈ 7.5/10 (acumula error).
+  - Post-edición con Qwen 2.5 1.5B Q4_K_M mejora fluidez y corrige errores de concordancia.
+  - Límite real: textos con ironía, modismos culturales o jerga muy especializada.
+
+LIMITACIONES:
+  - Ventana de 512 tokens (~380 caracteres/segmento) — textos más largos se fragmentan.
+  - Modelos multilingüe (en-cat_oci_spa, itc-ar, zle) requieren prefijo de idioma destino;
+    ya configurados en PREFIJOS.
 """
 
 import os

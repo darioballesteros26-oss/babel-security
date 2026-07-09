@@ -1,5 +1,9 @@
-from transformers import MarianMTModel, MarianTokenizer
-import torch
+try:
+    from transformers import MarianMTModel, MarianTokenizer
+    import torch
+    _TORCH_OK = True
+except ImportError:
+    _TORCH_OK = False
 import os
 import re
 
@@ -54,7 +58,7 @@ CADENAS = {
 
 _modelos: dict = {}
 _tokenizers: dict = {}
-_device = "mps" if torch.backends.mps.is_available() else "cpu"
+_device = ("mps" if torch.backends.mps.is_available() else "cpu") if _TORCH_OK else "cpu"
 
 # Límite de caracteres por segmento enviado a MarianMT.
 # El modelo tiene ventana de 512 tokens (~380 chars en español/inglés).
