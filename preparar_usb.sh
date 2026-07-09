@@ -470,46 +470,87 @@ echo "┌─ [5/7] Creando launchers..."
 mkdir -p "$USB/win/recursos"
 rsync -a --delete "$RESOURCES/tessdata/"  "$USB/win/recursos/tessdata/"
 rsync -a --delete "$RESOURCES/servidor/"  "$USB/win/recursos/servidor/"
-echo "  ✓ win/recursos/ sincronizado"
+
+# Windows: el symlink Unix modelos/qwen-1.5b-q4.gguf no funciona en NTFS/exFAT.
+# Si rsync lo copió como symlink, reemplazarlo con el archivo real.
+_qwen_win="$USB/win/recursos/servidor/modelos/qwen-1.5b-q4.gguf"
+_qwen_real="$RESOURCES/servidor/modelos_usb/qwen.gguf"
+if [[ -L "$_qwen_win" || ! -f "$_qwen_win" ]]; then
+  [[ -L "$_qwen_win" ]] && rm "$_qwen_win"
+  mkdir -p "$(dirname "$_qwen_win")"
+  cp "$_qwen_real" "$_qwen_win"
+fi
+echo "  ✓ win/recursos/ sincronizado (Qwen symlink resuelto)"
 
 cat > "$USB/LANZAR_BABEL.bat" << 'WIN_EOF'
 @echo off
 chcp 65001 > nul
-setlocal
+setlocal EnableDelayedExpansion
 
+:: Rutas base (%~dp0 termina siempre en \)
 set "USB=%~dp0"
 set "WIN_EXE=%USB%win\babel-interfaz.exe"
 set "PYWIN=%USB%win\python_win\python.exe"
 set "SERVIDOR=%USB%win\recursos\servidor\server.py"
 set "USB_MOD=%USB%win\recursos\servidor\modelos_usb"
+set "LOG=%USB%win\servidor_log.txt"
 
 if not exist "%WIN_EXE%" (
-  echo [ERROR] Falta win\babel-interfaz.exe — compila en Windows con: cargo tauri build
+  echo [ERROR] Falta win\babel-interfaz.exe
+  echo         Compila en Windows con: cargo tauri build
   pause & exit /b 1
 )
 if not exist "%PYWIN%" (
   echo [ERROR] Falta win\python_win\python.exe
-  echo Descarga Python 3.12 embeddable de python.org y extraelo en win\python_win\
+  echo         Descarga Python 3.12 embeddable de python.org y ponlo en win\python_win\
   pause & exit /b 1
 )
 if not exist "%SERVIDOR%" (
-  echo [ERROR] Falta servidor. Regenera el USB con preparar_usb.sh
+  echo [ERROR] Falta el servidor. Regenera el USB con preparar_usb.sh
   pause & exit /b 1
 )
 
-set TESSDATA_PREFIX=%USB%win\recursos\tessdata
-set TRANSFORMERS_OFFLINE=1
-set HF_DATASETS_OFFLINE=1
-set TOKENIZERS_PARALLELISM=false
-set BABEL_DIR_USB=%USB_MOD%
+:: Token aleatorio de 32 hex
+for /f "delims=" %%i in ('powershell -NoProfile -Command "[guid]::NewGuid().ToString(\"N\")"') do set "BABEL_NLLB_TOKEN=babel_%%i"
 
-for /f "delims=" %%i in ('powershell -NoProfile -Command "[guid]::NewGuid().ToString('N')"') do set BABEL_NLLB_TOKEN=babel_%%i
+:: Entorno (comillas en todas las rutas para soportar espacios)
+set "TESSDATA_PREFIX=%USB%win\recursos\tessdata"
+set "TRANSFORMERS_OFFLINE=1"
+set "HF_DATASETS_OFFLINE=1"
+set "TOKENIZERS_PARALLELISM=false"
+set "BABEL_DIR_USB=%USB_MOD%"
+set "PATH=%USB%win\python_win;%PATH%"
 
+:: Arrancar servidor en segundo plano; log en win\servidor_log.txt
 echo Iniciando servidor Babel (MarianMT + Qwen)...
-start /B "" "%PYWIN%" "%SERVIDOR%"
-echo Esperando servidor (25 s)...
-timeout /t 25 /nobreak > NUL
-start "" "%WIN_EXE%"
+start /B "" cmd /c ""%PYWIN%" "%SERVIDOR%" >> "%LOG%" 2>&1"
+
+:: Esperar hasta que el puerto 5002 responda (máx. 90 s, sondeo cada 2 s)
+echo Esperando servidor...
+set "_LISTO=0"
+for /L %%i in (1,1,45) do (
+  if "!_LISTO!" == "0" (
+    powershell -NoProfile -Command "try{$c=New-Object Net.Sockets.TcpClient;$c.Connect('127.0.0.1',5002);$c.Close();exit 0}catch{exit 1}" >nul 2>&1
+    if !ERRORLEVEL! == 0 set "_LISTO=1"
+    if "!_LISTO!" == "0" timeout /t 2 /nobreak >nul
+  )
+)
+if "!_LISTO!" == "0" (
+  echo.
+  echo [ERROR] El servidor no respondio en 90 segundos.
+  echo         Revisa el log: %LOG%
+  pause & exit /b 1
+)
+
+:: Lanzar app y esperar a que el usuario la cierre
+echo Servidor listo. Abriendo Babel Security...
+start /WAIT "" "%WIN_EXE%"
+
+:: Apagar el servidor al cerrar la app
+echo Cerrando servidor...
+taskkill /F /IM python.exe >nul 2>&1
+
+endlocal
 WIN_EOF
 echo "  ✓ LANZAR_BABEL.bat"
 
