@@ -276,16 +276,41 @@ PID_TOK=$!
 PID_QWEN=$!
 
 # Código del servidor (instantáneo)
-for f in server.py revisor.py traductor_usb.py traductor.py; do
+for f in server.py revisor.py traductor_usb.py traductor.py nougat_extract.py; do
   [[ -f "$SERVIDOR_SRC/$f" ]] && cp "$SERVIDOR_SRC/$f" "$RESOURCES/servidor/"
 done
-echo "  ✓ código servidor (4 archivos)"
+echo "  ✓ código servidor (5 archivos, incluye nougat_extract.py)"
 
 wait $PID_TESS
 wait $PID_TOD || true 2>/dev/null
 wait $PID_TOK
 wait $PID_QWEN
 wait $PID_MOD
+
+# Modelo Nougat-small (~250 MB) — solo si no está ya descargado
+NOUGAT_DEST="$RESOURCES/servidor/modelos/nougat-small"
+if [[ ! -d "$NOUGAT_DEST" || ! -f "$NOUGAT_DEST/config.json" ]]; then
+  echo ""
+  echo "  Descargando modelo Nougat-small (~250 MB, solo la primera vez)..."
+  mkdir -p "$NOUGAT_DEST"
+  "$BABEL/babel_env/bin/python3" -c "
+from huggingface_hub import snapshot_download
+import sys
+try:
+    snapshot_download(
+        'facebook/nougat-small',
+        local_dir='$NOUGAT_DEST',
+        ignore_patterns=['*.msgpack', 'flax_model*', 'tf_model*', 'rust_model*'],
+    )
+    print('OK')
+except Exception as e:
+    sys.stderr.write(str(e))
+    sys.exit(1)
+" && echo "  ✓ Nougat-small ($(du -sh "$NOUGAT_DEST" | cut -f1))" \
+  || echo "  ⚠ Nougat no descargado — PDF usará pymupdf como respaldo"
+else
+  echo "  ✓ Nougat-small ya presente ($(du -sh "$NOUGAT_DEST" | cut -f1))"
+fi
 
 echo "└─ Todos los recursos copiados ($(( SECONDS - T3 ))s)"
 
@@ -315,6 +340,9 @@ PAQUETES=(
   "pymupdf>=1.23"
   "llama-cpp-python>=0.3.0"
   "pdf2docx>=0.5.0"
+  "nougat-ocr>=0.1.0"
+  "torch>=2.0"
+  "pypdfium2>=4.0"
 )
 STAMP_CONTENT="${PAQUETES[*]}"
 STAMP_FILE="$CACHE_DIR/python_env_${ARCH}.stamp"
@@ -365,6 +393,30 @@ print(hits[0] if hits else '')
   echo "  Instalando paquetes (~5-10 min, incluye llama-cpp-python y pdf2docx)..."
   "$PYBIN" -m pip install --quiet --no-warn-script-location \
     "${PAQUETES[@]}" 2>&1 | tail -5
+
+  # ── Limpieza para reducir ~75 MB del entorno Python ──────────────────
+  echo "  Limpiando entorno Python (~75 MB de archivos innecesarios)..."
+  # 1. __pycache__ y .pyc — nunca necesarios en producción (~25 MB)
+  find "$PY_CACHE_ENV" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+  find "$PY_CACHE_ENV" -name "*.pyc" -delete 2>/dev/null || true
+  # 2. Implementaciones de modelos de transformers que NO usamos (~46 MB)
+  #    Solo conservamos marian (MarianMT), auto (imports dinámicos) y utils
+  TRANS_MODELS="$PY_CACHE_ENV/lib/python3.*/site-packages/transformers/models"
+  for model_dir in $TRANS_MODELS/*/; do
+    model_name=$(basename "$model_dir")
+    case "$model_name" in
+      marian|auto|__pycache__|__init__.py) ;;  # conservar
+      *) rm -rf "$model_dir" 2>/dev/null || true ;;
+    esac
+  done
+  # 3. PyInstaller (herramienta de empaquetado, no runtime) (~4 MB)
+  find "$PY_CACHE_ENV" -type d -name "PyInstaller" -exec rm -rf {} + 2>/dev/null || true
+  find "$PY_CACHE_ENV" -name "PyInstaller*" -maxdepth 4 -exec rm -rf {} + 2>/dev/null || true
+  # 4. hf_xet (protocolo HuggingFace para subidas, no necesario offline) (~7 MB)
+  find "$PY_CACHE_ENV" -type d -name "hf_xet*" -exec rm -rf {} + 2>/dev/null || true
+  PY_SIZE_CLEAN=$(du -sh "$PY_CACHE_ENV" 2>/dev/null | cut -f1)
+  echo "  ✓ Entorno limpio: $PY_SIZE_CLEAN"
+  # ── Fin limpieza ──────────────────────────────────────────────────────
 
   echo "$STAMP_CONTENT" > "$STAMP_FILE"
   echo "  Copiando entorno al USB..."
@@ -491,6 +543,20 @@ else
   echo "  ✗ Error importando paquetes Python"
   echo "    → Prueba: $0 $USB --reset-cache"
   _smoke_ok=0
+fi
+
+# Nougat (opcional — si está no verificar como error)
+if [[ -f "$RESOURCES/servidor/modelos/nougat-small/config.json" ]]; then
+  NOUGAT_MB=$(du -m "$RESOURCES/servidor/modelos/nougat-small" | cut -f1)
+  echo "  ✓ Nougat-small presente (${NOUGAT_MB}MB)"
+  if "$RESOURCES/python/bin/python3" -c "import nougat, torch, pypdfium2; print('OK')" \
+       2>/dev/null | grep -q "OK"; then
+    echo "  ✓ nougat + torch + pypdfium2 importan correctamente"
+  else
+    echo "  ⚠ nougat/torch/pypdfium2 no importan — PDF usará pymupdf como respaldo"
+  fi
+else
+  echo "  ℹ Nougat no descargado — PDF usará pymupdf (normal si no se descargó)"
 fi
 
 # Archivos servidor

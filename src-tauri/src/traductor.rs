@@ -1020,6 +1020,24 @@ fn borrar_seguro_local(ruta: &str) {
 
 /// Envía los bloques extraídos por pymupdf al endpoint /limpiar_pdf de Qwen.
 /// Si el servidor no está disponible o falla, devuelve el texto original sin modificar.
+/// Localiza nougat_extract.py relativo al intérprete Python detectado.
+/// En USB: python en Resources/python/bin/ → Resources/servidor/nougat_extract.py
+/// En dev: python en babel_env/bin/ → Babel/babel-interfaz/servidor_babel/nougat_extract.py
+fn encontrar_nougat_script(python3: &str) -> Option<String> {
+    let py = std::path::Path::new(python3);
+    let base = py.parent()?.parent()?.parent()?;
+    let candidatos = [
+        base.join("servidor/nougat_extract.py"),
+        base.join("babel-interfaz/servidor_babel/nougat_extract.py"),
+    ];
+    for c in &candidatos {
+        if c.exists() {
+            return Some(c.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
 fn limpiar_bloques_con_qwen(texto: &str, subclave_hex: &str) -> String {
     let bloques: Vec<serde_json::Value> = texto
         .lines()
@@ -1129,7 +1147,60 @@ pub fn procesar_pdf(
     };
 
     if !ok {
-        // PASO 2: pymupdf — extrae bloques con estructura semántica:
+        // PASO 2: Nougat — si el modelo está disponible, produce Markdown estructurado
+        // (encabezados, párrafos, tablas) mucho mejor que extracción de texto plano.
+        // Solo se usa si nougat_extract.py y el modelo nougat-small existen.
+        if let Some(script_nougat) = encontrar_nougat_script(python3) {
+            progreso(8, "ANALIZANDO PDF (Nougat)...");
+            let nougat_out = std::process::Command::new(python3)
+                .args([script_nougat.as_str(), ruta])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .unwrap_or_default();
+
+            let nougat_words = nougat_out.split_whitespace().count();
+            if nougat_words > 30 {
+                // Nougat tuvo éxito — traducir el Markdown resultante
+                progreso(15, "TRADUCIENDO...");
+                let parrafos: Vec<String> = nougat_out
+                    .lines()
+                    .map(String::from)
+                    .collect();
+                let total_p = parrafos.iter().filter(|p| !p.trim().is_empty()).count().max(1);
+                let mut traducidos_p = 0usize;
+                let mut traducido = String::new();
+                let mut ultimo = String::new();
+                for parrafo in &parrafos {
+                    if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
+                        return Err("Traducción cancelada.".into());
+                    }
+                    if parrafo.trim().is_empty() {
+                        traducido.push('\n');
+                        continue;
+                    }
+                    let pct = (20 + traducidos_p * 70 / total_p).min(90) as u8;
+                    progreso(pct, &format!("TRADUCIENDO... {}%", pct));
+                    traducidos_p += 1;
+                    let ctx = if ultimo.is_empty() { None } else { Some(ultimo.clone()) };
+                    let t = traducir_texto_largo(parrafo, par, ctx.as_deref(), dict, subclave_hex);
+                    ultimo = t.clone();
+                    traducido.push_str(&t);
+                    traducido.push('\n');
+                }
+                progreso(93, "CIFRANDO RESULTADO...");
+                let cifrado = seguridad::blindar_documento(&traducido, subclave_hex)?;
+                fs::write(
+                    archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre)),
+                    cifrado,
+                )?;
+                return Ok(());
+            }
+            // Nougat sin suficiente texto → continuar con pymupdf
+        }
+
+        // PASO 3: pymupdf — extrae bloques con estructura semántica:
         // rawdict da tamaño de fuente (headings) y flags (bold/italic).
         // Unión de fragmentos: si un bloque no cierra oración y el siguiente
         // empieza en minúscula → misma frase. Dehifenación inline.
