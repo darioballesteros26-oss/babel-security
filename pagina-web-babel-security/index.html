@@ -661,6 +661,91 @@
 
 
 <!-- ═══════════════════════════════════════════════════════════
+     AUDITORÍA ETH ZURICH — ¿Cifrado en la nube = seguro?
+═══════════════════════════════════════════════════════════ -->
+<section id="auditoria-nube" class="py-24 lg:py-32" style="background: linear-gradient(180deg, #0B0F19 0%, #130A0A 60%, #0B0F19 100%);">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+
+    <!-- Cabecera -->
+    <div class="text-center mb-12 sr">
+      <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-widest mb-5" style="background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: #F87171;">
+        <span class="w-1.5 h-1.5 rounded-full" style="background:#EF4444"></span>
+        <span data-i18n="eth_badge">ETH Zurich · ACM CCS 2024</span>
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-black text-white mb-5" data-i18n="eth_title">¿"Cifrado en la nube" significa realmente seguro?</h2>
+      <p class="text-slate-400 text-lg max-w-3xl mx-auto leading-relaxed" data-i18n="eth_subtitle">En 2024, investigadores de ETH Zurich (una de las universidades técnicas más prestigiosas de Europa) auditaron los principales proveedores de almacenamiento cifrado "zero-knowledge" bajo condiciones de ataque real.</p>
+    </div>
+
+    <!-- 4 estadísticas -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10 sr">
+      <div class="rounded-2xl p-6 text-center card-lift" style="background:#0F0A0A; border:1px solid rgba(239,68,68,0.22);">
+        <div class="text-4xl font-black mb-2" style="color:#F87171;" data-i18n="eth_stat1_n">22M</div>
+        <div class="text-slate-400 text-xs leading-snug" data-i18n="eth_stat1_l">usuarios afectados en conjunto</div>
+      </div>
+      <div class="rounded-2xl p-6 text-center card-lift" style="background:#0F0A0A; border:1px solid rgba(239,68,68,0.22);">
+        <div class="text-4xl font-black mb-2" style="color:#F87171;" data-i18n="eth_stat2_n">5</div>
+        <div class="text-slate-400 text-xs leading-snug" data-i18n="eth_stat2_l">proveedores auditados</div>
+      </div>
+      <div class="rounded-2xl p-6 text-center card-lift" style="background:#0F0A0A; border:1px solid rgba(239,68,68,0.22);">
+        <div class="text-3xl font-black mb-2" style="color:#F87171;" data-i18n="eth_stat3_n">4 de 5</div>
+        <div class="text-slate-400 text-xs leading-snug" data-i18n="eth_stat3_l">con vulnerabilidades graves confirmadas</div>
+      </div>
+      <div class="rounded-2xl p-6 text-center card-lift" style="background:#0F0A0A; border:1px solid rgba(239,68,68,0.22);">
+        <div class="text-4xl font-black mb-2" style="color:#FBBF24;" data-i18n="eth_stat4_n">1</div>
+        <div class="text-slate-400 text-xs leading-snug" data-i18n="eth_stat4_l">salió relativamente bien parado (con fallos menores)</div>
+      </div>
+    </div>
+
+    <!-- Lista de vulnerabilidades -->
+    <div class="sr rounded-2xl p-8 lg:p-10 mb-8" style="background:#0F0A0A; border:1px solid rgba(239,68,68,0.18);">
+      <h3 class="text-white font-bold text-lg mb-6" data-i18n="eth_findings_title">Qué se demostró en condiciones reales de ataque</h3>
+      <ul class="space-y-4">
+        <li class="flex gap-3 items-start">
+          <span class="flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
+          <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f1">Inyección de archivos falsos en el almacenamiento del usuario (Sync, pCloud)</span>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
+          <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f2">Manipulación del contenido cifrado sin que el usuario lo detecte (pCloud, Icedrive, Seafile)</span>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
+          <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f3">Acceso directo al contenido de los archivos en texto plano, en algunos escenarios</span>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
+          <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f4">Manipulación de nombres de archivo y metadatos (todos excepto Tresorit)</span>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
+          <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f5">Icedrive: decidió no corregir los fallos reportados</span>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="flex-shrink-0 mt-0.5" style="color:#FBBF24; font-size:1.1rem;">⚠</span>
+          <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f6">Investigación previa de los mismos autores encontró fallos similares en MEGA y Nextcloud</span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Cita textual -->
+    <blockquote class="sr rounded-2xl p-8 lg:p-10 mb-8 relative overflow-hidden" style="background:#0F0A0A; border-left:4px solid #EF4444; border-top:1px solid rgba(239,68,68,0.15); border-right:1px solid rgba(239,68,68,0.15); border-bottom:1px solid rgba(239,68,68,0.15);">
+      <div class="absolute top-0 left-0 w-40 h-40 opacity-5 -translate-y-10 -translate-x-10" style="background: radial-gradient(circle, #EF4444, transparent);" aria-hidden="true"></div>
+      <svg class="mb-5 opacity-30" width="40" height="40" viewBox="0 0 24 24" fill="#EF4444" aria-hidden="true"><path d="M11.192 15.757c0-.88-.23-1.618-.69-2.217-.326-.412-.768-.683-1.327-.812-.55-.128-1.07-.137-1.54-.028-.16-.95.1-1.626.76-2.027.66-.4 1.43-.558 2.31-.472.18.023.53.085.53.085V7.957c-.18-.01-.32-.01-.47-.01-1.43 0-2.85.563-3.94 1.693-1.09 1.13-1.633 2.68-1.633 4.65 0 1.4.345 2.534 1.035 3.402.69.868 1.638 1.302 2.846 1.302 1.197 0 2.117-.398 2.76-1.194.643-.795.965-1.82.965-3.043zm8.808 0c0-.88-.23-1.618-.69-2.217-.326-.42-.77-.69-1.327-.812-.55-.13-1.07-.14-1.54-.03-.16-.95.1-1.625.76-2.026.66-.4 1.43-.558 2.31-.472.18.023.52.085.52.085V7.957c-.17-.01-.32-.01-.46-.01-1.39 0-2.81.563-3.9 1.693-1.09 1.13-1.634 2.68-1.634 4.65 0 1.4.345 2.534 1.035 3.402.69.868 1.638 1.302 2.847 1.302 1.196 0 2.116-.398 2.76-1.194.642-.795.963-1.82.963-3.043z"/></svg>
+      <p class="text-white text-xl lg:text-2xl font-semibold leading-relaxed mb-5 italic" data-i18n="eth_quote">"Nuestros ataques invalidan las promesas de marketing hechas por los proveedores de estos sistemas."</p>
+      <footer class="text-slate-400 text-sm leading-relaxed" data-i18n="eth_quote_attr">— Jonas Hofmann y Kien Tuong Truong, investigadores de ETH Zurich (paper presentado en ACM CCS 2024, la conferencia académica más importante del mundo en seguridad informática)</footer>
+    </blockquote>
+
+    <!-- Mensaje de cierre -->
+    <div class="sr rounded-2xl p-8 text-center" style="background: rgba(212,175,55,0.06); border: 1px solid rgba(212,175,55,0.2);">
+      <p class="text-slate-200 text-base lg:text-lg leading-relaxed mb-5" data-i18n="eth_close">Security Babel no tiene este problema porque no hay ningún servidor en la ecuación. Tus documentos nunca salen de tu ordenador — cifrados o sin cifrar. No hay ningún punto de la cadena donde un servidor, comprometido o no, pueda intentar nada.</p>
+      <p class="text-slate-500 text-xs" data-i18n="eth_source">Fuente: "End-to-End Encrypted Cloud Storage in the Wild: A Broken Ecosystem", ETH Zurich, ACM CCS 2024</p>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
      PRECIOS
 ═══════════════════════════════════════════════════════════ -->
 <section id="precios" class="py-24 lg:py-32">
@@ -1125,6 +1210,25 @@ const translations = {
     gdpr_card2_desc:  "Al eliminar las transferencias internacionales de datos a servicios en la nube, se elimina ese vector de riesgo regulatorio concreto. Más control significa menos exposición.",
     gdpr_card3_title: "IA local y privada",
     gdpr_card3_desc:  "El motor de traducción corre íntegramente en tu dispositivo. Ningún modelo externo procesa ni aprende de tus documentos confidenciales.",
+    /* auditoría ETH Zurich */
+    eth_badge: "ETH Zurich · ACM CCS 2024",
+    eth_title: "¿\"Cifrado en la nube\" significa realmente seguro?",
+    eth_subtitle: "En 2024, investigadores de ETH Zurich (una de las universidades técnicas más prestigiosas de Europa) auditaron los principales proveedores de almacenamiento cifrado \"zero-knowledge\" bajo condiciones de ataque real.",
+    eth_stat1_n: "22M", eth_stat1_l: "usuarios afectados en conjunto",
+    eth_stat2_n: "5",   eth_stat2_l: "proveedores auditados",
+    eth_stat3_n: "4 de 5", eth_stat3_l: "con vulnerabilidades graves confirmadas",
+    eth_stat4_n: "1",   eth_stat4_l: "salió relativamente bien parado (con fallos menores)",
+    eth_findings_title: "Qué se demostró en condiciones reales de ataque",
+    eth_f1: "Inyección de archivos falsos en el almacenamiento del usuario (Sync, pCloud)",
+    eth_f2: "Manipulación del contenido cifrado sin que el usuario lo detecte (pCloud, Icedrive, Seafile)",
+    eth_f3: "Acceso directo al contenido de los archivos en texto plano, en algunos escenarios",
+    eth_f4: "Manipulación de nombres de archivo y metadatos (todos excepto Tresorit)",
+    eth_f5: "Icedrive: decidió no corregir los fallos reportados",
+    eth_f6: "Investigación previa de los mismos autores encontró fallos similares en MEGA y Nextcloud",
+    eth_quote: "\"Nuestros ataques invalidan las promesas de marketing hechas por los proveedores de estos sistemas.\"",
+    eth_quote_attr: "— Jonas Hofmann y Kien Tuong Truong, investigadores de ETH Zurich (paper presentado en ACM CCS 2024, la conferencia académica más importante del mundo en seguridad informática)",
+    eth_close: "Security Babel no tiene este problema porque no hay ningún servidor en la ecuación. Tus documentos nunca salen de tu ordenador — cifrados o sin cifrar. No hay ningún punto de la cadena donde un servidor, comprometido o no, pueda intentar nada.",
+    eth_source: "Fuente: \"End-to-End Encrypted Cloud Storage in the Wild: A Broken Ecosystem\", ETH Zurich, ACM CCS 2024",
     pricing_title:    "Planes diseñados para la soberanía de tus datos.",
     pricing_subtitle: "Sin sorpresas. Sin datos en la nube. Sin letra pequeña.",
     pricing_pro_name:   "Standard",
@@ -1250,6 +1354,25 @@ const translations = {
     gdpr_card2_desc:  "By eliminating international data transfers to cloud services, that specific regulatory risk vector is removed. More control means less exposure.",
     gdpr_card3_title: "Local and Private AI",
     gdpr_card3_desc:  "The translation engine runs entirely on your device. No external model processes or learns from your confidential documents.",
+    /* ETH Zurich audit */
+    eth_badge: "ETH Zurich · ACM CCS 2024",
+    eth_title: "Does 'cloud encryption' really mean secure?",
+    eth_subtitle: "In 2024, researchers from ETH Zurich (one of Europe's most prestigious technical universities) audited the leading 'zero-knowledge' encrypted cloud storage providers under real attack conditions.",
+    eth_stat1_n: "22M", eth_stat1_l: "users affected in total",
+    eth_stat2_n: "5",   eth_stat2_l: "providers audited",
+    eth_stat3_n: "4 out of 5", eth_stat3_l: "with confirmed serious vulnerabilities",
+    eth_stat4_n: "1",   eth_stat4_l: "came out relatively unscathed (with minor flaws)",
+    eth_findings_title: "What was demonstrated under real attack conditions",
+    eth_f1: "Injection of fake files into user storage (Sync, pCloud)",
+    eth_f2: "Manipulation of encrypted content without the user detecting it (pCloud, Icedrive, Seafile)",
+    eth_f3: "Direct access to file contents in plaintext, in some scenarios",
+    eth_f4: "Manipulation of file names and metadata (all except Tresorit)",
+    eth_f5: "Icedrive: decided not to fix the reported vulnerabilities",
+    eth_f6: "Prior research by the same authors found similar flaws in MEGA and Nextcloud",
+    eth_quote: "\"Our attacks invalidate the marketing promises made by the providers of these systems.\"",
+    eth_quote_attr: "— Jonas Hofmann and Kien Tuong Truong, ETH Zurich researchers (paper presented at ACM CCS 2024, the world's most important academic conference on computer security)",
+    eth_close: "Security Babel doesn't have this problem because there is no server in the equation. Your documents never leave your computer — encrypted or unencrypted. There is no point in the chain where a server, compromised or not, can attempt anything.",
+    eth_source: "Source: \"End-to-End Encrypted Cloud Storage in the Wild: A Broken Ecosystem\", ETH Zurich, ACM CCS 2024",
     pricing_title:    "Plans designed for your data sovereignty.",
     pricing_subtitle: "No surprises. No cloud data. No fine print.",
     pricing_pro_name:   "Standard",
@@ -1370,6 +1493,25 @@ const translations = {
     gdpr_card2_desc:  "Устраняя международные передачи данных в облачные сервисы, этот конкретный вектор регуляторного риска исключается. Больше контроля — меньше ответственности.",
     gdpr_card3_title: "Локальный и приватный ИИ",
     gdpr_card3_desc:  "Движок перевода работает полностью на вашем устройстве. Никакие внешние модели не обрабатывают ваши конфиденциальные документы и не обучаются на них.",
+    /* аудит ETH Zurich */
+    eth_badge: "ETH Zurich · ACM CCS 2024",
+    eth_title: "Означает ли «облачное шифрование» реальную безопасность?",
+    eth_subtitle: "В 2024 году исследователи ETH Zurich (одного из самых престижных технических университетов Европы) провели аудит ведущих провайдеров зашифрованного хранилища «zero-knowledge» в условиях реальной атаки.",
+    eth_stat1_n: "22 млн", eth_stat1_l: "затронутых пользователей в совокупности",
+    eth_stat2_n: "5",      eth_stat2_l: "провайдеров прошли аудит",
+    eth_stat3_n: "4 из 5", eth_stat3_l: "с подтверждёнными серьёзными уязвимостями",
+    eth_stat4_n: "1",      eth_stat4_l: "вышел относительно невредимым (с незначительными недостатками)",
+    eth_findings_title: "Что было доказано в условиях реальной атаки",
+    eth_f1: "Внедрение поддельных файлов в хранилище пользователя (Sync, pCloud)",
+    eth_f2: "Манипуляция зашифрованным содержимым без обнаружения пользователем (pCloud, Icedrive, Seafile)",
+    eth_f3: "Прямой доступ к содержимому файлов в открытом виде в ряде сценариев",
+    eth_f4: "Манипуляция именами файлов и метаданными (все, кроме Tresorit)",
+    eth_f5: "Icedrive: приняла решение не исправлять сообщённые уязвимости",
+    eth_f6: "Предыдущее исследование тех же авторов выявило аналогичные уязвимости в MEGA и Nextcloud",
+    eth_quote: "«Наши атаки опровергают маркетинговые обещания, данные провайдерами этих систем.»",
+    eth_quote_attr: "— Йонас Хофманн и Киен Туонг Труонг, исследователи ETH Zurich (доклад на ACM CCS 2024, самой важной академической конференции по информационной безопасности в мире)",
+    eth_close: "Security Babel не имеет этой проблемы, потому что в уравнении нет никакого сервера. Ваши документы никогда не покидают ваш компьютер — зашифрованные или нет. Нет ни одной точки в цепи, где сервер, скомпрометированный или нет, мог бы что-либо предпринять.",
+    eth_source: "Источник: «End-to-End Encrypted Cloud Storage in the Wild: A Broken Ecosystem», ETH Zurich, ACM CCS 2024",
     pricing_title:    "Тарифы, разработанные для суверенитета ваших данных.",
     pricing_subtitle: "Без сюрпризов. Без данных в облаке. Без мелкого шрифта.",
     pricing_pro_name:   "Standard",
@@ -1490,6 +1632,25 @@ const translations = {
     gdpr_card2_desc:  "بإزالة عمليات النقل الدولية للبيانات إلى الخدمات السحابية، يتم القضاء على هذا المتجه المحدد للمخاطر التنظيمية. مزيد من التحكم يعني تقليل التعرض.",
     gdpr_card3_title: "ذكاء اصطناعي محلي وخاص",
     gdpr_card3_desc:  "يعمل محرك الترجمة بالكامل على جهازك. لا يعالج أي نموذج خارجي وثائقك السرية ولا يتدرب عليها.",
+    /* تدقيق ETH Zurich */
+    eth_badge: "ETH Zurich · ACM CCS 2024",
+    eth_title: "هل يعني \"التشفير السحابي\" الأمان الحقيقي؟",
+    eth_subtitle: "في عام 2024، دقّق باحثو ETH Zurich (إحدى أرقى الجامعات التقنية في أوروبا) في كبرى مزودي التخزين السحابي المشفر «zero-knowledge» في ظروف هجوم حقيقية.",
+    eth_stat1_n: "22 مليون", eth_stat1_l: "مستخدم متضرر إجمالاً",
+    eth_stat2_n: "5",        eth_stat2_l: "مزودين خضعوا للتدقيق",
+    eth_stat3_n: "4 من 5",   eth_stat3_l: "بثغرات جسيمة مؤكدة",
+    eth_stat4_n: "1",        eth_stat4_l: "خرج سليماً نسبياً (مع عيوب طفيفة)",
+    eth_findings_title: "ما تم إثباته في ظروف الهجوم الحقيقية",
+    eth_f1: "حقن ملفات مزيفة في تخزين المستخدم (Sync, pCloud)",
+    eth_f2: "التلاعب بالمحتوى المشفر دون أن يكتشفه المستخدم (pCloud, Icedrive, Seafile)",
+    eth_f3: "الوصول المباشر إلى محتوى الملفات بنص واضح في بعض السيناريوهات",
+    eth_f4: "التلاعب بأسماء الملفات والبيانات الوصفية (الجميع باستثناء Tresorit)",
+    eth_f5: "Icedrive: قررت عدم إصلاح الثغرات المُبلَّغ عنها",
+    eth_f6: "بحث سابق للمؤلفين أنفسهم وجد ثغرات مماثلة في MEGA وNextcloud",
+    eth_quote: "«هجماتنا تُبطل الوعود التسويقية التي قطعها مزودو هذه الأنظمة.»",
+    eth_quote_attr: "— يوناس هوفمان وكيان تيونج ترونج، باحثو ETH Zurich (ورقة بحثية قُدِّمت في ACM CCS 2024، أهم مؤتمر أكاديمي في العالم لأمن المعلومات)",
+    eth_close: "لا يعاني Security Babel من هذه المشكلة لأنه لا يوجد خادم في المعادلة. وثائقك لا تغادر جهازك أبداً — مشفرة أو غير مشفرة. لا توجد نقطة واحدة في السلسلة يمكن لخادم، سواء تعرض للاختراق أم لا، أن يحاول فيها أي شيء.",
+    eth_source: "المصدر: «End-to-End Encrypted Cloud Storage in the Wild: A Broken Ecosystem»، ETH Zurich، ACM CCS 2024",
     pricing_title:    "خطط مصممة لسيادة بياناتك.",
     pricing_subtitle: "بدون مفاجآت. بدون بيانات في السحابة. بدون حروف دقيقة.",
     pricing_pro_name:   "Standard",
