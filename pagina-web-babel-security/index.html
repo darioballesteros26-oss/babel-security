@@ -183,6 +183,69 @@
     .term-tip:hover::after,
     .term-tip:focus::after { opacity: 1; }
 
+    /* ── Glow en números clave ── */
+    .num-gold { text-shadow: 0 0 22px rgba(212,175,55,0.5), 0 0 48px rgba(212,175,55,0.18); }
+    .num-red  { text-shadow: 0 0 22px rgba(239,68,68,0.55), 0 0 48px rgba(239,68,68,0.2); }
+
+    /* ── Badge dot pulsante en cabeceras de sección ── */
+    .badge-dot {
+      animation: badgePulse 2.5s ease-in-out infinite;
+    }
+    @keyframes badgePulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(212,175,55,0.5); }
+      50%       { opacity: 0.6; box-shadow: 0 0 0 6px rgba(212,175,55,0); }
+    }
+
+    /* ── Conectores entre pasos "cómo funciona" (LG+) ── */
+    @media (min-width: 1024px) {
+      .step-card { position: relative; }
+      .step-card:not(:last-child)::after {
+        content: '›';
+        position: absolute;
+        top: 1.6rem;
+        right: -1.35rem;
+        color: rgba(212,175,55,0.4);
+        font-size: 2rem;
+        line-height: 1;
+        pointer-events: none;
+      }
+    }
+
+    /* ── Comparativa: columna Security Babel destacada ── */
+    #cmp-table thead th:last-child {
+      background: rgba(212,175,55,0.07);
+      border-bottom: 2px solid rgba(212,175,55,0.3);
+    }
+    #cmp-table tbody td:last-child { background: rgba(212,175,55,0.04); }
+
+    /* ── Icono ⚠ pulsante (sección ETH Zurich) ── */
+    .warn-icon {
+      animation: warnPulse 3s ease-in-out infinite;
+      display: inline-block;
+    }
+    @keyframes warnPulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.55; filter: drop-shadow(0 0 5px rgba(239,68,68,0.7)); }
+    }
+
+    /* ── Pulse CTA Enterprise ── */
+    .pulse-cta { animation: ctaPulse 3s ease-in-out infinite; }
+    @keyframes ctaPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0.35), 0 0 22px rgba(212,175,55,0.3); }
+      50%       { box-shadow: 0 0 0 9px rgba(212,175,55,0), 0 0 40px rgba(212,175,55,0.5); }
+    }
+
+    /* ── FAQ: borde dorado al abrir ── */
+    .faq-open { border-color: rgba(212,175,55,0.35) !important; }
+    .faq-trigger[aria-expanded="true"] { color: #D4AF37; }
+
+    /* ── Contador animado: fade+rise de entrada ── */
+    .count-in { animation: countIn 0.55s cubic-bezier(.22,1,.36,1) forwards; }
+    @keyframes countIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
     /* ── Responsive: solo aplicar hover-lift en dispositivos con puntero ── */
     @media (hover: none) {
       .card-lift:hover { transform: none; box-shadow: none; }
@@ -446,7 +509,7 @@
     <div class="grid md:grid-cols-3 gap-6 lg:gap-8 mb-12">
 
       <!-- Paso 1: Entorno aislado -->
-      <div class="sr d1 card-lift rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+      <div class="sr d1 card-lift step-card rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
         <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-6" style="background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2);">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="1.8" aria-hidden="true">
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
@@ -458,7 +521,7 @@
       </div>
 
       <!-- Paso 2: Motor de traducción -->
-      <div class="sr d2 card-lift rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+      <div class="sr d2 card-lift step-card rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
         <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-6" style="background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2);">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="1.8" aria-hidden="true">
             <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
@@ -470,7 +533,7 @@
       </div>
 
       <!-- Paso 3: Cifrado -->
-      <div class="sr d3 card-lift rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
+      <div class="sr d3 card-lift step-card rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.07);">
         <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-6" style="background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2);">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="1.8" aria-hidden="true">
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
@@ -505,7 +568,7 @@
     </div>
 
     <div class="sr overflow-x-auto rounded-2xl" style="border:1px solid rgba(212,175,55,0.18)">
-      <table class="w-full text-sm">
+      <table id="cmp-table" class="w-full text-sm">
         <thead>
           <tr style="background:#141A2E;border-bottom:1px solid rgba(255,255,255,0.07)">
             <th class="text-left px-6 py-4 text-slate-400 font-semibold w-1/2" data-i18n="cmp_col_feature">Característica</th>
@@ -679,19 +742,19 @@
     <!-- 4 estadísticas -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10 sr">
       <div class="rounded-2xl p-6 text-center card-lift" style="background:#0F0A0A; border:1px solid rgba(239,68,68,0.22);">
-        <div class="text-4xl font-black mb-2" style="color:#F87171;" data-i18n="eth_stat1_n">22M</div>
+        <div class="text-4xl font-black mb-2 num-red" style="color:#F87171;" data-i18n="eth_stat1_n">22M</div>
         <div class="text-slate-400 text-xs leading-snug" data-i18n="eth_stat1_l">usuarios afectados en conjunto</div>
       </div>
       <div class="rounded-2xl p-6 text-center card-lift" style="background:#0F0A0A; border:1px solid rgba(239,68,68,0.22);">
-        <div class="text-4xl font-black mb-2" style="color:#F87171;" data-i18n="eth_stat2_n">5</div>
+        <div class="text-4xl font-black mb-2 num-red" style="color:#F87171;" data-i18n="eth_stat2_n">5</div>
         <div class="text-slate-400 text-xs leading-snug" data-i18n="eth_stat2_l">proveedores auditados</div>
       </div>
       <div class="rounded-2xl p-6 text-center card-lift" style="background:#0F0A0A; border:1px solid rgba(239,68,68,0.22);">
-        <div class="text-3xl font-black mb-2" style="color:#F87171;" data-i18n="eth_stat3_n">4 de 5</div>
+        <div class="text-3xl font-black mb-2 num-red" style="color:#F87171;" data-i18n="eth_stat3_n">4 de 5</div>
         <div class="text-slate-400 text-xs leading-snug" data-i18n="eth_stat3_l">con vulnerabilidades graves confirmadas</div>
       </div>
       <div class="rounded-2xl p-6 text-center card-lift" style="background:#0F0A0A; border:1px solid rgba(239,68,68,0.22);">
-        <div class="text-4xl font-black mb-2" style="color:#FBBF24;" data-i18n="eth_stat4_n">1</div>
+        <div class="text-4xl font-black mb-2 num-gold" style="color:#FBBF24;" data-i18n="eth_stat4_n">1</div>
         <div class="text-slate-400 text-xs leading-snug" data-i18n="eth_stat4_l">salió relativamente bien parado (con fallos menores)</div>
       </div>
     </div>
@@ -701,27 +764,27 @@
       <h3 class="text-white font-bold text-lg mb-6" data-i18n="eth_findings_title">Qué se demostró en condiciones reales de ataque</h3>
       <ul class="space-y-4">
         <li class="flex gap-3 items-start">
-          <span class="flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
+          <span class="warn-icon flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
           <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f1">Inyección de archivos falsos en el almacenamiento del usuario (Sync, pCloud)</span>
         </li>
         <li class="flex gap-3 items-start">
-          <span class="flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
+          <span class="warn-icon flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
           <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f2">Manipulación del contenido cifrado sin que el usuario lo detecte (pCloud, Icedrive, Seafile)</span>
         </li>
         <li class="flex gap-3 items-start">
-          <span class="flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
+          <span class="warn-icon flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
           <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f3">Acceso directo al contenido de los archivos en texto plano, en algunos escenarios</span>
         </li>
         <li class="flex gap-3 items-start">
-          <span class="flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
+          <span class="warn-icon flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
           <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f4">Manipulación de nombres de archivo y metadatos (todos excepto Tresorit)</span>
         </li>
         <li class="flex gap-3 items-start">
-          <span class="flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
+          <span class="warn-icon flex-shrink-0 mt-0.5" style="color:#F87171; font-size:1.1rem;">⚠</span>
           <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f5">Icedrive: decidió no corregir los fallos reportados</span>
         </li>
         <li class="flex gap-3 items-start">
-          <span class="flex-shrink-0 mt-0.5" style="color:#FBBF24; font-size:1.1rem;">⚠</span>
+          <span class="warn-icon flex-shrink-0 mt-0.5" style="color:#FBBF24; font-size:1.1rem;">⚠</span>
           <span class="text-slate-300 text-sm leading-relaxed" data-i18n="eth_f6">Investigación previa de los mismos autores encontró fallos similares en MEGA y Nextcloud</span>
         </li>
       </ul>
@@ -832,7 +895,7 @@
         </ul>
 
         <!-- Más adelante se integrará Stripe para pago directo desde estos botones — por ahora dirigen al formulario de contacto para gestionar la compra manualmente. -->
-        <a href="#contacto-ventas" class="btn-emerald block text-center w-full py-3.5 rounded-xl font-semibold text-sm text-white shadow-lg" data-i18n="pricing_ent_cta">
+        <a href="#contacto-ventas" class="btn-emerald pulse-cta block text-center w-full py-3.5 rounded-xl font-semibold text-sm text-white shadow-lg" data-i18n="pricing_ent_cta">
           Contactar con Ventas
         </a>
       </div>
@@ -892,19 +955,19 @@
       <h3 class="text-white font-bold text-lg text-center mb-8" data-i18n="roi_hour_title">Retorno por traducción manual ahorrada</h3>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-6 text-center mb-6">
         <div>
-          <div class="text-3xl font-black c-gold mb-2">200€</div>
+          <div class="text-3xl font-black c-gold num-gold mb-2" data-count-end="200" data-count-suffix="€">200€</div>
           <div class="text-slate-500 text-xs leading-snug" data-i18n="roi_h1">Coste/hora de un abogado socio (estimación media)</div>
         </div>
         <div>
-          <div class="text-3xl font-black c-gold mb-2">3h</div>
+          <div class="text-3xl font-black c-gold num-gold mb-2" data-count-end="3" data-count-suffix="h">3h</div>
           <div class="text-slate-500 text-xs leading-snug" data-i18n="roi_h2">Tiempo medio de traducción manual de un contrato de 15 páginas</div>
         </div>
         <div>
-          <div class="text-3xl font-black c-gold mb-2">30s</div>
+          <div class="text-3xl font-black c-gold num-gold mb-2" data-count-end="30" data-count-suffix="s">30s</div>
           <div class="text-slate-500 text-xs leading-snug" data-i18n="roi_h3">Tiempo con Security Babel (mismo contrato)</div>
         </div>
         <div>
-          <div class="text-3xl font-black c-gold mb-2">600€</div>
+          <div class="text-3xl font-black c-gold num-gold mb-2" data-count-end="600" data-count-suffix="€">600€</div>
           <div class="text-slate-500 text-xs leading-snug" data-i18n="roi_h4">Ahorro por contrato frente a traducción manual</div>
         </div>
       </div>
@@ -1847,8 +1910,8 @@ document.querySelectorAll('.mobile-link').forEach(link => {
 // ──────────────────────────────────────────────────────────
 document.querySelectorAll('.faq-trigger').forEach(trigger => {
   trigger.addEventListener('click', () => {
-    const body = trigger.nextElementSibling;   // div.faq-body
-    const icon = trigger.querySelector('.faq-icon');
+    const body   = trigger.nextElementSibling;   // div.faq-body
+    const icon   = trigger.querySelector('.faq-icon');
     const isOpen = body.classList.contains('open');
 
     // Cerrar todos los demás primero
@@ -1856,6 +1919,7 @@ document.querySelectorAll('.faq-trigger').forEach(trigger => {
       b.classList.remove('open');
       b.previousElementSibling.querySelector('.faq-icon').style.transform = '';
       b.previousElementSibling.setAttribute('aria-expanded', 'false');
+      b.closest('.rounded-2xl')?.classList.remove('faq-open');
     });
 
     // Abrir/cerrar el actual
@@ -1863,6 +1927,7 @@ document.querySelectorAll('.faq-trigger').forEach(trigger => {
       body.classList.add('open');
       icon.style.transform = 'rotate(180deg)';
       trigger.setAttribute('aria-expanded', 'true');
+      trigger.closest('.rounded-2xl')?.classList.add('faq-open');
     }
   });
 });
@@ -1883,7 +1948,46 @@ const observer = new IntersectionObserver((entries) => {
 document.querySelectorAll('.sr').forEach(el => observer.observe(el));
 
 // ──────────────────────────────────────────────────────────
-// 7. FORMULARIO DE CONTACTO (Formspree / Web3Forms)
+// 7. CONTADOR ANIMADO EN STATS
+// Cuenta de 0 al valor data-count-end con ease-out cúbico.
+// ──────────────────────────────────────────────────────────
+function animateCount(el) {
+  const target = parseFloat(el.dataset.countEnd);
+  const suffix = el.dataset.countSuffix || '';
+  const dur    = 1100;
+  const start  = performance.now();
+  const isInt  = Number.isInteger(target);
+
+  el.classList.add('count-in');
+
+  function tick(now) {
+    const p    = Math.min((now - start) / dur, 1);
+    const ease = 1 - Math.pow(1 - p, 3);
+    const val  = target * ease;
+    el.textContent = (isInt ? Math.round(val) : val.toFixed(1)) + suffix;
+    if (p < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+const countObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      animateCount(entry.target);
+      countObserver.unobserve(entry.target);
+    }
+  });
+}, { threshold: 0.6 });
+
+document.querySelectorAll('[data-count-end]').forEach(el => countObserver.observe(el));
+
+// Añadir pulso a los dots indicadores de cabeceras de sección
+document.querySelectorAll('.inline-flex .w-1\\.5.h-1\\.5.rounded-full').forEach(el => {
+  el.classList.add('badge-dot');
+});
+
+// ──────────────────────────────────────────────────────────
+// 9. FORMULARIO DE CONTACTO (Formspree / Web3Forms)
 // Envío asíncrono con estados de éxito y error.
 // ──────────────────────────────────────────────────────────
 const form       = document.getElementById('contact-form');
