@@ -74,6 +74,48 @@ def _verificar_token():
     return None
 
 
+# ── PaddleOCR-VL — modelo en memoria (warm) ──────────────────────────────────
+_OCR_LLM       = None
+_OCR_LOCK      = threading.Lock()
+
+def _cargar_ocr() -> bool:
+    """Carga PaddleOCR-VL-1.5 en memoria la primera vez; reutiliza en adelante."""
+    global _OCR_LLM
+    if _OCR_LLM is not None:
+        return True
+    with _OCR_LOCK:
+        if _OCR_LLM is not None:
+            return True
+        _DIR       = os.path.dirname(os.path.abspath(__file__))
+        MODEL_DIR  = os.path.join(_DIR, "modelos", "paddleocr-vl")
+        LM_NAMES   = [
+            "PaddleOCR-VL-1.5-Q4_K_M.gguf",
+            "PaddleOCR-VL-1.5-Q8_0.gguf",
+            "PaddleOCR-VL-1.5.gguf",
+            "PaddleOCR-VL-1.5-BF16.gguf",
+        ]
+        PROJ_NAMES = [
+            "PaddleOCR-VL-1.5-mmproj.gguf",
+            "mmproj-BF16.gguf",
+            "mmproj-F16.gguf",
+        ]
+        lm   = next((os.path.join(MODEL_DIR, f) for f in LM_NAMES   if os.path.isfile(os.path.join(MODEL_DIR, f))), None)
+        proj = next((os.path.join(MODEL_DIR, f) for f in PROJ_NAMES if os.path.isfile(os.path.join(MODEL_DIR, f))), None)
+        if not lm or not proj:
+            return False
+        try:
+            from llama_cpp import Llama
+            from llama_cpp.llama_chat_format import MTMDChatHandler
+            handler    = MTMDChatHandler(clip_model_path=proj, verbose=False, use_gpu=True)
+            _OCR_LLM   = Llama(model_path=lm, chat_handler=handler,
+                                n_ctx=4096, n_gpu_layers=-1, verbose=False)
+            print("[server] PaddleOCR-VL cargado en memoria", flush=True)
+            return True
+        except Exception as e:
+            print(f"[server] Error cargando PaddleOCR-VL: {e}", file=sys.stderr)
+            return False
+
+
 @app.route("/ping", methods=["GET"])
 def ping():
     # Liveness PÚBLICA (sin token): el badge de la app la consulta desde el webview,
@@ -193,6 +235,45 @@ def traducir_batch_endpoint():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Error interno: {e}"}), 500
+
+
+@app.route("/ocr_pdf", methods=["POST"])
+def ocr_pdf_endpoint():
+    err = _verificar_token()
+    if err:
+        return err
+
+    data = request.json or {}
+    ruta = data.get("ruta", "")
+    if not ruta or not os.path.isfile(ruta):
+        return jsonify({"error": "Ruta PDF no válida"}), 400
+
+    if not _cargar_ocr():
+        return jsonify({"error": "Modelo PaddleOCR-VL no disponible"}), 503
+
+    try:
+        import fitz, base64 as _b64
+        doc = fitz.open(ruta)
+        resultados = []
+        for i, page in enumerate(doc):
+            if i >= 60:
+                break
+            pix     = page.get_pixmap(dpi=150)
+            img_b64 = _b64.b64encode(pix.tobytes("jpeg")).decode()
+            res = _OCR_LLM.create_chat_completion(
+                messages=[{"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                    {"type": "text", "text": "OCR:"},
+                ]}],
+                max_tokens=2048,
+                temperature=0,
+            )
+            texto = res["choices"][0]["message"]["content"].strip()
+            if texto:
+                resultados.append(texto)
+        return jsonify({"texto": "\n\n".join(resultados)})
+    except Exception as e:
+        return jsonify({"error": f"OCR error: {e}"}), 500
 
 
 @app.route("/limpiar_pdf", methods=["POST"])

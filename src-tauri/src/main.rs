@@ -1390,6 +1390,7 @@ fn detectar_ext(bytes: &[u8]) -> &'static str {
     if bytes.len() >= 2 && &bytes[..2] == b"PK" { return "docx"; }
     if bytes.len() >= 4 && &bytes[..4] == b"\x89PNG" { return "png"; }
     if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8 { return "jpg"; }
+    if bytes.len() >= 5 && &bytes[..5] == b"html:" { return "html"; }
     "txt"
 }
 
@@ -2304,6 +2305,22 @@ fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Strin
 
         // Binario no reconocido
         return Err("Formato no previsualizable. Usa EXPORTAR.".into());
+    }
+
+    // Contenido guardado como html: (nueva ruta fallback PDF)
+    if contenido.starts_with("html:") {
+        return Ok(contenido);
+    }
+
+    // Retrocompatibilidad: archivos antiguos guardados como Markdown plano
+    // (antes de introducir html: prefix) — convertir al vuelo para el visor
+    let parece_markdown = contenido.lines().take(20).any(|l| {
+        let t = l.trim();
+        t.starts_with("# ") || t.starts_with("## ") || t.starts_with("### ")
+            || (t.starts_with('|') && t.ends_with('|'))
+    });
+    if parece_markdown {
+        return Ok(format!("html:{}", traductor::markdown_a_html(&contenido)));
     }
 
     Ok(contenido)

@@ -115,6 +115,7 @@ check_ruta "$SERVIDOR_SRC/traductor_usb.py"       "traductor_usb.py"
 check_ruta "$SERVIDOR_SRC/traductor.py"           "traductor.py (fallback)"
 check_ruta "$SERVIDOR_SRC/pymupdf4llm_extract.py" "pymupdf4llm_extract.py (primera pasada PDF)"
 check_ruta "$SERVIDOR_SRC/paddleocr_extract.py"   "paddleocr_extract.py (segunda pasada PDF OCR)"
+check_ruta "$SERVIDOR_SRC/md_to_pdf.py"           "md_to_pdf.py (PDF desde Markdown con reportlab)"
 
 if [[ $_prereq_ok -eq 0 ]]; then
   echo ""
@@ -283,7 +284,7 @@ PID_QWEN=$!
 
 # Código del servidor (7 archivos: pipeline PDF de doble pasada incluido)
 for f in server.py revisor.py traductor_usb.py traductor.py \
-          pymupdf4llm_extract.py paddleocr_extract.py; do
+          pymupdf4llm_extract.py paddleocr_extract.py md_to_pdf.py; do
   [[ -f "$SERVIDOR_SRC/$f" ]] && cp "$SERVIDOR_SRC/$f" "$RESOURCES/servidor/"
 done
 echo "  ✓ código servidor (6 archivos, pipeline PDF doble pasada)"
@@ -367,6 +368,7 @@ PAQUETES=(
   "llama-cpp-python>=0.3.0"
   "pdf2docx>=0.5.0"
   "pypdfium2>=4.0"
+  "reportlab>=4.0"
 )
 STAMP_CONTENT="${PAQUETES[*]}"
 STAMP_FILE="$CACHE_DIR/python_env_${ARCH}.stamp"

@@ -255,13 +255,15 @@ def traducir(texto: str, par: str) -> str:
 
     frases = dividir_frases(texto_norm)
     if len(frases) == 1:
-        return _traducir_con_cadena(texto_norm, par)
+        r = _traducir_con_cadena(texto_norm, par)
+        return r.upper() if era_mayusculas else r
     partes = []
     for frase in frases:
         if not frase.strip():
             continue
         partes.append(_traducir_con_cadena(frase, par))
-    return " ".join(partes)
+    r = " ".join(partes)
+    return r.upper() if era_mayusculas else r
 
 
 def _check_garble(resultado: str, texto: str) -> bool:
@@ -333,8 +335,10 @@ def traducir_batch(textos: list, par: str) -> list:
         return []
 
     textos_norm = []
+    flags_caps = []
     for t in textos:
         era_mayusculas = t == t.upper() and sum(c.isalpha() for c in t) >= 4
+        flags_caps.append(era_mayusculas)
         norm = t.lower() if era_mayusculas else t
         textos_norm.append(_normalizar_puntuacion(norm))
 
@@ -367,5 +371,10 @@ def traducir_batch(textos: list, par: str) -> list:
 
     for idx, t in resto:
         resultados[idx] = traducir(t, par)
+
+    # Restaurar ALL-CAPS: si el original era todo mayúsculas, la traducción también
+    for i, era in enumerate(flags_caps):
+        if era and resultados[i]:
+            resultados[i] = resultados[i].upper()
 
     return resultados
