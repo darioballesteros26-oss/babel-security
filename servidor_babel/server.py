@@ -140,8 +140,8 @@ def limpiar_pdf_endpoint():
     if not isinstance(bloques, list) or not bloques:
         return jsonify({"bloques": []})
 
-    if len(bloques) > 1000:
-        return jsonify({"error": "Demasiados bloques (máx 1000)"}), 400
+    if len(bloques) > 10000:
+        return jsonify({"error": "Demasiados bloques (máx 10000)"}), 400
 
     # Rechazar bloques individuales demasiado grandes
     bloques = [b[:2000] for b in bloques if isinstance(b, str)]
