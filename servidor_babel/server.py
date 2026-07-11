@@ -16,7 +16,7 @@ import revisor
 
 _tasa_lock = threading.Lock()
 _tasa_por_ip: dict = defaultdict(list)
-_MAX_PETICIONES = 60
+_MAX_PETICIONES = 600
 _VENTANA_SEGUNDOS = 60
 
 
