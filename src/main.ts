@@ -1124,38 +1124,33 @@ async function buscarEnTodosBuzones(texto: string): Promise<void> {
         data-buzon-id="${escapeHTML(n.id)}"
         data-ruta=""
         data-es-trad="false">
-        <div class="resultado-busqueda-nombre">
-          <span style="color:var(--dorado);margin-right:5px;font-size:0.75rem;">📁</span>${nombre}
-        </div>
-        <div class="resultado-busqueda-meta">
-          <span style="color:var(--dorado);letter-spacing:1px;font-size:0.6rem;">BUZÓN</span>
+        <div class="resultado-busqueda-fila">
+          <span class="resultado-tipo-badge resultado-tipo-buzon">BUZ</span>
+          <span class="resultado-busqueda-nombre">${nombre}</span>
         </div>
       </div>`;
     });
 
     const htmlArchivos = archivosMatch.map(a => {
       const nombre = escapeHTML(limpiar(a.nombre));
-      const buzonNombre = a.buzon === "todos" || !a.buzon
-        ? "Sin carpeta"
-        : escapeHTML(a.buzon.toUpperCase());
-      const tipo = a.es_traduccion ? "TRAD" : "GUARDADO";
-      const tipoColor = a.es_traduccion ? "var(--dorado)" : "var(--texto-secundario)";
+      const buzonNombre = a.buzon === "todos" || !a.buzon ? "—" : escapeHTML(a.buzon.toUpperCase());
+      const tipo = a.es_traduccion ? "TRAD" : "ARC";
+      const tipoClass = a.es_traduccion ? "resultado-tipo-trad" : "resultado-tipo-arc";
       return `<div class="resultado-busqueda resultado-busqueda--archivo"
         data-action="abrir-resultado-busqueda"
         data-buzon-id="${escapeHTML(a.buzon_id)}"
         data-ruta="${escapeHTML(a.ruta)}"
         data-es-trad="${a.es_traduccion}">
-        <div class="resultado-busqueda-nombre">
-          <span style="color:var(--texto-secundario);margin-right:5px;font-size:0.75rem;">◫</span>${nombre}
+        <div class="resultado-busqueda-fila">
+          <span class="resultado-tipo-badge ${tipoClass}">${tipo}</span>
+          <span class="resultado-busqueda-nombre">${nombre}</span>
         </div>
         <div class="resultado-busqueda-meta">
-          <span style="opacity:0.5;">📁 ${buzonNombre}</span>
-          <span style="color:${tipoColor};">${tipo}</span>
+          <span style="opacity:0.45;padding-left:38px;">${buzonNombre}</span>
         </div>
       </div>`;
     });
 
-    // Separador visual si hay los dos tipos
     const separador = buzonesMatch.length > 0 && archivosMatch.length > 0
       ? `<div style="height:1px;background:var(--borde);margin:2px 8px;opacity:0.4;"></div>`
       : "";
