@@ -1380,6 +1380,10 @@ fn descifrar_a_bytes(ruta: &str, subclave_hex: &str) -> Result<Vec<u8>, String> 
     if let Ok(raw) = traductor::descomprimir_b64(&contenido) {
         return Ok(raw);
     }
+    // Archivos html: (fallback PDF traducido): quitar prefijo antes de exportar
+    if let Some(sin_prefijo) = contenido.strip_prefix("html:") {
+        return Ok(sin_prefijo.as_bytes().to_vec());
+    }
     // Fallback: el contenido descifrado ya es el texto (TXT sin comprimir)
     Ok(contenido.into_bytes())
 }
@@ -1390,7 +1394,9 @@ fn detectar_ext(bytes: &[u8]) -> &'static str {
     if bytes.len() >= 2 && &bytes[..2] == b"PK" { return "docx"; }
     if bytes.len() >= 4 && &bytes[..4] == b"\x89PNG" { return "png"; }
     if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8 { return "jpg"; }
-    if bytes.len() >= 5 && &bytes[..5] == b"html:" { return "html"; }
+    if bytes.len() >= 6 && &bytes[..6] == b"GIF89a" { return "gif"; }
+    if bytes.len() >= 6 && &bytes[..6] == b"GIF87a" { return "gif"; }
+    if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" { return "webp"; }
     "txt"
 }
 

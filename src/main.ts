@@ -10,6 +10,15 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
     node.setAttribute("rel", "noopener noreferrer");
     node.setAttribute("target", "_blank");
   }
+  // Imágenes embebidas del backend: permitir solo data: URIs, bloquear URLs externas
+  if (node.tagName === "IMG") {
+    const src = node.getAttribute("src") ?? "";
+    if (src.startsWith("data:image/")) {
+      node.setAttribute("src", src);
+    } else {
+      node.removeAttribute("src");
+    }
+  }
 });
 
 type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos" | "nombre" | "ajustes";
