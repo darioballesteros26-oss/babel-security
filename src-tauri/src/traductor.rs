@@ -1049,39 +1049,51 @@ fn encontrar_script_servidor(python3: &str, nombre_script: &str) -> Option<Strin
 }
 
 fn limpiar_bloques_con_qwen(texto: &str, subclave_hex: &str) -> String {
-    let bloques: Vec<serde_json::Value> = texto
+    const LOTE: usize = 500;
+    let _ = subclave_hex;
+
+    let bloques: Vec<String> = texto
         .lines()
         .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::Value::String(l.to_string()))
+        .map(|l| l.to_string())
         .collect();
     if bloques.is_empty() {
         return texto.to_string();
     }
-    let body = serde_json::json!({ "bloques": bloques });
+
     let token = token_efectivo();
-    let resp = agente_http()
-        .post("http://127.0.0.1:5002/limpiar_pdf")
-        .set("X-Babel-Token", &token)
-        .set("Content-Type", "application/json")
-        .send_string(&body.to_string());
-    match resp {
-        Ok(r) if r.status() == 200 => {
-            if let Ok(json) = r.into_json::<serde_json::Value>() {
-                if let Some(arr) = json["bloques"].as_array() {
-                    let lineas: Vec<&str> = arr
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .collect();
-                    if !lineas.is_empty() {
-                        let _ = subclave_hex; // sin uso, coherencia con otras fns
-                        return lineas.join("\n");
+    let mut resultado: Vec<String> = Vec::with_capacity(bloques.len());
+
+    for lote in bloques.chunks(LOTE) {
+        let body = serde_json::json!({
+            "bloques": lote.iter().map(|s| serde_json::Value::String(s.clone())).collect::<Vec<_>>()
+        });
+        let resp = agente_http()
+            .post("http://127.0.0.1:5002/limpiar_pdf")
+            .set("X-Babel-Token", &token)
+            .set("Content-Type", "application/json")
+            .send_string(&body.to_string());
+        match resp {
+            Ok(r) if r.status() == 200 => {
+                if let Ok(json) = r.into_json::<serde_json::Value>() {
+                    if let Some(arr) = json["bloques"].as_array() {
+                        let limpios: Vec<String> = arr
+                            .iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect();
+                        if !limpios.is_empty() {
+                            resultado.extend(limpios);
+                            continue;
+                        }
                     }
                 }
+                resultado.extend(lote.iter().cloned());
             }
-            texto.to_string()
+            _ => resultado.extend(lote.iter().cloned()),
         }
-        _ => texto.to_string(),
     }
+
+    if resultado.is_empty() { texto.to_string() } else { resultado.join("\n") }
 }
 
 pub fn procesar_pdf(
