@@ -105,7 +105,7 @@ function renderArbolBuzones(
         style="padding-left:${indent}px;border:1px solid transparent;border-radius:3px;transition:background 0.2s,border-color 0.2s;">
         ${toggleIcon}
         <span class="buzon-icono" onclick="${onRen}" style="cursor:pointer;" title="Renombrar">✎</span>
-        <span class="buzon-nombre" style="flex:1">${escapeHTML(n.nombre).toUpperCase()}</span>
+        <span class="buzon-nombre" style="flex:1" title="${escapeHTML(n.nombre)}">${escapeHTML(n.nombre).toUpperCase()}</span>
         <span onclick="${onMas}" style="color:var(--texto-secundario);cursor:pointer;font-size:0.85rem;opacity:0.5;padding:0 4px;" title="Nuevo subbuzón">+</span>
         <button type="button" onclick="${onDel}" style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;font-size:0.7rem;opacity:0.4;padding:0 2px;" title="Eliminar">✕</button>
       </div>${hijos}`;
@@ -1086,15 +1086,13 @@ async function buscarEnTodosBuzones(texto: string): Promise<void> {
   container.innerHTML = `<div style="padding:10px 14px;color:var(--texto-secundario);font-size:0.7rem;letter-spacing:1px;">Buscando...</div>`;
 
   try {
-    const todos = await invoke<MetadatosArchivo[]>("listar_archivos_guardados", { buzon: "todos" });
+    const [todos, nodos] = await Promise.all([
+      invoke<MetadatosArchivo[]>("listar_archivos_guardados", { buzon: "todos" }),
+      invoke<BuzonNodo[]>("listar_buzones_guardados"),
+    ]);
     const q = texto.toLowerCase();
     const limpiar = (n: string) =>
       n.replace(/\.babel$/, "").replace(/__orig/gi, "").replace(/_\d{8,}$/, "").trim();
-
-    const resultados = todos
-      .filter(a => a.idioma !== "original" && !a.nombre.toLowerCase().includes("__orig"))
-      .filter(a => limpiar(a.nombre).toLowerCase().includes(q))
-      .slice(0, 8);
 
     // Verificar que el input sigue activo — el invoke puede haber llegado tarde
     const inputEl = document.getElementById("input-buscar-g") as HTMLInputElement | null;
@@ -1103,30 +1101,66 @@ async function buscarEnTodosBuzones(texto: string): Promise<void> {
       return;
     }
 
-    if (resultados.length === 0) {
+    // Buzones que coinciden con la búsqueda
+    const buzonesMatch = nodos
+      .filter(n => n.nombre.toLowerCase().includes(q))
+      .slice(0, 3);
+
+    // Archivos que coinciden
+    const archivosMatch = todos
+      .filter(a => a.idioma !== "original" && !a.nombre.toLowerCase().includes("__orig"))
+      .filter(a => limpiar(a.nombre).toLowerCase().includes(q))
+      .slice(0, 6);
+
+    if (buzonesMatch.length === 0 && archivosMatch.length === 0) {
       container.innerHTML = `<div style="padding:10px 14px;color:var(--texto-secundario);font-size:0.7rem;letter-spacing:1px;text-align:center;">Sin resultados</div>`;
       return;
     }
 
-    container.innerHTML = resultados.map(a => {
+    const htmlBuzones = buzonesMatch.map(n => {
+      const nombre = escapeHTML(n.nombre.toUpperCase());
+      return `<div class="resultado-busqueda resultado-busqueda--buzon"
+        data-action="abrir-resultado-busqueda"
+        data-buzon-id="${escapeHTML(n.id)}"
+        data-ruta=""
+        data-es-trad="false">
+        <div class="resultado-busqueda-nombre">
+          <span style="color:var(--dorado);margin-right:5px;font-size:0.75rem;">📁</span>${nombre}
+        </div>
+        <div class="resultado-busqueda-meta">
+          <span style="color:var(--dorado);letter-spacing:1px;font-size:0.6rem;">BUZÓN</span>
+        </div>
+      </div>`;
+    });
+
+    const htmlArchivos = archivosMatch.map(a => {
       const nombre = escapeHTML(limpiar(a.nombre));
       const buzonNombre = a.buzon === "todos" || !a.buzon
         ? "Sin carpeta"
         : escapeHTML(a.buzon.toUpperCase());
       const tipo = a.es_traduccion ? "TRAD" : "GUARDADO";
       const tipoColor = a.es_traduccion ? "var(--dorado)" : "var(--texto-secundario)";
-      return `<div class="resultado-busqueda"
+      return `<div class="resultado-busqueda resultado-busqueda--archivo"
         data-action="abrir-resultado-busqueda"
         data-buzon-id="${escapeHTML(a.buzon_id)}"
         data-ruta="${escapeHTML(a.ruta)}"
         data-es-trad="${a.es_traduccion}">
-        <div class="resultado-busqueda-nombre">${nombre}</div>
+        <div class="resultado-busqueda-nombre">
+          <span style="color:var(--texto-secundario);margin-right:5px;font-size:0.75rem;">◫</span>${nombre}
+        </div>
         <div class="resultado-busqueda-meta">
           <span style="opacity:0.5;">📁 ${buzonNombre}</span>
           <span style="color:${tipoColor};">${tipo}</span>
         </div>
       </div>`;
-    }).join("");
+    });
+
+    // Separador visual si hay los dos tipos
+    const separador = buzonesMatch.length > 0 && archivosMatch.length > 0
+      ? `<div style="height:1px;background:var(--borde);margin:2px 8px;opacity:0.4;"></div>`
+      : "";
+
+    container.innerHTML = htmlBuzones.join("") + separador + htmlArchivos.join("");
   } catch {
     container.classList.add("hidden");
   }
@@ -1140,6 +1174,11 @@ function abrirResultadoBusqueda(buzonId: string, ruta: string, esTrad: boolean):
   ocultarResultadosBusqueda();
   const inputBuscar = document.getElementById("input-buscar-g") as HTMLInputElement | null;
   if (inputBuscar) inputBuscar.value = "";
+  // Resultado de buzón (ruta vacía): navegar directo al buzón sin resaltar archivo
+  if (!ruta) {
+    seleccionarBuzonGuardados(buzonId || "todos");
+    return;
+  }
   _resaltarRuta = ruta;
   // Traducciones usan el sistema de buzones de archivos — mostramos "todos" para no ocultar guardados
   seleccionarBuzonGuardados(esTrad ? "todos" : (buzonId || "todos"));

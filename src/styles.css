@@ -2390,6 +2390,20 @@ body {
   border-bottom: none;
 }
 
+.resultado-busqueda--buzon {
+  border-left: 2px solid var(--dorado);
+  padding-left: 12px;
+  background: rgba(197,160,89,0.03);
+}
+
+.resultado-busqueda--buzon:hover {
+  background: rgba(197,160,89,0.12);
+}
+
+.resultado-busqueda--archivo {
+  border-left: 2px solid transparent;
+}
+
 .resultado-busqueda-nombre {
   font-family: 'Times New Roman', Times, serif;
   font-size: 0.75rem;
