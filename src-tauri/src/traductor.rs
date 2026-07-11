@@ -1049,7 +1049,14 @@ fn encontrar_script_servidor(python3: &str, nombre_script: &str) -> Option<Strin
 }
 
 fn limpiar_bloques_con_qwen(texto: &str, subclave_hex: &str) -> String {
-    const LOTE: usize = 500;
+    // Lotes de 100 líneas: ~2-3 llamadas Qwen × ~40s = 80-120s por lote,
+    // dentro del timeout de 180s. Lotes más grandes agotarían el timeout.
+    const LOTE: usize = 100;
+    // Timeout generoso — Qwen en CPU puede tardar ~40s por llamada interna.
+    let agente_pdf = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(180))
+        .build();
     let _ = subclave_hex;
 
     let bloques: Vec<String> = texto
@@ -1068,7 +1075,7 @@ fn limpiar_bloques_con_qwen(texto: &str, subclave_hex: &str) -> String {
         let body = serde_json::json!({
             "bloques": lote.iter().map(|s| serde_json::Value::String(s.clone())).collect::<Vec<_>>()
         });
-        let resp = agente_http()
+        let resp = agente_pdf
             .post("http://127.0.0.1:5002/limpiar_pdf")
             .set("X-Babel-Token", &token)
             .set("Content-Type", "application/json")
