@@ -115,8 +115,12 @@ def traducir_endpoint():
     if len(texto) > MAX_INPUT_CHARS:
         return jsonify({"error": f"Texto demasiado largo (máx {MAX_INPUT_CHARS} caracteres)"}), 400
 
+    sin_revision = bool(data.get("sin_revision", False))
+
     try:
         traduccion_base = _traducir_base(texto, par)
+        if sin_revision:
+            return jsonify({"traduccion": traduccion_base, "revisada": False})
         traduccion_final = revisor.revisar(texto, traduccion_base, par, contexto)
         return jsonify({"traduccion": traduccion_final, "revisada": True})
     except ValueError as e:

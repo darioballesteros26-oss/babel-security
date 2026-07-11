@@ -354,7 +354,7 @@ pub fn procesar_archivo_inteligente(
             progreso(pct, &format!("TRADUCIENDO... {}%", pct));
             traducidos_p += 1;
             let ctx_prev = if ultimo_trad.is_empty() { None } else { Some(ultimo_trad.clone()) };
-            let traducido = traducir_texto_largo(parrafo, par, ctx_prev.as_deref(), dict, subclave_hex);
+            let traducido = traducir_texto_largo(parrafo, par, ctx_prev.as_deref(), dict, subclave_hex, false);
             ultimo_trad = traducido.clone();
             traducido_final.push_str(&traducido);
             traducido_final.push('\n');
@@ -453,7 +453,7 @@ fn traducir_xml_at(
         let trad = if dec.trim().is_empty() || dec.trim().parse::<f64>().is_ok() {
             dec
         } else {
-            match traducir_con_marian(dec.trim(), par, None) {
+            match traducir_con_marian(dec.trim(), par, None, false) {
                 Ok(t) => t,
                 Err(_) => {
                     let (fallback, _) = motor_atomico(dec.trim(), dict, subclave_hex);
@@ -601,10 +601,11 @@ fn traducir_texto_largo(
     contexto: Option<&str>,
     dict: &HashMap<String, String>,
     subclave_hex: &str,
+    sin_revision: bool,
 ) -> String {
     const MAX_CHARS: usize = 1800;
     if texto.len() <= MAX_CHARS {
-        return match traducir_con_marian(texto, par, contexto) {
+        return match traducir_con_marian(texto, par, contexto, sin_revision) {
             Ok(t) => t,
             Err(_) => motor_atomico(texto, dict, subclave_hex).0,
         };
@@ -631,7 +632,7 @@ fn traducir_texto_largo(
         if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
             return "[[CANCELADA]]".to_string();
         }
-        let t = match traducir_con_marian(trozo, par, ctx_local.as_deref()) {
+        let t = match traducir_con_marian(trozo, par, ctx_local.as_deref(), sin_revision) {
             Ok(t) => t,
             Err(_) => motor_atomico(trozo, dict, subclave_hex).0,
         };
@@ -654,7 +655,7 @@ fn traducir_parrafo_xml(
         return parrafo.to_string();
     }
 
-    let traducido = traducir_texto_largo(&texto, par, contexto, dict, subclave_hex);
+    let traducido = traducir_texto_largo(&texto, par, contexto, dict, subclave_hex, false);
 
     *ultimo_traducido = traducido.clone();
     reconstruir_parrafo(parrafo, &traducido)
@@ -1259,19 +1260,27 @@ pub fn procesar_pdf(
             if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
                 return Err("Traducción cancelada.".into());
             }
-            if parrafo.trim().is_empty() {
+            let trim = parrafo.trim();
+            if trim.is_empty() {
+                traducido.push('\n');
+                continue;
+            }
+            // Artefactos PDF: números de página, URLs sueltas, líneas de 1 carácter.
+            // Se conservan en el output tal cual pero sin gastar una llamada al servidor.
+            let es_artefacto = trim.len() < 2
+                || trim.parse::<u64>().is_ok()
+                || (trim.starts_with("http") && !trim.contains(' '))
+                || (trim.starts_with("www.") && !trim.contains(' '));
+            if es_artefacto {
+                traducido.push_str(parrafo);
                 traducido.push('\n');
                 continue;
             }
             let pct = (20 + traducidos_p * 70 / total_p).min(90) as u8;
             progreso(pct, &format!("TRADUCIENDO... {}%", pct));
             traducidos_p += 1;
-            let ctx_prev = if ultimo_trad_pdf.is_empty() {
-                None
-            } else {
-                Some(ultimo_trad_pdf.clone())
-            };
-            let t = traducir_texto_largo(parrafo, par, ctx_prev.as_deref(), dict, subclave_hex);
+            let ctx_prev = if ultimo_trad_pdf.is_empty() { None } else { Some(ultimo_trad_pdf.clone()) };
+            let t = traducir_texto_largo(parrafo, par, ctx_prev.as_deref(), dict, subclave_hex, true);
             ultimo_trad_pdf = t.clone();
             traducido.push_str(&t);
             traducido.push('\n');
@@ -2032,16 +2041,18 @@ fn agente_http() -> &'static ureq::Agent {
 /// Llama al servidor Python MarianMT en localhost:5002.
 /// `contexto` es el párrafo anterior traducido: el revisor Qwen lo usa
 /// para corregir concordancia de pronombres y tiempos verbales entre párrafos.
-pub fn traducir_con_marian(texto: &str, par: &str, contexto: Option<&str>) -> Result<String, String> {
+pub fn traducir_con_marian(texto: &str, par: &str, contexto: Option<&str>, sin_revision: bool) -> Result<String, String> {
     const MAX_BYTES: usize = 50_000;
     if texto.len() > MAX_BYTES {
         return Err(format!("Texto demasiado grande ({} bytes, máx {} KB)", texto.len(), MAX_BYTES / 1000));
     }
     let url = "http://127.0.0.1:5002/traducir";
     let token = token_efectivo();
-    let body = match contexto.filter(|c| !c.is_empty()) {
-        Some(ctx) => serde_json::json!({ "texto": texto, "par": par, "contexto": ctx }),
-        None      => serde_json::json!({ "texto": texto, "par": par }),
+    let body = match (contexto.filter(|c| !c.is_empty()), sin_revision) {
+        (Some(ctx), true)  => serde_json::json!({ "texto": texto, "par": par, "contexto": ctx, "sin_revision": true }),
+        (Some(ctx), false) => serde_json::json!({ "texto": texto, "par": par, "contexto": ctx }),
+        (None,      true)  => serde_json::json!({ "texto": texto, "par": par, "sin_revision": true }),
+        (None,      false) => serde_json::json!({ "texto": texto, "par": par }),
     };
 
     let respuesta = agente_http()
@@ -2074,7 +2085,7 @@ pub fn traducir_inteligente(
     subclave_hex: &str,
     par: &str,
 ) -> (String, usize) {
-    match traducir_con_marian(texto, par, None) {
+    match traducir_con_marian(texto, par, None, false) {
         Ok(traduccion) => (traduccion, 0),
         Err(_) => motor_atomico(texto, dict, subclave_hex),
     }
