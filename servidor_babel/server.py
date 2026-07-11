@@ -79,7 +79,7 @@ def ping():
     # Liveness PÚBLICA (sin token): el badge de la app la consulta desde el webview,
     # donde no dispone del token. Solo revela que el servidor está arriba en un puerto
     # que ya está restringido a 127.0.0.1. /traducir sigue exigiendo token.
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "usb": _USAR_USB})
 
 
 @lru_cache(maxsize=1024)
@@ -128,6 +128,69 @@ def traducir_endpoint():
     except RuntimeError as e:
         # Traducción degradada — Rust usará el diccionario como fallback
         return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        return jsonify({"error": f"Error interno: {e}"}), 500
+
+
+@app.route("/revisar_solo", methods=["POST"])
+def revisar_solo_endpoint():
+    """Qwen review sobre una traducción ya hecha — no relanza MarianMT."""
+    err = _verificar_token()
+    if err:
+        return err
+    data = request.json or {}
+    original   = data.get("original", "").strip()
+    traduccion = data.get("traduccion", "").strip()
+    par        = data.get("par", "es-en")
+    if not original or not traduccion:
+        return jsonify({"traduccion": traduccion})
+    if par not in PARES_PERMITIDOS:
+        return jsonify({"traduccion": traduccion})
+    try:
+        revisada = revisor.revisar(original, traduccion, par)
+        return jsonify({"traduccion": revisada})
+    except Exception:
+        return jsonify({"traduccion": traduccion})
+
+
+@app.route("/traducir_batch", methods=["POST"])
+def traducir_batch_endpoint():
+    err = _verificar_token()
+    if err:
+        return err
+
+    ip = request.remote_addr or "local"
+    if not _verificar_tasa(ip):
+        return jsonify({"error": "Demasiadas peticiones — espera un momento"}), 429
+
+    data = request.json or {}
+    textos = data.get("textos", [])
+    par = data.get("par", "es-en")
+    sin_revision = bool(data.get("sin_revision", False))
+
+    if par not in PARES_PERMITIDOS:
+        return jsonify({"error": f"Par no soportado: {par}"}), 400
+
+    if not isinstance(textos, list) or len(textos) > 500:
+        return jsonify({"error": "textos debe ser lista de máx 500 elementos"}), 400
+
+    textos = [t[:MAX_INPUT_CHARS] for t in textos if isinstance(t, str)]
+
+    try:
+        if _USAR_USB:
+            traducciones = traductor_usb.traducir_batch(textos, par)
+        else:
+            traducciones = traductor.traducir_batch(textos, par)
+
+        if not sin_revision:
+            traducciones = [
+                revisor.revisar(orig, trad, par)
+                for orig, trad in zip(textos, traducciones)
+            ]
+
+        return jsonify({"traducciones": traducciones})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Error interno: {e}"}), 500
 

@@ -64,6 +64,27 @@ _device = ("mps" if torch.backends.mps.is_available() else "cpu") if _TORCH_OK e
 # El modelo tiene ventana de 512 tokens (~380 chars en español/inglés).
 _MAX_CHARS_SEGMENTO = 380
 
+# Puntuación tipográfica → ASCII antes de enviar a MarianMT.
+# MarianMT fue entrenado mayoritariamente con ASCII; los caracteres tipográficos
+# confunden al tokenizador y producen tokens OOV que degradan la traducción.
+_PUNCT_MAP = str.maketrans({
+    '«': '"',   # «
+    '»': '"',   # »
+    '“': '"',   # "
+    '”': '"',   # "
+    '‘': "'",   # '
+    '’': "'",   # '
+    '—': '-',   # —  em-dash
+    '–': '-',   # –  en-dash
+    '…': '...', # …  ellipsis
+    ' ': ' ',   # espacio duro
+    '­': '',    # guión suave (invisible, confunde tokenizador)
+})
+
+
+def _normalizar_puntuacion(texto: str) -> str:
+    return texto.translate(_PUNCT_MAP)
+
 
 def dividir_frases(texto: str) -> list:
     """Divide texto en frases de hasta _MAX_CHARS_SEGMENTO caracteres.
@@ -230,6 +251,7 @@ def traducir(texto: str, par: str) -> str:
         and sum(c.isalpha() for c in texto) >= 4
     )
     texto_norm = texto.lower() if era_mayusculas else texto
+    texto_norm = _normalizar_puntuacion(texto_norm)
 
     frases = dividir_frases(texto_norm)
     if len(frases) == 1:
@@ -240,3 +262,110 @@ def traducir(texto: str, par: str) -> str:
             continue
         partes.append(_traducir_con_cadena(frase, par))
     return " ".join(partes)
+
+
+def _check_garble(resultado: str, texto: str) -> bool:
+    """True si el resultado parece garbled y debería re-traducirse individualmente."""
+    # Repetición: alguna palabra significativa aparece más de 2 veces
+    palabras = [re.sub(r'[^a-zA-Z]', '', p).lower() for p in resultado.split()]
+    palabras = [p for p in palabras if p.isalpha() and len(p) > 3]
+    if palabras and max(palabras.count(p) for p in set(palabras)) > 2:
+        return True
+    # Garble fonético: ≥70% de palabras con el mismo prefijo de 2 letras
+    palabras_r = resultado.split()
+    if len(palabras_r) >= 5:
+        prefijos = ["".join(c for c in w.lower() if c.isalpha())[:2]
+                    for w in palabras_r if sum(c.isalpha() for c in w) >= 2]
+        if len(prefijos) >= 5:
+            conteo = {}
+            for p in prefijos:
+                conteo[p] = conteo.get(p, 0) + 1
+            if max(conteo.values()) / len(prefijos) >= 0.70:
+                return True
+    # Garble de tokenización: >25% tokens de 1 carácter alfabético
+    if len(palabras_r) >= 5:
+        tokens_1 = sum(1 for w in palabras_r if len(w) == 1 and w.isalpha())
+        if tokens_1 / len(palabras_r) > 0.25:
+            return True
+    # Truncado en frases cortas
+    n_in, n_out = len(texto.split()), len(palabras_r)
+    if 3 <= n_in <= 5 and n_out > 0 and n_out / n_in < 0.5:
+        return True
+    return False
+
+
+def _traducir_directo_batch(textos: list, par: str) -> list:
+    """Infiere N textos cortos en una sola llamada al modelo (batch).
+    Devuelve None en las posiciones con output garbled para que el caller reintente."""
+    if par not in _modelos:
+        raise RuntimeError(f"Modelo {par} no disponible")
+    tokenizer = _tokenizers[par]
+    model = _modelos[par]
+    inputs = tokenizer(
+        textos,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=512,
+    ).to(_device)
+    # max_new_tokens basado en el texto más largo del lote (no en el padding global)
+    attn = inputs["attention_mask"]
+    n_src_real = int(attn.sum(dim=1).max().item())
+    with torch.no_grad():
+        ids = model.generate(
+            **inputs,
+            num_beams=4,
+            max_new_tokens=min(n_src_real * 3, 512),
+            no_repeat_ngram_size=2,
+            early_stopping=True,
+        )
+    resultados = []
+    for i, (id_seq, texto) in enumerate(zip(ids, textos)):
+        r = tokenizer.decode(id_seq, skip_special_tokens=True)
+        resultados.append(None if _check_garble(r, texto) else r)
+    return resultados
+
+
+def traducir_batch(textos: list, par: str) -> list:
+    """Traduce una lista de textos: batch directo para cortos, individual para largos o cadenas.
+    Textos con output garbled en el batch se re-traducen individualmente."""
+    if not textos:
+        return []
+
+    textos_norm = []
+    for t in textos:
+        era_mayusculas = t == t.upper() and sum(c.isalpha() for c in t) >= 4
+        norm = t.lower() if era_mayusculas else t
+        textos_norm.append(_normalizar_puntuacion(norm))
+
+    # Textos cortos con modelo directo → batch; el resto → individual
+    puede_batch = par in _modelos
+    directos = [(i, t) for i, t in enumerate(textos_norm) if len(t) <= _MAX_CHARS_SEGMENTO and puede_batch]
+    resto    = [(i, t) for i, t in enumerate(textos_norm) if not (len(t) <= _MAX_CHARS_SEGMENTO and puede_batch)]
+
+    resultados = [""] * len(textos)
+
+    if directos:
+        indices, solo = zip(*directos)
+        try:
+            batch_results = _traducir_directo_batch(list(solo), par)
+            for idx, r in zip(indices, batch_results):
+                if r is None:
+                    # Garble detectado: re-traducir individualmente con todos los guards
+                    try:
+                        resultados[idx] = _traducir_con_cadena(textos_norm[idx], par)
+                    except Exception:
+                        resultados[idx] = textos_norm[idx]
+                else:
+                    resultados[idx] = r
+        except Exception:
+            for idx, t in directos:
+                try:
+                    resultados[idx] = _traducir_con_cadena(t, par)
+                except Exception:
+                    resultados[idx] = t
+
+    for idx, t in resto:
+        resultados[idx] = traducir(t, par)
+
+    return resultados

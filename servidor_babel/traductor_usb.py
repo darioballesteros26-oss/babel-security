@@ -79,7 +79,19 @@ CADENAS = {
 _modelos: dict     = {}
 _tokenizers: dict  = {}
 _lock              = threading.Lock()
-_MAX_CHARS_SEG     = 380
+_MAX_CHARS_SEG = 380
+
+_PUNCT_MAP = str.maketrans({
+    '«': '"',   '»': '"',
+    '"': '"',   '"': '"',
+    ''': "'",   ''': "'",
+    '—': '-',   '–': '-',
+    '…': '...', ' ': ' ', '­': '',
+})
+
+
+def _normalizar_puntuacion(texto: str) -> str:
+    return texto.translate(_PUNCT_MAP)
 
 
 def disponible() -> bool:
@@ -230,6 +242,7 @@ def _traducir_con_cadena(texto: str, par: str) -> str:
 def traducir(texto: str, par: str) -> str:
     era_mayusculas = texto == texto.upper() and sum(c.isalpha() for c in texto) >= 4
     texto_norm = texto.lower() if era_mayusculas else texto
+    texto_norm = _normalizar_puntuacion(texto_norm)
 
     frases = dividir_frases(texto_norm)
     if len(frases) == 1:
@@ -240,3 +253,100 @@ def traducir(texto: str, par: str) -> str:
         if frase.strip():
             partes.append(_traducir_con_cadena(frase, par))
     return " ".join(partes)
+
+
+def _check_garble_usb(resultado: str, texto: str) -> bool:
+    """True si el resultado parece garbled."""
+    palabras = [re.sub(r'[^\w]', '', p).lower() for p in resultado.split()]
+    palabras = [p for p in palabras if p.isalpha() and len(p) > 3]
+    if palabras and max(palabras.count(p) for p in set(palabras)) > 2:
+        return True
+    palabras_r = resultado.split()
+    if len(palabras_r) >= 5:
+        prefijos = ["".join(c for c in w.lower() if c.isalpha())[:2]
+                    for w in palabras_r if sum(c.isalpha() for c in w) >= 2]
+        if len(prefijos) >= 5:
+            conteo = {}
+            for p in prefijos:
+                conteo[p] = conteo.get(p, 0) + 1
+            if max(conteo.values()) / len(prefijos) >= 0.70:
+                return True
+    n_in, n_out = len(texto.split()), len(palabras_r)
+    if 3 <= n_in <= 5 and n_out > 0 and n_out / n_in < 0.5:
+        return True
+    return False
+
+
+def _traducir_directo_batch(textos: list, par: str) -> list:
+    """CTranslate2 batch nativo: N textos en una sola llamada al modelo.
+    Devuelve None en posiciones con output garbled para re-traducción individual."""
+    if par not in _modelos:
+        raise RuntimeError(f"Modelo USB {par} no disponible")
+    translator = _modelos[par]
+    tokenizer  = _tokenizers[par]
+    prefijo    = PREFIJOS.get(par)
+
+    src_batch = []
+    for texto in textos:
+        t = f"{prefijo} {texto}" if prefijo else texto
+        ids = tokenizer.encode(t, truncation=True, max_length=512)
+        src_batch.append(tokenizer.convert_ids_to_tokens(ids))
+
+    with _lock:
+        results = translator.translate_batch(
+            src_batch,
+            beam_size=4,
+            no_repeat_ngram_size=2,
+            max_decoding_length=512,
+        )
+
+    salidas = []
+    for result, texto in zip(results, textos):
+        out_tokens = result.hypotheses[0]
+        out_ids    = tokenizer.convert_tokens_to_ids(out_tokens)
+        r = tokenizer.decode(out_ids, skip_special_tokens=True)
+        salidas.append(None if _check_garble_usb(r, texto) else r)
+    return salidas
+
+
+def traducir_batch(textos: list, par: str) -> list:
+    """Batch: directo para textos cortos con modelo disponible, individual para el resto.
+    Textos con output garbled se re-traducen individualmente."""
+    if not textos:
+        return []
+
+    textos_norm = []
+    for t in textos:
+        era_mayusculas = t == t.upper() and sum(c.isalpha() for c in t) >= 4
+        norm = t.lower() if era_mayusculas else t
+        textos_norm.append(_normalizar_puntuacion(norm))
+
+    puede_batch = par in _modelos
+    directos = [(i, t) for i, t in enumerate(textos_norm) if len(t) <= _MAX_CHARS_SEG and puede_batch]
+    resto    = [(i, t) for i, t in enumerate(textos_norm) if not (len(t) <= _MAX_CHARS_SEG and puede_batch)]
+
+    resultados = [""] * len(textos)
+
+    if directos:
+        indices, solo = zip(*directos)
+        try:
+            batch_results = _traducir_directo_batch(list(solo), par)
+            for idx, r in zip(indices, batch_results):
+                if r is None:
+                    try:
+                        resultados[idx] = _traducir_con_cadena(textos_norm[idx], par)
+                    except Exception:
+                        resultados[idx] = textos_norm[idx]
+                else:
+                    resultados[idx] = r
+        except Exception:
+            for idx, t in directos:
+                try:
+                    resultados[idx] = _traducir_con_cadena(t, par)
+                except Exception:
+                    resultados[idx] = t
+
+    for idx, t in resto:
+        resultados[idx] = traducir(t, par)
+
+    return resultados

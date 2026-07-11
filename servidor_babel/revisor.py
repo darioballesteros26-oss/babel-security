@@ -193,8 +193,8 @@ def revisar(original: str, traduccion: str, par: str, contexto: str = "") -> str
     if _llm is None:
         return traduccion
 
-    # Frases muy cortas no mejoran con Qwen
-    if len(original.split()) < 5:
+    # Frases cortas (< 15 palabras) no mejoran con Qwen — demasiado coste para poco beneficio
+    if len(original.split()) < 15:
         return traduccion
 
     lang_dest = par.split("-")[1] if "-" in par else par

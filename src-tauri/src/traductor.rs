@@ -1104,6 +1104,84 @@ fn limpiar_bloques_con_qwen(texto: &str, subclave_hex: &str) -> String {
     if resultado.is_empty() { texto.to_string() } else { resultado.join("\n") }
 }
 
+/// Une líneas partidas a mitad de frase en texto extraído de PDF.
+/// Heurísticas:
+///   - Si la línea termina en guión silábico → quita el guión, une sin espacio.
+///   - Si la línea no termina en puntuación de cierre (.!?:;»") y tiene ≥10 chars
+///     Y la siguiente empieza en minúscula → une con espacio (continuación de oración).
+///   - Las líneas en blanco siempre son separadores de párrafo (no se cruzan).
+///   - Encabezados (todo-mayúsculas cortos o markdown #) no se unen.
+fn unir_lineas_partidas(texto: &str) -> String {
+    const MIN_LEN: usize = 10;
+
+    let lineas: Vec<&str> = texto.lines().collect();
+    if lineas.len() <= 1 {
+        return texto.to_string();
+    }
+
+    let es_terminal = |s: &str| {
+        s.chars().last()
+            .map(|c| matches!(c, '.' | '!' | '?' | ':' | ';' | '»' | '"' | ')' | ']'))
+            .unwrap_or(true)
+    };
+
+    // Encabezados: todo-mayúsculas corto (<60 chars con al menos una letra) o línea markdown
+    let es_encabezado = |s: &str| -> bool {
+        if s.starts_with('#') { return true; }
+        let tiene_letras = s.chars().any(|c| c.is_alphabetic());
+        let todo_mayus = s.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_uppercase());
+        tiene_letras && todo_mayus && s.len() < 60
+    };
+
+    let mut resultado: Vec<String> = Vec::with_capacity(lineas.len());
+    let mut acum = String::new();
+
+    for i in 0..lineas.len() {
+        let trim = lineas[i].trim();
+
+        if trim.is_empty() {
+            if !acum.is_empty() {
+                resultado.push(acum.trim_end().to_string());
+                acum.clear();
+            }
+            resultado.push(String::new());
+            continue;
+        }
+
+        acum.push_str(trim);
+
+        let sig = lineas.get(i + 1).map(|s| s.trim()).unwrap_or("");
+        let trim_acum = acum.trim_end();
+
+        // Guión silábico al final: quitar guión, continuar sin espacio
+        if trim_acum.ends_with('-') && trim_acum.len() > 1 && !sig.is_empty() {
+            let new_len = trim_acum.len() - 1;
+            acum.truncate(new_len);
+            continue;
+        }
+
+        // Continuación de oración: sin terminal, no es encabezado, ≥10 chars, siguiente en minúscula
+        if !es_terminal(trim_acum)
+            && !es_encabezado(trim_acum)
+            && trim_acum.len() >= MIN_LEN
+            && !sig.is_empty()
+            && sig.chars().next().map(|c| c.is_lowercase()).unwrap_or(false)
+        {
+            acum = format!("{} ", trim_acum);
+            continue;
+        }
+
+        resultado.push(trim_acum.to_string());
+        acum.clear();
+    }
+
+    if !acum.trim().is_empty() {
+        resultado.push(acum.trim_end().to_string());
+    }
+
+    resultado.join("\n")
+}
+
 pub fn procesar_pdf(
     ruta: &str,
     dict: &HashMap<String, String>,
@@ -1249,42 +1327,120 @@ pub fn procesar_pdf(
             limpiar_bloques_con_qwen(&ocr_total, subclave_hex)
         };
 
-        // Bucle de traducción único para todos los métodos de extracción
+        // Bucle de traducción por lotes (batch HTTP) para máxima velocidad
         progreso(15, "TRADUCIENDO...");
-        let parrafos: Vec<String> = texto_extraido.lines().map(String::from).collect();
-        let total_p = parrafos.iter().filter(|p| !p.trim().is_empty()).count().max(1);
-        let mut traducidos_p = 0usize;
-        let mut traducido = String::new();
-        let mut ultimo_trad_pdf = String::new();
+        let texto_unido = unir_lineas_partidas(&texto_extraido);
+        let parrafos: Vec<String> = texto_unido.lines().map(String::from).collect();
+
+        // Primera pasada: clasificar cada línea en vacía, artefacto o "pendiente de traducir"
+        let mut salida: Vec<String> = Vec::with_capacity(parrafos.len());
+        let mut pendientes: Vec<(usize, String)> = Vec::new(); // (índice en salida, texto)
+
         for parrafo in &parrafos {
-            if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
-                return Err("Traducción cancelada.".into());
-            }
             let trim = parrafo.trim();
             if trim.is_empty() {
-                traducido.push('\n');
+                salida.push("\n".to_string());
                 continue;
             }
-            // Artefactos PDF: números de página, URLs sueltas, líneas de 1 carácter.
-            // Se conservan en el output tal cual pero sin gastar una llamada al servidor.
             let es_artefacto = trim.len() < 2
                 || trim.parse::<u64>().is_ok()
                 || (trim.starts_with("http") && !trim.contains(' '))
                 || (trim.starts_with("www.") && !trim.contains(' '));
             if es_artefacto {
-                traducido.push_str(parrafo);
-                traducido.push('\n');
+                salida.push(format!("{}\n", parrafo));
                 continue;
             }
-            let pct = (20 + traducidos_p * 70 / total_p).min(90) as u8;
-            progreso(pct, &format!("TRADUCIENDO... {}%", pct));
-            traducidos_p += 1;
-            let ctx_prev = if ultimo_trad_pdf.is_empty() { None } else { Some(ultimo_trad_pdf.clone()) };
-            let t = traducir_texto_largo(parrafo, par, ctx_prev.as_deref(), dict, subclave_hex, true);
-            ultimo_trad_pdf = t.clone();
-            traducido.push_str(&t);
-            traducido.push('\n');
+            pendientes.push((salida.len(), parrafo.clone()));
+            salida.push(String::new()); // marcador de posición
         }
+
+        // Segunda pasada: traducir en lotes de 50 con un solo HTTP request por lote
+        const BATCH_PDF: usize = 50;
+        let total_trad = pendientes.len().max(1);
+        let mut hechos = 0usize;
+
+        for lote in pendientes.chunks(BATCH_PDF) {
+            if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
+                return Err("Traducción cancelada.".into());
+            }
+            // Progreso al inicio del lote (hechos) y al final (hechos + lote.len())
+            // para que la barra avance al empezar cada lote, no al terminar.
+            let pct_ini = (20 + hechos * 50 / total_trad).min(69) as u8;
+            let pct_fin = (20 + (hechos + lote.len()) * 50 / total_trad).min(70) as u8;
+            progreso(pct_ini, &format!("TRADUCIENDO... {}%", pct_ini));
+
+            // Fase 1: batch MarianMT para todo el lote (sin Qwen)
+            let mut batch_ids: Vec<usize> = Vec::new();
+            let mut batch_txts: Vec<&str> = Vec::new();
+            let mut largos: Vec<(usize, &str)> = Vec::new();
+
+            for (out_idx, texto) in lote {
+                if texto.len() <= 1800 {
+                    batch_ids.push(*out_idx);
+                    batch_txts.push(texto.as_str());
+                } else {
+                    largos.push((*out_idx, texto.as_str()));
+                }
+            }
+
+            if !batch_txts.is_empty() {
+                match traducir_batch_con_marian(&batch_txts, par) {
+                    Ok(traducciones) if traducciones.len() == batch_txts.len() => {
+                        for (out_idx, t) in batch_ids.iter().zip(traducciones) {
+                            salida[*out_idx] = format!("{}\n", t);
+                        }
+                    }
+                    _ => {
+                        for (out_idx, texto) in batch_ids.iter().zip(&batch_txts) {
+                            let t = traducir_texto_largo(texto, par, None, dict, subclave_hex, true);
+                            salida[*out_idx] = format!("{}\n", t);
+                        }
+                    }
+                }
+            }
+            for (out_idx, texto) in largos {
+                let t = traducir_texto_largo(texto, par, None, dict, subclave_hex, true);
+                salida[out_idx] = format!("{}\n", t);
+            }
+
+            hechos += lote.len();
+            progreso(pct_fin, &format!("TRADUCIENDO... {}%", pct_fin));
+        }
+
+        // Fase 2: revisión Qwen selectiva.
+        // Para pares tc-big directos (25-44 palabras): solo si el ratio output/input es anómalo.
+        // Para pares de cadena o párrafos ≥45 palabras: siempre.
+        // Usa el resultado de MarianMT ya en salida[] — no relanza MarianMT.
+        let es_usb = servidor_usa_usb();
+        let para_revisar: Vec<(usize, &str)> = pendientes
+            .iter()
+            .filter(|(idx, t)| {
+                let n = t.split_whitespace().count();
+                if n < 25 {
+                    return false;
+                }
+                let trad = salida[*idx].trim_end_matches('\n');
+                necesita_revision_qwen(t, trad, n, par, es_usb)
+            })
+            .map(|(idx, t)| (*idx, t.as_str()))
+            .collect();
+
+        let total_rev = para_revisar.len().max(1);
+        for (i, (out_idx, texto)) in para_revisar.iter().enumerate() {
+            if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
+                break;
+            }
+            let pct = (70 + i * 20 / total_rev).min(90) as u8;
+            progreso(pct, &format!("REVISANDO CALIDAD... {}%", pct));
+            let traduccion_base = salida[*out_idx].trim_end_matches('\n').to_string();
+            if !traduccion_base.is_empty() {
+                if let Ok(revisada) = revisar_con_qwen(texto, &traduccion_base, par) {
+                    salida[*out_idx] = format!("{}\n", revisada);
+                }
+            }
+        }
+
+        let traducido: String = salida.concat();
         progreso(93, "CIFRANDO RESULTADO...");
         let cifrado = seguridad::blindar_documento(&traducido, subclave_hex)?;
         fs::write(
@@ -2036,6 +2192,104 @@ fn agente_http() -> &'static ureq::Agent {
             .timeout(std::time::Duration::from_secs(60))
             .build()
     })
+}
+
+static UREQ_AGENTE_BATCH: OnceLock<ureq::Agent> = OnceLock::new();
+
+fn agente_http_batch() -> &'static ureq::Agent {
+    UREQ_AGENTE_BATCH.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+    })
+}
+
+/// Consulta /ping para saber si el servidor cargó modelos tc-big USB.
+/// Resultado cacheado: solo una llamada por sesión.
+static ES_SERVIDOR_USB: OnceLock<bool> = OnceLock::new();
+fn servidor_usa_usb() -> bool {
+    *ES_SERVIDOR_USB.get_or_init(|| {
+        agente_http()
+            .get("http://127.0.0.1:5002/ping")
+            .call()
+            .ok()
+            .and_then(|r| r.into_json::<serde_json::Value>().ok())
+            .and_then(|j| j["usb"].as_bool())
+            .unwrap_or(false)
+    })
+}
+
+/// Decide si un párrafo necesita revisión Qwen después del batch MarianMT.
+/// Para pares con modelo tc-big directo (calidad base 8.5/10): solo si ratio anómalo o ≥45 palabras.
+/// Para pares de cadena (calidad base 7.5/10): siempre que tenga ≥25 palabras.
+fn necesita_revision_qwen(original: &str, traduccion: &str, n_orig: usize, par: &str, es_usb: bool) -> bool {
+    // Textos muy largos: Qwen 1.5B no puede revisar sin truncar el output
+    // (max_tokens en revisor.py capado a 400; un texto >280 palabras necesita >360 tokens de output)
+    if n_orig > 280 || original.len() > 1800 {
+        return false;
+    }
+    // Párrafos largos (45-280 palabras): siempre revisar, alta probabilidad de error estructural
+    if n_orig >= 45 {
+        return true;
+    }
+    // El filtro de confianza solo aplica con modelos tc-big USB (8.5/10 base).
+    // Con modelos opus-mt dev (7/10), Qwen mejora más y no conviene saltarlo.
+    if !es_usb {
+        return true;
+    }
+    // Pares con modelo tc-big directo en el USB — calidad base ya buena (8.5/10)
+    const DIRECTOS_TC_BIG: &[&str] = &[
+        "ar-en", "ar-es", "de-es", "en-ar", "en-es", "en-fr", "en-ru",
+        "es-en", "es-ru", "fr-en", "ru-en", "ru-es",
+    ];
+    if !DIRECTOS_TC_BIG.contains(&par) {
+        // Par de cadena: MarianMT acumula error en cada paso → Qwen siempre necesario
+        return true;
+    }
+    // Par directo, 25-44 palabras: revisar solo si el ratio output/input es anómalo.
+    // Un ratio normal (0.60–1.70) indica que MarianMT no truncó ni hallucinó.
+    let n_trad = traduccion.split_whitespace().count();
+    let ratio = n_trad as f64 / n_orig as f64;
+    ratio < 0.60 || ratio > 1.70
+}
+
+fn revisar_con_qwen(original: &str, traduccion: &str, par: &str) -> Result<String, String> {
+    let body = serde_json::json!({ "original": original, "traduccion": traduccion, "par": par });
+    let resp = agente_http()
+        .post("http://127.0.0.1:5002/revisar_solo")
+        .set("Content-Type", "application/json")
+        .set("X-Babel-Token", &token_efectivo())
+        .send_json(&body)
+        .map_err(|e| format!("Revisor no disponible: {}", e))?;
+    let json: serde_json::Value = resp
+        .into_json()
+        .map_err(|e| format!("Revisor respuesta inválida: {}", e))?;
+    json["traduccion"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Revisor: campo traduccion ausente".to_string())
+}
+
+fn traducir_batch_con_marian(textos: &[&str], par: &str) -> Result<Vec<String>, String> {
+    let body = serde_json::json!({
+        "textos": textos,
+        "par": par,
+        "sin_revision": true,
+    });
+    let resp = agente_http_batch()
+        .post("http://127.0.0.1:5002/traducir_batch")
+        .set("Content-Type", "application/json")
+        .set("X-Babel-Token", &token_efectivo())
+        .send_json(&body)
+        .map_err(|e| format!("Batch no disponible: {}", e))?;
+    let json: serde_json::Value = resp
+        .into_json()
+        .map_err(|e| format!("Batch respuesta inválida: {}", e))?;
+    json["traducciones"]
+        .as_array()
+        .ok_or_else(|| "Batch: campo traducciones ausente".to_string())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
 }
 
 /// Llama al servidor Python MarianMT en localhost:5002.
