@@ -3539,9 +3539,12 @@ async function actualizarPeersPendientes(): Promise<void> {
     banner.innerHTML = pendientes.map(p =>
       `<div style="display:flex;gap:8px;align-items:center;margin:4px 0">
         <span style="font-family:monospace;font-size:0.85rem">${escapeHTML(p)}</span>
-        <button type="button" onclick="aprobarPeerPendiente('${escapeHTML(p.split(':')[0])}')" style="background:var(--dorado);color:#000;border:none;border-radius:4px;padding:2px 8px;cursor:pointer">Aprobar</button>
+        <button type="button" data-peer="${escapeHTML(p.split(':')[0])}" class="btn-aprobar-peer" style="background:var(--dorado);color:#000;border:none;border-radius:4px;padding:2px 8px;cursor:pointer">Aprobar</button>
       </div>`
     ).join("");
+    banner.querySelectorAll<HTMLButtonElement>(".btn-aprobar-peer").forEach(btn => {
+      btn.addEventListener("click", () => aprobarPeerPendiente(btn.dataset.peer ?? ""));
+    });
   } catch { /* sin sesión activa */ }
 }
 

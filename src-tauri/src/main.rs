@@ -2665,6 +2665,20 @@ fn addr_de_remitente(remitente: &str) -> String {
     }
 }
 
+fn es_remitente_valido(s: &str) -> bool {
+    if s.contains('@') {
+        let mut partes = s.splitn(2, '@');
+        let local = partes.next().unwrap_or("");
+        let dominio = partes.next().unwrap_or("");
+        !local.is_empty() && !dominio.is_empty() && dominio.contains('.')
+    } else {
+        !s.is_empty()
+            && s.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-')
+            && !s.starts_with('.')
+            && !s.ends_with('.')
+    }
+}
+
 // ============================================================
 // COMANDO 23 — Guardar configuración del email
 // ============================================================
@@ -2684,7 +2698,7 @@ fn guardar_config_email_tauri(
     let remitentes_autorizados: Vec<String> = remitentes
         .split(',')
         .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty() && es_remitente_valido(s))
         .collect();
 
     let creds = traductor::CredencialesEmail {
@@ -2829,10 +2843,8 @@ fn obtener_emails_tauri(
             creds.remitentes_autorizados.iter().any(|r| {
                 if r.contains('@') {
                     addr == r.as_str()
-                } else if r.contains('.') {
-                    addr.ends_with(&format!("@{}", r))
                 } else {
-                    addr.contains(r.as_str())
+                    addr.ends_with(&format!("@{}", r))
                 }
             })
         });
@@ -2874,10 +2886,8 @@ fn obtener_email_completo_tauri(
         let autorizado = creds.remitentes_autorizados.iter().any(|r| {
             if r.contains('@') {
                 addr == r.as_str()
-            } else if r.contains('.') {
-                addr.ends_with(&format!("@{}", r))
             } else {
-                addr.contains(r.as_str())
+                addr.ends_with(&format!("@{}", r))
             }
         });
         if !autorizado {

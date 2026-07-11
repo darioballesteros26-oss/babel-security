@@ -306,13 +306,14 @@ pub struct DescubrimientoRed;
 impl DescubrimientoRed {
     pub fn iniciar_servidor(nombre: String) {
         thread::spawn(move || {
-            // Preferir la IP LAN para no escuchar en todas las interfaces
-            let bind_ip = lan_ip()
-                .map(|ip| ip.to_string())
-                .unwrap_or_else(|| "0.0.0.0".to_string());
-            let socket = match UdpSocket::bind(format!("{}:{}", bind_ip, PUERTO_DESCUBRIMIENTO))
-                .or_else(|_| UdpSocket::bind(format!("0.0.0.0:{}", PUERTO_DESCUBRIMIENTO)))
-            {
+            let bind_ip = match lan_ip() {
+                Some(ip) => ip.to_string(),
+                None => {
+                    log::warn!("[P2P] No se detectó IP LAN — descubrimiento UDP deshabilitado.");
+                    return;
+                }
+            };
+            let socket = match UdpSocket::bind(format!("{}:{}", bind_ip, PUERTO_DESCUBRIMIENTO)) {
                 Ok(s) => s,
                 Err(e) => {
                     log::warn!("[P2P] No se pudo iniciar descubrimiento UDP: {}", e);
@@ -428,7 +429,7 @@ impl DescubrimientoRed {
                 Ok((n, origen)) => {
                     let respuesta = String::from_utf8_lossy(&buf[..n]);
                     if let Some(peer) = Self::parsear_respuesta(&respuesta, &origen) {
-                        log::warn!(
+                        log::debug!(
                             "[P2P] Encontrado: {} en {}:{}",
                             peer.nombre,
                             redactar_ip(&peer.ip),
@@ -906,12 +907,11 @@ impl ServidorP2P {
         let config_arc = Arc::new(config_tls);
         let conexiones_activas = Arc::new(AtomicUsize::new(0));
 
-        // Preferir LAN IP para no exponer el servidor en todas las interfaces
-        let bind_addr = lan_ip()
-            .map(|ip| format!("{}:{}", ip, PUERTO_TRANSFERENCIA))
-            .unwrap_or_else(|| format!("0.0.0.0:{}", PUERTO_TRANSFERENCIA));
+        let bind_addr = match lan_ip() {
+            Some(ip) => format!("{}:{}", ip, PUERTO_TRANSFERENCIA),
+            None => return Err("No se detectó IP LAN — P2P deshabilitado sin red local.".to_string()),
+        };
         let listener = TcpListener::bind(&bind_addr)
-            .or_else(|_| TcpListener::bind(format!("0.0.0.0:{}", PUERTO_TRANSFERENCIA)))
             .map_err(|e| format!("No se pudo abrir puerto {}: {}", PUERTO_TRANSFERENCIA, e))?;
 
         // Non-blocking + poll loop permite comprobar P2P_SHUTDOWN sin bloquearse

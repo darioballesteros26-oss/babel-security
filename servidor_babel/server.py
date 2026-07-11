@@ -1,5 +1,8 @@
 import sys
 import os
+import time
+import threading
+from collections import defaultdict
 
 # Permite importar traductor y revisor desde el mismo directorio
 sys.path.insert(0, os.path.dirname(__file__))
@@ -10,6 +13,22 @@ from functools import lru_cache
 import traductor
 import traductor_usb
 import revisor
+
+_tasa_lock = threading.Lock()
+_tasa_por_ip: dict = defaultdict(list)
+_MAX_PETICIONES = 60
+_VENTANA_SEGUNDOS = 60
+
+
+def _verificar_tasa(ip: str) -> bool:
+    ahora = time.monotonic()
+    with _tasa_lock:
+        hist = _tasa_por_ip[ip]
+        hist[:] = [t for t in hist if ahora - t < _VENTANA_SEGUNDOS]
+        if len(hist) >= _MAX_PETICIONES:
+            return False
+        hist.append(ahora)
+        return True
 
 # True si los modelos tc-big están disponibles en modelos_usb/
 _USAR_USB = traductor_usb.disponible()
@@ -77,6 +96,10 @@ def traducir_endpoint():
     if err:
         return err
 
+    ip = request.remote_addr or "local"
+    if not _verificar_tasa(ip):
+        return jsonify({"error": "Demasiadas peticiones — espera un momento"}), 429
+
     data = request.json or {}
     texto = data.get("texto", "").strip()
     par = data.get("par", "es-en")
@@ -116,6 +139,9 @@ def limpiar_pdf_endpoint():
 
     if not isinstance(bloques, list) or not bloques:
         return jsonify({"bloques": []})
+
+    if len(bloques) > 1000:
+        return jsonify({"error": "Demasiados bloques (máx 1000)"}), 400
 
     # Rechazar bloques individuales demasiado grandes
     bloques = [b[:2000] for b in bloques if isinstance(b, str)]

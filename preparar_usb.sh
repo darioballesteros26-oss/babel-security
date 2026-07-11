@@ -33,7 +33,10 @@ if [[ -z "$USB" ]]; then
   echo "  Ejemplo: $0 /Volumes/BABEL_USB"
   exit 1
 fi
-USB="$(eval echo "$USB")"
+case "$USB" in
+  "~/"*) USB="$HOME/${USB#\~/}" ;;
+  "~")   USB="$HOME" ;;
+esac
 
 BABEL="${BABEL_DIR:-$HOME/Desktop/Babel}"
 INTERFAZ="$BABEL/babel-interfaz"

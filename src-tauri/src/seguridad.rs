@@ -171,8 +171,9 @@ pub fn blindar_documento(texto: &str, clave_hex: &str) -> Result<Vec<u8>, String
     // Reutilizar un nonce con AES-GCM destruye completamente la seguridad.
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
-    // Un nonce todo-ceros indica fallo catastrófico del RNG — abortamos.
-    if nonce_bytes == [0u8; 12] {
+    // Nonce degenerado (todos los bytes iguales) indica fallo catastrófico del RNG.
+    let primer_byte = nonce_bytes[0];
+    if nonce_bytes.iter().all(|&b| b == primer_byte) {
         return Err("Fallo del generador de entropía del sistema".to_string());
     }
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -216,7 +217,7 @@ pub fn descifrar_documento(paquete: Vec<u8>, clave_hex: &str) -> Result<String, 
     // No podemos distinguir entre los dos casos — eso es intencionado (no revela info).
     let plaintext = cipher
         .decrypt(nonce, ciphertext)
-        .map_err(|_| "Descifrado fallido — clave incorrecta o archivo manipulado".to_string())?;
+        .map_err(|_| "Descifrado fallido".to_string())?;
 
     let plaintext_z = Zeroizing::new(plaintext);
     let resultado = String::from_utf8(plaintext_z.to_vec())
