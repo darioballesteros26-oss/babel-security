@@ -1076,6 +1076,9 @@ function filtrarArchivosGuardados(texto: string): void {
   const limpiar = document.getElementById("buscar-archivos-limpiar");
   if (limpiar) limpiar.classList.toggle("hidden", !terminoBusquedaArchivos);
 
+  const vacioPermanente = lista.querySelector<HTMLElement>(".archivos-vacio");
+  if (vacioPermanente) vacioPermanente.style.display = terminoBusquedaArchivos ? "none" : "";
+
   const normalizar = (s: string) => s.toLowerCase().replace(/[\s_ ]+/g, " ").trim();
   const q = normalizar(terminoBusquedaArchivos);
   const count = document.getElementById("count-guardados");
