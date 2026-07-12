@@ -884,38 +884,36 @@ async function cargarArchivosGuardados(): Promise<void> {
         <p>No hay archivos guardados</p>
         <p class="archivos-vacio-sub">Arrastra documentos aquí para cifrarlos</p>
       </div>`;
-      return;
-    }
+    } else {
+      const limpiarNombre = (n: string) =>
+        n.replace(/\.babel$/, "")
+         .replace(/__orig/g, "")
+         .replace(/^[a-z]{2}-[a-z]{2}_/, "")
+         .replace(/_\d{8,}$/, "")
+         .trim();
 
-    const limpiarNombre = (n: string) =>
-      n.replace(/\.babel$/, "")
-       .replace(/__orig/g, "")
-       .replace(/^[a-z]{2}-[a-z]{2}_/, "")
-       .replace(/_\d{8,}$/, "")
-       .trim();
+      type Par = { orig?: MetadatosArchivo; trad?: MetadatosArchivo; guardado?: MetadatosArchivo };
+      const grupos = new Map<string, Par>();
 
-    type Par = { orig?: MetadatosArchivo; trad?: MetadatosArchivo; guardado?: MetadatosArchivo };
-    const grupos = new Map<string, Par>();
+      for (const a of archivos) {
+        const base = limpiarNombre(a.nombre);
+        if (!grupos.has(base)) grupos.set(base, {});
+        const g = grupos.get(base)!;
+        if (!a.es_traduccion) g.guardado = a;
+        else if (a.idioma === "original") g.orig = a;
+        else g.trad = a;
+      }
 
-    for (const a of archivos) {
-      const base = limpiarNombre(a.nombre);
-      if (!grupos.has(base)) grupos.set(base, {});
-      const g = grupos.get(base)!;
-      if (!a.es_traduccion) g.guardado = a;
-      else if (a.idioma === "original") g.orig = a;
-      else g.trad = a;
-    }
+      if (count) count.textContent = `${grupos.size} archivo${grupos.size !== 1 ? "s" : ""}`;
 
-    if (count) count.textContent = `${grupos.size} archivo${grupos.size !== 1 ? "s" : ""}`;
+      lista.innerHTML = Array.from(grupos.entries()).map(([base, g]) => {
+        const nombre = escapeHTML(base);
 
-    lista.innerHTML = Array.from(grupos.entries()).map(([base, g]) => {
-      const nombre = escapeHTML(base);
-
-      const fuenteOrig = g.orig ?? g.guardado;
-      if (g.trad && fuenteOrig) {
-        const kb = (g.trad.tamaño / 1024).toFixed(0);
-        const idioma = g.trad.idioma.replace("_", "→").toUpperCase();
-        return `
+        const fuenteOrig = g.orig ?? g.guardado;
+        if (g.trad && fuenteOrig) {
+          const kb = (g.trad.tamaño / 1024).toFixed(0);
+          const idioma = g.trad.idioma.replace("_", "→").toUpperCase();
+          return `
 <div class="archivo-card" data-ruta="${escapeHTML(g.trad.ruta)}" data-ruta-orig="${escapeHTML(fuenteOrig.ruta)}" data-base="${escapeHTML(base)}" data-busqueda="${escapeHTML(base.toLowerCase().replace(/[\s_]+/g," ").trim())}" data-guardado="false" draggable="true">
   <div class="archivo-card-header">
     <input type="checkbox" class="archivo-checkbox-g" data-action="seleccionar" style="accent-color:var(--dorado);cursor:pointer;flex-shrink:0;width:16px;height:16px;">
@@ -933,11 +931,11 @@ async function cargarArchivosGuardados(): Promise<void> {
     <button type="button" class="btn-archivo" data-action="enviar" style="opacity:0.7;">✉</button>
   </div>
 </div>`;
-      }
+        }
 
-      const a = g.guardado ?? g.trad ?? g.orig!;
-      const kb = (a.tamaño / 1024).toFixed(0);
-      return `
+        const a = g.guardado ?? g.trad ?? g.orig!;
+        const kb = (a.tamaño / 1024).toFixed(0);
+        return `
 <div class="archivo-card" data-ruta="${escapeHTML(a.ruta)}" data-base="${escapeHTML(base)}" data-busqueda="${escapeHTML(base.toLowerCase().replace(/[\s_]+/g," ").trim())}" data-guardado="true" draggable="true">
   <div class="archivo-card-header">
     <input type="checkbox" class="archivo-checkbox-g" data-action="seleccionar" style="accent-color:var(--dorado);cursor:pointer;flex-shrink:0;width:16px;height:16px;">
@@ -956,9 +954,10 @@ async function cargarArchivosGuardados(): Promise<void> {
     <button type="button" class="btn-archivo" data-action="enviar" style="opacity:0.7;">✉</button>
   </div>
 </div>`;
-    }).join("");
+      }).join("");
 
-    if (terminoBusquedaArchivos) filtrarArchivosGuardados(terminoBusquedaArchivos);
+      if (terminoBusquedaArchivos) filtrarArchivosGuardados(terminoBusquedaArchivos);
+    }
 
     lista.onclick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
