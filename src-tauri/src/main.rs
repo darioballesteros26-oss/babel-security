@@ -360,7 +360,7 @@ fn incrementar_contador_y_bloquear(sesion: &tauri::State<SesionActiva>) -> Resul
     if let Ok(mut c) = sesion.contador.lock() {
         *c = (*c).max(disco) + 1;
         seguridad::escribir_contador_intentos(*c);
-        if *c >= 3 {
+        if *c >= 5 {
             *c = 0;
             seguridad::borrar_contador_intentos();
             traductor::activar_bloqueo_disco()
