@@ -725,6 +725,10 @@ function toggleSidebar(): void {
   }
 }
 
+function toggleBorrarOriginal(activado: boolean): void {
+  localStorage.setItem(LS_NO_PREG_BORRAR_ORIG, activado ? "si" : "");
+}
+
 function toggleBorradoAutomatico(activado: boolean): void {
   borradoAutomaticoActivado = activado;
   guardarAjustesTraduccion().catch(() => {});
@@ -2400,6 +2404,8 @@ async function cargarAjustesTraduccion(): Promise<void> {
   const sidebarAbierto = localStorage.getItem("babel-sidebar") !== "0";
   const sidebar = document.getElementById("chat-sidebar");
   if (sidebar) sidebar.classList.toggle("hidden", !sidebarAbierto);
+  const toggleBorrarOrig = document.getElementById("toggle-borrar-orig") as HTMLInputElement | null;
+  if (toggleBorrarOrig) toggleBorrarOrig.checked = localStorage.getItem(LS_NO_PREG_BORRAR_ORIG) === "si";
   const savedBuzonG = localStorage.getItem("babel-buzon-activo-g");
   if (savedBuzonG && savedBuzonG !== "todos") {
     const nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados");
@@ -3079,6 +3085,7 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).crearBunker = crearBunker;
 (window as any).intentarAcceso = intentarAcceso;
 (window as any).manejarSeleccion = manejarSeleccion;
+(window as any).toggleBorrarOriginal = toggleBorrarOriginal;
 (window as any).toggleBorradoAutomatico = toggleBorradoAutomatico;
 (window as any).cambiarIdiomaDesdeSelectores = cambiarIdiomaDesdeSelectores;
 (window as any).cambiarIdiomaDesdeAjustes = cambiarIdiomaDesdeAjustes;
