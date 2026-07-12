@@ -1714,12 +1714,6 @@ async fn exportar_archivos_a_carpeta(
     app: tauri::AppHandle,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<u32, String> {
-    if sesion.subclave_hex()?.is_empty() {
-        return Err("No hay sesión activa.".into());
-    }
-
-    // async + spawn_blocking para que el folder picker nativo no deadlockee el hilo
-    // principal (mismo motivo que exportar_archivo / importar_archivo_dialogo).
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -2295,16 +2289,13 @@ pub struct AppSettings {
 #[tauri::command]
 fn save_settings(settings: AppSettings, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
     let subclave_hex = sesion.subclave_hex()?;
-
-    let data = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
-
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa para cifrar los ajustes.".to_string());
-    } else {
-        let cifrado = seguridad::blindar_documento(&data, &subclave_hex)
-            .map_err(|e| format!("Error cifrando ajustes: {}", e))?;
-        fs::write(&babel_path("settings.babel"), cifrado).map_err(|e| e.to_string())?;
     }
+    let data = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
+    let cifrado = seguridad::blindar_documento(&data, &subclave_hex)
+        .map_err(|e| format!("Error cifrando ajustes: {}", e))?;
+    fs::write(&babel_path("settings.babel"), cifrado).map_err(|e| e.to_string())?;
     Ok(())
 }
 

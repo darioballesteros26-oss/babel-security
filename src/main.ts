@@ -1136,6 +1136,29 @@ function filtrarArchivosGuardados(texto: string): void {
 const LS_NO_PREG_BORRAR_ORIG = "babel_noPreg_borrarOrig";
 const LS_NO_PREG_ELIMINAR    = "babel_noPreg_eliminar";
 
+async function confirmarEliminar(n: number): Promise<boolean> {
+  return confirmarConCheckbox({
+    titulo: "ELIMINAR ARCHIVO",
+    msg: `¿Eliminar ${n === 1 ? "este archivo" : `estos ${n} archivos`} de forma permanente?`,
+    riesgos: [
+      "El archivo será destruido con 3 pasadas de sobreescritura.",
+      "No puede recuperarse de ninguna forma, ni con software de recuperación.",
+      "Asegúrate de que no necesitas acceder a él nunca más.",
+    ],
+    textoOk: "ELIMINAR",
+    lsKey: LS_NO_PREG_ELIMINAR,
+  });
+}
+
+async function borrarRutas(rutas: string[]): Promise<number> {
+  let errores = 0;
+  for (const ruta of rutas) {
+    try { await invoke("eliminar_archivo", { ruta }); }
+    catch { errores++; }
+  }
+  return errores;
+}
+
 // Modal de confirmación reutilizable con checkbox "no volver a preguntar".
 // Guarda en localStorage la elección del usuario si marca el checkbox.
 // respetarNo: si true, un "no" guardado resuelve false sin mostrar el modal.
@@ -1301,43 +1324,17 @@ function cerrarModalRenombrarArchivo(): void {
 // Elimina todos los archivos guardados seleccionados y recarga la lista
 async function eliminarSeleccionadosGuardados(): Promise<void> {
   const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
-  if (checkboxes.length === 0) return;
-
-  const n = checkboxes.length;
-  const confirmar = await confirmarConCheckbox({
-    titulo: "ELIMINAR ARCHIVO",
-    msg: `¿Eliminar ${n === 1 ? "este archivo" : `estos ${n} archivos`} de forma permanente?`,
-    riesgos: [
-      "El archivo será destruido con 3 pasadas de sobreescritura.",
-      "No puede recuperarse de ninguna forma, ni con software de recuperación.",
-      "Asegúrate de que no necesitas acceder a él nunca más.",
-    ],
-    textoOk: "ELIMINAR",
-    lsKey: LS_NO_PREG_ELIMINAR,
-  });
-  if (!confirmar) return;
-
+  if (!checkboxes.length || !await confirmarEliminar(checkboxes.length)) return;
   const rutas: string[] = [];
   checkboxes.forEach(cb => {
     const card = cb.closest(".archivo-card") as HTMLElement;
-    const ruta = card?.dataset.ruta;
-    const rutaOrig = card?.dataset.rutaOrig;
-    if (ruta) rutas.push(ruta);
-    if (rutaOrig) rutas.push(rutaOrig);
+    if (card?.dataset.ruta) rutas.push(card.dataset.ruta);
+    if (card?.dataset.rutaOrig) rutas.push(card.dataset.rutaOrig);
   });
-
-  let errores = 0;
-  for (const ruta of rutas) {
-    try {
-      await invoke("eliminar_archivo", { ruta });
-    } catch {
-      errores++;
-    }
-  }
-
+  const errores = await borrarRutas(rutas);
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.add("hidden");
-  mostrarToast(errores === 0 ? `✓ Destruido de forma segura — irrecuperable` : `${errores} errores al eliminar`, errores > 0);
+  mostrarToast(errores ? `${errores} errores al eliminar` : "✓ Destruido de forma segura — irrecuperable", errores > 0);
   await cargarArchivosGuardados();
 }
 
@@ -1516,7 +1513,7 @@ async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent): Promi
     const agregar = (label: string, id: string, indent: number, tieneHijos: boolean) => {
       const item = document.createElement("div");
       const colapsado = buzonesColapsados.has(id);
-      item.style.cssText = `display:flex;align-items:center;padding:8px ${16 + indent * 12}px;font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.7rem;letter-spacing:2px;color:var(--dorado);cursor:pointer;`;
+      item.style.cssText = `display:flex;align-items:center;padding:8px ${16 + indent * 12}px;font-family:'Times New Roman', Times, serif;font-size:0.7rem;letter-spacing:2px;color:var(--dorado);cursor:pointer;`;
       if (tieneHijos) {
         const toggle = document.createElement("span");
         toggle.textContent = colapsado ? "▶ " : "▼ ";
@@ -1642,7 +1639,7 @@ function mostrarToast(mensaje: string, esError: boolean): void {
     color: ${esError ? "#ff6b6b" : "var(--dorado)"};
     border: 1px solid ${esError ? "#ff6b6b44" : "var(--dorado)"};
     padding: 12px 28px;
-    font-family: var(--fuente-titulo, 'Times New Roman', Times, serif, serif);
+    font-family: var(--fuente-titulo, 'Times New Roman', Times, serif);
     font-size: 0.85rem;
     letter-spacing: 0.12em;
     border-radius: 2px;
@@ -1697,45 +1694,13 @@ function mostrarAlertaAmenaza(amenazas: string[]): void {
 // Elimina todos los archivos seleccionados con zeroize
 async function eliminarSeleccionados(): Promise<void> {
   const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox:checked");
-  if (checkboxes.length === 0) return;
-
-  const n = checkboxes.length;
-  const confirmar = await confirmarConCheckbox({
-    titulo: "ELIMINAR ARCHIVO",
-    msg: `¿Eliminar ${n === 1 ? "este archivo" : `estos ${n} archivos`} de forma permanente?`,
-    riesgos: [
-      "El archivo será destruido con 3 pasadas de sobreescritura.",
-      "No puede recuperarse de ninguna forma, ni con software de recuperación.",
-      "Asegúrate de que no necesitas acceder a él nunca más.",
-    ],
-    textoOk: "ELIMINAR",
-    lsKey: LS_NO_PREG_ELIMINAR,
-  });
-  if (!confirmar) return;
-
-  const rutas: string[] = [];
-  checkboxes.forEach(cb => {
-    const card = cb.closest(".archivo-card") as HTMLElement;
-    const ruta = card?.dataset.ruta;
-    if (ruta) rutas.push(ruta);
-  });
-
-  let errores = 0;
-  for (const ruta of rutas) {
-    try {
-      await invoke("eliminar_archivo", { ruta });
-    } catch {
-      errores++;
-    }
-  }
-
+  if (!checkboxes.length || !await confirmarEliminar(checkboxes.length)) return;
+  const rutas = Array.from(checkboxes)
+    .map(cb => (cb.closest(".archivo-card") as HTMLElement)?.dataset.ruta)
+    .filter((r): r is string => !!r);
+  const errores = await borrarRutas(rutas);
   await cargarArchivosGuardados();
-
-  if (errores > 0) {
-    mostrarToast(`${errores} archivos no se pudieron eliminar`, true);
-  } else {
-    mostrarToast(`✓ Destruido de forma segura — irrecuperable`, false);
-  }
+  mostrarToast(errores ? `${errores} archivos no se pudieron eliminar` : "✓ Destruido de forma segura — irrecuperable", errores > 0);
 }
 // CIERRE AUTOMÁTICO POR INACTIVIDAD
 let timerInactividad: ReturnType<typeof setTimeout> | null = null;
@@ -2103,12 +2068,12 @@ async function buscarDispositivos(): Promise<void> {
   const lista = document.getElementById("p2p-lista-peers");
   if (!lista) return;
   lista.style.display = "flex";
-  lista.innerHTML = `<div style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);text-align:center;">BUSCANDO...</div>`;
+  lista.innerHTML = `<div style="font-family:'Times New Roman', Times, serif;font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);text-align:center;">BUSCANDO...</div>`;
 
   try {
     const peers = await invoke<any[]>("buscar_peers_p2p");
     if (peers.length === 0) {
-      lista.innerHTML = `<div style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);text-align:center;opacity:0.5;">NO SE ENCONTRÓ NINGÚN BABEL</div>`;
+      lista.innerHTML = `<div style="font-family:'Times New Roman', Times, serif;font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);text-align:center;opacity:0.5;">NO SE ENCONTRÓ NINGÚN BABEL</div>`;
       return;
     }
     lista.innerHTML = peers.map(p => `
@@ -2116,8 +2081,8 @@ async function buscarDispositivos(): Promise<void> {
         style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);
         color:var(--texto-principal);padding:10px 14px;cursor:pointer;border-radius:2px;
         display:flex;justify-content:space-between;align-items:center;width:100%;">
-        <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;letter-spacing:1px;">${escapeHTML(p.nombre)}</span>
-        <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;color:var(--dorado);opacity:0.7;">${escapeHTML(p.ip)}</span>
+        <span style="font-family:'Times New Roman', Times, serif;font-size:0.65rem;letter-spacing:1px;">${escapeHTML(p.nombre)}</span>
+        <span style="font-family:'Times New Roman', Times, serif;font-size:0.58rem;color:var(--dorado);opacity:0.7;">${escapeHTML(p.ip)}</span>
       </button>`).join("");
     lista.onclick = (e: MouseEvent) => {
       const btn = (e.target as HTMLElement).closest("[data-action='peer']") as HTMLElement | null;
@@ -2180,19 +2145,19 @@ function añadirMensajeP2P(tipo: "yo" | "ellos" | "sistema", texto: string, trad
   const div = document.createElement("div");
 
   if (tipo === "sistema") {
-    div.style.cssText = "text-align:center;font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);opacity:0.5;padding:4px 0;";
+    div.style.cssText = "text-align:center;font-family:'Times New Roman', Times, serif;font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);opacity:0.5;padding:4px 0;";
     div.textContent = texto;
   } else {
     const esYo = tipo === "yo";
-    const textoTraducido = traduccion ? `<p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.78rem;color:var(--texto-secundario);margin:6px 0 0;font-style:italic;opacity:0.7;">${escapeHTML(traduccion)}</p>` : "";
+    const textoTraducido = traduccion ? `<p style="font-family:'Times New Roman', Times, serif;font-size:0.78rem;color:var(--texto-secundario);margin:6px 0 0;font-style:italic;opacity:0.7;">${escapeHTML(traduccion)}</p>` : "";
     div.style.cssText = `display:flex;justify-content:${esYo ? "flex-end" : "flex-start"};margin-bottom:4px;`;
     div.innerHTML = `
       <div style="max-width:70%;background:${esYo ? "rgba(201,168,76,0.12)" : "rgba(255,255,255,0.05)"};
         border:1px solid ${esYo ? "rgba(201,168,76,0.3)" : "rgba(255,255,255,0.08)"};
         border-radius:3px;padding:10px 14px;">
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;color:var(--texto-principal);margin:0;line-height:1.5;">${escapeHTML(texto)}</p>
+        <p style="font-family:'Times New Roman', Times, serif;font-size:0.88rem;color:var(--texto-principal);margin:0;line-height:1.5;">${escapeHTML(texto)}</p>
         ${textoTraducido}
-        <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.55rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.5;display:block;margin-top:4px;">${esYo ? "TÚ" : "BABEL REMOTO"} · AES-256</span>
+        <span style="font-family:'Times New Roman', Times, serif;font-size:0.55rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.5;display:block;margin-top:4px;">${esYo ? "TÚ" : "BABEL REMOTO"} · AES-256</span>
       </div>`;
   }
 
@@ -3295,24 +3260,20 @@ function guardarNombreDisplay(): void {
   cargarAjustesTraduccion().catch(() => {});
 }
 
-// Cargar ajustes al arrancar
-document.addEventListener("DOMContentLoaded", cargarAjustesGuardados);
-document.addEventListener("DOMContentLoaded", () => cargarAjustesTraduccion().catch(() => {}));
+// Cargar ajustes + UX global al arrancar
 
-// Botón cancelar traducción en curso
 document.addEventListener("DOMContentLoaded", () => {
-  const btnCancelar = document.getElementById("btn-cancelar-traduccion");
-  btnCancelar?.addEventListener("click", async () => {
+  cargarAjustesGuardados();
+  cargarAjustesTraduccion().catch(() => {});
+
+  document.getElementById("btn-cancelar-traduccion")?.addEventListener("click", async () => {
     try {
       await invoke("cancelar_traduccion_activa");
       mostrarProcesando(false);
       añadirMensajeBabel("Traducción cancelada.", "BABEL · cancelada");
     } catch { /* silencioso */ }
   });
-});
 
-// UX GLOBAL — Escape cierra modales, Enter navega recovery, paste BIP39
-document.addEventListener("DOMContentLoaded", () => {
   const inputBuscar = document.getElementById("buscar-archivos-g") as HTMLInputElement | null;
   const btnLimpiar = document.getElementById("buscar-archivos-limpiar") as HTMLButtonElement | null;
   inputBuscar?.addEventListener("input", () => filtrarArchivosGuardados(inputBuscar.value));
@@ -3321,9 +3282,6 @@ document.addEventListener("DOMContentLoaded", () => {
     filtrarArchivosGuardados("");
   });
 
-});
-
-document.addEventListener("DOMContentLoaded", () => {
   // Escape cierra cualquier modal visible
   document.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key !== "Escape") return;
