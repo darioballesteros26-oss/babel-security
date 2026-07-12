@@ -50,6 +50,8 @@ let buzonParentPendienteG: string | null = null;
 // Tipo compartido para nodos de buzón con árbol jerárquico
 interface BuzonNodo { id: string; nombre: string; parent: string | null; }
 
+let _buzonesCache: BuzonNodo[] = [];
+
 // IDs de buzones colapsados (no muestran sus hijos)
 const buzonesColapsados = new Set<string>();
 
@@ -963,6 +965,12 @@ async function cargarArchivosGuardados(): Promise<void> {
       if (!btn) return;
       const accion = btn.dataset.action;
       if (accion === "seleccionar") { actualizarSeleccionGuardados(); return; }
+      if (accion === "resultado-buzon") {
+        seleccionarBuzonGuardados(btn.dataset.buzon ?? "todos");
+        const inp = document.getElementById("buscar-archivos-g") as HTMLInputElement | null;
+        if (inp) { inp.value = ""; filtrarArchivosGuardados(""); }
+        return;
+      }
       const card = btn.closest(".archivo-card") as HTMLElement | null;
       if (!card) return;
       const ruta = card.dataset.ruta ?? "";
@@ -1044,9 +1052,6 @@ function seleccionarBuzonGuardados(id: string): void {
   if (inp) inp.value = "";
   const limpiar = document.getElementById("buscar-archivos-limpiar");
   if (limpiar) limpiar.classList.add("hidden");
-  terminoBusquedaBuzones = "";
-  const inpBuzones = document.getElementById("buscar-buzones-g") as HTMLInputElement | null;
-  if (inpBuzones) inpBuzones.value = "";
   cargarBuzonesGuardados();
   cargarArchivosGuardados();
 }
@@ -1056,37 +1061,64 @@ function filtrarArchivosGuardados(texto: string): void {
   const lista = document.getElementById("lista-guardados");
   if (!lista) return;
 
+  lista.querySelectorAll(".resultado-busqueda-inject").forEach(el => el.remove());
   lista.querySelector(".sin-resultados-busqueda")?.remove();
 
   const limpiar = document.getElementById("buscar-archivos-limpiar");
   if (limpiar) limpiar.classList.toggle("hidden", !terminoBusquedaArchivos);
 
-  // Normalizar: minúsculas, colapsar espacios/guiones bajos/non-breaking spaces
   const normalizar = (s: string) => s.toLowerCase().replace(/[\s_ ]+/g, " ").trim();
   const q = normalizar(terminoBusquedaArchivos);
-  const cards = lista.querySelectorAll<HTMLElement>(".archivo-card");
-  let visibles = 0;
+  const count = document.getElementById("count-guardados");
 
+  const cards = lista.querySelectorAll<HTMLElement>(".archivo-card");
+  let archivosVisibles = 0;
   cards.forEach(card => {
-    const busqueda = card.dataset.busqueda ?? normalizar(card.dataset.base ?? "");
-    const visible = !q || busqueda.includes(q);
+    const visible = !q || (card.dataset.busqueda ?? normalizar(card.dataset.base ?? "")).includes(q);
     card.style.display = visible ? "" : "none";
-    if (visible) visibles++;
+    if (visible) archivosVisibles++;
   });
 
-  const count = document.getElementById("count-guardados");
-  if (q) {
-    if (count) count.textContent = visibles === cards.length
-      ? `${visibles} archivo${visibles !== 1 ? "s" : ""}`
-      : `${visibles} de ${cards.length}`;
-    if (visibles === 0) {
-      const div = document.createElement("div");
-      div.className = "sin-resultados-busqueda archivos-vacio";
-      div.innerHTML = `<p>Sin resultados</p><p class="archivos-vacio-sub">«${escapeHTML(q)}» no coincide con ningún archivo</p>`;
-      lista.appendChild(div);
-    }
-  } else if (count) {
-    count.textContent = `${cards.length} archivo${cards.length !== 1 ? "s" : ""}`;
+  if (!q) {
+    if (count) count.textContent = `${archivosVisibles} archivo${archivosVisibles !== 1 ? "s" : ""}`;
+    return;
+  }
+
+  const buzonesMatch = _buzonesCache.filter(b => normalizar(b.nombre).includes(q));
+  const frag = document.createDocumentFragment();
+
+  if (buzonesMatch.length > 0) {
+    const h = document.createElement("div");
+    h.className = "resultado-seccion-titulo resultado-busqueda-inject";
+    h.textContent = "CARPETAS";
+    frag.appendChild(h);
+    buzonesMatch.forEach(b => {
+      const row = document.createElement("div");
+      row.className = "resultado-buzon-item resultado-busqueda-inject";
+      row.dataset.action = "resultado-buzon";
+      row.dataset.buzon = b.id;
+      row.innerHTML = `<span class="resultado-buzon-icono">\u25ab</span><span class="resultado-buzon-nombre">${escapeHTML(b.nombre.toUpperCase())}</span><span class="resultado-buzon-badge">CARPETA</span>`;
+      frag.appendChild(row);
+    });
+  }
+
+  if (archivosVisibles > 0) {
+    const h = document.createElement("div");
+    h.className = "resultado-seccion-titulo resultado-busqueda-inject";
+    h.textContent = "ARCHIVOS";
+    frag.appendChild(h);
+  }
+
+  lista.prepend(frag);
+
+  const total = buzonesMatch.length + archivosVisibles;
+  if (count) count.textContent = `${total} resultado${total !== 1 ? "s" : ""}`;
+
+  if (total === 0) {
+    const div = document.createElement("div");
+    div.className = "sin-resultados-busqueda archivos-vacio resultado-busqueda-inject";
+    div.innerHTML = `<p>Sin resultados</p><p class="archivos-vacio-sub">«${escapeHTML(q)}» no coincide con nada</p>`;
+    lista.appendChild(div);
   }
 }
 
@@ -1400,6 +1432,7 @@ async function irAArchivos(): Promise<void> {
 async function cargarBuzonesGuardados(): Promise<void> {
   try {
     const nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados");
+    _buzonesCache = nodos;
     const lista = document.getElementById("lista-buzones-g");
     if (!lista) return;
     lista.innerHTML = `
@@ -3278,8 +3311,6 @@ document.addEventListener("DOMContentLoaded", () => {
     filtrarArchivosGuardados("");
   });
 
-  const inputBuzones = document.getElementById("buscar-buzones-g") as HTMLInputElement | null;
-  inputBuzones?.addEventListener("input", () => filtrarBuzonesGuardados(inputBuzones.value));
 });
 
 document.addEventListener("DOMContentLoaded", () => {

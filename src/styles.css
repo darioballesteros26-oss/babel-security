@@ -1085,6 +1085,49 @@ body {
 
 .archivos-vacio-sub { font-size: 0.65rem !important; opacity: 0.5; }
 
+.resultado-seccion-titulo {
+  padding: 10px 24px 4px;
+  font-size: 0.55rem;
+  letter-spacing: 3px;
+  color: var(--texto-secundario);
+  opacity: 0.6;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.resultado-buzon-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(197,160,89,0.06);
+  background: rgba(197,160,89,0.03);
+  transition: background 0.15s;
+}
+.resultado-buzon-item:hover { background: rgba(197,160,89,0.09); }
+
+.resultado-buzon-icono { color: var(--dorado); opacity: 0.7; font-size: 0.9rem; flex-shrink: 0; }
+
+.resultado-buzon-nombre {
+  flex: 1;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.68rem;
+  letter-spacing: 2px;
+  color: var(--dorado);
+}
+
+.resultado-buzon-badge {
+  font-size: 0.5rem;
+  letter-spacing: 2px;
+  color: var(--dorado);
+  border: 1px solid rgba(197,160,89,0.3);
+  padding: 2px 6px;
+  border-radius: 2px;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
 /* ============================================================
    BUZONES
    ============================================================ */
