@@ -785,6 +785,24 @@ fn borrar_archivo_original(token: String) -> Result<bool, String> {
 }
 
 // ============================================================
+// COMANDO — Borrar un archivo externo (fuera de ~/Babel/) de forma segura.
+// Usado cuando el toggle "BORRAR ORIG." está ON en flujos de drag-and-drop/traducción.
+// Rechaza rutas dentro del directorio Babel para evitar borrado accidental de datos propios.
+// ============================================================
+#[tauri::command]
+fn borrar_archivo_fuente(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
+    sesion.subclave_hex()?; // requiere sesión activa
+    let path = std::fs::canonicalize(&ruta)
+        .map_err(|_| "Archivo no accesible.".to_string())?;
+    let babel = babel_dir();
+    if path.starts_with(&babel) {
+        return Err("No se puede borrar archivos internos de Babel.".into());
+    }
+    borrar_seguro(path.to_str().unwrap_or(&ruta));
+    Ok(())
+}
+
+// ============================================================
 // COMANDO — Comprobar si ya existe un archivo guardado con ese nombre base
 // Verifica contra el sistema de archivos real, no contra el DOM del frontend.
 // Evita que archivos en buzones no visibles pasen inadvertidos (B5).
@@ -3360,6 +3378,7 @@ fn main() {
             guardar_documento_sin_traducir,
             importar_archivo_dialogo,
             borrar_archivo_original,
+            borrar_archivo_fuente,
             archivo_guardado_existe,
             verificar_herramientas_pdf,
             listar_archivos_guardados,

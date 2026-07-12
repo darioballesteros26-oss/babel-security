@@ -704,6 +704,9 @@ async function procesarRuta(ruta: string): Promise<void> {
     const partesRes = rutaResultado.replace(/\\/g, "/").split("/");
     añadirResultadoArchivo(partesRes[partesRes.length - 1], rutaResultado);
     scrollAlFinal();
+    if (localStorage.getItem(LS_NO_PREG_BORRAR_ORIG) === "si") {
+      try { await invoke("borrar_archivo_fuente", { ruta }); } catch { /* silencioso */ }
+    }
   } catch (error) {
     mostrarProcesando(false);
     añadirMensajeBabel("Error procesando archivo: " + String(error), "BABEL · error");
@@ -1450,7 +1453,11 @@ async function guardarArchivoSinTraducir(rutaArchivo: string): Promise<void> {
         console.error("Error moviendo al buzón:", e);
       }
     }
-    mostrarToast(`✓ ${nombre} guardado y cifrado`, false);
+    let sufijo = "";
+    if (localStorage.getItem(LS_NO_PREG_BORRAR_ORIG) === "si") {
+      try { await invoke("borrar_archivo_fuente", { ruta: rutaArchivo }); sufijo = " · original destruido"; } catch { /* silencioso */ }
+    }
+    mostrarToast(`✓ ${nombre} guardado y cifrado${sufijo}`, false);
     await cargarArchivosGuardados();
 
   } catch (error) {
