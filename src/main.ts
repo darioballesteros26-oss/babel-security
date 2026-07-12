@@ -433,6 +433,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }).catch(() => {});
 
+  // Ocultar sidebar en fullscreen nativo (botón verde macOS)
+  getCurrentWindow().onResized(async () => {
+    const fs = await getCurrentWindow().isFullscreen().catch(() => false);
+    document.body.classList.toggle("es-fullscreen", fs);
+  }).catch(() => {});
+
   // Badge servidor: monitoreo continuo cada 5 s (verde=activo, rojo=caído)
   const badge = document.getElementById("nllb-badge");
   let servidorEstabaActivo = false;
@@ -2391,7 +2397,7 @@ async function cargarAjustesTraduccion(): Promise<void> {
     sincronizarSelectoresIdioma(origen, destino);
     await cambiarIdioma(`${origen}_${destino}`).catch(() => {});
   }
-  const sidebarAbierto = localStorage.getItem("babel-sidebar") === "1";
+  const sidebarAbierto = localStorage.getItem("babel-sidebar") !== "0";
   const sidebar = document.getElementById("chat-sidebar");
   if (sidebar) sidebar.classList.toggle("hidden", !sidebarAbierto);
   const savedBuzonG = localStorage.getItem("babel-buzon-activo-g");

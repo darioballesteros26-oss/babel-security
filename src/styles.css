@@ -754,6 +754,12 @@ body {
 
 .chat-sidebar.hidden { display: none !important; }
 
+/* Ocultar sidebar en pantalla completa y ventana reducida */
+:-webkit-full-screen .chat-sidebar { display: none !important; }
+:fullscreen .chat-sidebar { display: none !important; }
+.es-fullscreen .chat-sidebar { display: none !important; }
+@media (max-width: 680px) { .chat-sidebar { display: none !important; } }
+
 .sidebar-titulo {
   font-size: 0.6rem;
   color: var(--dorado);
