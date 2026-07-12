@@ -29,14 +29,12 @@ const MAX_ARCHIVOS: usize = 1000;
 // pueden perder actualizaciones (last-write-wins sobre estado obsoleto).
 static BUZON_INDEX_MUTEX: Mutex<()> = Mutex::new(());
 
-// Ruta del archivo original pendiente de borrado tras un import.
-// Se fija en importar_archivo_dialogo y se consume (→ None) en borrar_archivo_original.
-// Nunca se expone al frontend: el JS solo sabe si hay algo pendiente (bool).
-static PENDING_BORRAR_ORIGINAL: Mutex<Option<String>> = Mutex::new(None);
+// Rutas de archivos originales pendientes de borrado tras un import.
+// Clave: token opaco generado por nuevo_id(); valor: ruta canónica.
+// Cada import tiene su propio token — evita que imports concurrentes se sobreescriban.
+static PENDING_BORRAR_ORIGINAL: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
-// ============================================================
 // HELPER — Borrado seguro de archivos temporales
-// ============================================================
 // Sobreescribe el archivo con ceros antes de borrarlo.
 // Así los bytes no quedan recuperables en disco aunque el SO
 // no haya sobreescrito el sector todavía.
@@ -75,9 +73,7 @@ pub fn borrar_seguro(ruta: &str) {
     let _ = fs::remove_file(ruta);
 }
 
-// ============================================================
 // ESTADO GLOBAL — Sesión activa del usuario
-// ============================================================
 
 pub struct SesionActiva {
     // Parche 4: la subclave residente se guarda como 32 bytes crudos (mlock'd), NO como hex.
@@ -140,9 +136,7 @@ impl SesionActiva {
     }
 }
 
-// ============================================================
 // HELPERS — Rutas absolutas de Babel
-// ============================================================
 // ~/Babel/          → archivos del sistema (salt, config, bloqueo...)
 // ~/Babel/archivos/ → documentos cifrados del usuario
 // ~/Babel/tmp/      → temporales durante traducción (se borran solos)
@@ -208,7 +202,6 @@ fn validar_ruta_en(ruta: &str, base: std::path::PathBuf) -> Result<(), String> {
     {
         return Err("Ruta no autorizada.".into());
     }
-    // Verificar existencia
     if !std::path::Path::new(ruta).exists() {
         return Err("Archivo no encontrado.".into());
     }
@@ -222,103 +215,81 @@ fn validar_ruta_en(ruta: &str, base: std::path::PathBuf) -> Result<(), String> {
     }
     Ok(())
 }
-// ============================================================
 // COMANDO 1 — Verificación de entorno
-// ============================================================
 
-#[tauri::command]
-fn verificar_entorno_seguro() -> Result<String, String> {
-    let sandbox = seguridad::AntiSandbox::analizar_entorno();
-    if !sandbox.seguro {
-        // E-3: no filtrar nombres de procesos — solo el recuento
-        return Err(format!(
-            "Entorno comprometido: {} amenaza(s) detectada(s)",
-            sandbox.amenazas.len()
-        ));
-    }
-
-    if let Ok(keylogger) = seguridad::AntiKeylogger::blindaje_total(None) {
-        if !keylogger.amenazas.is_empty() {
-            return Err(format!(
-                "Procesos sospechosos: {} proceso(s) detectado(s)",
-                keylogger.amenazas.len()
-            ));
-        }
-    }
-    // Comprobar FileVault — solo genera un aviso, NUNCA salta la verificación de licencia.
-    // Antes hacía return temprano si FileVault estaba OFF, lo que permitía bypasear la
-    // vinculación al equipo simplemente desactivando FileVault (A2).
-    #[allow(unused_mut)]
-    let mut aviso_filevault = String::new();
-    #[cfg(target_os = "macos")]
-    {
-        let fv = std::process::Command::new("fdesetup")
-            .arg("status")
-            .output();
-        if let Ok(out) = fv {
-            let status = String::from_utf8_lossy(&out.stdout);
-            if !status.contains("On") {
-                aviso_filevault =
-                    " — FileVault desactivado. Recomendamos activarlo en Preferencias del Sistema."
-                        .to_string();
-            }
-        }
-    }
-
-    // Licencia por hardware — vincula Babel al número de serie del Mac.
-    // Primera vez: crea licencia.babel con el hash del serial.
-    // Siguientes veces: verifica que el serial coincide. Si no, acceso denegado.
-
+fn verificar_licencia_hardware() -> Result<(), String> {
+    use hmac::{Hmac, Mac};
+    use sha2::Digest;
     #[cfg(target_os = "macos")]
     let serial = std::process::Command::new("system_profiler")
         .args(["SPHardwareDataType"])
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| {
-            s.lines()
-                .find(|l| l.contains("Serial Number"))
-                .map(|l| l.trim().to_string())
-        })
+        .and_then(|s| s.lines().find(|l| l.contains("Serial Number")).map(|l| l.trim().to_string()))
         .unwrap_or_else(|| "UNKNOWN".to_string());
-
     #[cfg(not(target_os = "macos"))]
     let serial = "WINDOWS-NO-SERIAL".to_string();
 
-    use sha2::Digest;
-    let hash = format!("{:x}", sha2::Sha256::digest(serial.as_bytes()));
-    let ruta_licencia = babel_path("licencia.babel");
-
-    if std::path::Path::new(&ruta_licencia).exists() {
-        let guardado = fs::read_to_string(&ruta_licencia)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        if guardado != hash {
+    const LICENCIA_KEY: &[u8] = b"babel-license-bind-v1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+    let hmac_serial = |bytes: &[u8]| -> String {
+        let mut mac = <Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(LICENCIA_KEY)
+            .expect("LICENCIA_KEY is a compile-time constant with valid length");
+        mac.update(bytes);
+        hex::encode(mac.finalize().into_bytes())
+    };
+    let firma = hmac_serial(serial.as_bytes());
+    let ruta = babel_path("licencia.babel");
+    if std::path::Path::new(&ruta).exists() {
+        let guardado = fs::read_to_string(&ruta).unwrap_or_default().trim().to_string();
+        let hash_legacy = format!("{:x}", sha2::Sha256::digest(serial.as_bytes()));
+        if guardado != firma && guardado == hash_legacy {
+            let _ = fs::write(&ruta, &firma); // migrar legado a HMAC
+        } else if guardado != firma {
             return Err("Licencia inválida. Babel está vinculado a otro equipo.".into());
         }
     } else {
-        let _ = fs::write(&ruta_licencia, &hash);
-    };
+        let _ = fs::write(&ruta, &firma);
+    }
+    Ok(())
+}
 
+#[tauri::command]
+fn verificar_entorno_seguro() -> Result<String, String> {
+    let sandbox = seguridad::AntiSandbox::analizar_entorno();
+    if !sandbox.seguro {
+        return Err(format!("Entorno comprometido: {} amenaza(s) detectada(s)", sandbox.amenazas.len()));
+    }
+    if let Ok(keylogger) = seguridad::AntiKeylogger::blindaje_total(None) {
+        if !keylogger.amenazas.is_empty() {
+            return Err(format!("Procesos sospechosos: {} proceso(s) detectado(s)", keylogger.amenazas.len()));
+        }
+    }
+
+    // FileVault: solo aviso, nunca bloquea (desactivarlo no debe permitir bypasear la licencia)
+    #[allow(unused_mut)]
+    let mut aviso_filevault = String::new();
+    #[cfg(target_os = "macos")]
+    if let Ok(out) = std::process::Command::new("fdesetup").arg("status").output() {
+        if !String::from_utf8_lossy(&out.stdout).contains("On") {
+            aviso_filevault = " — FileVault desactivado. Recomendamos activarlo en Preferencias del Sistema.".to_string();
+        }
+    }
+
+    verificar_licencia_hardware()?;
     Ok(format!("BABEL SEGURO — Todos los protocolos activos.{}", aviso_filevault))
 }
-// ============================================================
 // COMANDO 2 — Comprobar si el búnker existe
-// ============================================================
 
 #[tauri::command]
 fn comprobar_estado_bunker() -> bool {
     Path::new(&babel_path("usuarios.babel")).exists()
 }
 
-// ============================================================
 // COMANDO 3 — Crear el búnker por primera vez
-// ============================================================
 
 #[tauri::command]
 fn crear_acceso_bunker(maestra: String, usuario: String, pass: String) -> Result<String, String> {
-    // Zeroizing garantiza borrado en cualquier salida, incluidos early returns
     let pass = Zeroizing::new(pass);
     let maestra = Zeroizing::new(maestra);
 
@@ -380,9 +351,7 @@ fn crear_acceso_bunker(maestra: String, usuario: String, pass: String) -> Result
     ))
 }
 
-// ============================================================
 // COMANDO 4 — Verificar login y guardar sesión
-// ============================================================
 
 fn incrementar_contador_y_bloquear(sesion: &tauri::State<SesionActiva>) -> Result<(), String> {
     // HMAC-SHA256 con master.salt: borrar intentos.dat no resetea el valor si hay sesión
@@ -393,7 +362,7 @@ fn incrementar_contador_y_bloquear(sesion: &tauri::State<SesionActiva>) -> Resul
         seguridad::escribir_contador_intentos(*c);
         if *c >= 3 {
             *c = 0;
-            let _ = fs::remove_file(&babel_path("intentos.dat"));
+            seguridad::borrar_contador_intentos();
             traductor::activar_bloqueo_disco()
                 .map_err(|e| format!("Error crítico activando bloqueo: {}", e))?;
             return Err("Bloqueado 10 minutos por demasiados intentos fallidos.".into());
@@ -464,7 +433,7 @@ fn verificar_login(
     if let Ok(mut c) = sesion.contador.lock() {
         *c = 0;
     }
-    let _ = fs::remove_file(&babel_path("intentos.dat"));
+    seguridad::borrar_contador_intentos();
     // Resetear amenazas conocidas para que el monitor periódico las reporte de nuevo
     seguridad::resetear_amenazas_conocidas();
 
@@ -474,10 +443,7 @@ fn verificar_login(
     Ok(true)
 }
 
-// ============================================================
-// COMANDO 4b — Cambiar categoría del diccionario en caliente
-// Recarga el diccionario filtrando por categoría (jurídico, médico, etc.)
-// ============================================================
+// COMANDO 4b — Cambiar categoría del diccionario en caliente — Recarga el diccionario filtrando por categoría (jurídico, médico, etc.)
 #[tauri::command]
 fn cambiar_categoria_diccionario(
     categoria: String,
@@ -503,9 +469,7 @@ fn cambiar_categoria_diccionario(
     Ok(())
 }
 
-// ============================================================
 // COMANDO 5 — Traducir documento vía selector de archivo
-// ============================================================
 
 #[tauri::command]
 fn traducir_documento(
@@ -723,6 +687,7 @@ struct ImportarDialogoResultado {
     nombre: String,
     original_borrado: bool,
     tiene_original: bool,
+    token_borrado: Option<String>,
 }
 
 #[tauri::command]
@@ -774,16 +739,14 @@ async fn importar_archivo_dialogo(
             .ok_or("Nombre de archivo inválido")?
             .to_string();
 
-        // Limpiar cualquier pendiente anterior antes de empezar
-        if let Ok(mut p) = PENDING_BORRAR_ORIGINAL.lock() { *p = None; }
-
         let ruta_cifrada =
             cifrar_y_guardar_desde_ruta(&nombre, &ruta_original_str, &subclave_hex, &id_usuario)?;
 
-        // Guardar la ruta en el mutex interno — el frontend NUNCA la ve.
-        // Solo recibe un bool para saber si debe ofrecer el borrado.
-        if let Ok(mut p) = PENDING_BORRAR_ORIGINAL.lock() {
-            *p = Some(ruta_original_str);
+        // Generar token único por operación — cada import tiene su propia ranura en el mapa.
+        // El frontend solo recibe el token opaco; la ruta real nunca cruza el IPC.
+        let token = nuevo_id();
+        if let Ok(mut guard) = PENDING_BORRAR_ORIGINAL.lock() {
+            guard.get_or_insert_with(HashMap::new).insert(token.clone(), ruta_original_str);
         }
 
         Ok(Some(ImportarDialogoResultado {
@@ -791,6 +754,7 @@ async fn importar_archivo_dialogo(
             nombre,
             original_borrado: false,
             tiene_original: true,
+            token_borrado: Some(token),
         }))
     })
     .await
@@ -799,16 +763,18 @@ async fn importar_archivo_dialogo(
 
 // ============================================================
 // COMANDO — Borrar de forma segura el archivo original tras importar.
-// No acepta parámetros del frontend: lee la ruta de PENDING_BORRAR_ORIGINAL
-// (fijada por importar_archivo_dialogo) y la limpia después de usarla.
-// Así el frontend nunca conoce la ruta y no puede usarla como vector de ataque.
+// Recibe el token opaco devuelto por importar_archivo_dialogo.
+// La ruta real se resuelve en Rust usando ese token — nunca cruza el IPC.
+// AVISO (B2): en SSD con wear-leveling el contenido puede persistir en sectores
+// históricos aunque se sobrescriba. El cifrado AES-256-GCM ya protege el contenido.
 // ============================================================
 #[tauri::command]
-fn borrar_archivo_original() -> Result<bool, String> {
+fn borrar_archivo_original(token: String) -> Result<bool, String> {
     let ruta = PENDING_BORRAR_ORIGINAL
         .lock()
         .map_err(|_| "Error interno.".to_string())?
-        .take()
+        .as_mut()
+        .and_then(|m| m.remove(&token))
         .ok_or_else(|| "No hay archivo pendiente de borrado.".to_string())?;
 
     let path = std::fs::canonicalize(&ruta)
@@ -819,8 +785,46 @@ fn borrar_archivo_original() -> Result<bool, String> {
 }
 
 // ============================================================
-// COMANDO — Verificar herramientas opcionales para PDF
+// COMANDO — Comprobar si ya existe un archivo guardado con ese nombre base
+// Verifica contra el sistema de archivos real, no contra el DOM del frontend.
+// Evita que archivos en buzones no visibles pasen inadvertidos (B5).
 // ============================================================
+#[tauri::command]
+fn archivo_guardado_existe(nombre_base: String, sesion: tauri::State<SesionActiva>) -> bool {
+    let _ = sesion; // requiere sesión activa — si no hay sesión, devuelve false
+    let nombre_base_lower = nombre_base.to_lowercase();
+    let carpetas = [guardados_dir(), archivos_dir()];
+    for carpeta in &carpetas {
+        if let Ok(entradas) = fs::read_dir(carpeta) {
+            for entrada in entradas.flatten() {
+                let fname = entrada.file_name();
+                let fname_str = fname.to_string_lossy();
+                if fname_str.ends_with(".babel") {
+                    // Extraer el nombre base del archivo siguiendo limpiarNombre del frontend:
+                    // formato: {id_usuario}_{nombre_base}_{timestamp}.babel
+                    // → quitar prefijo usuario (hasta primer _), quitar sufijo _timestamp, quitar .babel
+                    let sin_ext = &fname_str[..fname_str.len() - 6];
+                    let sin_prefix = sin_ext.splitn(2, '_').nth(1).unwrap_or(sin_ext);
+                    let sin_ts = sin_prefix.rsplit_once('_').map(|(s, _)| s).unwrap_or(sin_prefix);
+                    // Quitar prefijo de idioma si existe (ej: es-en_)
+                    let sin_idioma = sin_ts.splitn(2, '_')
+                        .collect::<Vec<_>>();
+                    let base = if sin_idioma.len() == 2 && sin_idioma[0].len() == 5 && sin_idioma[0].chars().nth(2) == Some('-') {
+                        sin_idioma[1]
+                    } else {
+                        sin_ts
+                    };
+                    if base.to_lowercase() == nombre_base_lower {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+// COMANDO — Verificar herramientas opcionales para PDF
 #[derive(serde::Serialize)]
 struct HerramientasPdf {
     pdf2docx: bool,
@@ -846,9 +850,7 @@ fn verificar_herramientas_pdf() -> HerramientasPdf {
     HerramientasPdf { pdf2docx, libreoffice }
 }
 
-// ============================================================
 // COMANDO — Listar archivos guardados (sin traducir)
-// ============================================================
 
 #[tauri::command]
 fn listar_archivos_guardados(
@@ -1008,10 +1010,7 @@ fn listar_archivos_guardados(
 
     Ok(archivos)
 }
-// ============================================================
-// COMANDO — Mover archivo guardado entre buzones
-// Actualiza el índice cifrado .buzon_index_guardados.babel con el nuevo buzón destino.
-// ============================================================
+// COMANDO — Mover archivo guardado entre buzones — Actualiza el índice cifrado .buzon_index_guardados.babel con el nuevo buzón destino.
 #[tauri::command]
 fn mover_archivo_guardado(
     ruta: String,
@@ -1048,15 +1047,13 @@ fn mover_archivo_guardado(
 
     Ok(())
 }
-// ============================================================
 // COMANDO 6 — Cerrar sesión (limpia la RAM)
-// ============================================================
 #[tauri::command]
 fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
     babel_p2p::detener_servidor_p2p();
     sesion.limpiar();
-    // Limpiar ruta pendiente de borrado para que no persista entre sesiones
-    if let Ok(mut p) = PENDING_BORRAR_ORIGINAL.lock() { *p = None; }
+    // Limpiar todas las rutas pendientes de borrado al cerrar sesión
+    if let Ok(mut guard) = PENDING_BORRAR_ORIGINAL.lock() { *guard = None; }
     // Borrar temporales en claro con 3 pasadas (0x00, 0xFF, 0xAA) + fsync antes de eliminar
     let tmp = babel_dir().join("tmp");
     if let Ok(entradas) = fs::read_dir(&tmp) {
@@ -1067,9 +1064,7 @@ fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
     // Matar Flask
 }
 
-// ============================================================
 // COMANDO 7 — Traducir documento vía drag & drop nativo
-// ============================================================
 
 #[tauri::command]
 async fn traducir_documento_ruta(
@@ -1366,9 +1361,7 @@ async fn seleccionar_ruta_dialogo(app: tauri::AppHandle) -> Result<Option<String
     .map_err(|e| format!("Error en diálogo: {}", e))?
 }
 
-// ============================================================
 // COMANDO 8 — Leer resultado para descarga
-// ============================================================
 
 // Descifra un .babel y devuelve los bytes originales del documento.
 // Maneja dos casos: contenido comprimido en b64 (PDF, DOCX, binarios) y
@@ -1403,49 +1396,22 @@ fn detectar_ext(bytes: &[u8]) -> &'static str {
 // Reconstruye un nombre de archivo limpio a partir de la ruta .babel interna.
 // Formato interno: "{usuario}_{nombre_base}.babel" o "{usuario}_{nombre}_{ts}.babel"
 fn nombre_exportacion(ruta: &str, ext: &str) -> String {
-    let stem = Path::new(ruta)
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "archivo".into());
-
-    // Quitar prefijo de usuario (primer segmento numérico: "1_…" → "…")
-    let sin_usuario = stem.splitn(2, '_').nth(1).unwrap_or(&stem).to_string();
-
-    // Quitar prefijo de par de idioma ("es-en_…" → "…")
-    let sin_par = {
-        let b = sin_usuario.as_bytes();
-        if b.len() > 6
-            && b[0].is_ascii_lowercase() && b[1].is_ascii_lowercase()
-            && b[2] == b'-'
-            && b[3].is_ascii_lowercase() && b[4].is_ascii_lowercase()
-            && b[5] == b'_'
-        {
-            sin_usuario[6..].to_string()
-        } else {
-            sin_usuario
-        }
-    };
-
-    // Quitar sufijo __orig
-    let sin_orig = if sin_par.ends_with("__orig") {
-        sin_par[..sin_par.len() - 6].to_string()
-    } else {
-        sin_par
-    };
-
-    // Quitar sufijo de timestamp (≥ 8 dígitos al final)
-    let nombre = if let Some(pos) = sin_orig.rfind('_') {
-        let sufijo = &sin_orig[pos + 1..];
-        if sufijo.len() >= 8 && sufijo.chars().all(|c| c.is_ascii_digit()) {
-            sin_orig[..pos].to_string()
-        } else {
-            sin_orig
-        }
-    } else {
-        sin_orig
-    };
-
-    format!("{}.{}", nombre, ext)
+    let stem = Path::new(ruta).file_stem()
+        .map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "archivo".into());
+    // Strip user prefix (numeric first segment)
+    let s = stem.splitn(2, '_').nth(1).unwrap_or(&stem).to_string();
+    // Strip language-pair prefix "xx-xx_"
+    let b = s.as_bytes();
+    let s = if b.len() > 6 && b[2] == b'-' && b[5] == b'_'
+        && b[0].is_ascii_lowercase() && b[1].is_ascii_lowercase()
+        && b[3].is_ascii_lowercase() && b[4].is_ascii_lowercase()
+    { s[6..].to_string() } else { s };
+    // Strip __orig suffix
+    let s = if s.ends_with("__orig") { s[..s.len()-6].to_string() } else { s };
+    // Strip timestamp suffix (≥8 digits)
+    let s = s.rfind('_').filter(|&p| s[p+1..].len() >= 8 && s[p+1..].chars().all(|c| c.is_ascii_digit()))
+        .map(|p| s[..p].to_string()).unwrap_or(s);
+    format!("{}.{}", s, ext)
 }
 
 #[tauri::command]
@@ -1469,9 +1435,7 @@ fn leer_resultado(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Ve
     descifrar_a_bytes(&ruta, &subclave_hex)
 }
 
-// ============================================================
 // COMANDO 9 — Cambiar idioma y recargar diccionario
-// ============================================================
 
 #[tauri::command]
 fn cambiar_idioma(idioma: String, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
@@ -1502,9 +1466,7 @@ fn cambiar_idioma(idioma: String, sesion: tauri::State<SesionActiva>) -> Result<
     Ok(())
 }
 
-// ============================================================
 // COMANDO 10 — Listar archivos guardados
-// ============================================================
 
 #[derive(serde::Serialize)]
 struct MetadatosArchivo {
@@ -1517,7 +1479,6 @@ struct MetadatosArchivo {
     buzon_id: String,
     es_traduccion: bool,
 }
-
 
 // ============================================================
 // ÁRBOL DE BUZONES — Struct + helpers compartidos
@@ -1600,9 +1561,46 @@ fn recopilar_ids_rec(
     lista
 }
 
-// ============================================================
+// Valida formato mínimo de dirección email: debe contener @ y un punto después de @.
+fn validar_email(email: &str) -> Result<(), String> {
+    let e = email.trim();
+    if e.is_empty() { return Ok(()); } // CC/CCO son opcionales
+    let at = e.find('@').ok_or_else(|| format!("Email inválido (falta @): {}", e))?;
+    let dominio = &e[at + 1..];
+    if !dominio.contains('.') {
+        return Err(format!("Email inválido (dominio sin punto): {}", e));
+    }
+    if e.len() > 254 {
+        return Err(format!("Email demasiado largo: {}", e));
+    }
+    Ok(())
+}
+
+fn validar_email_requerido(email: &str) -> Result<(), String> {
+    let e = email.trim();
+    if e.is_empty() {
+        return Err("El campo destinatario no puede estar vacío.".into());
+    }
+    validar_email(e)
+}
+
+// Valida que un nombre de buzón sea aceptable (S7).
+// Rechaza nombres vacíos, muy largos o con caracteres de control.
+fn validar_nombre_buzon(nombre: &str) -> Result<String, String> {
+    let nombre = nombre.trim().to_string();
+    if nombre.is_empty() {
+        return Err("El nombre no puede estar vacío.".into());
+    }
+    if nombre.len() > 64 {
+        return Err("El nombre no puede superar los 64 caracteres.".into());
+    }
+    if nombre.chars().any(|c| c.is_control()) {
+        return Err("El nombre contiene caracteres no permitidos.".into());
+    }
+    Ok(nombre)
+}
+
 // COMANDO 11 — Crear buzón (traducciones)
-// ============================================================
 
 #[tauri::command]
 fn crear_buzon(
@@ -1610,6 +1608,7 @@ fn crear_buzon(
     parent: Option<String>,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
+    let nombre = validar_nombre_buzon(&nombre)?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
@@ -1625,9 +1624,7 @@ fn crear_buzon(
     Ok(id)
 }
 
-// ============================================================
 // COMANDO 12 — Listar buzones
-// ============================================================
 
 #[tauri::command]
 fn listar_buzones(sesion: tauri::State<SesionActiva>) -> Result<Vec<BuzonNodo>, String> {
@@ -1636,9 +1633,7 @@ fn listar_buzones(sesion: tauri::State<SesionActiva>) -> Result<Vec<BuzonNodo>, 
     let ruta = archivos_path(".buzones.babel");
     Ok(cargar_nodos(std::path::Path::new(&ruta), &subclave_hex))
 }
-// ============================================================
 // COMANDOS — Buzones de archivos guardados (separados)
-// ============================================================
 
 #[tauri::command]
 fn crear_buzon_guardado(
@@ -1646,6 +1641,7 @@ fn crear_buzon_guardado(
     parent: Option<String>,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
+    let nombre = validar_nombre_buzon(&nombre)?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
@@ -1669,9 +1665,7 @@ fn listar_buzones_guardados(sesion: tauri::State<SesionActiva>) -> Result<Vec<Bu
     let ruta = guardados_path(".buzones_guardados.babel");
     Ok(cargar_nodos(std::path::Path::new(&ruta), &subclave_hex))
 }
-// ============================================================
 // COMANDO 13 — Exportar archivo al Finder (save panel nativo)
-// ============================================================
 
 #[tauri::command]
 async fn exportar_archivo(
@@ -1713,10 +1707,7 @@ async fn exportar_archivo(
     .map_err(|e| format!("Error interno al exportar: {}", e))?
 }
 
-// ============================================================
-// COMANDO 13b — Exportar múltiples archivos a una carpeta
-// Muestra UN folder picker nativo; copia todos los archivos ahí.
-// ============================================================
+// COMANDO 13b — Exportar múltiples archivos a una carpeta — Muestra UN folder picker nativo; copia todos los archivos ahí.
 #[tauri::command]
 async fn exportar_archivos_a_carpeta(
     rutas: Vec<String>,
@@ -1768,9 +1759,7 @@ async fn exportar_archivos_a_carpeta(
     .map_err(|e| format!("Error interno al exportar: {}", e))?
 }
 
-// ============================================================
 // COMANDO 14 — Mover archivos entre buzones
-// ============================================================
 
 #[tauri::command]
 fn mover_archivo(
@@ -1811,9 +1800,7 @@ fn mover_archivo(
     Ok(())
 }
 
-// ============================================================
 // COMANDO 15 — Eliminar buzón
-// ============================================================
 
 #[tauri::command]
 fn eliminar_buzon(id: String, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
@@ -1837,6 +1824,7 @@ fn renombrar_buzon(
     nombre_nuevo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
+    let nombre_nuevo = validar_nombre_buzon(&nombre_nuevo)?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
@@ -1847,9 +1835,7 @@ fn renombrar_buzon(
     }
     guardar_nodos(&nodos, std::path::Path::new(&ruta), &subclave_hex)
 }
-// ============================================================
 // COMANDO 16 — Eliminar archivo con zeroize
-// ============================================================
 #[tauri::command]
 fn renombrar_archivo(
     ruta: String,
@@ -1961,9 +1947,7 @@ fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
     Ok(())
 }
 
-// ============================================================
 // COMANDO — Eliminar buzón del sistema de guardados
-// ============================================================
 #[tauri::command]
 fn eliminar_buzon_guardado(id: String, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
     let subclave_hex = sesion.subclave_hex()?;
@@ -1993,6 +1977,7 @@ fn renombrar_buzon_guardado(
     nombre_nuevo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
+    let nombre_nuevo = validar_nombre_buzon(&nombre_nuevo)?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() { return Err("No hay sesión activa.".into()); }
 
@@ -2004,9 +1989,7 @@ fn renombrar_buzon_guardado(
     guardar_nodos(&nodos, std::path::Path::new(&ruta), &subclave_hex)
 }
 
-// ============================================================
 // COMANDO 17 — Ver archivo descifrado
-// ============================================================
 fn extraer_texto_xml(xml: &str) -> String {
     let mut texto = String::new();
     let mut resto = xml;
@@ -2045,13 +2028,7 @@ fn extraer_zip_html(raw_bytes: &[u8]) -> (String, String, String) {
     let mut footer_html = String::new();
     let mut imagenes_html = String::new();
 
-    // Encabezados y pies
-    for nombre in &[
-        "word/header1.xml",
-        "word/header2.xml",
-        "word/footer1.xml",
-        "word/footer2.xml",
-    ] {
+    for nombre in &["word/header1.xml","word/header2.xml","word/footer1.xml","word/footer2.xml"] {
         if let Ok(mut file) = zip.by_name(nombre) {
             let mut xml = String::new();
             if file.read_to_string(&mut xml).is_ok() {
@@ -2069,30 +2046,20 @@ fn extraer_zip_html(raw_bytes: &[u8]) -> (String, String, String) {
     }
 
     // Imágenes embebidas
-    let n = zip.len();
-    for i in 0..n {
+    for i in 0..zip.len() {
         if let Ok(mut file) = zip.by_index(i) {
             let name = file.name().to_string();
-            if name.starts_with("word/media/") {
-                let mime = if name.ends_with(".png") {
-                    "image/png"
-                } else if name.ends_with(".jpg") || name.ends_with(".jpeg") {
-                    "image/jpeg"
-                } else if name.ends_with(".gif") {
-                    "image/gif"
-                } else if name.ends_with(".webp") {
-                    "image/webp"
-                } else {
-                    continue;
-                };
-                let mut buf = Vec::new();
-                if file.read_to_end(&mut buf).is_ok() {
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
-                    imagenes_html.push_str(&format!(
-                        "<img src='data:{};base64,{}' style='max-width:100%;margin:10px 0;display:block;border-radius:4px;'>",
-                        mime, b64
-                    ));
-                }
+            if !name.starts_with("word/media/") { continue; }
+            let mime = match name.rsplit('.').next().unwrap_or("") {
+                "png" => "image/png", "jpg" | "jpeg" => "image/jpeg",
+                "gif" => "image/gif", "webp" => "image/webp", _ => continue,
+            };
+            let mut buf = Vec::new();
+            if file.read_to_end(&mut buf).is_ok() {
+                imagenes_html.push_str(&format!(
+                    "<img src='data:{};base64,{}' style='max-width:100%;margin:10px 0;display:block;border-radius:4px;'>",
+                    mime, base64::engine::general_purpose::STANDARD.encode(&buf)
+                ));
             }
         }
     }
@@ -2167,35 +2134,23 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
     }
 
     let texto_run = |run: &docx_rs::Run| -> String {
-        let bold = run.run_property.bold.is_some();
-        let italic = run.run_property.italic.is_some();
+        let (bold, italic) = (run.run_property.bold.is_some(), run.run_property.italic.is_some());
         let mut out = String::new();
         for rc in &run.children {
             match rc {
                 docx_rs::RunChild::Text(t) => {
-                    let escaped = t
-                        .text
-                        .replace('&', "&amp;")
-                        .replace('<', "&lt;")
-                        .replace('>', "&gt;");
-                    let s = if bold && italic {
-                        format!("<strong><em>{}</em></strong>", escaped)
-                    } else if bold {
-                        format!("<strong>{}</strong>", escaped)
-                    } else if italic {
-                        format!("<em>{}</em>", escaped)
-                    } else {
-                        escaped
-                    };
-                    out.push_str(&s);
+                    let e = t.text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+                    out.push_str(&match (bold, italic) {
+                        (true, true)  => format!("<strong><em>{}</em></strong>", e),
+                        (true, false) => format!("<strong>{}</strong>", e),
+                        (false, true) => format!("<em>{}</em>", e),
+                        _             => e,
+                    });
                 }
                 docx_rs::RunChild::Drawing(_) => {
                     let i = img_idx.get();
                     if i < imagenes.len() {
-                        out.push_str(&format!(
-                            "<img src='{}' style='max-width:100%;height:auto;display:block;margin:4px 0;'>",
-                            imagenes[i]
-                        ));
+                        out.push_str(&format!("<img src='{}' style='max-width:100%;height:auto;display:block;margin:4px 0;'>", imagenes[i]));
                         img_idx.set(i + 1);
                     }
                 }
@@ -2285,23 +2240,13 @@ fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Strin
         }
 
         // Imágenes: PNG, JPEG, GIF, WEBP
-        let mime = if raw_bytes.starts_with(b"\x89PNG") {
-            Some("image/png")
-        } else if raw_bytes.starts_with(b"\xFF\xD8\xFF") {
-            Some("image/jpeg")
-        } else if raw_bytes.starts_with(b"GIF8") {
-            Some("image/gif")
-        } else if raw_bytes.len() > 12
-            && &raw_bytes[0..4] == b"RIFF"
-            && &raw_bytes[8..12] == b"WEBP"
-        {
-            Some("image/webp")
-        } else {
-            None
-        };
+        let mime = if raw_bytes.starts_with(b"\x89PNG") { Some("image/png") }
+            else if raw_bytes.starts_with(b"\xFF\xD8\xFF") { Some("image/jpeg") }
+            else if raw_bytes.starts_with(b"GIF8") { Some("image/gif") }
+            else if raw_bytes.len() > 12 && &raw_bytes[..4] == b"RIFF" && &raw_bytes[8..12] == b"WEBP" { Some("image/webp") }
+            else { None };
         if let Some(mime) = mime {
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
-            return Ok(format!("data:{};base64,{}", mime, b64));
+            return Ok(format!("data:{};base64,{}", mime, base64::engine::general_purpose::STANDARD.encode(&raw_bytes)));
         }
 
         // TXT — texto plano UTF-8
@@ -2332,9 +2277,7 @@ fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Strin
     Ok(contenido)
 }
 
-// ============================================================
 // COMANDO 18 — Guardar y cargar ajustes
-// ============================================================
 
 fn default_timeout() -> u32 { 15 }
 
@@ -2387,21 +2330,17 @@ fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, Stri
 
     if let Ok(data) = fs::read_to_string(&babel_path("settings.json")) {
         if let Ok(settings) = serde_json::from_str::<AppSettings>(&data) {
+            // migrate plaintext settings to encrypted
             if !subclave_hex.is_empty() {
                 if let Ok(json) = serde_json::to_string(&settings) {
                     if let Ok(cifrado) = seguridad::blindar_documento(&json, &subclave_hex) {
-                        if fs::write(babel_path("settings.babel"), cifrado).is_ok() {
-                            let _ = fs::remove_file(babel_path("settings.json"));
-                            traductor::registrar_evento(
-                                "settings.json migrado a settings.babel cifrado",
-                                &subclave_hex,
-                            );
-                        } else {
-                            traductor::registrar_evento(
-                                "AVISO: migración settings.json fallida — no se pudo escribir settings.babel",
-                                &subclave_hex,
-                            );
-                        }
+                        let ok = fs::write(babel_path("settings.babel"), cifrado).is_ok();
+                        if ok { let _ = fs::remove_file(babel_path("settings.json")); }
+                        traductor::registrar_evento(
+                            if ok { "settings.json migrado a settings.babel cifrado" }
+                            else { "AVISO: migración settings.json fallida — no se pudo escribir settings.babel" },
+                            &subclave_hex,
+                        );
                     }
                 }
             }
@@ -2412,9 +2351,7 @@ fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, Stri
     Ok(default)
 }
 
-// ============================================================
 // HELPER — Genera 12 palabras aleatorias del diccionario BIP39
-// ============================================================
 
 fn generar_palabras_recuperacion() -> Vec<String> {
     use rand::rngs::OsRng;
@@ -2436,9 +2373,7 @@ fn generar_palabras_recuperacion() -> Vec<String> {
         .collect()
 }
 
-// ============================================================
 // COMANDO 19 — Generar frase de recuperación BIP39
-// ============================================================
 
 #[tauri::command]
 fn generar_frase_recuperacion(
@@ -2446,7 +2381,6 @@ fn generar_frase_recuperacion(
     pass_usuario: String,
     _sesion: tauri::State<SesionActiva>,
 ) -> Result<Vec<String>, String> {
-    // Zeroizing desde el primer momento para que serde_json nunca tenga copias no-zeroized
     let maestra = Zeroizing::new(maestra);
     let pass_usuario = Zeroizing::new(pass_usuario);
 
@@ -2477,20 +2411,67 @@ fn generar_frase_recuperacion(
         .map_err(|e| format!("Error cifrando mnemonic.babel: {}", e))?;
     fs::write(&babel_path("mnemonic.babel"), &cifrado_mnemonic)
         .map_err(|e| format!("Error guardando mnemonic.babel: {}", e))?;
-    // maestra y pass_usuario se zeroizan automáticamente al salir del scope (Zeroizing<String>)
     Ok(palabras)
 }
 
+// recuperar_con_frase era el comando IPC original (devolvía credenciales al frontend).
+// Sustituido por recuperar_y_autenticar — ya no se registra como comando Tauri.
 // ============================================================
-// COMANDO 20 — Recuperar búnker con las 12 palabras
+// COMANDO — Recuperar Y autenticar en un solo paso (B7/S2)
+// Las credenciales (maestra, pass) se derivan y verifican íntegramente en Rust.
+// El frontend solo recibe un aviso opcional — ningún secreto cruza el IPC.
 // ============================================================
-
 #[tauri::command]
-fn recuperar_con_frase(
+fn recuperar_y_autenticar(
     palabras: Vec<String>,
     sesion: tauri::State<SesionActiva>,
+) -> Result<String, String> {
+    // Reutilizar la misma lógica de recuperación para obtener las credenciales
+    let (maestra, pass, aviso) = recuperar_con_frase_interno(&palabras, &sesion)?;
+    let maestra = Zeroizing::new(maestra);
+    let pass = Zeroizing::new(pass);
+
+    // Ahora ejecutar el login internamente (igual que verificar_login)
+    let salt = traductor::cargar_o_crear_salt();
+    let subclave = seguridad::derivar_subclave(maestra.as_bytes(), "babel-usuarios-v1", &salt)
+        .map_err(|e| format!("Error derivando subclave: {}", e))?;
+    let subclave_hex = Zeroizing::new(hex::encode(subclave.as_ref()));
+
+    let cifrado = fs::read(&babel_path("usuarios.babel"))
+        .map_err(|_| "No se encontró el búnker.".to_string())?;
+    let json = seguridad::descifrar_documento(cifrado, &subclave_hex)
+        .map_err(|_| "Llave maestra incorrecta.".to_string())?;
+    let usuario_guardado: UsuarioBabel =
+        serde_json::from_str(&json).map_err(|_| "Búnker corrupto.".to_string())?;
+
+    if !seguridad::verificar_password(&pass, &usuario_guardado.password_hash) {
+        return Err("Contraseña de usuario incorrecta.".to_string());
+    }
+
+    // Establecer sesión
+    if let Ok(mut s) = sesion.subclave.lock() {
+        let z = Zeroizing::new(*subclave);
+        seguridad::mlock_bytes(&z[..]);
+        *s = Some(z);
+    }
+    if let Ok(mut u) = sesion.usuario.lock() {
+        *u = usuario_guardado.nombre.clone();
+    }
+    if let Ok(mut d) = sesion.diccionario.lock() {
+        *d = traductor::cargar_diccionario("es_en", &subclave_hex, "todos");
+    }
+    if let Ok(mut c) = sesion.contador.lock() { *c = 0; }
+    seguridad::borrar_contador_intentos();
+    seguridad::resetear_amenazas_conocidas();
+
+    Ok(aviso)
+}
+
+// Lógica interna de recuperación compartida por recuperar_con_frase y recuperar_y_autenticar.
+fn recuperar_con_frase_interno(
+    palabras: &[String],
+    sesion: &tauri::State<SesionActiva>,
 ) -> Result<(String, String, String), String> {
-    // Comprobar bloqueo activo
     if let Some(ts) = seguridad::leer_bloqueo() {
         let restante = (ts + 600) - chrono::Local::now().timestamp();
         if restante > 0 {
@@ -2499,12 +2480,9 @@ fn recuperar_con_frase(
             let _ = fs::remove_file(&babel_path("bloqueo.tmp"));
         }
     }
-
     if palabras.len() != 12 {
         return Err("La frase debe tener exactamente 12 palabras.".into());
     }
-
-    // B-1: validar todas las palabras sin early-return para evitar timing attack
     let todas_validas = palabras.iter().all(|p| bip39_words::WORDLIST.contains(&p.as_str()));
     if !todas_validas {
         return Err("Una o más palabras no pertenecen al diccionario BIP39.".into());
@@ -2512,84 +2490,68 @@ fn recuperar_con_frase(
 
     let salt_maestra = traductor::cargar_o_crear_salt();
     let recovery_salt = seguridad::derivar_recovery_salt_v2(&salt_maestra);
-    // v3 (actual): Argon2id 131072/4/4 — mismos parámetros que el login
-    let key_v3 = seguridad::derivar_clave_recuperacion_v3(&palabras, &recovery_salt)?;
+    let key_v3 = seguridad::derivar_clave_recuperacion_v3(palabras, &recovery_salt)?;
     let key_v3_hex = Zeroizing::new(hex::encode(key_v3.as_ref()));
-    // v2: Argon2id 65536/3/1 con salt por instalación
-    let key_v2 = seguridad::derivar_clave_recuperacion_v2(&palabras, &recovery_salt)?;
+    let key_v2 = seguridad::derivar_clave_recuperacion_v2(palabras, &recovery_salt)?;
     let key_v2_hex = Zeroizing::new(hex::encode(key_v2.as_ref()));
 
     let cifrado = fs::read(&babel_path("recovery.babel")).map_err(|_| {
-        "No se encontró archivo de recuperación. ¿Generaste la frase al crear el búnker?"
-            .to_string()
+        "No se encontró archivo de recuperación.".to_string()
     })?;
 
     let mut usado_v0 = false;
-    let mut datos =
-        match seguridad::descifrar_documento(cifrado.clone(), &key_v3_hex) {
-            Ok(d) => d,
-            Err(_) => match seguridad::descifrar_documento(cifrado.clone(), &key_v2_hex) {
-                Ok(d) => {
-                    // Migración automática a v3
-                    if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
-                        let _ = fs::write(babel_path("recovery.babel"), nuevo);
-                    }
-                    d
+    let mut datos = match seguridad::descifrar_documento(cifrado.clone(), &key_v3_hex) {
+        Ok(d) => d,
+        Err(_) => match seguridad::descifrar_documento(cifrado.clone(), &key_v2_hex) {
+            Ok(d) => {
+                if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
+                    let _ = fs::write(babel_path("recovery.babel"), nuevo);
                 }
-                Err(_) => {
-                    // Fallback v1: salt estática global
-                    let key_v1 = seguridad::derivar_clave_recuperacion(&palabras)
-                        .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
-                    let key_v1_hex = Zeroizing::new(hex::encode(key_v1.as_ref()));
-                    match seguridad::descifrar_documento(cifrado.clone(), &key_v1_hex) {
-                        Ok(d) => {
-                            if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
-                                let _ = fs::write(babel_path("recovery.babel"), nuevo);
-                            }
-                            d
+                d
+            }
+            Err(_) => {
+                let key_v1 = seguridad::derivar_clave_recuperacion(palabras)
+                    .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
+                let key_v1_hex = Zeroizing::new(hex::encode(key_v1.as_ref()));
+                match seguridad::descifrar_documento(cifrado.clone(), &key_v1_hex) {
+                    Ok(d) => {
+                        if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
+                            let _ = fs::write(babel_path("recovery.babel"), nuevo);
                         }
-                        Err(_) => {
-                            // Fallback v0: HKDF sin Argon2id (muy antiguos)
-                            let key_v0 = seguridad::derivar_clave_recuperacion_v0(&palabras)
-                                .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
-                            let key_v0_hex = Zeroizing::new(hex::encode(key_v0.as_ref()));
-                            match seguridad::descifrar_documento(cifrado, &key_v0_hex) {
-                                Ok(d) => {
-                                    usado_v0 = true;
-                                    if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
-                                        let _ = fs::write(babel_path("recovery.babel"), nuevo);
-                                    }
-                                    d
+                        d
+                    }
+                    Err(_) => {
+                        let key_v0 = seguridad::derivar_clave_recuperacion_v0(palabras)
+                            .unwrap_or_else(|_| Zeroizing::new([0u8; 32]));
+                        let key_v0_hex = Zeroizing::new(hex::encode(key_v0.as_ref()));
+                        match seguridad::descifrar_documento(cifrado, &key_v0_hex) {
+                            Ok(d) => {
+                                usado_v0 = true;
+                                if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
+                                    let _ = fs::write(babel_path("recovery.babel"), nuevo);
                                 }
-                                Err(_) => {
-                                    incrementar_contador_y_bloquear(&sesion)?;
-                                    return Err("Frase incorrecta - no corresponde a este bunker.".to_string());
-                                }
+                                d
+                            }
+                            Err(_) => {
+                                incrementar_contador_y_bloquear(sesion)?;
+                                return Err("Frase incorrecta - no corresponde a este bunker.".to_string());
                             }
                         }
                     }
                 }
             }
-        };
+        }
+    };
 
-    // Frase correcta — resetear contador (en RAM y en disco)
-    if let Ok(mut c) = sesion.contador.lock() {
-        *c = 0;
-    }
-    let _ = fs::remove_file(&babel_path("intentos.dat"));
+    if let Ok(mut c) = sesion.contador.lock() { *c = 0; }
+    seguridad::borrar_contador_intentos();
 
     let json: serde_json::Value =
         serde_json::from_str(&datos).map_err(|_| "Formato de recovery invalido.".to_string())?;
-    let maestra = json["m"]
-        .as_str()
-        .ok_or("Falta maestra".to_string())?
-        .to_string();
-    let pass = json["p"]
-        .as_str()
-        .ok_or("Falta pass".to_string())?
-        .to_string();
-
+    let maestra = json["m"].as_str().ok_or("Falta maestra".to_string())?.to_string();
+    let pass = json["p"].as_str().ok_or("Falta pass".to_string())?.to_string();
     datos.zeroize();
+
     let aviso = if usado_v0 {
         "ADVERTENCIA: búnker creado con esquema BIP39 v0 (HKDF sin Argon2id). \
          Se ha migrado automáticamente a v3 — vuelve a generar tu frase de recuperación.".to_string()
@@ -2598,9 +2560,8 @@ fn recuperar_con_frase(
     };
     Ok((maestra, pass, aviso))
 }
-// ============================================================
+
 // COMANDO 21 — Ver frase de recuperación (dentro de la app)
-// ============================================================
 
 #[tauri::command]
 fn ver_frase_recuperacion(sesion: tauri::State<SesionActiva>) -> Result<Vec<String>, String> {
@@ -2653,15 +2614,13 @@ fn obtener_usuario_con_maestra(
     if let Ok(mut c) = sesion.contador.lock() {
         *c = 0;
     }
-    let _ = fs::remove_file(&babel_path("intentos.dat"));
+    seguridad::borrar_contador_intentos();
     let usuario: seguridad::UsuarioBabel =
         serde_json::from_str(&json).map_err(|e| format!("Error leyendo usuario: {}", e))?;
     Ok(usuario.nombre)
 }
 
-// ============================================================
 // COMANDO 22 — Términos de uso
-// ============================================================
 
 #[tauri::command]
 fn comprobar_terminos_aceptados() -> bool {
@@ -2702,9 +2661,7 @@ fn es_remitente_valido(s: &str) -> bool {
     }
 }
 
-// ============================================================
 // COMANDO 23 — Guardar configuración del email
-// ============================================================
 
 #[tauri::command]
 fn guardar_config_email_tauri(
@@ -2737,9 +2694,7 @@ fn guardar_config_email_tauri(
     Ok(())
 }
 
-// ============================================================
 // COMANDO 24 — Enviar archivo cifrado por email
-// ============================================================
 
 #[tauri::command]
 fn enviar_archivo_cifrado_tauri(
@@ -2751,6 +2706,9 @@ fn enviar_archivo_cifrado_tauri(
     cuerpo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
+    validar_email_requerido(&destinatario)?;
+    validar_email(&cc)?;
+    validar_email(&cco)?;
     validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
     let subclave_hex = sesion.subclave_hex()?;
@@ -2784,9 +2742,7 @@ fn enviar_archivo_cifrado_tauri(
     resultado
 }
 
-// ============================================================
 // COMANDO 25 — Enviar bytes por email
-// ============================================================
 
 #[tauri::command]
 fn enviar_bytes_cifrados_tauri(
@@ -2799,6 +2755,9 @@ fn enviar_bytes_cifrados_tauri(
     cuerpo: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
+    validar_email_requerido(&destinatario)?;
+    validar_email(&cc)?;
+    validar_email(&cco)?;
     let subclave_hex = sesion.subclave_hex()?;
 
     let nombre_solo = std::path::Path::new(&nombre_archivo)
@@ -2806,7 +2765,8 @@ fn enviar_bytes_cifrados_tauri(
         .and_then(|n| n.to_str())
         .ok_or("Nombre de archivo inválido.")?
         .to_string();
-    let ruta_temp = tmp_path(&format!("email_{}", nombre_solo));
+    // Sufijo aleatorio evita colisiones y ataques de predicción de nombre (B10)
+    let ruta_temp = tmp_path(&format!("email_{}_{}", nombre_solo, nuevo_id()));
     fs::write(&ruta_temp, &bytes).map_err(|e| format!("Error guardando temporal: {}", e))?;
 
     // Closure garantiza borrar_seguro incluso si cargar_config_email devuelve None
@@ -2842,9 +2802,7 @@ fn enviar_bytes_cifrados_tauri(
     resultado
 }
 
-// ============================================================
 // COMANDO 26 — Obtener emails de la bandeja de entrada
-// ============================================================
 
 #[tauri::command]
 fn obtener_emails_tauri(
@@ -2876,9 +2834,7 @@ fn obtener_emails_tauri(
     Ok(emails)
 }
 
-// ============================================================
 // COMANDO 27 — Obtener cuerpo completo de un email por ID
-// ============================================================
 
 #[derive(serde::Serialize)]
 struct EmailCompleto {
@@ -2931,9 +2887,7 @@ fn obtener_email_completo_tauri(
     })
 }
 
-// ============================================================
 // COMANDO — Obtener firma del email configurado
-// ============================================================
 
 #[tauri::command]
 fn obtener_firma_email(sesion: tauri::State<SesionActiva>) -> String {
@@ -2949,9 +2903,7 @@ fn obtener_firma_email(sesion: tauri::State<SesionActiva>) -> String {
         .unwrap_or_default()
 }
 
-// ============================================================
 // COMANDO — Eliminar email por UID via IMAP (\Deleted + EXPUNGE)
-// ============================================================
 
 #[tauri::command]
 fn eliminar_email_tauri(
@@ -2967,9 +2919,7 @@ fn eliminar_email_tauri(
         .map_err(|e| format!("Error eliminando email: {}", e))
 }
 
-// ============================================================
 // COMANDO — Marcar email como no leído (IMAP -\Seen)
-// ============================================================
 
 #[tauri::command]
 fn marcar_no_leido_tauri(
@@ -2983,9 +2933,7 @@ fn marcar_no_leido_tauri(
         .map_err(|e| format!("Error marcando no leído: {}", e))
 }
 
-// ============================================================
 // COMANDO — Comprobar si el email está configurado
-// ============================================================
 
 #[tauri::command]
 fn tiene_config_email(sesion: tauri::State<SesionActiva>) -> bool {
@@ -2999,9 +2947,7 @@ fn tiene_config_email(sesion: tauri::State<SesionActiva>) -> bool {
     traductor::cargar_config_email(&subclave_hex).is_some()
 }
 
-// ============================================================
 // COMANDO 28 — Abrir carpeta Babel en Finder
-// ============================================================
 
 #[tauri::command]
 fn abrir_carpeta_babel(sesion: tauri::State<SesionActiva>) -> Result<(), String> {
@@ -3013,9 +2959,7 @@ fn abrir_carpeta_babel(sesion: tauri::State<SesionActiva>) -> Result<(), String>
     tauri_plugin_opener::open_path(&*carpeta_babel.to_string_lossy(), None::<&str>)
         .map_err(|e| format!("Error abriendo Finder: {}", e))
 }
-// ============================================================
 // COMANDOS P2P
-// ============================================================
 
 #[tauri::command]
 fn iniciar_servidor_p2p(sesion: tauri::State<SesionActiva>) -> Result<String, String> {
@@ -3091,9 +3035,7 @@ fn enviar_archivo_p2p(
     let cliente = babel_p2p::ClienteP2P::nuevo(&subclave_hex);
     cliente.enviar(&peer, &ruta)
 }
-//=============================================================
 // enviar mensajes de texto como archivos .txt para aprovechar la infraestructura de envío de archivos cifrados
-//=============================================================
 #[tauri::command]
 fn enviar_mensaje_p2p(
     ip: String,
@@ -3113,9 +3055,7 @@ fn enviar_mensaje_p2p(
     let cliente = babel_p2p::ClienteP2P::nuevo(&subclave_hex);
     cliente.enviar_bytes(&peer, "mensaje.txt", &datos)
 }
-//=============================================================
 // Obtener mensajes de texto recibidos por P2P
-//=============================================================
 #[tauri::command]
 fn listar_peers_pendientes_cmd(_sesion: tauri::State<SesionActiva>) -> Vec<String> {
     crate::babel_p2p::listar_peers_pendientes()
@@ -3144,62 +3084,26 @@ fn obtener_mensajes_p2p(sesion: tauri::State<SesionActiva>) -> Result<Vec<String
         .collect();
     Ok(mensajes)
 }
-// ============================================================
 // HELPER — Convierte código de idioma al par MarianMT
-// ============================================================
 // Centralizado aquí para no duplicar el match en cada comando.
 
 fn idioma_a_par(idioma: &str) -> &'static str {
     match idioma {
-        "es_en" => "es-en",
-        "en_es" => "en-es",
-        "es_fr" => "es-fr",
-        "fr_es" => "fr-es",
-        "es_ar" => "es-ar",
-        "ar_es" => "ar-es",
-        "fr_en" => "fr-en",
-        "en_fr" => "en-fr",
-        "en_ar" => "en-ar",
-        "ar_en" => "ar-en",
-        "fr_ar" => "fr-ar",
-        "ar_fr" => "ar-fr",
-        "es_de" => "es-de",
-        "de_es" => "de-es",
-        "fr_de" => "fr-de",
-        "de_fr" => "de-fr",
-        "ar_de" => "ar-de",
-        "de_ar" => "de-ar",
-        "es_ru" => "es-ru",
-        "ru_es" => "ru-es",
-        "fr_ru" => "fr-ru",
-        "ru_fr" => "ru-fr",
-        "ar_ru" => "ar-ru",
-        "ru_ar" => "ru-ar",
-        "es_zh" => "es-zh",
-        "zh_es" => "zh-es",
-        "fr_zh" => "fr-zh",
-        "zh_fr" => "zh-fr",
-        "ar_zh" => "ar-zh",
-        "zh_ar" => "zh-ar",
-        "de_ru" => "de-ru",
-        "ru_de" => "ru-de",
-        "de_zh" => "de-zh",
-        "zh_de" => "zh-de",
-        "ru_zh" => "ru-zh",
-        "zh_ru" => "zh-ru",
-        "en_de" => "en-de",
-        "de_en" => "de-en",
-        "en_ru" => "en-ru",
-        "ru_en" => "ru-en",
-        "en_zh" => "en-zh",
-        "zh_en" => "zh-en",
-        _ => "es-en",
+        "es_en"=>"es-en","en_es"=>"en-es","es_fr"=>"es-fr","fr_es"=>"fr-es",
+        "es_ar"=>"es-ar","ar_es"=>"ar-es","fr_en"=>"fr-en","en_fr"=>"en-fr",
+        "en_ar"=>"en-ar","ar_en"=>"ar-en","fr_ar"=>"fr-ar","ar_fr"=>"ar-fr",
+        "es_de"=>"es-de","de_es"=>"de-es","fr_de"=>"fr-de","de_fr"=>"de-fr",
+        "ar_de"=>"ar-de","de_ar"=>"de-ar","es_ru"=>"es-ru","ru_es"=>"ru-es",
+        "fr_ru"=>"fr-ru","ru_fr"=>"ru-fr","ar_ru"=>"ar-ru","ru_ar"=>"ru-ar",
+        "es_zh"=>"es-zh","zh_es"=>"zh-es","fr_zh"=>"fr-zh","zh_fr"=>"zh-fr",
+        "ar_zh"=>"ar-zh","zh_ar"=>"zh-ar","de_ru"=>"de-ru","ru_de"=>"ru-de",
+        "de_zh"=>"de-zh","zh_de"=>"zh-de","ru_zh"=>"ru-zh","zh_ru"=>"zh-ru",
+        "en_de"=>"en-de","de_en"=>"de-en","en_ru"=>"en-ru","ru_en"=>"ru-en",
+        "en_zh"=>"en-zh","zh_en"=>"zh-en",_=>"es-en",
     }
 }
 
-// ============================================================
 // COMANDO — Guardar HTML de frase BIP39 en tmp para imprimir
-// ============================================================
 // La plantilla de impresión la construye Rust a partir de las 12 palabras, NO se recibe
 // HTML del frontend. Antes se recibía HTML arbitrario y se filtraba con un blocklist frágil
 // que, además, rechazaba la propia plantilla (`<meta>`, `<style>`) y dejaba la impresión rota.
@@ -3288,10 +3192,7 @@ fn borrar_html_frase() {
     borrar_seguro(&tmp_path("frase_recuperacion.html"));
 }
 
-// ============================================================
-// PUNTO DE ENTRADA — Arranca Tauri, registra todos los comandos
-// y gestiona el estado global de sesión (SesionActiva).
-// ============================================================
+// PUNTO DE ENTRADA — Arranca Tauri, registra todos los comandos — y gestiona el estado global de sesión (SesionActiva).
 
 fn main() {
     // Impedir que debuggers externos se adjunten al proceso en producción.
@@ -3320,24 +3221,17 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            // Modo producción: lanzar el sidecar servidor_babel (PyInstaller) si existe
-            // en el directorio del ejecutable (empaquetado por Tauri en bundle/macOS/).
             let exe_dir = std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-
             let sidecar_path = exe_dir.as_ref().map(|d| d.join("servidor_babel"));
             let sidecar_exists = sidecar_path.as_ref().map(|p| p.exists()).unwrap_or(false);
-
-            // Fallback legacy: buscar python + script en Resources/ (USBs anteriores)
+            // Fallback legacy: python + script en Resources/ (USBs anteriores)
             let legacy_exists = app.path().resource_dir().ok().map(|res| {
                 res.join("python").join("bin").join("python3").exists()
                     && res.join("servidor").join("marian_server_usb.py").exists()
             }).unwrap_or(false);
-
-            // Si el puerto 5002 ya está ocupado (servidor externo en modo dev),
-            // no lanzar el sidecar ni generar token aleatorio — se usará el token
-            // por defecto que comparte tanto el servidor externo como el código Rust.
+            // Puerto libre = no hay servidor externo arrancado en modo dev
             let puerto_libre = std::net::TcpStream::connect_timeout(
                 &"127.0.0.1:5002".parse::<std::net::SocketAddr>().unwrap(),
                 std::time::Duration::from_millis(300),
@@ -3374,8 +3268,6 @@ fn main() {
                     *USB_CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
                 }
 
-                // Hilo en background: cuando el servidor acepte conexiones,
-                // emite el evento "servidor-usb-listo" al frontend
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     let addr: std::net::SocketAddr = "127.0.0.1:5002".parse().unwrap();
@@ -3390,20 +3282,14 @@ fn main() {
                 });
             }
 
-            // Modo dev / servidor externo: si NO estamos en modo USB, el bloque de arriba
-            // no fija el token NLLB y toda traducción caería al diccionario (solo palabras
-            // sueltas). Aquí lo tomamos del entorno BABEL_NLLB_TOKEN para autenticarnos
-            // contra un servidor arrancado aparte (`npm run tauri dev`, arrancar_babel.sh…).
-            // inicializar_nllb_token es idempotente: si el modo USB ya lo fijó, esto es no-op.
+            // Dev/externo: tomar token del entorno si el modo USB no lo fijó ya (idempotente)
             if let Ok(tok) = std::env::var("BABEL_NLLB_TOKEN") {
                 if !tok.is_empty() {
                     traductor::inicializar_nllb_token(tok);
                 }
             }
 
-            // Monitor periódico de amenazas — escanea cada 5 minutos en background.
-            // Solo emite el evento "amenaza-detectada" si hay amenazas NUEVAS respecto
-            // a la última vez, y solo cuando hay sesión activa (subclave no vacía).
+            // Monitor de amenazas cada 5 min — solo emite si hay amenazas nuevas y sesión activa
             let handle_monitor = app.handle().clone();
             std::thread::spawn(move || {
                 loop {
@@ -3459,7 +3345,7 @@ fn main() {
             ver_archivo,
             mover_archivo,
             generar_frase_recuperacion,
-            recuperar_con_frase,
+            recuperar_y_autenticar,
             ver_frase_recuperacion,
             comprobar_terminos_aceptados,
             aceptar_terminos,
@@ -3483,6 +3369,7 @@ fn main() {
             guardar_documento_sin_traducir,
             importar_archivo_dialogo,
             borrar_archivo_original,
+            archivo_guardado_existe,
             verificar_herramientas_pdf,
             listar_archivos_guardados,
             crear_buzon_guardado,

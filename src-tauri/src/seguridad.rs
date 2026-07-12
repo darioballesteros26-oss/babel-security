@@ -1,6 +1,4 @@
-// ============================================================
 // SISTEMA BABEL — NÚCLEO DE SEGURIDAD ELITE v10
-// ============================================================
 //
 // Arquitectura de seguridad en capas:
 //
@@ -65,9 +63,7 @@ use sha2::Sha256;
 use sysinfo::{PidExt, ProcessExt, System, SystemExt};
 use zeroize::{Zeroize, Zeroizing};
 
-// ============================================================
 // ESTRUCTURAS PÚBLICAS
-// ============================================================
 
 /// Niveles de licencia — determina qué funciones están disponibles
 #[derive(Serialize, Deserialize, Clone)]
@@ -97,9 +93,7 @@ pub struct ResultadoSeguridad {
     pub advertencias: Vec<String>,
 }
 
-// ============================================================
 // CAPA 1 — MOTOR DE CIFRADO (AES-256-GCM + Argon2id + HKDF)
-// ============================================================
 
 /// Deriva una subclave única para cada propósito (usuarios, diccionario, bóveda).
 ///
@@ -225,9 +219,7 @@ pub fn descifrar_documento(paquete: Vec<u8>, clave_hex: &str) -> Result<String, 
     resultado
 }
 
-// ============================================================
 // CAPA 2 — GESTIÓN DE CONTRASEÑAS
-// ============================================================
 
 /// Genera un hash seguro de una contraseña usando Argon2id con salt aleatoria.
 /// El resultado incluye la salt — se puede verificar solo con el hash.
@@ -255,9 +247,7 @@ pub fn verificar_password(password: &str, hash: &str) -> bool {
         .unwrap_or(false)
 }
 
-// ============================================================
 // CAPA 4 — DETECCIÓN DE AMENAZAS (sin requerir root)
-// ============================================================
 
 pub struct AntiKeylogger;
 
@@ -1183,9 +1173,7 @@ impl AntiKeylogger {
     fn detectar_extensiones_sistema_sospechosas() -> Vec<String> { vec![] }
 }
 
-// ============================================================
 // CAPA 5 — ANTI-SANDBOXING
-// ============================================================
 //
 // ¿Qué es un sandbox?
 //   Un sandbox es una "caja de arena" virtual — un entorno aislado
@@ -1479,9 +1467,7 @@ impl AntiSandbox {
     }
 }
 
-// ============================================================
 // CAPA 6 — AUDITORÍA DE SEGURIDAD CIFRADA
-// ============================================================
 
 /// Registra un evento de seguridad en auditoria.babel de forma cifrada.
 ///
@@ -1495,17 +1481,57 @@ static AUDIT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const AUDIT_MAX_BYTES: u64 = 2 * 1024 * 1024; // 2 MB
 
-// Lee el SHA-256 del último bloque cifrado escrito en el archivo de auditoría.
-// Se guarda en `{ruta}.tip` para no tener que releer el archivo completo.
-// Si el .tip no existe o no coincide, se registra una advertencia y se usa ceros.
+// C4: El .tip se guarda con HMAC-SHA256 usando master.salt como clave.
+// Así un atacante no puede sustituirlo por un hash arbitrario para romper la
+// cadena forense sin conocer master.salt.
+fn tip_hmac_key() -> Option<[u8; 32]> {
+    let bytes = fs::read(babel_path("master.salt")).ok()?;
+    if bytes.len() < 32 { return None; }
+    let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, &bytes[..32]);
+    let mut k = [0u8; 32];
+    hk.expand(b"babel-audit-tip-v1", &mut k).ok()?;
+    Some(k)
+}
+
 fn leer_chain_tip(ruta: &str) -> [u8; 32] {
-    fs::read(format!("{}.tip", ruta))
-        .ok()
-        .and_then(|b| b.try_into().ok())
-        .unwrap_or([0u8; 32])
+    let raw = match fs::read(format!("{}.tip", ruta)) {
+        Ok(b) => b,
+        Err(_) => return [0u8; 32],
+    };
+    // Formato: 32 bytes hash || 32 bytes HMAC. Total = 64 bytes.
+    if raw.len() == 64 {
+        if let Some(key) = tip_hmac_key() {
+            let mut mac = match <Hmac<sha2::Sha256> as KeyInit>::new_from_slice(&key) {
+                Ok(m) => m, Err(_) => return [0u8; 32],
+            };
+            mac.update(&raw[..32]);
+            if mac.verify_slice(&raw[32..]).is_ok() {
+                let mut h = [0u8; 32];
+                h.copy_from_slice(&raw[..32]);
+                return h;
+            }
+            // HMAC inválido — posible manipulación del .tip
+            log::warn!("[!] audit chain tip HMAC inválido — posible manipulación");
+            return [0u8; 32];
+        }
+    }
+    // Fallback: .tip antiguo (32 bytes sin HMAC) — migrar en próxima escritura
+    raw.try_into().unwrap_or([0u8; 32])
 }
 
 fn escribir_chain_tip(ruta: &str, hash: &[u8; 32]) {
+    if let Some(key) = tip_hmac_key() {
+        if let Ok(mut mac) = <Hmac<sha2::Sha256> as KeyInit>::new_from_slice(&key) {
+            mac.update(hash);
+            let firma = mac.finalize().into_bytes();
+            let mut buf = [0u8; 64];
+            buf[..32].copy_from_slice(hash);
+            buf[32..].copy_from_slice(&firma);
+            let _ = fs::write(format!("{}.tip", ruta), &buf);
+            return;
+        }
+    }
+    // Sin master.salt disponible: guardar sin HMAC (fallback)
     let _ = fs::write(format!("{}.tip", ruta), hash);
 }
 
@@ -1562,9 +1588,7 @@ pub fn registrar_evento_seguridad(evento: &str, clave_hex: &str) {
     escribir_evento_cifrado(evento, clave_hex, &ruta_bck);
 }
 
-// ============================================================
 // CAPA 1B — RECUPERACIÓN CON FRASE BIP39
-// ============================================================
 
 pub fn derivar_clave_recuperacion(palabras: &[String]) -> Result<Zeroizing<[u8; 32]>, String> {
     let frase = Zeroizing::new(palabras.join(" "));
@@ -1692,16 +1716,14 @@ pub fn activar_bloqueo() -> Result<(), String> {
         .map_err(|e| format!("activar_bloqueo: no se pudo escribir bloqueo.tmp: {}", e))
 }
 
-// ============================================================
 // HMAC del contador de intentos
-// ============================================================
 // Igual que bloqueo.tmp: formato `{count}:{hmac}` con la misma clave derivada de master.salt.
 // Si el archivo falta, está corrupto o tiene HMAC inválido → se trata como 0 (cero intentos).
 // Eliminar el archivo no resetea el contador en RAM; sólo protege el caso en que la app
 // se reinicia entre intentos y lee del disco.
 
-pub fn leer_contador_intentos() -> u32 {
-    let contenido = match fs::read_to_string(babel_path("intentos.dat")) {
+fn leer_contador_desde(nombre: &str) -> u32 {
+    let contenido = match fs::read_to_string(babel_path(nombre)) {
         Ok(s) => s,
         Err(_) => return 0,
     };
@@ -1717,19 +1739,35 @@ pub fn leer_contador_intentos() -> u32 {
     count
 }
 
-pub fn escribir_contador_intentos(count: u32) {
+pub fn leer_contador_intentos() -> u32 {
+    // B11: tomar el máximo entre el contador primario y el de respaldo.
+    // Eliminar uno de los archivos no resetea el contador si el otro sigue.
+    let primario = leer_contador_desde("intentos.dat");
+    let respaldo = leer_contador_desde(".babel_ac");
+    primario.max(respaldo)
+}
+
+fn escribir_contador_desde(nombre: &str, count: u32) {
     let secret = match clave_hmac_bloqueo() { Some(s) => s, None => return };
     let mut mac = match <Hmac<Sha256> as KeyInit>::new_from_slice(&secret) {
         Ok(m) => m, Err(_) => return,
     };
     mac.update(count.to_string().as_bytes());
     let firma = hex::encode(mac.finalize().into_bytes());
-    let _ = fs::write(babel_path("intentos.dat"), format!("{}:{}", count, firma));
+    let _ = fs::write(babel_path(nombre), format!("{}:{}", count, firma));
 }
 
-// ============================================================
+pub fn escribir_contador_intentos(count: u32) {
+    escribir_contador_desde("intentos.dat", count);
+    escribir_contador_desde(".babel_ac", count);
+}
+
+pub fn borrar_contador_intentos() {
+    let _ = fs::remove_file(babel_path("intentos.dat"));
+    let _ = fs::remove_file(babel_path(".babel_ac"));
+}
+
 // CAPA 4B — ANTI-DEPURACIÓN
-// ============================================================
 
 /// Llama a PT_DENY_ATTACH (macOS) para que la app se cierre inmediatamente
 /// si alguien intenta adjuntarle un debugger después del arranque.
@@ -1743,9 +1781,7 @@ pub fn denegar_depuracion() {
     }
 }
 
-// ============================================================
 // MONITOR PERIÓDICO DE AMENAZAS
-// ============================================================
 
 // Amenazas ya reportadas en la sesión actual. Se resetea al hacer login
 // para que cada nueva sesión vea amenazas nuevas aunque persistan del arranque.

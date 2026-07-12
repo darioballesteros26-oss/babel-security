@@ -327,19 +327,6 @@
         </div>
       </div>
 
-      <div style="padding:12px 24px 20px;display:flex;gap:8px;">
-        <div class="buscar-g-wrap" style="flex:1;">
-          <div style="display:flex;align-items:center;gap:10px;background:transparent;border:1px solid var(--borde);border-radius:2px;padding:10px 16px;transition:border-color 0.2s;">
-            <span style="color:var(--texto-secundario);font-size:1rem;opacity:0.5;flex-shrink:0;">⌕</span>
-            <input type="text" id="input-buscar-g" placeholder="BUSCAR EN TODOS LOS BUZONES..."
-              oninput="filtrarArchivosGuardados(this.value)"
-              autocomplete="off"
-              style="flex:1;background:transparent;border:none;outline:none;color:var(--texto-principal);font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.72rem;letter-spacing:2px;min-width:0;">
-          </div>
-          <div id="buscar-g-resultados" class="buscar-resultados hidden"></div>
-        </div>
-      </div>
-
       <div class="archivos-layout">
         <div class="buzones-panel">
           <div class="buzones-header">
@@ -355,6 +342,9 @@
               <button type="button" data-action="cancelar-buzon-guardado" class="btn-buzon-cancelar">✕</button>
             </div>
           </div>
+          <div class="buzon-buscar-wrap">
+            <input type="text" id="buscar-buzones-g" class="buzon-buscar-input" placeholder="Buscar buzón..." autocomplete="off" spellcheck="false">
+          </div>
           <div id="lista-buzones-g" class="buzones-lista">
             <div class="buzon-item activo" data-action="seleccionar-buzon-guardados" data-buzon="todos">
               <span class="buzon-icono">◫</span>
@@ -369,6 +359,13 @@
           <div class="archivos-columna-titulo">
             <span id="ui-archivos-titulo">ARCHIVOS</span>
             <span class="archivos-count" id="count-guardados">0 archivos</span>
+          </div>
+          <div class="archivos-buscar-wrap">
+            <span class="archivos-buscar-icono">⌕</span>
+            <input type="text" id="buscar-archivos-g" class="archivos-buscar-input"
+              placeholder="Buscar por nombre..."
+              autocomplete="off" spellcheck="false">
+            <button type="button" id="buscar-archivos-limpiar" class="archivos-buscar-limpiar hidden">✕</button>
           </div>
           <div id="lista-guardados" class="archivos-lista">
             <div class="archivos-vacio">
@@ -1120,7 +1117,7 @@
         letter-spacing:3px;color:var(--dorado);margin-bottom:12px;">
         RENOMBRAR BUZÓN
       </p>
-      <input id="input-renombrar-buzon" type="text" style="width:100%;background:transparent;border:1px solid var(--borde);
+      <input id="input-renombrar-buzon" type="text" maxlength="64" style="width:100%;background:transparent;border:1px solid var(--borde);
         color:var(--texto-principal);padding:8px;font-size:0.8rem;
         border-radius:2px;outline:none;box-sizing:border-box;
         font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;"

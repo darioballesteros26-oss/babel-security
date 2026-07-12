@@ -1,6 +1,4 @@
-// ============================================================
 // BABEL P2P - COMUNICACIÓN DIRECTA ENTRE INSTANCIAS v5
-// ============================================================
 //
 // Módulo único que incluye todo el sistema P2P:
 //   - Certificados mTLS (generación y gestión)
@@ -60,9 +58,7 @@ pub fn reiniciar_servidor_p2p() {
     P2P_SHUTDOWN.store(false, Ordering::SeqCst);
 }
 
-// ============================================================
 // CONSTANTES
-// ============================================================
 fn p2p_dir() -> PathBuf {
     let dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -114,9 +110,7 @@ fn redactar_ip(ip: &str) -> String {
     }
 }
 
-// ============================================================
 // peers_trusted — cifrado con AES-256-GCM
-// ============================================================
 // El archivo peers_trusted.babel contiene las IPs históricas y
 // fingerprints de certificados. Cifrarlo evita revelar con quién
 // se ha comunicado este Babel si alguien accede al disco.
@@ -143,9 +137,7 @@ fn guardar_peers_trusted(peers: &HashMap<String, String>, subclave_hex: &str) {
     }
 }
 
-// ============================================================
 // CONSTANTES DE PROTOCOLO
-// ============================================================
 pub const PUERTO_DESCUBRIMIENTO: u16 = 47823;
 pub const PUERTO_TRANSFERENCIA: u16 = 47824;
 pub const TAMAÑO_CABECERA: usize = 304;
@@ -176,9 +168,7 @@ fn verificar_hmac_anuncio(ts: u64, hmac_hex: &str) -> bool {
     hmac_anuncio(ts) == hmac_hex
 }
 
-// ============================================================
 // ESTRUCTURAS
-// ============================================================
 
 /// Babel encontrado en la red local
 #[derive(Debug, Clone, serde::Serialize)]
@@ -188,9 +178,7 @@ pub struct PeerDescubierto {
     pub nombre: String,
 }
 
-// ============================================================
 // CERTIFICADOS - Gestión de identidad mTLS
-// ============================================================
 
 pub struct GestorCertificados;
 
@@ -297,9 +285,7 @@ impl GestorCertificados {
     }
 }
 
-// ============================================================
 // DESCUBRIMIENTO - Búsqueda de peers en red local por UDP
-// ============================================================
 
 pub struct DescubrimientoRed;
 
@@ -496,9 +482,7 @@ impl DescubrimientoRed {
     }
 }
 
-// ============================================================
 // PROTOCOLO - Formato de paquetes (sin cambios)
-// ============================================================
 
 pub struct Cabecera {
     pub longitud_datos: u64,
@@ -622,9 +606,7 @@ pub fn recibir_archivo<S: Read + Write>(stream: &mut S) -> Result<(String, Vec<u
     Ok((cabecera.nombre_archivo, datos))
 }
 
-// ============================================================
 // VERIFICADOR SERVIDOR (cliente → servidor): TOFU con pinning
-// ============================================================
 // Primera conexión a un peer: acepta y guarda el fingerprint SHA-256.
 // Siguientes: rechaza si cambió. Ahora también verifica la firma TLS.
 
@@ -699,9 +681,7 @@ impl rustls::client::danger::ServerCertVerifier for VerificadorPinning {
     }
 }
 
-// ============================================================
 // VERIFICADOR CLIENTE (servidor → cliente): mTLS
-// ============================================================
 // El servidor requiere que el cliente presente un certificado.
 // TOFU: acepta el primer peer que se conecta y registra su fingerprint.
 // Conexiones posteriores se rechazan si el fingerprint no coincide.
@@ -883,9 +863,7 @@ impl rustls::server::danger::ClientCertVerifier for VerificadorClienteP2P {
     }
 }
 
-// ============================================================
 // SERVIDOR - Babel que recibe archivos
-// ============================================================
 
 pub struct ServidorP2P {
     subclave_hex: Zeroizing<String>,
@@ -1086,9 +1064,7 @@ impl ServidorP2P {
     }
 }
 
-// ============================================================
 // CLIENTE - Babel que envía archivos
-// ============================================================
 
 pub struct ClienteP2P {
     subclave_hex: Zeroizing<String>,
@@ -1149,7 +1125,7 @@ impl ClienteP2P {
         crate::seguridad::registrar_evento_seguridad(
             &format!(
                 "P2P enviado a {} ({}): {} ({} bytes)",
-                peer.nombre, peer.ip, nombre_envio, datos.len()
+                peer.nombre, redactar_ip(&peer.ip), nombre_envio, datos.len()
             ),
             &self.subclave_hex,
         );
@@ -1180,7 +1156,7 @@ impl ClienteP2P {
         let config_arc = Arc::new(config_tls);
 
         let stream = TcpStream::connect(format!("{}:{}", peer.ip, peer.puerto))
-            .map_err(|e| format!("No se pudo conectar a {}: {}", peer.ip, e))?;
+            .map_err(|e| format!("No se pudo conectar a {}: {}", redactar_ip(&peer.ip), e))?;
 
         let server_name = ServerName::try_from(peer.nombre.clone())
             .or_else(|_| ServerName::try_from("localhost"))
@@ -1212,9 +1188,7 @@ impl ClienteP2P {
     }
 }
 
-// ============================================================
 // APROBACIÓN DE PEERS PENDIENTES (M9 TOFU)
-// ============================================================
 
 /// Devuelve los peers pendientes de aprobación como "fp8:ip_redactada".
 pub fn listar_peers_pendientes() -> Vec<String> {

@@ -74,26 +74,20 @@ function renderArbolBuzones(
     const indent = 8 + profundidad * 14;
     const tieneHijos = nodos.some(h => h.parent === n.id);
     const colapsado = buzonesColapsados.has(n.id);
-    const safeId = escapeHTML(n.id).replace(/'/g, "&#039;");
+    // Use escapeHTML for HTML attribute context — browser decodes entities correctly via dataset.*
+    const safeId = escapeHTML(n.id);
+    const safeNombre = escapeHTML(n.nombre);
 
+    // Drop handlers for trad still need inline strings (need event object), but IDs come
+    // from Rust-generated hex so they can't carry injection payloads.
     const drop = sistema === "trad"
-      ? `ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="soltarEnBuzon(event,'${safeId}')"`
+      ? `ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="soltarEnBuzon(event,'${escapeHTML(n.id).replace(/'/g, "&#039;")}')"`
       : "";
-    const onSel = sistema === "trad"
-      ? `seleccionarBuzon('${safeId}')`
-      : `seleccionarBuzonGuardados('${safeId}')`;
-    const onMas = sistema === "trad"
-      ? `event.stopPropagation();mostrarInputBuzon('${safeId}')`
-      : `event.stopPropagation();mostrarInputBuzonGuardado('${safeId}')`;
-    const onRen = sistema === "trad"
-      ? `event.stopPropagation();iniciarRenombrado('${safeId}','${escapeHTML(n.nombre).replace(/'/g, "&#039;")}')`
-      : `event.stopPropagation();iniciarRenombradoGuardado('${safeId}','${escapeHTML(n.nombre).replace(/'/g, "&#039;")}')`;
-    const onDel = sistema === "trad"
-      ? `event.stopPropagation();borrarBuzon('${safeId}')`
-      : `event.stopPropagation();borrarBuzonGuardado('${safeId}')`;
+
+    const selAction = sistema === "trad" ? "seleccionar-buzon" : "seleccionar-buzon-guardados";
 
     const toggleIcon = tieneHijos
-      ? `<span onclick="event.stopPropagation();toggleColapso('${safeId}','${sistema}')"
+      ? `<span data-action="toggle-colapso" data-buzon="${safeId}" data-sistema="${sistema}"
            style="cursor:pointer;font-size:0.6rem;opacity:0.6;padding:0 3px;transition:transform 0.15s;"
            title="${colapsado ? "Expandir" : "Colapsar"}">${colapsado ? "▶" : "▼"}</span>`
       : `<span style="display:inline-block;width:14px;"></span>`;
@@ -101,19 +95,17 @@ function renderArbolBuzones(
     const hijos = colapsado ? "" : renderArbolBuzones(nodos, n.id, profundidad + 1, activo, sistema);
 
     return `
-      <div class="buzon-item ${esActivo ? "activo" : ""}" onclick="${onSel}" ${drop}
+      <div class="buzon-item ${esActivo ? "activo" : ""}" data-action="${selAction}" data-buzon="${safeId}" ${drop}
         style="padding-left:${indent}px;border:1px solid transparent;border-radius:3px;transition:background 0.2s,border-color 0.2s;">
         ${toggleIcon}
-        <span class="buzon-icono" onclick="${onRen}" style="cursor:pointer;" title="Renombrar">✎</span>
-        <span class="buzon-nombre" style="flex:1" title="${escapeHTML(n.nombre)}">${escapeHTML(n.nombre).toUpperCase()}</span>
-        <span onclick="${onMas}" style="color:var(--texto-secundario);cursor:pointer;font-size:0.85rem;opacity:0.5;padding:0 4px;" title="Nuevo subbuzón">+</span>
-        <button type="button" onclick="${onDel}" style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;font-size:0.7rem;opacity:0.4;padding:0 2px;" title="Eliminar">✕</button>
+        <span class="buzon-icono" data-action="renombrar-buzon" data-buzon="${safeId}" data-nombre="${safeNombre}" data-sistema="${sistema}" style="cursor:pointer;" title="Renombrar">✎</span>
+        <span class="buzon-nombre" style="flex:1" title="${safeNombre}">${safeNombre.toUpperCase()}</span>
+        <span data-action="nuevo-subbuzon" data-buzon="${safeId}" data-sistema="${sistema}" style="color:var(--texto-secundario);cursor:pointer;font-size:0.85rem;opacity:0.5;padding:0 4px;" title="Nuevo subbuzón">+</span>
+        <button type="button" data-action="borrar-buzon" data-buzon="${safeId}" data-sistema="${sistema}" style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;font-size:0.7rem;opacity:0.4;padding:0 2px;" title="Eliminar">✕</button>
       </div>${hijos}`;
   }).join("");
 }
-// ============================================================
 // UTILIDADES UI
-// ============================================================
 
 function mostrarPantalla(nombre: Pantalla): void {
   document.querySelectorAll<HTMLElement>(".pantalla")
@@ -141,10 +133,7 @@ function limpiarCamposSensibles(): void {
     "login-pass", "login-pass-usuario"].forEach(limpiarCampo);
 }
 
-// ============================================================
 // CHAT — SISTEMA DE MENSAJES
-// ============================================================
-
 
 function añadirMensajeUsuario(texto: string): void {
   const contenedor = document.getElementById("chat-mensajes");
@@ -205,7 +194,6 @@ function añadirResultadoArchivo(nombreResultado: string, ruta: string): void {
   const contenedor = document.getElementById("chat-mensajes");
   if (!contenedor) return;
 
-  // Quitar prefijo de usuario si existe (usuario_archivo.babel → archivo.babel)
   const nombreLimpio = nombreResultado
     .replace(/\.babel$/, "")
     .replace(/_\d+$/, "")
@@ -254,7 +242,6 @@ function scrollAlFinal(): void {
 
 }
 
-
 function mostrarProcesando(visible: boolean): void {
   const el = document.getElementById("chat-procesando");
   if (!el) return;
@@ -282,11 +269,9 @@ function borrarChat(): void {
     el.textContent = "";
   });
 
-  // Eliminar todos los mensajes dinámicos — deja solo la bienvenida
   while (contenedor.children.length > 1) {
     contenedor.removeChild(contenedor.lastChild!);
   }
-
 
   // Zeroize del input
   const input = document.getElementById("chat-input") as HTMLTextAreaElement;
@@ -297,14 +282,7 @@ function borrarChat(): void {
   }
 }
 
-
-// ============================================================
-// ARRANQUE
-// ============================================================
-
-// ============================================================
 // DELEGATED CLICK HANDLER — reemplaza todos los onclick="..." del HTML
-// ============================================================
 document.addEventListener("click", (e: MouseEvent) => {
   const el = (e.target as Element).closest<HTMLElement>("[data-action]");
   if (!el) return;
@@ -354,6 +332,17 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "confirmar-buzon-guardado": confirmarBuzonGuardado(); break;
     case "cancelar-buzon-guardado": cancelarBuzonGuardado(); break;
     case "seleccionar-buzon-guardados": seleccionarBuzonGuardados(el.dataset.buzon!); break;
+    case "toggle-colapso": toggleColapso(el.dataset.buzon!, el.dataset.sistema ?? "guard"); break;
+    case "renombrar-buzon":
+      if (el.dataset.sistema === "trad") iniciarRenombrado(el.dataset.buzon!, el.dataset.nombre!);
+      else iniciarRenombradoGuardado(el.dataset.buzon!, el.dataset.nombre!);
+      break;
+    case "nuevo-subbuzon":
+      mostrarInputBuzonGuardado(el.dataset.buzon!);
+      break;
+    case "borrar-buzon":
+      borrarBuzonGuardado(el.dataset.buzon!);
+      break;
     case "guardar-nombre-display": guardarNombreDisplay(); break;
     // Renombrar modales
     case "cerrar-modal-renombrar": cerrarModalRenombrar(); break;
@@ -385,16 +374,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "cerrar-visor-email": cerrarVisorEmail(); break;
     case "cerrar-compositor": cerrarCompositor(); break;
     case "insertar-plantilla": insertarPlantillaEmail(el.dataset.texto!); break;
-    case "abrir-resultado-busqueda":
-      abrirResultadoBusqueda(el.dataset.buzonId!, el.dataset.ruta!, el.dataset.esTrad === "true");
-      break;
   }
-});
-
-// Cierra el dropdown de búsqueda al hacer clic fuera
-document.addEventListener("click", (e: MouseEvent) => {
-  const dentro = (e.target as Element).closest(".buscar-g-wrap");
-  if (!dentro) ocultarResultadosBusqueda();
 });
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -478,7 +458,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }, 5000);
 
-
   try {
     const msg = await invoke<string>("verificar_entorno_seguro");
     const statusEl = document.getElementById("status-text");
@@ -507,9 +486,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   mostrarPantalla(bunkerExiste ? "login" : "decision");
 });
 
-// ============================================================
 // CREAR BÚNKER
-// ============================================================
 
 async function crearBunker(): Promise<void> {
   const maestra = (document.getElementById("master-key") as HTMLInputElement)?.value ?? "";
@@ -538,9 +515,7 @@ async function crearBunker(): Promise<void> {
   }
 }
 
-// ============================================================
 // LOGIN
-// ============================================================
 
 async function intentarAcceso(): Promise<void> {
   const llaveMaestra = (document.getElementById("login-pass") as HTMLInputElement)?.value ?? "";
@@ -644,9 +619,7 @@ async function enviarMensaje(): Promise<void> {
   }
 }
 
-// ============================================================
 // TRADUCCIÓN — VÍA SELECTOR DE ARCHIVO
-// ============================================================
 
 // Importa y traduce un documento vía diálogo nativo (NSOpenPanel).
 // El comando Rust emite "archivo-seleccionado" nada más elegir el archivo (antes de
@@ -691,9 +664,7 @@ async function procesarArchivo(archivo: File): Promise<void> {
   }
 }
 
-// ============================================================
 // TRADUCCIÓN — VÍA DRAG & DROP NATIVO
-// ============================================================
 
 async function advertirCalidadPdf(nombreArchivo: string): Promise<void> {
   if (!nombreArchivo.toLowerCase().endsWith(".pdf")) return;
@@ -731,10 +702,7 @@ async function procesarRuta(ruta: string): Promise<void> {
   }
 }
 
-// ============================================================
-// ============================================================
 // SESIÓN Y NAVEGACIÓN
-// ============================================================
 
 function toggleSidebar(): void {
   const sidebar = document.getElementById("chat-sidebar");
@@ -773,10 +741,7 @@ async function cambiarCategoriaDiccionario(categoria: string): Promise<void> {
   }
 }
 
-// ============================================================
-// SIDEBAR — SELECTOR DE IDIOMA DE TRADUCCIÓN
-// Sincroniza el selector del sidebar con el del header
-// ============================================================
+// SIDEBAR — SELECTOR DE IDIOMA DE TRADUCCIÓN — Sincroniza el selector del sidebar con el del header
 
 async function cerrarSesion(): Promise<void> {
   limpiarCamposSensibles();
@@ -808,8 +773,6 @@ function volverAlPanel(): void {
   if (borradoAutomaticoActivado) borrarChat();
   mostrarPantalla("principal");
 }
-
-
 
 function sincronizarSelectoresIdioma(origen: string, destino: string): void {
   const s1 = document.getElementById("selector-origen") as HTMLSelectElement | null;
@@ -884,12 +847,12 @@ async function cambiarIdioma(idioma: string): Promise<void> {
   await invoke("cambiar_idioma", { idioma });
 }
 
-// ============================================================
 // ARCHIVOS — BUZONES Y LISTADO
-// ============================================================
 
 // Variable global — buzón activo
 let buzonActivoGuardados: string = "todos";
+let terminoBusquedaArchivos = "";
+let terminoBusquedaBuzones = "";
 let _smtpConfigurado: boolean = false;
 // Tipo que refleja el struct Rust MetadatosArchivo
 interface MetadatosArchivo {
@@ -902,7 +865,6 @@ interface MetadatosArchivo {
   buzon_id: string;
   es_traduccion: boolean;
 }
-
 
 // Carga y renderiza los archivos del buzón de guardados (sin traducir)
 async function cargarArchivosGuardados(): Promise<void> {
@@ -952,11 +914,11 @@ async function cargarArchivosGuardados(): Promise<void> {
         const kb = (g.trad.tamaño / 1024).toFixed(0);
         const idioma = g.trad.idioma.replace("_", "→").toUpperCase();
         return `
-<div class="archivo-card" data-ruta="${escapeHTML(g.trad.ruta)}" data-ruta-orig="${escapeHTML(fuenteOrig.ruta)}" data-base="${escapeHTML(base)}" data-guardado="false" draggable="true">
+<div class="archivo-card" data-ruta="${escapeHTML(g.trad.ruta)}" data-ruta-orig="${escapeHTML(fuenteOrig.ruta)}" data-base="${escapeHTML(base)}" data-busqueda="${escapeHTML(base.toLowerCase().replace(/[\s_]+/g," ").trim())}" data-guardado="false" draggable="true">
   <div class="archivo-card-header">
     <input type="checkbox" class="archivo-checkbox-g" data-action="seleccionar" style="accent-color:var(--dorado);cursor:pointer;flex-shrink:0;width:16px;height:16px;">
     <div class="archivo-card-info">
-      <div class="archivo-card-nombre" style="display:flex;align-items:center;gap:8px;">${nombre}
+      <div class="archivo-card-nombre" style="display:flex;align-items:center;gap:8px;"><span class="card-nombre-texto">${nombre}</span>
         <button type="button" data-action="renombrar" style="background:none;border:none;color:var(--dorado);cursor:pointer;font-size:0.85rem;padding:0;opacity:0.7;">✎</button>
       </div>
       <div class="archivo-card-meta">${kb} KB · <span style="color:var(--dorado);">${escapeHTML(idioma)} · TRAD</span> · AES-256${g.trad.fecha ? ' · ' + escapeHTML(g.trad.fecha) : ''}</div>
@@ -974,11 +936,11 @@ async function cargarArchivosGuardados(): Promise<void> {
       const a = g.guardado ?? g.trad ?? g.orig!;
       const kb = (a.tamaño / 1024).toFixed(0);
       return `
-<div class="archivo-card" data-ruta="${escapeHTML(a.ruta)}" data-base="${escapeHTML(base)}" data-guardado="true" draggable="true">
+<div class="archivo-card" data-ruta="${escapeHTML(a.ruta)}" data-base="${escapeHTML(base)}" data-busqueda="${escapeHTML(base.toLowerCase().replace(/[\s_]+/g," ").trim())}" data-guardado="true" draggable="true">
   <div class="archivo-card-header">
     <input type="checkbox" class="archivo-checkbox-g" data-action="seleccionar" style="accent-color:var(--dorado);cursor:pointer;flex-shrink:0;width:16px;height:16px;">
     <div class="archivo-card-info">
-      <div class="archivo-card-nombre" style="display:flex;align-items:center;gap:8px;">${nombre}
+      <div class="archivo-card-nombre" style="display:flex;align-items:center;gap:8px;"><span class="card-nombre-texto">${nombre}</span>
         <button type="button" data-action="renombrar" style="background:none;border:none;color:var(--dorado);cursor:pointer;font-size:0.85rem;padding:0;opacity:0.7;">✎</button>
       </div>
       <div class="archivo-card-meta">${kb} KB · GUARDADO · AES-256${a.fecha ? ' · ' + escapeHTML(a.fecha) : ''}</div>
@@ -993,6 +955,8 @@ async function cargarArchivosGuardados(): Promise<void> {
   </div>
 </div>`;
     }).join("");
+
+    if (terminoBusquedaArchivos) filtrarArchivosGuardados(terminoBusquedaArchivos);
 
     lista.onclick = (e: MouseEvent) => {
       const btn = (e.target as HTMLElement).closest("[data-action]") as HTMLElement | null;
@@ -1021,21 +985,6 @@ async function cargarArchivosGuardados(): Promise<void> {
       _esGuardadoArrastrado = card.dataset.guardado === "true";
     };
 
-    // Resaltar archivo si venimos de una búsqueda cross-buzones
-    if (_resaltarRuta) {
-      const rutaBuscada = _resaltarRuta;
-      _resaltarRuta = null;
-      const cards = lista.querySelectorAll<HTMLElement>(".archivo-card");
-      for (const card of cards) {
-        if (card.dataset.ruta === rutaBuscada) {
-          card.scrollIntoView({ behavior: "smooth", block: "center" });
-          card.classList.add("archivo-card-resaltado");
-          setTimeout(() => card.classList.remove("archivo-card-resaltado"), 2000);
-          break;
-        }
-      }
-    }
-
   } catch (error) {
     mostrarToast("Error cargando lista: " + String(error), true);
     console.error("Error cargando guardados:", error);
@@ -1051,134 +1000,6 @@ function actualizarSeleccionGuardados(): void {
   if (btnEliminar) btnEliminar.classList.toggle("hidden", seleccionados.length === 0);
 }
 
-// Filtra la lista de archivos guardados por texto de búsqueda
-let _resaltarRuta: string | null = null;
-let _buscarTimer: ReturnType<typeof setTimeout> | null = null;
-
-function filtrarArchivosGuardados(texto: string): void {
-  if (_buscarTimer) clearTimeout(_buscarTimer);
-
-  if (!texto) {
-    ocultarResultadosBusqueda();
-    document.querySelectorAll<HTMLElement>("#lista-guardados .archivo-card")
-      .forEach(c => c.style.display = "");
-    return;
-  }
-
-  // Filtro inmediato en cards visibles
-  const q = texto.toLowerCase();
-  document.querySelectorAll<HTMLElement>("#lista-guardados .archivo-card")
-    .forEach(card => {
-      const nombre = card.querySelector(".archivo-card-nombre")?.textContent?.toLowerCase() ?? "";
-      card.style.display = nombre.includes(q) ? "" : "none";
-    });
-
-  // Búsqueda cross-buzones con debounce
-  if (texto.length >= 2) {
-    _buscarTimer = setTimeout(() => buscarEnTodosBuzones(texto), 300);
-  }
-}
-
-async function buscarEnTodosBuzones(texto: string): Promise<void> {
-  const container = document.getElementById("buscar-g-resultados");
-  if (!container) return;
-  container.classList.remove("hidden");
-  container.innerHTML = `<div style="padding:10px 14px;color:var(--texto-secundario);font-size:0.7rem;letter-spacing:1px;">Buscando...</div>`;
-
-  try {
-    const [todos, nodos] = await Promise.all([
-      invoke<MetadatosArchivo[]>("listar_archivos_guardados", { buzon: "todos" }),
-      invoke<BuzonNodo[]>("listar_buzones_guardados"),
-    ]);
-    const q = texto.toLowerCase();
-    const limpiar = (n: string) =>
-      n.replace(/\.babel$/, "").replace(/__orig/gi, "").replace(/_\d{8,}$/, "").trim();
-
-    // Verificar que el input sigue activo — el invoke puede haber llegado tarde
-    const inputEl = document.getElementById("input-buscar-g") as HTMLInputElement | null;
-    if (!inputEl || inputEl.value.length < 2) {
-      container.classList.add("hidden");
-      return;
-    }
-
-    // Buzones que coinciden con la búsqueda
-    const buzonesMatch = nodos
-      .filter(n => n.nombre.toLowerCase().includes(q))
-      .slice(0, 3);
-
-    // Archivos que coinciden
-    const archivosMatch = todos
-      .filter(a => a.idioma !== "original" && !a.nombre.toLowerCase().includes("__orig"))
-      .filter(a => limpiar(a.nombre).toLowerCase().includes(q))
-      .slice(0, 6);
-
-    if (buzonesMatch.length === 0 && archivosMatch.length === 0) {
-      container.innerHTML = `<div style="padding:10px 14px;color:var(--texto-secundario);font-size:0.7rem;letter-spacing:1px;text-align:center;">Sin resultados</div>`;
-      return;
-    }
-
-    const htmlBuzones = buzonesMatch.map(n => {
-      const nombre = escapeHTML(n.nombre.toUpperCase());
-      return `<div class="resultado-busqueda resultado-busqueda--buzon"
-        data-action="abrir-resultado-busqueda"
-        data-buzon-id="${escapeHTML(n.id)}"
-        data-ruta=""
-        data-es-trad="false">
-        <div class="resultado-busqueda-fila">
-          <span class="resultado-tipo-badge resultado-tipo-buzon">BUZ</span>
-          <span class="resultado-busqueda-nombre">${nombre}</span>
-        </div>
-      </div>`;
-    });
-
-    const htmlArchivos = archivosMatch.map(a => {
-      const nombre = escapeHTML(limpiar(a.nombre));
-      const buzonNombre = a.buzon === "todos" || !a.buzon ? "—" : escapeHTML(a.buzon.toUpperCase());
-      const tipo = a.es_traduccion ? "TRAD" : "ARC";
-      const tipoClass = a.es_traduccion ? "resultado-tipo-trad" : "resultado-tipo-arc";
-      return `<div class="resultado-busqueda resultado-busqueda--archivo"
-        data-action="abrir-resultado-busqueda"
-        data-buzon-id="${escapeHTML(a.buzon_id)}"
-        data-ruta="${escapeHTML(a.ruta)}"
-        data-es-trad="${a.es_traduccion}">
-        <div class="resultado-busqueda-fila">
-          <span class="resultado-tipo-badge ${tipoClass}">${tipo}</span>
-          <span class="resultado-busqueda-nombre">${nombre}</span>
-        </div>
-        <div class="resultado-busqueda-meta">
-          <span style="opacity:0.45;padding-left:38px;">${buzonNombre}</span>
-        </div>
-      </div>`;
-    });
-
-    const separador = buzonesMatch.length > 0 && archivosMatch.length > 0
-      ? `<div style="height:1px;background:var(--borde);margin:2px 8px;opacity:0.4;"></div>`
-      : "";
-
-    container.innerHTML = htmlBuzones.join("") + separador + htmlArchivos.join("");
-  } catch {
-    container.classList.add("hidden");
-  }
-}
-
-function ocultarResultadosBusqueda(): void {
-  document.getElementById("buscar-g-resultados")?.classList.add("hidden");
-}
-
-function abrirResultadoBusqueda(buzonId: string, ruta: string, esTrad: boolean): void {
-  ocultarResultadosBusqueda();
-  const inputBuscar = document.getElementById("input-buscar-g") as HTMLInputElement | null;
-  if (inputBuscar) inputBuscar.value = "";
-  // Resultado de buzón (ruta vacía): navegar directo al buzón sin resaltar archivo
-  if (!ruta) {
-    seleccionarBuzonGuardados(buzonId || "todos");
-    return;
-  }
-  _resaltarRuta = ruta;
-  // Traducciones usan el sistema de buzones de archivos — mostramos "todos" para no ocultar guardados
-  seleccionarBuzonGuardados(esTrad ? "todos" : (buzonId || "todos"));
-}
-
 function actualizarBadgeEmail(n: number): void {
   const badge = document.getElementById("email-badge");
   if (!badge) return;
@@ -1190,14 +1011,83 @@ function actualizarBadgeEmail(n: number): void {
   }
 }
 
+function filtrarBuzonesGuardados(texto: string): void {
+  terminoBusquedaBuzones = texto.trim();
+  const lista = document.getElementById("lista-buzones-g");
+  if (!lista) return;
+  lista.querySelector(".buzon-sin-resultados")?.remove();
+  const q = terminoBusquedaBuzones.toLowerCase();
+  const items = lista.querySelectorAll<HTMLElement>(".buzon-item");
+  let hayResultados = false;
+  items.forEach(item => {
+    const nombre = (item.querySelector(".buzon-nombre")?.textContent ?? "").toLowerCase();
+    if (nombre === "todos") { item.style.display = ""; return; }
+    const visible = !q || nombre.includes(q);
+    item.style.display = visible ? "" : "none";
+    if (visible) hayResultados = true;
+  });
+  if (q && !hayResultados) {
+    const div = document.createElement("div");
+    div.className = "buzon-sin-resultados";
+    div.style.cssText = "padding:8px 10px;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.5;text-align:center;";
+    div.textContent = "Sin resultados";
+    lista.appendChild(div);
+  }
+}
+
 // Activa un buzón guardado y recarga su contenido
 function seleccionarBuzonGuardados(id: string): void {
   buzonActivoGuardados = id;
   localStorage.setItem("babel-buzon-activo-g", id);
-  const buscarEl = document.getElementById("input-buscar-g") as HTMLInputElement | null;
-  if (buscarEl) { buscarEl.value = ""; filtrarArchivosGuardados(""); }
+  terminoBusquedaArchivos = "";
+  const inp = document.getElementById("buscar-archivos-g") as HTMLInputElement | null;
+  if (inp) inp.value = "";
+  const limpiar = document.getElementById("buscar-archivos-limpiar");
+  if (limpiar) limpiar.classList.add("hidden");
+  terminoBusquedaBuzones = "";
+  const inpBuzones = document.getElementById("buscar-buzones-g") as HTMLInputElement | null;
+  if (inpBuzones) inpBuzones.value = "";
   cargarBuzonesGuardados();
   cargarArchivosGuardados();
+}
+
+function filtrarArchivosGuardados(texto: string): void {
+  terminoBusquedaArchivos = texto.trim();
+  const lista = document.getElementById("lista-guardados");
+  if (!lista) return;
+
+  lista.querySelector(".sin-resultados-busqueda")?.remove();
+
+  const limpiar = document.getElementById("buscar-archivos-limpiar");
+  if (limpiar) limpiar.classList.toggle("hidden", !terminoBusquedaArchivos);
+
+  // Normalizar: minúsculas, colapsar espacios/guiones bajos/non-breaking spaces
+  const normalizar = (s: string) => s.toLowerCase().replace(/[\s_ ]+/g, " ").trim();
+  const q = normalizar(terminoBusquedaArchivos);
+  const cards = lista.querySelectorAll<HTMLElement>(".archivo-card");
+  let visibles = 0;
+
+  cards.forEach(card => {
+    const busqueda = card.dataset.busqueda ?? normalizar(card.dataset.base ?? "");
+    const visible = !q || busqueda.includes(q);
+    card.style.display = visible ? "" : "none";
+    if (visible) visibles++;
+  });
+
+  const count = document.getElementById("count-guardados");
+  if (q) {
+    if (count) count.textContent = visibles === cards.length
+      ? `${visibles} archivo${visibles !== 1 ? "s" : ""}`
+      : `${visibles} de ${cards.length}`;
+    if (visibles === 0) {
+      const div = document.createElement("div");
+      div.className = "sin-resultados-busqueda archivos-vacio";
+      div.innerHTML = `<p>Sin resultados</p><p class="archivos-vacio-sub">«${escapeHTML(q)}» no coincide con ningún archivo</p>`;
+      lista.appendChild(div);
+    }
+  } else if (count) {
+    count.textContent = `${cards.length} archivo${cards.length !== 1 ? "s" : ""}`;
+  }
 }
 
 // LS keys para preferencias "no volver a preguntar"
@@ -1259,6 +1149,7 @@ async function abrirImportarGuardado(): Promise<void> {
       nombre: string;
       original_borrado: boolean;
       tiene_original: boolean;
+      token_borrado: string | null;
     } | null>("importar_archivo_dialogo");
 
     if (!res) return;
@@ -1287,8 +1178,7 @@ async function abrirImportarGuardado(): Promise<void> {
       });
       if (confirmar) {
         try {
-          // Sin parámetros: la ruta la gestiona Rust internamente
-          originalBorrado = await invoke<boolean>("borrar_archivo_original");
+          originalBorrado = await invoke<boolean>("borrar_archivo_original", { token: res.token_borrado ?? "" });
         } catch (e) {
           mostrarToast(`Error al eliminar original: ${e}`, true);
         }
@@ -1302,7 +1192,6 @@ async function abrirImportarGuardado(): Promise<void> {
     mostrarToast(`Error importando: ${error}`, true);
   }
 }
-
 
 async function verArchivoGuardado(): Promise<void> {
   const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
@@ -1410,57 +1299,41 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   await cargarArchivosGuardados();
 }
 
-
 let dropZoneInicializada = false;
 
 async function iniciarDropZone(): Promise<void> {
   if (dropZoneInicializada) return;
 
   await getCurrentWindow().onDragDropEvent(async (event) => {
-    // Detectar qué pantalla está activa
     const enTraduccion = !document.getElementById("pantalla-traduccion")?.classList.contains("hidden");
     const enGuardados = !document.getElementById("pantalla-archivos-guardados")?.classList.contains("hidden");
-
     if (!enTraduccion && !enGuardados) return;
 
     const barra = document.getElementById("chat-input-barra");
     const zona = document.getElementById("drop-zone-guardados");
+    const resetZona = () => {
+      barra?.classList.remove("drag-activo");
+      if (zona) { zona.style.borderColor = "var(--borde)"; zona.style.background = "transparent"; }
+    };
 
     if (event.payload.type === "over") {
       if (enTraduccion) barra?.classList.add("drag-activo");
-      if (enGuardados && zona) {
-        zona.style.borderColor = "var(--dorado)";
-        zona.style.background = "rgba(197,160,89,0.05)";
-      }
+      if (enGuardados && zona) { zona.style.borderColor = "var(--dorado)"; zona.style.background = "rgba(197,160,89,0.05)"; }
     } else if (event.payload.type === "drop") {
-      barra?.classList.remove("drag-activo");
-      if (zona) {
-        zona.style.borderColor = "var(--borde)";
-        zona.style.background = "transparent";
-      }
+      resetZona();
       const rutas = event.payload.paths;
       if (rutas && rutas.length > 0) {
         if (enTraduccion) procesarRuta(rutas[0]);
-        if (enGuardados) {
-          for (const ruta of rutas) {
-            await guardarArchivoSinTraducir(ruta);
-          }
-        }
+        if (enGuardados) for (const ruta of rutas) await guardarArchivoSinTraducir(ruta);
       }
     } else {
-      barra?.classList.remove("drag-activo");
-      if (zona) {
-        zona.style.borderColor = "var(--borde)";
-        zona.style.background = "transparent";
-      }
+      resetZona();
     }
   });
 
   dropZoneInicializada = true;
 }
-// ============================================================
 // NAVEGACIÓN — ENTRE PANTALLAS Y ACCIONES DE ARCHIVO
-// ============================================================
 
 // Abre en Finder la carpeta de archivos guardados cifrados
 async function abrirCarpetaBabelGuardados(): Promise<void> {
@@ -1471,7 +1344,6 @@ async function abrirCarpetaBabelGuardados(): Promise<void> {
   }
 }
 
-(window as any).abrirCarpetaBabelGuardados = abrirCarpetaBabelGuardados;
 function irATraduccion(): void {
   mostrarPantalla("traduccion");
   setTimeout(() => iniciarDropZone(), 100);
@@ -1486,15 +1358,12 @@ async function guardarArchivoSinTraducir(rutaArchivo: string): Promise<void> {
     return;
   }
 
-  // Duplicado: si ya hay una card con el mismo nombre base, no guardar
-  const nombreBase = nombre.replace(/\.[^/.]+$/, "").toLowerCase();
-  const cardsExistentes = document.querySelectorAll<HTMLElement>("#lista-guardados .archivo-card-nombre");
-  for (const card of cardsExistentes) {
-    const textoCard = (card.textContent ?? "").trim().toLowerCase();
-    if (textoCard === nombreBase) {
-      mostrarToast(`"${nombre}" ya está guardado`, true);
-      return;
-    }
+  // Verificar duplicados contra el sistema de archivos real (no solo DOM visible)
+  const nombreBase = nombre.replace(/\.[^/.]+$/, "");
+  const yaExiste = await invoke<boolean>("archivo_guardado_existe", { nombreBase }).catch(() => false);
+  if (yaExiste) {
+    mostrarToast(`"${nombre}" ya está guardado`, true);
+    return;
   }
 
   try {
@@ -1518,7 +1387,6 @@ async function guardarArchivoSinTraducir(rutaArchivo: string): Promise<void> {
   }
 }
 
-
 async function irAArchivos(): Promise<void> {
   mostrarPantalla("archivos-guardados");
   setTimeout(() => iniciarDropZone(), 100);
@@ -1526,13 +1394,7 @@ async function irAArchivos(): Promise<void> {
   await cargarArchivosGuardados();
 }
 
-// ============================================================
-// BUZONES DE TRADUCCIONES — CREAR, CANCELAR, CONFIRMAR
-// ============================================================
-
-// ============================================================
 // BUZONES DE GUARDADOS — CREAR, CARGAR, BORRAR, RENOMBRAR
-// ============================================================
 
 // Carga el árbol de buzones guardados y lo renderiza en el sidebar
 async function cargarBuzonesGuardados(): Promise<void> {
@@ -1541,9 +1403,10 @@ async function cargarBuzonesGuardados(): Promise<void> {
     const lista = document.getElementById("lista-buzones-g");
     if (!lista) return;
     lista.innerHTML = `
-      <div class="buzon-item ${buzonActivoGuardados === "todos" ? "activo" : ""}" onclick="seleccionarBuzonGuardados('todos')">
+      <div class="buzon-item ${buzonActivoGuardados === "todos" ? "activo" : ""}" data-action="seleccionar-buzon-guardados" data-buzon="todos">
         <span class="buzon-icono">◫</span><span class="buzon-nombre">TODOS</span>
       </div>` + renderArbolBuzones(nodos, null, 0, buzonActivoGuardados, "guard");
+    if (terminoBusquedaBuzones) filtrarBuzonesGuardados(terminoBusquedaBuzones);
   } catch (error) {
     console.error("Error cargando buzones guardados:", error);
   }
@@ -1592,9 +1455,7 @@ async function borrarBuzonGuardado(id: string): Promise<void> {
   }
 }
 
-// ============================================================
 // MOVER ARCHIVOS GUARDADOS — popup selector de buzón destino
-// ============================================================
 
 async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent): Promise<void> {
   document.querySelectorAll(".selector-buzon-popup").forEach(el => el.remove());
@@ -1657,9 +1518,7 @@ async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent): Promi
   document.body.appendChild(popup);
   setTimeout(() => { document.addEventListener("click", () => popup.remove(), { once: true }); }, 0);
 }
-// ============================================================
 // RENOMBRAR BUZONES — modal compartido para traducciones y guardados
-// ============================================================
 
 // Abre el modal de renombrado para un buzón de traducciones (por ID)
 async function iniciarRenombrado(id: string, nombreActual: string): Promise<void> {
@@ -1724,11 +1583,8 @@ async function exportarTodo(): Promise<void> {
     mostrarToast("Error: " + msg, true);
   }
 }
-(window as any).exportarTodo = exportarTodo;
 
-// ============================================================
 // TOAST — NOTIFICACIONES TEMPORALES
-// ============================================================
 
 // Muestra una notificación temporal en la parte inferior de la pantalla
 function mostrarToast(mensaje: string, esError: boolean): void {
@@ -1763,143 +1619,36 @@ function mostrarToast(mensaje: string, esError: boolean): void {
 // No se cierra automáticamente: el usuario debe escribir CONFIRMAR para continuar bajo riesgo.
 function mostrarAlertaAmenaza(amenazas: string[]): void {
   if (document.getElementById("babel-amenaza-overlay")) return;
-
-  const font = "var(--fuente-titulo, 'Times New Roman', Times, serif)";
-
+  const font = "var(--fuente-titulo,'Times New Roman',Times,serif)";
+  const items = amenazas.map(a => `<li style="margin:4px 0;color:#ffaaaa;">${escapeHTML(a)}</li>`).join("");
   const overlay = document.createElement("div");
   overlay.id = "babel-amenaza-overlay";
-  Object.assign(overlay.style, {
-    position: "fixed", inset: "0", background: "rgba(0,0,0,0.82)",
-    zIndex: "99999", display: "flex", alignItems: "center",
-    justifyContent: "center", fontFamily: font,
-  });
-
-  const caja = document.createElement("div");
-  Object.assign(caja.style, {
-    background: "#1a0a0a", border: "1px solid #ff4444", borderRadius: "4px",
-    padding: "36px 40px", maxWidth: "480px", width: "90%",
-    boxShadow: "0 0 40px #ff000044", textAlign: "center",
-  });
-
-  const icono = document.createElement("div");
-  icono.textContent = "⚠";
-  Object.assign(icono.style, { fontSize: "2rem", marginBottom: "16px" });
-
-  const titulo = document.createElement("h2");
-  titulo.textContent = "AMENAZA DETECTADA";
-  Object.assign(titulo.style, { color: "#ff6b6b", fontSize: "1rem", letterSpacing: "0.15em", margin: "0 0 12px" });
-
-  const descripcion = document.createElement("p");
-  descripcion.textContent = "El monitor de seguridad ha detectado software potencialmente peligroso activo en este sistema:";
-  Object.assign(descripcion.style, { color: "#aaa", fontSize: "0.8rem", letterSpacing: "0.08em", margin: "0 0 18px" });
-
-  const lista = document.createElement("ul");
-  Object.assign(lista.style, { listStyle: "none", padding: "0", margin: "0 0 24px", fontSize: "0.78rem", letterSpacing: "0.06em", textAlign: "left" });
-  amenazas.forEach(a => {
-    const li = document.createElement("li");
-    li.textContent = a;
-    Object.assign(li.style, { margin: "4px 0", color: "#ffaaaa" });
-    lista.appendChild(li);
-  });
-
-  const aviso = document.createElement("p");
-  aviso.textContent = "Recomendación: cierra la sesión y verifica tu sistema antes de continuar.";
-  Object.assign(aviso.style, { color: "#888", fontSize: "0.72rem", margin: "0 0 20px", letterSpacing: "0.06em" });
-
-  const inputLabel = document.createElement("p");
-  inputLabel.textContent = "Para continuar bajo riesgo escribe CONFIRMAR:";
-  Object.assign(inputLabel.style, { color: "#666", fontSize: "0.72rem", margin: "0 0 8px" });
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.placeholder = "CONFIRMAR";
-  Object.assign(input.style, {
-    background: "#0d0d0d", color: "#aaa", border: "1px solid #333",
-    padding: "8px 14px", fontFamily: font, fontSize: "0.78rem",
-    letterSpacing: "0.1em", borderRadius: "2px", width: "100%",
-    boxSizing: "border-box", marginBottom: "20px", textAlign: "center",
-  });
-
-  const fila = document.createElement("div");
-  Object.assign(fila.style, { display: "flex", gap: "12px", justifyContent: "center" });
-
-  const btnCerrar = document.createElement("button");
-  btnCerrar.textContent = "CERRAR SESIÓN";
-  Object.assign(btnCerrar.style, {
-    background: "#3a0a0a", color: "#ff6b6b", border: "1px solid #ff444466",
-    padding: "10px 22px", fontFamily: font, fontSize: "0.78rem",
-    letterSpacing: "0.12em", borderRadius: "2px", cursor: "pointer",
-  });
-  btnCerrar.addEventListener("click", () => {
-    overlay.remove();
-    cerrarSesion();
-  });
-
-  const btnContinuar = document.createElement("button");
-  btnContinuar.textContent = "CONTINUAR";
-  Object.assign(btnContinuar.style, {
-    background: "#111", color: "#555", border: "1px solid #222",
-    padding: "10px 22px", fontFamily: font, fontSize: "0.78rem",
-    letterSpacing: "0.12em", borderRadius: "2px", cursor: "not-allowed",
-  });
-  const activarContinuar = () => {
-    const ok = input.value.trim().toUpperCase() === "CONFIRMAR";
-    btnContinuar.style.color = ok ? "#888" : "#555";
-    btnContinuar.style.borderColor = ok ? "#444" : "#222";
-    btnContinuar.style.cursor = ok ? "pointer" : "not-allowed";
-  };
-  input.addEventListener("input", activarContinuar);
-  btnContinuar.addEventListener("click", () => {
-    if (input.value.trim().toUpperCase() === "CONFIRMAR") overlay.remove();
-  });
-
-  fila.appendChild(btnCerrar);
-  fila.appendChild(btnContinuar);
-  caja.append(icono, titulo, descripcion, lista, aviso, inputLabel, input, fila);
-  overlay.appendChild(caja);
+  overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99999;display:flex;align-items:center;justify-content:center;font-family:${font};`;
+  overlay.innerHTML = `
+    <div style="background:#1a0a0a;border:1px solid #ff4444;border-radius:4px;padding:36px 40px;max-width:480px;width:90%;box-shadow:0 0 40px #ff000044;text-align:center;">
+      <div style="font-size:2rem;margin-bottom:16px;">⚠</div>
+      <h2 style="color:#ff6b6b;font-size:1rem;letter-spacing:0.15em;margin:0 0 12px;">AMENAZA DETECTADA</h2>
+      <p style="color:#aaa;font-size:0.8rem;letter-spacing:0.08em;margin:0 0 18px;">El monitor de seguridad ha detectado software potencialmente peligroso activo en este sistema:</p>
+      <ul style="list-style:none;padding:0;margin:0 0 24px;font-size:0.78rem;letter-spacing:0.06em;text-align:left;">${items}</ul>
+      <p style="color:#888;font-size:0.72rem;margin:0 0 20px;letter-spacing:0.06em;">Recomendación: cierra la sesión y verifica tu sistema antes de continuar.</p>
+      <p style="color:#666;font-size:0.72rem;margin:0 0 8px;">Para continuar bajo riesgo escribe CONFIRMAR:</p>
+      <input id="_amenaza-input" type="text" placeholder="CONFIRMAR" style="background:#0d0d0d;color:#aaa;border:1px solid #333;padding:8px 14px;font-family:${font};font-size:0.78rem;letter-spacing:0.1em;border-radius:2px;width:100%;box-sizing:border-box;margin-bottom:20px;text-align:center;">
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button id="_amenaza-cerrar" style="background:#3a0a0a;color:#ff6b6b;border:1px solid #ff444466;padding:10px 22px;font-family:${font};font-size:0.78rem;letter-spacing:0.12em;border-radius:2px;cursor:pointer;">CERRAR SESIÓN</button>
+        <button id="_amenaza-continuar" style="background:#111;color:#555;border:1px solid #222;padding:10px 22px;font-family:${font};font-size:0.78rem;letter-spacing:0.12em;border-radius:2px;cursor:not-allowed;">CONTINUAR</button>
+      </div>
+    </div>`;
   document.body.appendChild(overlay);
-}
-
-// ============================================================
-// SELECCIÓN CON FEEDBACK VISUAL
-// ============================================================
-
-// Muestra/oculta botones de acción según checkboxes marcados.
-// También aplica highlight dorado a las cards seleccionadas.
-function actualizarSeleccion(): void {
-  // Feedback visual en cada card
-  document.querySelectorAll<HTMLElement>(".archivo-card").forEach(card => {
-    const cb = card.querySelector<HTMLInputElement>(".archivo-checkbox");
-    if (cb?.checked) {
-      card.style.borderColor = "var(--dorado)";
-      card.style.boxShadow = "0 0 0 1px rgba(197,160,89,0.3), inset 0 0 20px rgba(197,160,89,0.04)";
-      card.style.background = "rgba(197,160,89,0.06)";
-    } else {
-      card.style.borderColor = "";
-      card.style.boxShadow = "";
-      card.style.background = "";
-    }
+  const input = overlay.querySelector<HTMLInputElement>("#_amenaza-input")!;
+  const btnC = overlay.querySelector<HTMLButtonElement>("#_amenaza-continuar")!;
+  input.addEventListener("input", () => {
+    const ok = input.value.trim().toUpperCase() === "CONFIRMAR";
+    btnC.style.color = ok ? "#888" : "#555";
+    btnC.style.borderColor = ok ? "#444" : "#222";
+    btnC.style.cursor = ok ? "pointer" : "not-allowed";
   });
-
-  const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox:checked");
-  const btnEliminar = document.getElementById("btn-eliminar-sel");
-  const btnVer = document.getElementById("btn-ver-sel");
-
-  // Botón ELIMINAR — aparece con cualquier cantidad seleccionada
-  if (checkboxes.length > 0) {
-    btnEliminar?.classList.remove("hidden");
-    if (btnEliminar) btnEliminar.textContent = `✕ ELIMINAR (${checkboxes.length})`;
-  } else {
-    btnEliminar?.classList.add("hidden");
-  }
-
-  // Botón VER — solo con 1 o 2 seleccionados
-  if (checkboxes.length === 1 || checkboxes.length === 2) {
-    btnVer?.classList.remove("hidden");
-    if (btnVer) btnVer.textContent = checkboxes.length === 2 ? "◫ VER COMPARACIÓN" : "◫ VER ARCHIVO";
-  } else {
-    btnVer?.classList.add("hidden");
-  }
+  overlay.querySelector("#_amenaza-cerrar")!.addEventListener("click", () => { overlay.remove(); cerrarSesion(); });
+  btnC.addEventListener("click", () => { if (input.value.trim().toUpperCase() === "CONFIRMAR") overlay.remove(); });
 }
 
 // Elimina todos los archivos seleccionados con zeroize
@@ -1945,9 +1694,7 @@ async function eliminarSeleccionados(): Promise<void> {
     mostrarToast(`✓ Destruido de forma segura — irrecuperable`, false);
   }
 }
-// ============================================================
 // CIERRE AUTOMÁTICO POR INACTIVIDAD
-// ============================================================
 let timerInactividad: ReturnType<typeof setTimeout> | null = null;
 let timerAvisoLock: ReturnType<typeof setTimeout> | null = null;
 let _blurLockTimer: ReturnType<typeof setTimeout> | null = null; // Parche 1: bloqueo al perder foco
@@ -2029,12 +1776,9 @@ function desactivarTimerInactividad(): void {
     document.removeEventListener(evento, resetearTimerInactividad);
   });
 }
-// ============================================================
 // VISOR INDIVIDUAL — modal simple
-// ============================================================
 
 async function traducirArchivoGuardado(ruta: string): Promise<void> {
-  // Navegar al chat y mostrar el flujo normal (burbuja TÚ + spinner)
   irATraduccion();
   const nombreOrig = ruta.replace(/\\/g, "/").split("/").pop() ?? "archivo.babel";
   const nombreMostrado = nombreOrig.replace(/\.babel$/, "").replace(/^\d+_/, "");
@@ -2051,7 +1795,6 @@ async function traducirArchivoGuardado(ruta: string): Promise<void> {
     añadirMensajeBabel("Error al traducir: " + String(error), "BABEL · error");
   }
 }
-
 
 async function verArchivo(ruta: string): Promise<void> {
   try {
@@ -2127,9 +1870,7 @@ function cerrarVisor(): void {
   }
   modal?.classList.add("hidden");
 }
-// ============================================================
 // VISOR PARALELO — ver 1 o 2 archivos side by side
-// ============================================================
 
 async function verComparacion(): Promise<void> {
   // Tomamos los primeros 2 checkboxes marcados — sin deduplicar por ruta
@@ -2157,14 +1898,13 @@ async function verComparacion(): Promise<void> {
   }
 
   const modal = document.getElementById("modal-paralelo");
-  const titulo1 = document.getElementById("par-titulo-1");
   const cont1 = document.getElementById("par-contenido-1");
+  if (!modal || !cont1) return;
+  const titulo1 = document.getElementById("par-titulo-1");
   const divisor = document.getElementById("par-divisor");
   const panel2 = document.getElementById("par-panel-2");
   const titulo2 = document.getElementById("par-titulo-2");
   const cont2 = document.getElementById("par-contenido-2");
-
-  if (!modal || !cont1) return;
 
   if (titulo1) titulo1.textContent = datos[0].nombre;
   if (cont1) renderizarEnContenedor(datos[0].texto, cont1, "55vh");
@@ -2220,86 +1960,15 @@ function cerrarVisorParalelo(): void {
   }
   modal?.classList.add("hidden");
 }
-// ============================================================
-// MOVER ARCHIVOS ENTRE BUZONES — selector popup
-// ============================================================
-
-async function mostrarSelectorBuzon(ruta: string, boton: HTMLElement): Promise<void> {
-  document.querySelectorAll(".selector-buzon-popup").forEach(el => el.remove());
-  let nodos: BuzonNodo[];
-  try { nodos = await invoke<BuzonNodo[]>("listar_buzones"); } catch (e) { mostrarToast("Error cargando buzones: " + String(e), true); return; }
-  const popup = document.createElement("div");
-  popup.className = "selector-buzon-popup";
-  popup.style.cssText = `position:absolute;background:#0d0d0d;border:1px solid var(--dorado);border-radius:3px;z-index:999;min-width:140px;box-shadow:0 4px 20px rgba(0,0,0,0.5);max-height:60vh;overflow-y:auto;`;
-
-  const construirPopup = () => {
-    popup.innerHTML = "";
-    const agregar = (label: string, id: string, indent: number, tieneHijos: boolean) => {
-      const item = document.createElement("div");
-      const colapsado = buzonesColapsados.has(id);
-      item.style.cssText = `display:flex;align-items:center;padding:8px ${16 + indent * 12}px;font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.7rem;letter-spacing:2px;color:var(--dorado);cursor:pointer;`;
-      if (tieneHijos) {
-        const toggle = document.createElement("span");
-        toggle.textContent = colapsado ? "▶ " : "▼ ";
-        toggle.style.cssText = "font-size:0.55rem;opacity:0.6;margin-right:4px;";
-        toggle.onclick = (e) => { e.stopPropagation(); buzonesColapsados.has(id) ? buzonesColapsados.delete(id) : buzonesColapsados.add(id); construirPopup(); };
-        item.appendChild(toggle);
-      } else {
-        const spacer = document.createElement("span");
-        spacer.style.cssText = "display:inline-block;width:14px;";
-        item.appendChild(spacer);
-      }
-      const texto = document.createElement("span");
-      texto.textContent = label;
-      item.appendChild(texto);
-      item.onmouseenter = () => item.style.background = "rgba(197,160,89,0.1)";
-      item.onmouseleave = () => item.style.background = "";
-      item.onclick = async () => {
-        popup.remove();
-        try {
-          const cmd = ruta.includes("/guardados/") ? "mover_archivo_guardado" : "mover_archivo";
-          await invoke(cmd, { ruta, buzonDestino: id });
-          await cargarArchivosGuardados();
-          mostrarToast(`Movido a ${label}`, false);
-        } catch (error) { mostrarToast("Error: " + String(error), true); }
-      };
-      popup.appendChild(item);
-    };
-    agregar("TODOS", "todos", 0, false);
-    const renderNodos = (parentId: string | null, depth: number) => {
-      nodos.filter(n => n.parent === parentId).forEach(n => {
-        const tieneHijos = nodos.some(h => h.parent === n.id);
-        agregar(n.nombre.toUpperCase(), n.id, depth, tieneHijos);
-        if (!buzonesColapsados.has(n.id)) renderNodos(n.id, depth + 1);
-      });
-    };
-    renderNodos(null, 0);
-  };
-
-  construirPopup();
-  const rect = boton.getBoundingClientRect();
-  popup.style.top = (rect.bottom + window.scrollY + 4) + "px";
-  popup.style.left = rect.left + "px";
-  document.body.appendChild(popup);
-  setTimeout(() => { document.addEventListener("click", () => popup.remove(), { once: true }); }, 0);
-}
-
-// ============================================================
 // BÚSQUEDA DE ARCHIVOS
-// ============================================================
 
-// ============================================================
 // P2P — FUNCIONES
-// ============================================================
 
-// ============================================================
 // P2P — ESTADO
-// ============================================================
 
 let ipP2PConectada: string = "";
 let intervalP2PPoll: number | null = null;
 let p2pTraduccionActiva: boolean = false;
-
 
 function cambiarModoP2P(modo: string): void {
   document.getElementById("p2p-selector-inicial")?.classList.add("hidden");
@@ -2348,9 +2017,7 @@ function volverDeP2P(): void {
   }
 }
 
-// ============================================================
 // P2P — SERVIDOR (MODO RECIBIR)
-// ============================================================
 
 async function iniciarP2P(): Promise<void> {
   const faseInicio = document.getElementById("p2p-fase-inicio");
@@ -2388,9 +2055,7 @@ async function iniciarP2P(): Promise<void> {
   }
 }
 
-// ============================================================
 // P2P — CLIENTE (MODO ENVIAR)
-// ============================================================
 async function buscarDispositivos(): Promise<void> {
   const lista = document.getElementById("p2p-lista-peers");
   if (!lista) return;
@@ -2463,9 +2128,7 @@ async function conectarP2P(): Promise<void> {
   }
 }
 
-// ============================================================
 // P2P — CHAT Y TRADUCCIÓN EN TIEMPO REAL
-// ============================================================
 
 function añadirMensajeP2P(tipo: "yo" | "ellos" | "sistema", texto: string, traduccion?: string): void {
   const contenedor = document.getElementById("p2p-mensajes");
@@ -2502,7 +2165,6 @@ async function enviarMensajeP2P(): Promise<void> {
   input.value = "";
   input.style.height = "40px";
 
-  // Mostrar mensaje propio inmediatamente
   añadirMensajeP2P("yo", texto);
 
   if (ipP2PConectada) {
@@ -2525,8 +2187,6 @@ function toggleTraduccionP2P(): void {
   }
   mostrarToast(p2pTraduccionActiva ? "Traducción P2P activada" : "Traducción P2P desactivada", false);
 }
-
-
 
 // Detiene el polling de mensajes P2P y limpia el intervalo
 function detenerPollP2P(): void {
@@ -2597,7 +2257,6 @@ async function aceptarSolicitudP2P(): Promise<void> {
   document.getElementById("modal-solicitud-p2p")?.classList.add("hidden");
   ipP2PConectada = _solicitudIpRemota;
   iniciarPollMensajes();
-  // Ir a fase chat
   const faseInicio = document.getElementById("p2p-fase-inicio");
   const faseChat = document.getElementById("p2p-fase-chat");
   const estadoTexto = document.getElementById("p2p-estado-texto");
@@ -2606,7 +2265,6 @@ async function aceptarSolicitudP2P(): Promise<void> {
   if (faseChat) faseChat.style.display = "flex";
   if (estadoTexto) estadoTexto.textContent = `CONECTADO · ${_solicitudIpRemota}`;
   if (dot) { dot.style.background = "#22c55e"; dot.style.opacity = "1"; }
-  // Enviar aceptación al otro
   if (_solicitudIpRemota) {
     await invoke("enviar_mensaje_p2p", {
       ip: _solicitudIpRemota,
@@ -2638,7 +2296,6 @@ function destruirSesionP2P(): void {
   }
   if (input) { input.value = "0".repeat(input.value.length); input.value = ""; }
 
-  // Resetear estado
   ipP2PConectada = "";
   p2pTraduccionActiva = false;
   detenerPollP2P();
@@ -2652,9 +2309,7 @@ function destruirSesionP2P(): void {
   mostrarToast("Sesión destruida — borrado total", false);
 }
 
-// ============================================================
 // AJUSTES DE TRADUCCIÓN — guardado automático
-// ============================================================
 
 async function guardarAjustesTraduccion(): Promise<void> {
   const origen = (document.getElementById("selector-origen") as HTMLSelectElement)?.value ?? "es";
@@ -2691,15 +2346,11 @@ async function cargarAjustesTraduccion(): Promise<void> {
   const borradoAuto = s.borrar_al_salir ?? false;
   const timeoutMin: number = Math.max(2, Math.min(60, s.timeout_sesion_minutos ?? 15));
 
-  // Aplicar timeout al timer de inactividad (solo si hay sesión activa)
   _tiempoLockMs = timeoutMin * 60 * 1000;
   if (_sesionActiva) resetearTimerInactividad();
 
-  // Sincronizar selector de timeout en ajustes si ya está visible
   const selectorTimeout = document.getElementById("selector-timeout") as HTMLSelectElement;
   if (selectorTimeout) selectorTimeout.value = String(timeoutMin);
-
-  // Aplicar ajustes cargados a los controles reales de la UI
   const tipoDiccionario = document.getElementById("tipo-diccionario") as HTMLSelectElement;
   if (tipoDiccionario) tipoDiccionario.value = categoria;
   const toggleBorrado = document.getElementById("toggle-borrado") as HTMLInputElement;
@@ -2710,26 +2361,19 @@ async function cargarAjustesTraduccion(): Promise<void> {
     sincronizarSelectoresIdioma(origen, destino);
     await cambiarIdioma(`${origen}_${destino}`).catch(() => {});
   }
-  // Restaurar estado del sidebar
   const sidebarAbierto = localStorage.getItem("babel-sidebar") === "1";
   const sidebar = document.getElementById("chat-sidebar");
-  if (sidebar) {
-    if (sidebarAbierto) sidebar.classList.remove("hidden");
-    else sidebar.classList.add("hidden");
-  }
+  if (sidebar) sidebar.classList.toggle("hidden", !sidebarAbierto);
   const savedBuzonG = localStorage.getItem("babel-buzon-activo-g");
   if (savedBuzonG && savedBuzonG !== "todos") {
     const nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados");
-    const existe = nodos.some(n => n.id === savedBuzonG);
-    buzonActivoGuardados = existe ? savedBuzonG : "todos";
+    buzonActivoGuardados = nodos.some(n => n.id === savedBuzonG) ? savedBuzonG : "todos";
   } else {
     buzonActivoGuardados = "todos";
   }
 }
 
-// ============================================================
 // EMAIL — FUNCIONES
-// ============================================================
 
 let archivoEmailRuta: string = "";
 let archivoEmailFile: File | null = null;
@@ -2748,15 +2392,6 @@ function detenerRecargaAutomatica(): void {
   if (intervaloBandeja) {
     clearInterval(intervaloBandeja);
     intervaloBandeja = null;
-  }
-}
-
-// Abre en Finder la carpeta principal de Babel con todos los archivos cifrados
-async function abrirCarpetaBabel(): Promise<void> {
-  try {
-    await invoke("abrir_carpeta_babel");
-  } catch (error) {
-    mostrarToast("Error abriendo carpeta: " + String(error), true);
   }
 }
 
@@ -2901,69 +2536,39 @@ async function seleccionarEmail(id: number): Promise<void> {
   document.querySelectorAll(".email-item").forEach(el => el.classList.remove("activo"));
   const itemEl = document.querySelector(`.email-item[data-id="${id}"]`);
   itemEl?.classList.add("activo");
-
-  // Marcar como leído visualmente
   emailsVistos.add(id);
-  if (itemEl) {
-    itemEl.classList.remove("no-leido");
-    itemEl.querySelector(".email-punto-nuevo")?.remove();
-  }
+  if (itemEl) { itemEl.classList.remove("no-leido"); itemEl.querySelector(".email-punto-nuevo")?.remove(); }
 
   const lectorVacio = document.getElementById("email-lector-vacio");
   const compositor = document.getElementById("email-compositor");
   const visor = document.getElementById("email-visor");
+  const asuntoEl = document.getElementById("visor-asunto");
+  const metaEl = document.getElementById("visor-meta");
+  const adjuntosEl = document.getElementById("visor-adjuntos");
+  const cuerpoEl = document.getElementById("email-visor-cuerpo");
   lectorVacio?.classList.add("hidden");
   compositor?.classList.add("hidden");
+  visor?.classList.remove("hidden");
 
-  // Mostrar indicador de carga inmediatamente; resetear zoom al nuevo correo
-  if (visor) {
-    visor.classList.remove("hidden");
-    const asuntoEl = document.getElementById("visor-asunto");
-    const metaEl = document.getElementById("visor-meta");
-    const adjuntosEl = document.getElementById("visor-adjuntos");
-    const cuerpoEl = document.getElementById("email-visor-cuerpo");
-    if (asuntoEl) asuntoEl.textContent = "Cargando…";
-    if (metaEl) metaEl.textContent = "";
-    if (adjuntosEl) adjuntosEl.innerHTML = "";
-    if (cuerpoEl) {
-      cuerpoEl.innerHTML = '<div class="email-cargando">CARGANDO CORREO</div>';
-      _zoomEmailRem = 0.92;
-      cuerpoEl.style.fontSize = "";
-    }
-  }
+  if (asuntoEl) asuntoEl.textContent = "Cargando…";
+  if (metaEl) metaEl.textContent = "";
+  if (adjuntosEl) adjuntosEl.innerHTML = "";
+  if (cuerpoEl) { cuerpoEl.innerHTML = '<div class="email-cargando">CARGANDO CORREO</div>'; _zoomEmailRem = 0.92; cuerpoEl.style.fontSize = ""; }
 
   try {
     const email = await invoke<{
-      id: number;
-      remitente: string;
-      asunto: string;
-      fecha: string;
-      cuerpo: string;
-      adjuntos: string[];
+      id: number; remitente: string; asunto: string;
+      fecha: string; cuerpo: string; adjuntos: string[];
     }>("obtener_email_completo_tauri", { id });
 
     emailVisorActualId = email.id;
-
-    if (visor) {
-      visor.classList.remove("hidden");
-
-      const asuntoEl = document.getElementById("visor-asunto");
-      const metaEl = document.getElementById("visor-meta");
-      const adjuntosEl = document.getElementById("visor-adjuntos");
-      const cuerpoEl = document.getElementById("email-visor-cuerpo");
-
-      if (asuntoEl) asuntoEl.textContent = email.asunto || "Sin asunto";
-      if (metaEl) metaEl.textContent = `De: ${email.remitente} · ${formatearFechaEmail(email.fecha)}`;
-      if (adjuntosEl) {
-        adjuntosEl.innerHTML = email.adjuntos.length > 0
-          ? email.adjuntos.map(a => `<span class="email-adjunto-tag">📎 ${escapeHTML(a)}</span>`).join("")
-          : "";
-      }
-      _cuerpoEmailOriginal = email.cuerpo;
-      const idiomaEl = document.getElementById("email-idioma") as HTMLSelectElement;
-      if (idiomaEl) idiomaEl.value = "ninguno";
-      if (cuerpoEl) renderizarCuerpoEmail(cuerpoEl, email.cuerpo);
-    }
+    if (asuntoEl) asuntoEl.textContent = email.asunto || "Sin asunto";
+    if (metaEl) metaEl.textContent = `De: ${email.remitente} · ${formatearFechaEmail(email.fecha)}`;
+    if (adjuntosEl) adjuntosEl.innerHTML = email.adjuntos.map(a => `<span class="email-adjunto-tag">📎 ${escapeHTML(a)}</span>`).join("");
+    _cuerpoEmailOriginal = email.cuerpo;
+    const idiomaEl = document.getElementById("email-idioma") as HTMLSelectElement;
+    if (idiomaEl) idiomaEl.value = "ninguno";
+    if (cuerpoEl) renderizarCuerpoEmail(cuerpoEl, email.cuerpo);
   } catch (error) {
     mostrarToast("Error cargando email: " + String(error), true);
     lectorVacio?.classList.remove("hidden");
@@ -2981,7 +2586,6 @@ function abrirComponerEmail(): void {
   comp.classList.remove("hidden");
   comp.style.display = "flex";
 
-  // Inyectar firma si el campo está vacío
   const cuerpo = document.getElementById("comp-cuerpo") as HTMLTextAreaElement;
   if (cuerpo && !cuerpo.value && _firmaEmail) {
     cuerpo.value = `\n\n—\n${_firmaEmail}`;
@@ -2994,22 +2598,12 @@ function cerrarCompositor(): void {
   document.getElementById("email-lector-vacio")?.classList.remove("hidden");
   archivoEmailRuta = "";
   archivoEmailFile = null;
-  const nombre = document.getElementById("comp-archivo-nombre");
-  if (nombre) nombre.textContent = "📎 Adjuntar documento";
-  const estado = document.getElementById("comp-estado");
-  if (estado) estado.textContent = "";
-  const inputFile = document.getElementById("input-archivo-email") as HTMLInputElement;
-  if (inputFile) inputFile.value = "";
-  const destEl = document.getElementById("comp-destinatario") as HTMLInputElement;
-  const asuntoEl = document.getElementById("comp-asunto") as HTMLInputElement;
-  const ccEl = document.getElementById("comp-cc") as HTMLInputElement;
-  const ccoEl = document.getElementById("comp-cco") as HTMLInputElement;
-  const cuerpoEl = document.getElementById("comp-cuerpo") as HTMLTextAreaElement;
-  if (destEl) destEl.value = "";
-  if (asuntoEl) asuntoEl.value = "";
-  if (ccEl) ccEl.value = "";
-  if (ccoEl) ccoEl.value = "";
-  if (cuerpoEl) cuerpoEl.value = "";
+  const g = (id: string) => document.getElementById(id);
+  const n = g("comp-archivo-nombre"); if (n) n.textContent = "📎 Adjuntar documento";
+  const s = g("comp-estado"); if (s) s.textContent = "";
+  for (const id of ["input-archivo-email","comp-destinatario","comp-asunto","comp-cc","comp-cco","comp-cuerpo"]) {
+    const f = g(id) as HTMLInputElement | null; if (f) f.value = "";
+  }
 }
 
 // Cierra el visor de email y muestra el estado vacío del lector
@@ -3096,7 +2690,6 @@ async function guardarConfigSmtp(): Promise<void> {
     (document.getElementById("smtp-password") as HTMLInputElement).value = "";
     toggleConfigSmtp();
     mostrarToast("Configuración guardada y cifrada", false);
-    // Cargar bandeja inmediatamente tras guardar config
     await cargarBandejaEmail();
   } catch (error) {
     mostrarToast("Error: " + String(error), true);
@@ -3132,7 +2725,6 @@ async function enviarEmail(): Promise<void> {
 
   try {
     if (archivoEmailFile) {
-      // Archivo seleccionado desde el explorador del sistema
       const bytes = Array.from(new Uint8Array(await archivoEmailFile.arrayBuffer()));
       await invoke("enviar_bytes_cifrados_tauri", {
         nombreArchivo: archivoEmailFile.name,
@@ -3292,9 +2884,7 @@ async function enviarArchivoDesdeArchivos(ruta: string): Promise<void> {
   const el = document.getElementById("comp-archivo-nombre");
   if (el) el.textContent = "◫ " + nombre;
 }
-// ============================================================
 // BIP39 — FRASE DE RECUPERACIÓN
-// ============================================================
 
 function mostrarFrase(palabras: string[]): void {
   const sidebar = document.getElementById("chat-sidebar");
@@ -3315,7 +2905,6 @@ function cerrarFrase(): void {
 
 // Navega a la pantalla de recuperación desde login
 function irARecuperacion(): void {
-  // Limpiar inputs si los hubiera de un intento anterior
   for (let i = 1; i <= 12; i++) {
     const input = document.getElementById(`rec-palabra-${i}`) as HTMLInputElement;
     if (input) input.value = "";
@@ -3348,7 +2937,9 @@ async function imprimirFrase(): Promise<void> {
   }
 }
 
-// Intenta recuperar el búnker con las 12 palabras introducidas
+// Intenta recuperar el búnker con las 12 palabras introducidas.
+// recuperar_y_autenticar realiza recuperación + login en Rust — las credenciales
+// nunca pasan por el heap JS ni por el DOM.
 async function intentarRecuperacion(): Promise<void> {
   const palabras: string[] = [];
   for (let i = 1; i <= 12; i++) {
@@ -3360,34 +2951,35 @@ async function intentarRecuperacion(): Promise<void> {
     palabras.push(val);
   }
 
-
   mostrarMensaje("recovery-msg", "VERIFICANDO FRASE...", false);
 
   try {
-    const [maestra, passUsuario, aviso] = await invoke<[string, string, string]>("recuperar_con_frase", { palabras });
-
-    if (aviso) {
-      mostrarMensaje("recovery-msg", `⚠ ${aviso}`, true);
-    } else {
-      mostrarMensaje("recovery-msg", `✓ LLAVE MAESTRA RECUPERADA — SE HA RELLENADO EL LOGIN`, false);
-    }
-
-    // Limpiar campos de recuperación
+    const aviso = await invoke<string>("recuperar_y_autenticar", { palabras });
     for (let i = 1; i <= 12; i++) {
-      const input = document.getElementById(`rec-palabra-${i}`) as HTMLInputElement;
-      if (input) {
-        input.value = "0".repeat(input.value.length);
-        input.value = "";
-      }
+      const el = document.getElementById(`rec-palabra-${i}`) as HTMLInputElement | null;
+      if (el) { el.value = "0".repeat(el.value.length); el.value = ""; }
     }
+    mostrarMensaje("recovery-msg",
+      aviso ? `⚠ ${aviso} — Accediendo...` : `✓ FRASE VERIFICADA — ACCESO CONCEDIDO`, false);
+
+    _sesionActiva = true;
+    activarTimerInactividad();
+    invoke<boolean>("tiene_config_email").then(ok => {
+      _smtpConfigurado = ok;
+      if (ok) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
+    }).catch(() => {});
 
     setTimeout(() => {
-      mostrarPantalla("login");
-      // Rellenar credenciales solo al mostrar el login — minimiza tiempo en DOM
-      const campoMaestra = document.getElementById("login-pass") as HTMLInputElement;
-      if (campoMaestra) campoMaestra.value = maestra;
-      const campoPass = document.getElementById("login-pass-usuario") as HTMLInputElement;
-      if (campoPass) { campoPass.value = passUsuario; campoPass.focus(); }
+      const nombreGuardado = localStorage.getItem("babel-nombre-display");
+      _sesionUsuario = nombreGuardado ?? "";
+      const bienvenida = document.getElementById("bienvenida-usuario");
+      if (bienvenida) bienvenida.textContent = nombreGuardado ? `Bienvenido, ${nombreGuardado}` : "Bienvenido";
+      if (nombreGuardado === null) {
+        mostrarPantalla("nombre");
+      } else {
+        mostrarPantalla("principal");
+        cargarAjustesTraduccion().catch(() => {});
+      }
     }, 1500);
 
   } catch (error) {
@@ -3424,14 +3016,7 @@ function cerrarVerFrase(): void {
   }
   modal?.classList.add("hidden");
 }
-// ============================================================
-// BUZONES DE TRADUCCIONES — CONFIRMAR CREACIÓN
-// (función principal del flujo crear buzón de traducción)
-// ============================================================
-
-// ============================================================
 // TÉRMINOS DE USO
-// ============================================================
 
 // Muestra el modal de términos de uso (solo al primer arranque)
 function mostrarModalTerminos(): void {
@@ -3454,110 +3039,23 @@ async function aceptarTerminos(): Promise<void> {
     mostrarToast("Error: " + String(error), true);
   }
 }
-// ============================================================
-// EXPORTAR AL HTML
-// ============================================================
-// ============================================================
-// REGISTRO GLOBAL DE FUNCIONES
-// Las funciones se exponen en window para poder llamarlas desde
-// atributos onclick en el HTML (Tauri no permite módulos ES directos)
-// ============================================================
-(window as any).mostrarPantalla = mostrarPantalla;
-(window as any).irATraduccion = irATraduccion;
+// REGISTRO GLOBAL DE FUNCIONES — expuestas en window para dispatchInlineHandler
 (window as any).crearBunker = crearBunker;
 (window as any).intentarAcceso = intentarAcceso;
-(window as any).cerrarSesion = cerrarSesion;
-(window as any).desbloquearPantalla = desbloquearPantalla;
-(window as any).volverAtras = volverAtras;
-(window as any).volverAlPanel = volverAlPanel;
-(window as any).seleccionarArchivo = seleccionarArchivo;
 (window as any).manejarSeleccion = manejarSeleccion;
-(window as any).enviarMensaje = enviarMensaje;
-(window as any).borrarChat = borrarChat;
-(window as any).toggleSidebar = toggleSidebar;
 (window as any).toggleBorradoAutomatico = toggleBorradoAutomatico;
-(window as any).cambiarIdioma = cambiarIdioma;
 (window as any).cambiarIdiomaDesdeSelectores = cambiarIdiomaDesdeSelectores;
 (window as any).cambiarIdiomaDesdeAjustes = cambiarIdiomaDesdeAjustes;
 (window as any).cambiarCategoriaDiccionario = cambiarCategoriaDiccionario;
-(window as any).toggleContraseña = toggleContraseña;
 
-(window as any).exportarArchivo = exportarArchivo;
-(window as any).verArchivo = verArchivo;
-(window as any).cerrarVisor = cerrarVisor;
-
-(window as any).actualizarSeleccion = actualizarSeleccion;
-(window as any).eliminarSeleccionados = eliminarSeleccionados;
-(window as any).mostrarSelectorBuzon = mostrarSelectorBuzon;
-(window as any).cambiarModoP2P = cambiarModoP2P;
-(window as any).volverDeP2P = volverDeP2P;
-(window as any).iniciarP2P = iniciarP2P;
-(window as any).conectarP2P = conectarP2P;
-(window as any).abrirComponerEmail = abrirComponerEmail;
-(window as any).cerrarCompositor = cerrarCompositor;
-(window as any).cerrarVisorEmail = cerrarVisorEmail;
-(window as any).seleccionarArchivoEmail = seleccionarArchivoEmail;
 (window as any).manejarSeleccionArchivoEmail = manejarSeleccionArchivoEmail;
-(window as any).toggleConfigSmtp = toggleConfigSmtp;
-(window as any).guardarConfigSmtp = guardarConfigSmtp;
-(window as any).enviarEmail = enviarEmail;
 (window as any).cambiarIdiomaEmail = cambiarIdiomaEmail;
-(window as any).enviarArchivoDesdeArchivos = enviarArchivoDesdeArchivos;
-(window as any).verComparacion = verComparacion;
-(window as any).cerrarVisorParalelo = cerrarVisorParalelo;
-(window as any).mostrarFrase = mostrarFrase;
-(window as any).cerrarFrase = cerrarFrase;
-(window as any).irARecuperacion = irARecuperacion;
-(window as any).intentarRecuperacion = intentarRecuperacion;
-(window as any).verFraseApp = verFraseApp;
-(window as any).cerrarVerFrase = cerrarVerFrase;
-(window as any).aceptarTerminos = aceptarTerminos;
-(window as any).mostrarModalTerminos = mostrarModalTerminos;
-(window as any).cargarBandejaEmail = cargarBandejaEmail;
-(window as any).seleccionarEmail = seleccionarEmail;
-(window as any).sincronizarEmail = sincronizarEmail;
-(window as any).responderEmail = responderEmail;
-(window as any).eliminarEmailActual = eliminarEmailActual;
-(window as any).abrirCarpetaBabel = abrirCarpetaBabel;
-(window as any).iniciarRenombrado = iniciarRenombrado;
 (window as any).confirmarRenombrar = confirmarRenombrar;
 (window as any).cerrarModalRenombrar = cerrarModalRenombrar;
-(window as any).buscarDispositivos = buscarDispositivos;
-(window as any).seleccionarPeer = seleccionarPeer;
-(window as any).aceptarSolicitudP2P = aceptarSolicitudP2P;
-(window as any).rechazarSolicitudP2P = rechazarSolicitudP2P;
-(window as any).irAArchivos = irAArchivos;
-(window as any).cargarArchivosGuardados = cargarArchivosGuardados;
-(window as any).filtrarArchivosGuardados = filtrarArchivosGuardados;
-(window as any).seleccionarBuzonGuardados = seleccionarBuzonGuardados;
-(window as any).verArchivoGuardado = verArchivoGuardado;
-(window as any).eliminarSeleccionadosGuardados = eliminarSeleccionadosGuardados;
-(window as any).cargarBuzonesGuardados = cargarBuzonesGuardados;
-(window as any).actualizarSeleccionGuardados = actualizarSeleccionGuardados;
-(window as any).confirmarBuzonGuardado = confirmarBuzonGuardado;
-(window as any).mostrarInputBuzonGuardado = mostrarInputBuzonGuardado;
-(window as any).cancelarBuzonGuardado = cancelarBuzonGuardado;
-(window as any).borrarBuzonGuardado = borrarBuzonGuardado;
-(window as any).iniciarRenombradoGuardado = iniciarRenombradoGuardado;
-(window as any).abrirImportarGuardado = abrirImportarGuardado;
-(window as any).moverArchivoGuardadoPopup = moverArchivoGuardadoPopup;
-(window as any).imprimirFrase = imprimirFrase;
-(window as any).toggleColapso = toggleColapso;
-(window as any).iniciarRenombradoArchivo = iniciarRenombradoArchivo;
 (window as any).confirmarRenombrarArchivo = confirmarRenombrarArchivo;
 (window as any).cerrarModalRenombrarArchivo = cerrarModalRenombrarArchivo;
-(window as any).verComparacionRutas = verComparacionRutas;
-(window as any).aprobarPeerPendiente = aprobarPeerPendiente;
 (window as any).guardarTimeoutSesion = guardarTimeoutSesion;
 (window as any).filtrarEmails = filtrarEmails;
-(window as any).swapIdiomaTraduccion = swapIdiomaTraduccion;
-(window as any).actualizarContadorPalabras = actualizarContadorPalabras;
-(window as any).toggleBtnLimpiar = toggleBtnLimpiar;
-(window as any).limpiarInputTraduccion = limpiarInputTraduccion;
-(window as any).cambiarZoomEmail = cambiarZoomEmail;
-(window as any).copiarCuerpoEmail = copiarCuerpoEmail;
-(window as any).marcarEmailNoLeido = marcarEmailNoLeido;
-(window as any).insertarPlantillaEmail = insertarPlantillaEmail;
 
 async function aprobarPeerPendiente(fingerprint: string): Promise<void> {
   try {
@@ -3622,10 +3120,7 @@ async function soltarEnBuzon(event: DragEvent, buzonId: string): Promise<void> {
 (window as any).dragLeave = dragLeave;
 (window as any).soltarEnBuzon = soltarEnBuzon;
 
-
-// ============================================================
 // AJUSTES — Tema, Idioma UI, Ver Contraseña
-// ============================================================
 
 const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
   es: {
@@ -3690,40 +3185,23 @@ function cambiarIdiomaUI(idioma: string): void {
   const t = TRADUCCIONES_UI[idioma] ?? TRADUCCIONES_UI["es"];
   localStorage.setItem("babel-idioma-ui", idioma);
   const mapa: Record<string, string> = {
-    "pantalla-texto-traducir": t.traducir,
-    "pantalla-texto-archivos": t.archivos,
-    "pantalla-texto-p2p": t.p2p,
-    "pantalla-texto-ajustes": t.ajustes,
-    "pantalla-texto-cerrar": t.cerrarSesion,
-    "ui-borrar-chat": t.borrarChat,
-    "ui-configuracion": t.configuracion,
-    "ui-borrar-al-salir": t.borrarAlSalir,
-    "ui-borrar-al-salir-desc": t.borrarAlSalirDesc,
-    "ui-email-auto": t.emailAuto,
-    "ui-proximamente": t.proximamente,
-    "ui-diccionario": t.diccionario,
-    "ui-vocabulario-activo": t.vocabularioActivo,
-    "ui-volver-archivos": t.volver,
-    "btn-ver-sel-g": t.verArchivo,
-    "btn-eliminar-sel-g": t.eliminar,
-    "ui-actualizar": t.actualizar,
-    "ui-exportar-todo": t.exportarTodo,
-    "ui-importar": t.importar,
-    "ui-tema": t.tema,
-    "ui-idioma-interfaz": t.idiomaInterfaz,
-    "ui-bienvenido-sistema": t.bienvenidoSistema,
-    "ui-acceder-bunker": t.accederBunker,
-    "ui-autenticacion-requerida": t.autenticacion,
-    "ui-ajustes-titulo": t.ajustesTitulo,
-    "ui-volver-panel": t.volverPanel,
-    "ui-frase-recuperacion": t.fraseRecuperacion,
-    "ui-recuperar-bunker": t.recuperarBunker,
-    "ui-traducidos-guardados": t.traducidosGuardados,
-    "ui-buzones": t.buzones,
-    "ui-finder": t.finder,
-    "ui-archivos-titulo": t.archivosTitulo,
-    "ui-no-archivos": t.noArchivos,
-    "ui-arrastra": t.arrastra,
+    "pantalla-texto-traducir": t.traducir, "pantalla-texto-archivos": t.archivos,
+    "pantalla-texto-p2p": t.p2p, "pantalla-texto-ajustes": t.ajustes,
+    "pantalla-texto-cerrar": t.cerrarSesion, "ui-borrar-chat": t.borrarChat,
+    "ui-configuracion": t.configuracion, "ui-borrar-al-salir": t.borrarAlSalir,
+    "ui-borrar-al-salir-desc": t.borrarAlSalirDesc, "ui-email-auto": t.emailAuto,
+    "ui-proximamente": t.proximamente, "ui-diccionario": t.diccionario,
+    "ui-vocabulario-activo": t.vocabularioActivo, "ui-volver-archivos": t.volver,
+    "btn-ver-sel-g": t.verArchivo, "btn-eliminar-sel-g": t.eliminar,
+    "ui-actualizar": t.actualizar, "ui-exportar-todo": t.exportarTodo,
+    "ui-importar": t.importar, "ui-tema": t.tema,
+    "ui-idioma-interfaz": t.idiomaInterfaz, "ui-bienvenido-sistema": t.bienvenidoSistema,
+    "ui-acceder-bunker": t.accederBunker, "ui-autenticacion-requerida": t.autenticacion,
+    "ui-ajustes-titulo": t.ajustesTitulo, "ui-volver-panel": t.volverPanel,
+    "ui-frase-recuperacion": t.fraseRecuperacion, "ui-recuperar-bunker": t.recuperarBunker,
+    "ui-traducidos-guardados": t.traducidosGuardados, "ui-buzones": t.buzones,
+    "ui-finder": t.finder, "ui-archivos-titulo": t.archivosTitulo,
+    "ui-no-archivos": t.noArchivos, "ui-arrastra": t.arrastra,
   };
   for (const [id, texto] of Object.entries(mapa)) {
     const el = document.getElementById(id);
@@ -3736,7 +3214,6 @@ function cambiarIdiomaUI(idioma: string): void {
 function cambiarTema(tema: string): void {
   document.documentElement.setAttribute("data-tema", tema);
   localStorage.setItem("babel-tema", tema);
-  // Marcar botón activo visualmente
   const _mapaTemasBtn: Record<string, string> = {
     "negro": "tema-negro",
     "blanco-dorado": "tema-blanco2",
@@ -3758,13 +3235,9 @@ function cargarAjustesGuardados(): void {
 }
 
 // Registrar funciones globales
-(window as any).cambiarTema = cambiarTema;
 (window as any).cambiarIdiomaUI = cambiarIdiomaUI;
 
 (window as any).enviarMensajeP2P = enviarMensajeP2P;
-(window as any).destruirSesionP2P = destruirSesionP2P;
-(window as any).guardarAjustesTraduccion = guardarAjustesTraduccion;
-(window as any).toggleTraduccionP2P = toggleTraduccionP2P;
 (window as any).guardarNombreDisplay = guardarNombreDisplay;
 
 function guardarNombreDisplay(): void {
@@ -3795,9 +3268,20 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-// ============================================================
 // UX GLOBAL — Escape cierra modales, Enter navega recovery, paste BIP39
-// ============================================================
+document.addEventListener("DOMContentLoaded", () => {
+  const inputBuscar = document.getElementById("buscar-archivos-g") as HTMLInputElement | null;
+  const btnLimpiar = document.getElementById("buscar-archivos-limpiar") as HTMLButtonElement | null;
+  inputBuscar?.addEventListener("input", () => filtrarArchivosGuardados(inputBuscar.value));
+  btnLimpiar?.addEventListener("click", () => {
+    if (inputBuscar) inputBuscar.value = "";
+    filtrarArchivosGuardados("");
+  });
+
+  const inputBuzones = document.getElementById("buscar-buzones-g") as HTMLInputElement | null;
+  inputBuzones?.addEventListener("input", () => filtrarBuzonesGuardados(inputBuzones.value));
+});
+
 document.addEventListener("DOMContentLoaded", () => {
   // Escape cierra cualquier modal visible
   document.addEventListener("keydown", (e: KeyboardEvent) => {
