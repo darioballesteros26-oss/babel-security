@@ -914,7 +914,7 @@ async function cargarArchivosGuardados(): Promise<void> {
           const kb = (g.trad.tamaño / 1024).toFixed(0);
           const idioma = g.trad.idioma.replace("_", "→").toUpperCase();
           return `
-<div class="archivo-card" data-ruta="${escapeHTML(g.trad.ruta)}" data-ruta-orig="${escapeHTML(fuenteOrig.ruta)}" data-base="${escapeHTML(base)}" data-busqueda="${escapeHTML(base.toLowerCase().replace(/[\s_]+/g," ").trim())}" data-guardado="false" draggable="true">
+<div class="archivo-card" data-ruta="${escapeHTML(g.trad.ruta)}" data-ruta-orig="${escapeHTML(fuenteOrig.ruta)}" data-base="${escapeHTML(base)}" data-busqueda="${escapeHTML(base.toLowerCase().replace(/[\s_]+/g," ").trim())}" data-guardado="false" data-buzon-id="${escapeHTML(g.trad.buzon_id ?? "todos")}" draggable="true">
   <div class="archivo-card-header">
     <input type="checkbox" class="archivo-checkbox-g" data-action="seleccionar" style="accent-color:var(--dorado);cursor:pointer;flex-shrink:0;width:16px;height:16px;">
     <div class="archivo-card-info">
@@ -936,7 +936,7 @@ async function cargarArchivosGuardados(): Promise<void> {
         const a = g.guardado ?? g.trad ?? g.orig!;
         const kb = (a.tamaño / 1024).toFixed(0);
         return `
-<div class="archivo-card" data-ruta="${escapeHTML(a.ruta)}" data-base="${escapeHTML(base)}" data-busqueda="${escapeHTML(base.toLowerCase().replace(/[\s_]+/g," ").trim())}" data-guardado="true" draggable="true">
+<div class="archivo-card" data-ruta="${escapeHTML(a.ruta)}" data-base="${escapeHTML(base)}" data-busqueda="${escapeHTML(base.toLowerCase().replace(/[\s_]+/g," ").trim())}" data-guardado="true" data-buzon-id="${escapeHTML(a.buzon_id ?? "todos")}" draggable="true">
   <div class="archivo-card-header">
     <input type="checkbox" class="archivo-checkbox-g" data-action="seleccionar" style="accent-color:var(--dorado);cursor:pointer;flex-shrink:0;width:16px;height:16px;">
     <div class="archivo-card-info">
@@ -964,13 +964,18 @@ async function cargarArchivosGuardados(): Promise<void> {
       const btn = target.closest("[data-action]") as HTMLElement | null;
 
       if (!btn) {
-        // Clic en el cuerpo del card (no en botón) → abrir archivo
         const card = target.closest(".archivo-card") as HTMLElement | null;
         if (!card) return;
-        const ruta = card.dataset.ruta ?? "";
-        const rutaOrig = card.dataset.rutaOrig ?? "";
-        if (rutaOrig) verComparacionRutas(rutaOrig, ruta);
-        else verArchivo(ruta);
+        if (terminoBusquedaArchivos) {
+          // En búsqueda: navegar al buzón que contiene el archivo
+          seleccionarBuzonGuardados(card.dataset.buzonId ?? "todos");
+        } else {
+          // Modo normal: abrir el archivo
+          const ruta = card.dataset.ruta ?? "";
+          const rutaOrig = card.dataset.rutaOrig ?? "";
+          if (rutaOrig) verComparacionRutas(rutaOrig, ruta);
+          else verArchivo(ruta);
+        }
         return;
       }
 
@@ -986,8 +991,12 @@ async function cargarArchivosGuardados(): Promise<void> {
       const rutaOrig = card.dataset.rutaOrig ?? "";
       const base2 = card.dataset.base ?? "";
       switch (accion) {
-        case "ver-comparacion": verComparacionRutas(rutaOrig, ruta); break;
-        case "ver": verArchivo(ruta); break;
+        case "ver-comparacion":
+          if (terminoBusquedaArchivos) { seleccionarBuzonGuardados(card.dataset.buzonId ?? "todos"); break; }
+          verComparacionRutas(rutaOrig, ruta); break;
+        case "ver":
+          if (terminoBusquedaArchivos) { seleccionarBuzonGuardados(card.dataset.buzonId ?? "todos"); break; }
+          verArchivo(ruta); break;
         case "traducir-guardado": traducirArchivoGuardado(ruta); break;
         case "exportar": exportarArchivo(ruta); break;
         case "mover": moverArchivoGuardadoPopup(ruta, e); break;
@@ -1096,7 +1105,18 @@ function filtrarArchivosGuardados(texto: string): void {
     return;
   }
 
-  const buzonesMatch = _buzonesCache.filter(b => normalizar(b.nombre).includes(q));
+  const buzonIds = new Set<string>();
+  // Solo mostrar carpetas contenedoras cuando estamos en la vista "todos".
+  // Si ya estamos dentro de un buzón específico, la carpeta es obvia y repetirla es ruido.
+  if (buzonActivoGuardados === "todos") {
+    cards.forEach(card => {
+      if (card.style.display !== "none") {
+        const bid = card.dataset.buzonId;
+        if (bid && bid !== "todos") buzonIds.add(bid);
+      }
+    });
+  }
+  const buzonesMatch = _buzonesCache.filter(b => buzonIds.has(b.id));
   const frag = document.createDocumentFragment();
 
   if (buzonesMatch.length > 0) {
@@ -3283,6 +3303,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (inputBuscar) inputBuscar.value = "";
     filtrarArchivosGuardados("");
   });
+  document.getElementById("ir-a-todos-btn")?.addEventListener("click", () => seleccionarBuzonGuardados("todos"));
 
   // Escape cierra cualquier modal visible
   document.addEventListener("keydown", (e: KeyboardEvent) => {
