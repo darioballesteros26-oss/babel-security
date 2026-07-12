@@ -961,14 +961,24 @@ async function cargarArchivosGuardados(): Promise<void> {
     if (terminoBusquedaArchivos) filtrarArchivosGuardados(terminoBusquedaArchivos);
 
     lista.onclick = (e: MouseEvent) => {
-      const btn = (e.target as HTMLElement).closest("[data-action]") as HTMLElement | null;
-      if (!btn) return;
+      const target = e.target as HTMLElement;
+      const btn = target.closest("[data-action]") as HTMLElement | null;
+
+      if (!btn) {
+        // Clic en el cuerpo del card (no en botón) → abrir archivo
+        const card = target.closest(".archivo-card") as HTMLElement | null;
+        if (!card) return;
+        const ruta = card.dataset.ruta ?? "";
+        const rutaOrig = card.dataset.rutaOrig ?? "";
+        if (rutaOrig) verComparacionRutas(rutaOrig, ruta);
+        else verArchivo(ruta);
+        return;
+      }
+
       const accion = btn.dataset.action;
       if (accion === "seleccionar") { actualizarSeleccionGuardados(); return; }
       if (accion === "resultado-buzon") {
         seleccionarBuzonGuardados(btn.dataset.buzon ?? "todos");
-        const inp = document.getElementById("buscar-archivos-g") as HTMLInputElement | null;
-        if (inp) { inp.value = ""; filtrarArchivosGuardados(""); }
         return;
       }
       const card = btn.closest(".archivo-card") as HTMLElement | null;
