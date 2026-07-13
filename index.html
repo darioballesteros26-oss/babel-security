@@ -320,13 +320,15 @@
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">◫ VER ARCHIVO</button>
+          <button type="button" id="btn-compartir-sel-g" data-action="compartir-archivo-guardado" class="hidden"
+            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+            onmouseleave="this.style.background='transparent'">⇪ COMPARTIR</button>
           <button type="button" id="btn-eliminar-sel-g" data-action="eliminar-sel-guardados" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
             onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
-          <button type="button" data-action="cargar-archivos-guardados" class="btn-secundario-oro"
-            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px" id="ui-actualizar">↺ ACTUALIZAR</button>
-          <button type="button" data-action="abrir-carpeta-guardados" class="btn-secundario-oro"
+<button type="button" data-action="abrir-carpeta-guardados" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;opacity:0.7;"
             title="Abrir carpeta Guardados en Finder" id="ui-finder">◫ FINDER</button>
           <button type="button" data-action="exportar-todo" class="btn-secundario-oro"
@@ -1294,6 +1296,76 @@
           border-radius:2px;
           font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
           CONFIRMAR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL COMPARTIR -->
+  <div id="modal-compartir" class="hidden" style="
+    position:fixed;inset:0;background:rgba(0,0,0,0.75);
+    display:flex;align-items:center;justify-content:center;z-index:3000;">
+    <div style="background:var(--fondo-panel);border:1px solid var(--borde);
+      border-radius:4px;padding:28px 32px;width:380px;max-width:90vw;">
+      <div id="modal-compartir-paso1">
+        <p style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;
+          letter-spacing:2px;color:var(--dorado);margin:0 0 16px;">COMPARTIR ARCHIVO CIFRADO</p>
+        <p style="font-size:0.68rem;color:var(--texto-secundario);margin:0 0 12px;line-height:1.6;">
+          El archivo se cifrará con una contraseña única por contacto. El receptor lo abre en cualquier navegador.</p>
+        <label style="font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);display:block;margin-bottom:6px;">NOMBRE DEL CONTACTO</label>
+        <input type="text" id="input-contacto-compartir" autocomplete="off" spellcheck="false"
+          placeholder="ej: María, Cliente ABC…"
+          style="width:100%;box-sizing:border-box;background:var(--fondo-input,#111);
+            border:1px solid var(--borde);color:var(--texto);padding:8px 10px;
+            font-size:0.72rem;border-radius:2px;margin-bottom:20px;font-family:inherit;">
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button type="button" data-action="cerrar-modal-compartir"
+            style="background:transparent;border:1px solid var(--borde);
+              color:var(--texto-secundario);padding:6px 16px;cursor:pointer;
+              font-size:0.7rem;border-radius:2px;font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
+            CANCELAR</button>
+          <button type="button" data-action="confirmar-compartir"
+            style="background:var(--dorado);border:none;color:#000;
+              padding:6px 16px;cursor:pointer;font-size:0.7rem;font-weight:700;
+              border-radius:2px;font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
+            GENERAR</button>
+        </div>
+      </div>
+      <div id="modal-compartir-paso2" class="hidden">
+        <p style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;
+          letter-spacing:2px;color:var(--dorado);margin:0 0 12px;">ARCHIVO LISTO</p>
+        <div id="modal-compartir-nueva-pass" class="hidden"
+          style="background:rgba(197,160,89,0.08);border:1px solid rgba(197,160,89,0.3);
+            border-radius:3px;padding:12px 14px;margin-bottom:14px;">
+          <p style="font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);margin:0 0 6px;">
+            CONTRASEÑA NUEVA — ENVÍALA AHORA POR EL MISMO CANAL</p>
+          <p id="modal-compartir-pass-texto"
+            style="font-family:monospace;font-size:0.85rem;color:var(--dorado);
+              letter-spacing:1px;margin:0;word-break:break-all;"></p>
+          <button type="button" data-action="copiar-pass-compartir"
+            style="margin-top:8px;background:transparent;border:1px solid rgba(197,160,89,0.4);
+              color:var(--dorado);padding:4px 10px;cursor:pointer;font-size:0.62rem;
+              border-radius:2px;font-family:inherit;letter-spacing:1px;">
+            COPIAR</button>
+        </div>
+        <p id="modal-compartir-nombre-html"
+          style="font-size:0.65rem;color:var(--texto-secundario);margin:0 0 16px;word-break:break-all;"></p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" data-action="compartir-nativo"
+            style="flex:1;background:var(--dorado);border:none;color:#000;
+              padding:8px 12px;cursor:pointer;font-size:0.68rem;font-weight:700;
+              border-radius:2px;font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
+            ⇪ COMPARTIR…</button>
+          <button type="button" data-action="revelar-en-finder"
+            style="flex:1;background:transparent;border:1px solid var(--borde);
+              color:var(--texto-secundario);padding:8px 12px;cursor:pointer;
+              font-size:0.68rem;border-radius:2px;font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
+            ◫ REVELAR EN FINDER</button>
+        </div>
+        <button type="button" data-action="cerrar-modal-compartir"
+          style="width:100%;margin-top:10px;background:transparent;border:none;
+            color:var(--texto-secundario);padding:6px;cursor:pointer;
+            font-size:0.65rem;letter-spacing:1px;font-family:'Times New Roman',Times,serif;">
+          CERRAR</button>
       </div>
     </div>
   </div>

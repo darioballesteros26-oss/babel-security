@@ -325,8 +325,13 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "eliminar-seleccionados": eliminarSeleccionados(); break;
     // Archivos guardados
     case "ver-archivo-guardado": verArchivoGuardado(); break;
+    case "compartir-archivo-guardado": abrirModalCompartir(); break;
+    case "cerrar-modal-compartir": cerrarModalCompartir(); break;
+    case "confirmar-compartir": confirmarCompartir(); break;
+    case "compartir-nativo": compartirNativo(); break;
+    case "revelar-en-finder": revelarEnFinder(); break;
+    case "copiar-pass-compartir": copiarPassCompartir(); break;
     case "eliminar-sel-guardados": eliminarSeleccionadosGuardados(); break;
-    case "cargar-archivos-guardados": cargarArchivosGuardados(); break;
     case "abrir-carpeta-guardados": abrirCarpetaBabelGuardados(); break;
     case "exportar-todo": exportarTodo(); break;
     case "abrir-importar-guardado": abrirImportarGuardado(); break;
@@ -939,7 +944,8 @@ async function cargarArchivosGuardados(): Promise<void> {
   </div>
   <div class="archivo-card-botones">
     <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver-comparacion">◫ VER COMPARACIÓN</button>
-    <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar">EXPORTAR</button>
+    <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar-traducido" title="Descargar versión traducida">↓ TRAD</button>
+    <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar-original" title="Descargar versión original">↓ ORIG</button>
     <button type="button" class="btn-archivo" data-action="mover" style="opacity:0.7;">MOVER</button>
     <button type="button" class="btn-archivo" data-action="enviar" style="opacity:0.7;">✉</button>
   </div>
@@ -1012,6 +1018,8 @@ async function cargarArchivosGuardados(): Promise<void> {
           verArchivo(ruta); break;
         case "traducir-guardado": traducirArchivoGuardado(ruta); break;
         case "exportar": exportarArchivo(ruta); break;
+        case "exportar-traducido": exportarArchivo(ruta); break;
+        case "exportar-original": exportarArchivo(rutaOrig || ruta); break;
         case "mover": moverArchivoGuardadoPopup(ruta, e); break;
         case "enviar": enviarArchivoDesdeArchivos(ruta); break;
         case "renombrar": e.stopPropagation(); iniciarRenombradoArchivo(ruta, base2); break;
@@ -1033,10 +1041,13 @@ async function cargarArchivosGuardados(): Promise<void> {
 // Muestra/oculta botones de acción según checkboxes marcados en buzones guardados
 function actualizarSeleccionGuardados(): void {
   const seleccionados = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
-  const btnVer = document.getElementById("btn-ver-sel-g");
-  const btnEliminar = document.getElementById("btn-eliminar-sel-g");
-  if (btnVer) btnVer.classList.toggle("hidden", seleccionados.length === 0);
-  if (btnEliminar) btnEliminar.classList.toggle("hidden", seleccionados.length === 0);
+  const hay = seleccionados.length > 0;
+  const unico = seleccionados.length === 1;
+  document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
+  document.getElementById("btn-eliminar-sel-g")?.classList.toggle("hidden", !hay);
+  document.getElementById("btn-compartir-sel-g")?.classList.toggle("hidden", !unico);
+  document.getElementById("ui-finder")?.classList.toggle("hidden", hay);
+  document.getElementById("ui-importar")?.classList.toggle("hidden", hay);
 }
 
 function actualizarBadgeEmail(n: number): void {
@@ -1317,6 +1328,98 @@ async function verArchivoGuardado(): Promise<void> {
     mostrarToast("Error abriendo archivo: " + e, true);
   }
 }
+// ── COMPARTIR ARCHIVO CIFRADO ────────────────────────────────────────────────
+
+let _rutaCompartir = "";
+let _nombreCompartir = "";
+let _rutaHtmlCompartir = "";
+
+function abrirModalCompartir(): void {
+  const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
+  if (checkboxes.length !== 1) return;
+  const card = checkboxes[0].closest(".archivo-card") as HTMLElement;
+  _rutaCompartir = card?.dataset.ruta ?? "";
+  _nombreCompartir = _rutaCompartir.split("/").pop() ?? _rutaCompartir;
+  const modal = document.getElementById("modal-compartir");
+  const paso1 = document.getElementById("modal-compartir-paso1");
+  const paso2 = document.getElementById("modal-compartir-paso2");
+  const input = document.getElementById("input-contacto-compartir") as HTMLInputElement;
+  if (!modal || !paso1 || !paso2 || !input) return;
+  paso1.classList.remove("hidden");
+  paso2.classList.add("hidden");
+  input.value = "";
+  modal.classList.remove("hidden");
+  input.focus();
+}
+
+function cerrarModalCompartir(): void {
+  document.getElementById("modal-compartir")?.classList.add("hidden");
+}
+
+interface ResultadoCompartir {
+  ruta_html: string;
+  nombre_html: string;
+  es_nuevo_contacto: boolean;
+  password: string | null;
+}
+
+async function confirmarCompartir(): Promise<void> {
+  const input = document.getElementById("input-contacto-compartir") as HTMLInputElement;
+  const contacto = input?.value.trim();
+  if (!contacto) { input?.focus(); return; }
+  try {
+    const res = await invoke<ResultadoCompartir>("generar_archivo_compartir", {
+      ruta: _rutaCompartir,
+      nombreOriginal: _nombreCompartir,
+      contacto,
+    });
+    _rutaHtmlCompartir = res.ruta_html;
+    const paso1 = document.getElementById("modal-compartir-paso1");
+    const paso2 = document.getElementById("modal-compartir-paso2");
+    const bloquePass = document.getElementById("modal-compartir-nueva-pass");
+    const passTexto = document.getElementById("modal-compartir-pass-texto");
+    const nombreHtml = document.getElementById("modal-compartir-nombre-html");
+    if (!paso1 || !paso2 || !bloquePass || !passTexto || !nombreHtml) return;
+    paso1.classList.add("hidden");
+    paso2.classList.remove("hidden");
+    nombreHtml.textContent = res.nombre_html;
+    if (res.es_nuevo_contacto && res.password) {
+      passTexto.textContent = res.password;
+      bloquePass.classList.remove("hidden");
+    } else {
+      bloquePass.classList.add("hidden");
+    }
+  } catch (e) {
+    mostrarToast("Error al generar archivo: " + e, true);
+  }
+}
+
+async function compartirNativo(): Promise<void> {
+  if (!_rutaHtmlCompartir) return;
+  try {
+    await invoke("compartir_archivo_nativo", { rutaHtml: _rutaHtmlCompartir });
+  } catch (e) {
+    mostrarToast("Error compartiendo: " + e, true);
+  }
+}
+
+async function revelarEnFinder(): Promise<void> {
+  if (!_rutaHtmlCompartir) return;
+  try {
+    await invoke("revelar_en_finder", { ruta: _rutaHtmlCompartir });
+  } catch (e) {
+    mostrarToast("Error abriendo Finder: " + e, true);
+  }
+}
+
+function copiarPassCompartir(): void {
+  const txt = document.getElementById("modal-compartir-pass-texto")?.textContent ?? "";
+  if (!txt) return;
+  navigator.clipboard.writeText(txt).then(() => mostrarToast("Contraseña copiada", false));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
 async function iniciarRenombradoGuardado(id: string, nombreActual: string): Promise<void> {
   _renombraViejoG = id;
   _renombraEsGuardado = true;
@@ -1369,6 +1472,9 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   const errores = await borrarRutas(rutas);
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.add("hidden");
+  document.getElementById("btn-compartir-sel-g")?.classList.add("hidden");
+  document.getElementById("ui-finder")?.classList.remove("hidden");
+  document.getElementById("ui-importar")?.classList.remove("hidden");
   mostrarToast(errores ? `${errores} errores al eliminar` : "✓ Destruido de forma segura — irrecuperable", errores > 0);
   await cargarArchivosGuardados();
 }
@@ -3178,7 +3284,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     borrarChat: "BORRAR CHAT", configuracion: "CONFIGURACIÓN", borrarAlSalir: "BORRAR AL SALIR",
     borrarAlSalirDesc: "Limpia el chat al volver al panel", emailAuto: "EMAIL AUTO", proximamente: "Próximamente",
     diccionario: "DICCIONARIO", vocabularioActivo: "Vocabulario activo", volver: "← VOLVER",
-    verArchivo: "◫ VER ARCHIVO", eliminar: "✕ ELIMINAR", actualizar: "↺ ACTUALIZAR",
+    verArchivo: "◫ VER ARCHIVO", eliminar: "✕ ELIMINAR", compartir: "⇪ COMPARTIR",
     exportarTodo: "↓ EXPORTAR TODO", importar: "+ IMPORTAR", tema: "TEMA", idiomaInterfaz: "IDIOMA DE LA INTERFAZ",
     bienvenido: "BIENVENIDO AL SISTEMA", bienvenidoSistema: "BIENVENIDO AL SISTEMA", accederBunker: "ACCEDER A BÚNKER EXISTENTE",
     autenticacion: "AUTENTICACIÓN REQUERIDA", ajustesTitulo: "AJUSTES", volverPanel: "← VOLVER AL PANEL",
@@ -3192,7 +3298,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     borrarChat: "CLEAR CHAT", configuracion: "SETTINGS", borrarAlSalir: "CLEAR ON EXIT",
     borrarAlSalirDesc: "Clears chat when returning to panel", emailAuto: "AUTO EMAIL", proximamente: "Coming soon",
     diccionario: "DICTIONARY", vocabularioActivo: "Active vocabulary", volver: "← BACK",
-    verArchivo: "◫ VIEW FILE", eliminar: "✕ DELETE", actualizar: "↺ REFRESH",
+    verArchivo: "◫ VIEW FILE", eliminar: "✕ DELETE", compartir: "⇪ SHARE",
     exportarTodo: "↓ EXPORT ALL", importar: "+ IMPORT", tema: "THEME", idiomaInterfaz: "INTERFACE LANGUAGE",
     bienvenido: "WELCOME TO THE SYSTEM", bienvenidoSistema: "WELCOME TO THE SYSTEM", accederBunker: "ACCESS EXISTING VAULT",
     autenticacion: "AUTHENTICATION REQUIRED", ajustesTitulo: "SETTINGS", volverPanel: "← BACK TO PANEL",
@@ -3206,7 +3312,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     borrarChat: "EFFACER CHAT", configuracion: "CONFIGURATION", borrarAlSalir: "EFFACER EN QUITTANT",
     borrarAlSalirDesc: "Efface le chat au retour au panneau", emailAuto: "EMAIL AUTO", proximamente: "Bientôt",
     diccionario: "DICTIONNAIRE", vocabularioActivo: "Vocabulaire actif", volver: "← RETOUR",
-    verArchivo: "◫ VOIR FICHIER", eliminar: "✕ SUPPRIMER", actualizar: "↺ ACTUALISER",
+    verArchivo: "◫ VOIR FICHIER", eliminar: "✕ SUPPRIMER", compartir: "⇪ PARTAGER",
     exportarTodo: "↓ TOUT EXPORTER", importar: "+ IMPORTER", tema: "THÈME", idiomaInterfaz: "LANGUE DE L'INTERFACE",
     bienvenido: "BIENVENUE DANS LE SYSTÈME", bienvenidoSistema: "BIENVENUE DANS LE SYSTÈME", accederBunker: "ACCÉDER AU COFFRE EXISTANT",
     autenticacion: "AUTHENTIFICATION REQUISE", ajustesTitulo: "PARAMÈTRES", volverPanel: "← RETOUR AU PANNEAU",
@@ -3220,7 +3326,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     borrarChat: "مسح المحادثة", configuracion: "الإعدادات", borrarAlSalir: "مسح عند الخروج",
     borrarAlSalirDesc: "يمسح المحادثة عند العودة", emailAuto: "بريد تلقائي", proximamente: "قريباً",
     diccionario: "القاموس", vocabularioActivo: "المفردات النشطة", volver: "→ رجوع",
-    verArchivo: "◫ عرض الملف", eliminar: "✕ حذف", actualizar: "↺ تحديث",
+    verArchivo: "◫ عرض الملف", eliminar: "✕ حذف", compartir: "⇪ مشاركة",
     exportarTodo: "↓ تصدير الكل", importar: "+ استيراد", tema: "المظهر", idiomaInterfaz: "لغة الواجهة",
     bienvenido: "مرحباً بك في النظام", bienvenidoSistema: "مرحباً بك في النظام", accederBunker: "الدخول إلى الخزنة",
     autenticacion: "المصادقة مطلوبة", ajustesTitulo: "الإعدادات", volverPanel: "→ العودة إلى اللوحة",
@@ -3242,8 +3348,8 @@ function cambiarIdiomaUI(idioma: string): void {
     "ui-borrar-al-salir-desc": t.borrarAlSalirDesc, "ui-email-auto": t.emailAuto,
     "ui-proximamente": t.proximamente, "ui-diccionario": t.diccionario,
     "ui-vocabulario-activo": t.vocabularioActivo, "ui-volver-archivos": t.volver,
-    "btn-ver-sel-g": t.verArchivo, "btn-eliminar-sel-g": t.eliminar,
-    "ui-actualizar": t.actualizar, "ui-exportar-todo": t.exportarTodo,
+    "btn-ver-sel-g": t.verArchivo, "btn-compartir-sel-g": t.compartir, "btn-eliminar-sel-g": t.eliminar,
+    "ui-exportar-todo": t.exportarTodo,
     "ui-importar": t.importar, "ui-tema": t.tema,
     "ui-idioma-interfaz": t.idiomaInterfaz, "ui-bienvenido-sistema": t.bienvenidoSistema,
     "ui-acceder-bunker": t.accederBunker, "ui-autenticacion-requerida": t.autenticacion,
@@ -3326,11 +3432,17 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("ir-a-todos-btn")?.addEventListener("click", () => seleccionarBuzonGuardados("todos"));
 
   // Escape cierra cualquier modal visible
+  document.getElementById("input-contacto-compartir")?.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter") { e.preventDefault(); confirmarCompartir(); }
+    if (e.key === "Escape") cerrarModalCompartir();
+  });
+
   document.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key !== "Escape") return;
     const modales = [
       "modal-visor", "modal-paralelo", "modal-frase-app",
       "modal-renombrar", "modal-solicitud-p2p", "modal-renombrar-archivo",
+      "modal-compartir",
     ];
     for (const id of modales) {
       const el = document.getElementById(id);

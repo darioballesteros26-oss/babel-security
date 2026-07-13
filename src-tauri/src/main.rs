@@ -5,6 +5,7 @@
 
 mod babel_p2p;
 mod bip39_words;
+mod compartir;
 mod seguridad;
 mod traductor;
 
@@ -794,7 +795,7 @@ fn borrar_archivo_fuente(ruta: String, sesion: tauri::State<SesionActiva>) -> Re
     sesion.subclave_hex()?; // requiere sesión activa
     let path = std::fs::canonicalize(&ruta)
         .map_err(|_| "Archivo no accesible.".to_string())?;
-    let babel = babel_dir();
+    let babel = std::fs::canonicalize(babel_dir()).unwrap_or_else(|_| babel_dir());
     if path.starts_with(&babel) {
         return Err("No se puede borrar archivos internos de Babel.".into());
     }
@@ -3201,6 +3202,183 @@ fn borrar_html_frase() {
     borrar_seguro(&tmp_path("frase_recuperacion.html"));
 }
 
+// ============================================================
+// COMANDOS — COMPARTIR ARCHIVO CIFRADO (HTML autónomo)
+// ============================================================
+
+/// Descifra un .babel, empaqueta y genera un .html autónomo en ~/Babel/compartidos/.
+/// Si el contacto es nuevo genera una contraseña aleatoria y la devuelve (solo la primera vez).
+/// Si el contacto ya existe reutiliza su contraseña — el archivo se genera sin preguntar nada.
+#[tauri::command]
+fn generar_archivo_compartir(
+    ruta: String,
+    nombre_original: String,
+    contacto: String,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<compartir::ResultadoCompartir, String> {
+    validar_ruta_en(&ruta, archivos_dir())
+        .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+
+    // Validar nombre del contacto
+    let contacto = {
+        let c = contacto.trim().to_string();
+        if c.is_empty() { return Err("El nombre del contacto no puede estar vacío.".into()); }
+        if c.len() > 64 { return Err("El nombre del contacto es demasiado largo.".into()); }
+        if c.chars().any(|ch| ch.is_control()) { return Err("Nombre de contacto inválido.".into()); }
+        c
+    };
+
+    // Descifrar el .babel para obtener los bytes originales
+    let bytes = descifrar_a_bytes(&ruta, &subclave_hex)?;
+
+    compartir::generar_archivo_compartir(&bytes, &nombre_original, &contacto, &subclave_hex)
+}
+
+/// Muestra el NSSharingServicePicker nativo de macOS para el archivo HTML generado.
+/// Soporta AirDrop, Mail, Mensajes. En caso de error, el frontend debe ofrecer 'Revelar en Finder'.
+#[tauri::command]
+async fn compartir_archivo_nativo(
+    ruta_html: String,
+    app: tauri::AppHandle,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<(), String> {
+    // Verificar sesión
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+
+    // Validar que la ruta esté dentro de ~/Babel/compartidos/
+    validar_ruta_en(&ruta_html, compartir::compartidos_dir())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+        let app_clone = app.clone();
+        let path_clone = ruta_html.clone();
+
+        app.run_on_main_thread(move || {
+            let result = compartir::mostrar_share_picker_macos(&app_clone, &path_clone);
+            let _ = tx.send(result);
+        }).map_err(|e| format!("Error en hilo principal: {}", e))?;
+
+        rx.await.map_err(|_| "Error de comunicación interna".to_string())?
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    Err("Compartición nativa no disponible en esta plataforma. Usa 'Revelar en Finder'.".into())
+}
+
+/// Abre el Finder con el archivo HTML seleccionado, para arrastrar a WhatsApp/Telegram.
+#[tauri::command]
+fn revelar_en_finder(
+    ruta: String,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    validar_ruta_en(&ruta, compartir::compartidos_dir())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &ruta])
+            .spawn()
+            .map_err(|e| {
+                log::error!("[compartir] open -R falló: {}", e);
+                format!("Error abriendo Finder: {}", e)
+            })?;
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // En Windows: /select muestra el archivo en el Explorador
+        let ruta_w = ruta.replace('/', "\\");
+        std::process::Command::new("explorer")
+            .args(["/select,", &ruta_w])
+            .spawn()
+            .map_err(|e| format!("Error abriendo Explorador: {}", e))?;
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    Err("No disponible en esta plataforma.".into())
+}
+
+/// Lista los nombres de contactos con contraseña guardada.
+#[tauri::command]
+fn listar_contactos_compartir(
+    sesion: tauri::State<SesionActiva>,
+) -> Result<Vec<String>, String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let contactos = compartir::cargar_contactos(&subclave_hex);
+    let mut nombres: Vec<String> = contactos.into_keys().collect();
+    nombres.sort();
+    Ok(nombres)
+}
+
+/// Devuelve la contraseña guardada para un contacto (para mostrarla en ajustes).
+#[tauri::command]
+fn ver_password_contacto(
+    contacto: String,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<String, String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    compartir::cargar_contactos(&subclave_hex)
+        .get(&contacto)
+        .cloned()
+        .ok_or_else(|| format!("No hay contraseña guardada para '{}'.", contacto))
+}
+
+/// Cambia la contraseña de un contacto existente.
+#[tauri::command]
+fn actualizar_password_contacto(
+    contacto: String,
+    nueva_password: String,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    if nueva_password.trim().is_empty() {
+        return Err("La contraseña no puede estar vacía.".into());
+    }
+    let mut contactos = compartir::cargar_contactos(&subclave_hex);
+    if !contactos.contains_key(&contacto) {
+        return Err(format!("Contacto '{}' no encontrado.", contacto));
+    }
+    contactos.insert(contacto, nueva_password.trim().to_string());
+    compartir::guardar_contactos(&contactos, &subclave_hex)
+}
+
+/// Elimina un contacto y su contraseña de la tabla.
+#[tauri::command]
+fn olvidar_contacto(
+    contacto: String,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let mut contactos = compartir::cargar_contactos(&subclave_hex);
+    contactos.remove(&contacto);
+    compartir::guardar_contactos(&contactos, &subclave_hex)
+}
+
 // PUNTO DE ENTRADA — Arranca Tauri, registra todos los comandos — y gestiona el estado global de sesión (SesionActiva).
 
 fn main() {
@@ -3396,6 +3574,13 @@ fn main() {
             marcar_no_leido_tauri,
             guardar_html_frase,
             borrar_html_frase,
+            generar_archivo_compartir,
+            compartir_archivo_nativo,
+            revelar_en_finder,
+            listar_contactos_compartir,
+            ver_password_contacto,
+            actualizar_password_contacto,
+            olvidar_contacto,
         ]);
     if let Err(e) = app.run(tauri::generate_context!()) {
         eprintln!("[!] Error crítico al iniciar Babel: {}", e);

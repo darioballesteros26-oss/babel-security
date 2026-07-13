@@ -528,7 +528,8 @@ fn traducir_xml_batch(
         .collect();
 
     let total = traducibles.len().max(1);
-    let pct_marian = pct_inicio + (pct_fin - pct_inicio) * 60 / 100;
+    let rango = pct_fin as usize - pct_inicio as usize;
+    let pct_marian = (pct_inicio as usize + rango * 60 / 100) as u8;
     let pct_qwen   = pct_fin.saturating_sub(2);
     let mut hechos = 0usize;
     let mut para_qwen: Vec<usize> = Vec::new();
@@ -538,7 +539,7 @@ fn traducir_xml_batch(
     for lote in traducibles.chunks(BATCH) {
         if CANCELAR_TRADUCCION.load(Ordering::Relaxed) { break; }
         let pct = (pct_inicio as usize
-            + hechos * (pct_marian - pct_inicio) as usize / total)
+            + hechos * (pct_marian as usize).saturating_sub(pct_inicio as usize) / total)
             .min(pct_marian as usize) as u8;
         progreso(pct, &format!("TRADUCIENDO... {}%", pct));
 
