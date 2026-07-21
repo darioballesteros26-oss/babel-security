@@ -248,8 +248,12 @@ body{{min-height:100vh;display:flex;align-items:center;justify-content:center;ba
 .lock{{width:40px;height:40px;margin:0 auto 20px;opacity:.3}}
 form{{display:flex;flex-direction:column;gap:14px}}
 label{{font-size:11px;color:#555;letter-spacing:1.5px;text-transform:uppercase}}
-#pwd{{width:100%;padding:12px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#e0e0e0;font-size:18px;letter-spacing:4px;text-align:center;outline:none;transition:border-color .2s}}
+.pwd-wrap{{position:relative}}
+#pwd{{width:100%;padding:12px 44px 12px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#e0e0e0;font-size:18px;letter-spacing:4px;text-align:center;outline:none;transition:border-color .2s;box-sizing:border-box}}
 #pwd:focus{{border-color:#444}}
+#toggle-pwd{{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;padding:4px;cursor:pointer;color:#444;line-height:0;transition:color .2s}}
+#toggle-pwd:hover{{color:#aaa}}
+#toggle-pwd svg{{width:18px;height:18px;display:block}}
 button{{padding:13px;background:#e0e0e0;color:#0a0a0a;border:none;border-radius:4px;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;font-weight:600;transition:opacity .2s}}
 button:hover{{opacity:.85}}
 button:disabled{{opacity:.4;cursor:default}}
@@ -276,9 +280,15 @@ button:disabled{{opacity:.4;cursor:default}}
   </div>
   <form id="frm" onsubmit="return false">
     <label for="pwd">Contraseña</label>
-    <input type="text" id="pwd" name="password" autocomplete="off" inputmode="text"
-           placeholder="Introduce la contraseña" autofocus
-           spellcheck="false" autocorrect="off" autocapitalize="off">
+    <div class="pwd-wrap">
+      <input type="password" id="pwd" name="password" autocomplete="off"
+             placeholder="Introduce la contraseña" autofocus
+             spellcheck="false" autocorrect="off" autocapitalize="off">
+      <button type="button" id="toggle-pwd" onclick="togglePwd()" title="Mostrar/ocultar contraseña" aria-label="Mostrar contraseña">
+        <svg id="ico-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg id="ico-hide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M17.94 17.94A10.06 10.06 0 0112 19c-6.5 0-10-7-10-7a17.6 17.6 0 014.06-5.06M9.9 4.24A9.12 9.12 0 0112 4c6.5 0 10 7 10 7a17.6 17.6 0 01-2.33 3.37M3 3l18 18"/><circle cx="12" cy="12" r="3" style="clip-path:none"/></svg>
+      </button>
+    </div>
     <button id="btn" onclick="descifrar()">Descifrar</button>
     <div class="error" id="err">Contraseña incorrecta. Inténtalo de nuevo.</div>
     <div class="spinner" id="spin">Descifrando&hellip;</div>
@@ -294,6 +304,14 @@ button:disabled{{opacity:.4;cursor:default}}
 const DATA="{b64}";
 const ITER=250000;
 let blobUrl=null;
+
+function togglePwd(){{
+  const p=document.getElementById('pwd');
+  const show=document.getElementById('ico-show');
+  const hide=document.getElementById('ico-hide');
+  if(p.type==='password'){{p.type='text';show.style.display='none';hide.style.display='block';}}
+  else{{p.type='password';show.style.display='block';hide.style.display='none';}}
+}}
 
 async function descifrar(){{
   const pwd=document.getElementById('pwd').value;
@@ -440,7 +458,7 @@ pub fn guardar_contactos(
     let json = serde_json::to_string(contactos).map_err(|e| format!("Error: {}", e))?;
     let cifrado = seguridad::blindar_documento(&json, subclave_hex)
         .map_err(|e| format!("Error cifrando contactos: {}", e))?;
-    fs::write(contactos_path(), cifrado).map_err(|e| format!("Error guardando contactos: {}", e))
+    crate::escribir_privado(contactos_path(), cifrado).map_err(|e| format!("Error guardando contactos: {}", e))
 }
 
 /// Devuelve (password, es_nuevo). Si el contacto ya existe reutiliza su contraseña.
@@ -502,7 +520,7 @@ pub fn generar_archivo_compartir(
         .to_string_lossy()
         .to_string();
 
-    fs::write(&ruta_html, html.as_bytes())
+    crate::escribir_privado(&ruta_html, html.as_bytes())
         .map_err(|e| format!("Error guardando HTML: {}", e))?;
 
     log::info!("[compartir] HTML generado: {}", ruta_html);

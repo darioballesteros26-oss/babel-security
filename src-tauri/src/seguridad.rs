@@ -226,7 +226,11 @@ pub fn descifrar_documento(paquete: Vec<u8>, clave_hex: &str) -> Result<String, 
 pub fn hash_password(password: &[u8]) -> Result<String, String> {
     use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
     let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
+    // Mismos parámetros que derivar_subclave_desde_clave (128 MB / 4 iter / 4 hilos).
+    // verify_password lee los parámetros del PHC hash, así que los hashes existentes
+    // con Argon2::default() siguen siendo verificables sin migración.
+    let params = Params::new(131072, 4, 4, None).map_err(|e| e.to_string())?;
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
         .hash_password(password, &salt)
         .map(|h| h.to_string())
         .map_err(|e| e.to_string())
@@ -1527,12 +1531,12 @@ fn escribir_chain_tip(ruta: &str, hash: &[u8; 32]) {
             let mut buf = [0u8; 64];
             buf[..32].copy_from_slice(hash);
             buf[32..].copy_from_slice(&firma);
-            let _ = fs::write(format!("{}.tip", ruta), &buf);
+            let _ = crate::escribir_privado(format!("{}.tip", ruta), &buf);
             return;
         }
     }
     // Sin master.salt disponible: guardar sin HMAC (fallback)
-    let _ = fs::write(format!("{}.tip", ruta), hash);
+    let _ = crate::escribir_privado(format!("{}.tip", ruta), hash);
 }
 
 fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
@@ -1712,7 +1716,7 @@ pub fn activar_bloqueo() -> Result<(), String> {
         .map_err(|e| format!("activar_bloqueo: HMAC init falló: {}", e))?;
     mac.update(ts.to_string().as_bytes());
     let firma = hex::encode(mac.finalize().into_bytes());
-    fs::write(babel_path("bloqueo.tmp"), format!("{}:{}", ts, firma))
+    crate::escribir_privado(babel_path("bloqueo.tmp"), format!("{}:{}", ts, firma))
         .map_err(|e| format!("activar_bloqueo: no se pudo escribir bloqueo.tmp: {}", e))
 }
 
@@ -1754,7 +1758,7 @@ fn escribir_contador_desde(nombre: &str, count: u32) {
     };
     mac.update(count.to_string().as_bytes());
     let firma = hex::encode(mac.finalize().into_bytes());
-    let _ = fs::write(babel_path(nombre), format!("{}:{}", count, firma));
+    let _ = crate::escribir_privado(babel_path(nombre), format!("{}:{}", count, firma));
 }
 
 pub fn escribir_contador_intentos(count: u32) {

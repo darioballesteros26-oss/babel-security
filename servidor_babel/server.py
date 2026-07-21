@@ -119,7 +119,6 @@ CORS(app, origins=[
     "http://127.0.0.1:1420",
 ])
 
-_TOKEN_DEFECTO = "babel-local-default-token-2026-no-compartir"
 _TOKEN_FILE = os.path.join(os.path.expanduser("~"), "Babel", "servidor_token.txt")
 
 
@@ -144,7 +143,7 @@ def _obtener_o_generar_token() -> str:
     return tok
 
 
-BABEL_TOKEN = os.environ.get("BABEL_NLLB_TOKEN") or _obtener_o_generar_token()
+BABEL_TOKEN = os.environ.get("BABEL_SERVER_TOKEN") or os.environ.get("BABEL_NLLB_TOKEN") or _obtener_o_generar_token()
 MAX_INPUT_CHARS = 10_000
 
 PARES_PERMITIDOS = {
@@ -301,8 +300,20 @@ def ocr_pdf_endpoint():
 
     data = request.json or {}
     ruta = data.get("ruta", "")
-    # Solo ficheros .pdf reales: reduce la superficie de lectura arbitraria del endpoint.
-    if not ruta or not os.path.isfile(ruta) or not ruta.lower().endswith(".pdf"):
+    if not ruta or not ruta.lower().endswith(".pdf"):
+        return jsonify({"error": "Ruta PDF no válida"}), 400
+    # Restringir a directorios permitidos: evita que un token comprometido lea PDFs arbitrarios.
+    _DIRS_PERMITIDOS = [
+        os.path.realpath(os.path.expanduser("~/Babel")),
+        os.path.realpath(os.path.expanduser("~/Downloads")),
+        os.path.realpath(os.path.expanduser("~/Desktop")),
+        os.path.realpath(os.path.expanduser("~/Documents")),
+        os.path.realpath(__import__("tempfile").gettempdir()),
+    ]
+    ruta_real = os.path.realpath(ruta)
+    if not any(ruta_real.startswith(d + os.sep) or ruta_real == d for d in _DIRS_PERMITIDOS):
+        return jsonify({"error": "Ruta fuera de directorio permitido"}), 403
+    if not os.path.isfile(ruta_real):
         return jsonify({"error": "Ruta PDF no válida"}), 400
 
     if not _cargar_ocr():

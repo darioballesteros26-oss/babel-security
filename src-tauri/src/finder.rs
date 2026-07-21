@@ -113,6 +113,8 @@ pub struct ResultadoFinder {
     pub nombre: String,
     pub ok: bool,
     pub error: Option<String>,
+    /// true si el cifrado fue correcto pero el original no pudo borrarse (sandbox).
+    pub original_no_borrado: bool,
 }
 
 /// Verifica que la ruta del original sea segura para borrar:
@@ -158,19 +160,22 @@ where
             Ok(_) => {
                 // Borrado seguro de la copia staged en claro (3 pasadas + fsync).
                 crate::borrar_seguro(&staged_str);
-                // Borrado seguro del original. Está fuera del contenedor: funciona en
-                // dev/no-sandbox; bajo sandbox firmado requiere el entitlement de
-                // excepción temporal (ver Entitlements.plist / finder-extension/README).
+                // Borrado seguro del original. Funciona en dev/no-sandbox; bajo sandbox
+                // firmado el SO rechaza la escritura y el archivo queda en disco.
+                let mut original_no_borrado = false;
                 if let Some(orig) = &entrada.original {
                     if ruta_original_segura(orig) {
-                        let orig_str = orig.to_string_lossy().to_string();
                         if orig.exists() {
+                            let orig_str = orig.to_string_lossy().to_string();
                             crate::borrar_seguro(&orig_str);
-                        } else {
-                            log::warn!(
-                                "[finder] original no accesible para borrado seguro: {}",
-                                orig_str
-                            );
+                            // Comprobar si el borrado tuvo efecto (falla en sandbox).
+                            if orig.exists() {
+                                original_no_borrado = true;
+                                log::warn!(
+                                    "[finder] original sigue en disco tras borrado (sandbox?): {}",
+                                    orig_str
+                                );
+                            }
                         }
                     }
                 }
@@ -181,6 +186,7 @@ where
                     nombre: entrada.nombre,
                     ok: true,
                     error: None,
+                    original_no_borrado,
                 });
             }
             Err(e) => {
@@ -194,6 +200,7 @@ where
                     nombre: entrada.nombre,
                     ok: false,
                     error: Some(e),
+                    original_no_borrado: false,
                 });
             }
         }

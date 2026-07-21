@@ -84,6 +84,30 @@ impl Drop for BorrarAlSalir {
     }
 }
 
+/// Escribe `datos` en `ruta` con permisos 0o600 (solo dueño puede leer/escribir).
+/// En Windows usa los permisos heredados del proceso (no hay ACL equivalente simple).
+/// Usar en TODOS los archivos internos de Babel: vault, temporales, índices.
+pub(crate) fn escribir_privado(
+    ruta: impl AsRef<std::path::Path>,
+    datos: impl AsRef<[u8]>,
+) -> std::io::Result<()> {
+    #[cfg(unix)]
+    let res = {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(ruta.as_ref())
+            .and_then(|mut f| f.write_all(datos.as_ref()))
+    };
+    #[cfg(not(unix))]
+    let res = escribir_privado(ruta, datos);
+    res
+}
+
 // ESTADO GLOBAL — Sesión activa del usuario
 
 pub struct SesionActiva {
@@ -242,25 +266,32 @@ fn verificar_licencia_hardware() -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     let serial = "WINDOWS-NO-SERIAL".to_string();
 
-    const LICENCIA_KEY: &[u8] = b"babel-license-bind-v1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-    let hmac_serial = |bytes: &[u8]| -> String {
-        let mut mac = <Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(LICENCIA_KEY)
-            .expect("LICENCIA_KEY is a compile-time constant with valid length");
+    // Clave HMAC derivada de master.salt (única por instalación).
+    // La clave estática usada en versiones anteriores se conserva solo para migración.
+    let salt = traductor::cargar_o_crear_salt();
+    let hmac_con_clave = |bytes: &[u8], key: &[u8]| -> String {
+        let mut mac = <Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key)
+            .expect("clave HMAC de longitud válida");
         mac.update(bytes);
         hex::encode(mac.finalize().into_bytes())
     };
-    let firma = hmac_serial(serial.as_bytes());
+    let firma = hmac_con_clave(serial.as_bytes(), &salt);
     let ruta = babel_path("licencia.babel");
     if std::path::Path::new(&ruta).exists() {
         let guardado = fs::read_to_string(&ruta).unwrap_or_default().trim().to_string();
+        // Migración: HMAC con clave estática (v1) → HMAC con master.salt (v2)
+        const _LICENCIA_KEY_V1: &[u8] = b"babel-license-bind-v1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let firma_v1 = hmac_con_clave(serial.as_bytes(), _LICENCIA_KEY_V1);
         let hash_legacy = format!("{:x}", sha2::Sha256::digest(serial.as_bytes()));
-        if guardado != firma && guardado == hash_legacy {
-            let _ = fs::write(&ruta, &firma); // migrar legado a HMAC
-        } else if guardado != firma {
+        if guardado == firma {
+            // ya en formato v2 — ok
+        } else if guardado == firma_v1 || guardado == hash_legacy {
+            let _ = escribir_privado(&ruta, firma.as_bytes()); // migrar a v2
+        } else {
             return Err("Licencia inválida. Babel está vinculado a otro equipo.".into());
         }
     } else {
-        let _ = fs::write(&ruta, &firma);
+        let _ = escribir_privado(&ruta, firma.as_bytes());
     }
     Ok(())
 }
@@ -353,7 +384,7 @@ fn crear_acceso_bunker(maestra: String, usuario: String, pass: String) -> Result
         .map_err(|e| format!("Error cifrando: {}", e))?;
     json.zeroize();
 
-    fs::write(&babel_path("usuarios.babel"), &cifrado)
+    escribir_privado(&babel_path("usuarios.babel"), &cifrado)
         .map_err(|e| format!("Error guardando: {}", e))?;
 
     Ok(format!(
@@ -516,7 +547,7 @@ async fn traducir_documento(
     }
 
     let ruta_temp = tmp_path(&nombre_solo);
-    fs::write(&ruta_temp, &contenido).map_err(|e| format!("Error guardando temporal: {}", e))?;
+    escribir_privado(&ruta_temp, &contenido).map_err(|e| format!("Error guardando temporal: {}", e))?;
     drop(Zeroizing::new(contenido));
 
     let nombre_base = std::path::Path::new(&nombre_archivo)
@@ -637,7 +668,7 @@ fn cifrar_y_guardar_desde_ruta(
     let cifrado = seguridad::blindar_documento(&contenido_b64, subclave_hex)
         .map_err(|e| format!("Error cifrando: {}", e))?;
 
-    fs::write(&ruta_cifrada, cifrado).map_err(|e| format!("Error guardando: {}", e))?;
+    escribir_privado(&ruta_cifrada, cifrado).map_err(|e| format!("Error guardando: {}", e))?;
 
     Ok(ruta_cifrada)
 }
@@ -819,7 +850,12 @@ fn procesar_finder_bloqueante(
     for r in &resultados {
         let _ = app.emit(
             "finder-guardado",
-            serde_json::json!({ "nombre": r.nombre, "ok": r.ok, "error": r.error }),
+            serde_json::json!({
+                "nombre": r.nombre,
+                "ok": r.ok,
+                "error": r.error,
+                "originalNoBorrado": r.original_no_borrado,
+            }),
         );
     }
     resultados.iter().filter(|r| r.ok).count()
@@ -1147,7 +1183,7 @@ fn mover_archivo_guardado(
     let json = serde_json::to_string(&index).map_err(|e| format!("Error: {}", e))?;
     let cifrado =
         seguridad::blindar_documento(&json, &subclave_hex).map_err(|e| format!("Error: {}", e))?;
-    fs::write(&ruta_index, cifrado).map_err(|e| format!("Error: {}", e))?;
+    escribir_privado(&ruta_index, cifrado).map_err(|e| format!("Error: {}", e))?;
 
     Ok(())
 }
@@ -1294,7 +1330,7 @@ async fn traducir_archivo_guardado(
 
         // Escribir a tmp/ y traducir
         let tmp_path = tmp_dir().join(&nombre_base);
-        fs::write(&tmp_path, &bytes).map_err(|e| format!("Error escribiendo temporal: {}", e))?;
+        escribir_privado(&tmp_path, &bytes).map_err(|e| format!("Error escribiendo temporal: {}", e))?;
 
         let progreso = |pct: u8, msg: &str| {
             let _ = app.emit("progreso-traduccion", serde_json::json!({"pct": pct, "msg": msg}));
@@ -1644,7 +1680,7 @@ fn guardar_nodos(
     let json = serde_json::to_string(nodos).map_err(|e| format!("Error: {}", e))?;
     let cifrado =
         seguridad::blindar_documento(&json, subclave_hex).map_err(|e| format!("Error: {}", e))?;
-    fs::write(ruta, cifrado).map_err(|e| format!("Error: {}", e))?;
+    escribir_privado(ruta, cifrado).map_err(|e| format!("Error: {}", e))?;
     Ok(())
 }
 
@@ -1898,7 +1934,7 @@ fn mover_archivo(
     let json = serde_json::to_string(&index).map_err(|e| format!("Error: {}", e))?;
     let cifrado =
         seguridad::blindar_documento(&json, &subclave_hex).map_err(|e| format!("Error: {}", e))?;
-    fs::write(&ruta_index, cifrado).map_err(|e| format!("Error: {}", e))?;
+    escribir_privado(&ruta_index, cifrado).map_err(|e| format!("Error: {}", e))?;
 
     Ok(())
 }
@@ -2024,7 +2060,7 @@ fn renombrar_archivo(
         let json = serde_json::to_string(&index).map_err(|e| format!("Error: {}", e))?;
         let cifrado = seguridad::blindar_documento(&json, &subclave_hex)
             .map_err(|e| format!("Error: {}", e))?;
-        let _ = fs::write(&ruta_index, cifrado);
+        let _ = escribir_privado(&ruta_index, cifrado);
     }
 
     Ok(nueva_ruta.to_string_lossy().to_string())
@@ -2404,7 +2440,7 @@ fn save_settings(settings: AppSettings, sesion: tauri::State<SesionActiva>) -> R
     let data = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
     let cifrado = seguridad::blindar_documento(&data, &subclave_hex)
         .map_err(|e| format!("Error cifrando ajustes: {}", e))?;
-    fs::write(&babel_path("settings.babel"), cifrado).map_err(|e| e.to_string())?;
+    escribir_privado(&babel_path("settings.babel"), cifrado).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -2434,7 +2470,7 @@ fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, Stri
             if !subclave_hex.is_empty() {
                 if let Ok(json) = serde_json::to_string(&settings) {
                     if let Ok(cifrado) = seguridad::blindar_documento(&json, &subclave_hex) {
-                        let ok = fs::write(babel_path("settings.babel"), cifrado).is_ok();
+                        let ok = escribir_privado(babel_path("settings.babel"), cifrado).is_ok();
                         if ok { let _ = fs::remove_file(babel_path("settings.json")); }
                         traductor::registrar_evento(
                             if ok { "settings.json migrado a settings.babel cifrado" }
@@ -2494,13 +2530,15 @@ fn generar_frase_recuperacion(
     let recovery_key = seguridad::derivar_clave_recuperacion_v3(&palabras, &recovery_salt)?;
     let recovery_key_hex = Zeroizing::new(hex::encode(recovery_key.as_ref()));
     // Construir JSON con format! para evitar copias de strings dentro de serde_json::Value
-    let m_escaped = maestra.replace('\\', "\\\\").replace('"', "\\\"");
-    let p_escaped = pass_usuario.replace('\\', "\\\\").replace('"', "\\\"");
-    let mut datos_recovery = Zeroizing::new(format!("{{\"m\":\"{}\",\"p\":\"{}\"}}", m_escaped, p_escaped));
+    let mut m_escaped = Zeroizing::new(maestra.replace('\\', "\\\\").replace('"', "\\\""));
+    let mut p_escaped = Zeroizing::new(pass_usuario.replace('\\', "\\\\").replace('"', "\\\""));
+    let mut datos_recovery = Zeroizing::new(format!("{{\"m\":\"{}\",\"p\":\"{}\"}}", m_escaped.as_str(), p_escaped.as_str()));
+    m_escaped.zeroize();
+    p_escaped.zeroize();
     let cifrado_recuperacion = seguridad::blindar_documento(&datos_recovery, &recovery_key_hex)
         .map_err(|e| format!("Error cifrando recovery.babel: {}", e))?;
     datos_recovery.zeroize();
-    fs::write(&babel_path("recovery.babel"), &cifrado_recuperacion)
+    escribir_privado(&babel_path("recovery.babel"), &cifrado_recuperacion)
         .map_err(|e| format!("Error guardando recovery.babel: {}", e))?;
 
     let salt = traductor::cargar_o_crear_salt();
@@ -2509,7 +2547,7 @@ fn generar_frase_recuperacion(
     let subclave_hex = Zeroizing::new(hex::encode(subclave.as_ref()));
     let cifrado_mnemonic = seguridad::blindar_documento(&palabras.join(" "), &subclave_hex)
         .map_err(|e| format!("Error cifrando mnemonic.babel: {}", e))?;
-    fs::write(&babel_path("mnemonic.babel"), &cifrado_mnemonic)
+    escribir_privado(&babel_path("mnemonic.babel"), &cifrado_mnemonic)
         .map_err(|e| format!("Error guardando mnemonic.babel: {}", e))?;
     Ok(palabras)
 }
@@ -2605,7 +2643,7 @@ fn recuperar_con_frase_interno(
         Err(_) => match seguridad::descifrar_documento(cifrado.clone(), &key_v2_hex) {
             Ok(d) => {
                 if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
-                    let _ = fs::write(babel_path("recovery.babel"), nuevo);
+                    let _ = escribir_privado(babel_path("recovery.babel"), nuevo);
                 }
                 d
             }
@@ -2616,7 +2654,7 @@ fn recuperar_con_frase_interno(
                 match seguridad::descifrar_documento(cifrado.clone(), &key_v1_hex) {
                     Ok(d) => {
                         if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
-                            let _ = fs::write(babel_path("recovery.babel"), nuevo);
+                            let _ = escribir_privado(babel_path("recovery.babel"), nuevo);
                         }
                         d
                     }
@@ -2628,7 +2666,7 @@ fn recuperar_con_frase_interno(
                             Ok(d) => {
                                 usado_v0 = true;
                                 if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
-                                    let _ = fs::write(babel_path("recovery.babel"), nuevo);
+                                    let _ = escribir_privado(babel_path("recovery.babel"), nuevo);
                                 }
                                 d
                             }
@@ -2734,7 +2772,7 @@ fn aceptar_terminos() -> Result<(), String> {
         .unwrap_or_default()
         .as_secs()
         .to_string();
-    fs::write(&babel_path("terminos.babel"), ts).map_err(|e| format!("Error: {}", e))
+    escribir_privado(&babel_path("terminos.babel"), ts).map_err(|e| format!("Error: {}", e))
 }
 
 // Extrae la parte <email@dominio> del remitente para comparar sin display name.
@@ -2867,7 +2905,7 @@ fn enviar_bytes_cifrados_tauri(
         .to_string();
     // Sufijo aleatorio evita colisiones y ataques de predicción de nombre (B10)
     let ruta_temp = tmp_path(&format!("email_{}_{}", nombre_solo, nuevo_id()));
-    fs::write(&ruta_temp, &bytes).map_err(|e| format!("Error guardando temporal: {}", e))?;
+    escribir_privado(&ruta_temp, &bytes).map_err(|e| format!("Error guardando temporal: {}", e))?;
 
     // Closure garantiza borrar_seguro incluso si cargar_config_email devuelve None
     let resultado = (|| -> Result<(), String> {
@@ -3280,7 +3318,7 @@ fn guardar_html_frase(palabras: Vec<String>) -> Result<String, String> {
     );
 
     let ruta = tmp_path("frase_recuperacion.html");
-    std::fs::write(&ruta, html.as_bytes())
+    escribir_privado(&ruta, html.as_bytes())
         .map_err(|e| format!("Error al guardar HTML: {}", e))?;
     Ok(ruta)
 }
@@ -3426,7 +3464,7 @@ async fn compartir_directo(
         .to_string_lossy()
         .to_string();
 
-    std::fs::write(&ruta_compartir, html.as_bytes())
+    escribir_privado(&ruta_compartir, html.as_bytes())
         .map_err(|e| format!("Error escribiendo HTML temporal: {}", e))?;
 
     log::info!("[compartir_directo] HTML listo: {}", ruta_compartir);

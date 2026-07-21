@@ -240,13 +240,13 @@ pub fn cargar_o_crear_salt() -> [u8; 32] {
 
     match (salt_principal, salt_backup) {
         (Some(s), _) => {
-            let _ = fs::write(&ruta_bck, s);
+            let _ = crate::escribir_privado(&ruta_bck, s);
             salt_perms_600(&ruta_bck);
             return s;
         }
         (None, Some(s)) => {
             log::warn!("[Babel] master.salt no encontrada - recuperando desde backup...");
-            if let Err(e) = fs::write(&ruta_salt, s) {
+            if let Err(e) = crate::escribir_privado(&ruta_salt, s) {
                 log::error!("[Babel] No se pudo restaurar master.salt: {}", e);
             } else {
                 salt_perms_600(&ruta_salt);
@@ -263,7 +263,7 @@ pub fn cargar_o_crear_salt() -> [u8; 32] {
     }
 
     let nueva_salt = seguridad::generar_salt_maestra();
-    if let Err(e) = fs::write(&ruta_salt, nueva_salt) {
+    if let Err(e) = crate::escribir_privado(&ruta_salt, nueva_salt) {
         log::error!(
             "[Babel] ERROR CRÍTICO: no se pudo guardar master.salt: {}",
             e
@@ -271,7 +271,7 @@ pub fn cargar_o_crear_salt() -> [u8; 32] {
     } else {
         salt_perms_600(&ruta_salt);
     }
-    let _ = fs::write(&ruta_bck, nueva_salt);
+    let _ = crate::escribir_privado(&ruta_bck, nueva_salt);
     salt_perms_600(&ruta_bck);
     log::info!("[Babel] master.salt generada correctamente.");
     nueva_salt
@@ -346,7 +346,7 @@ pub fn procesar_archivo_inteligente(
             if let Ok(b64_docx) = seguridad::descifrar_documento(cifrado_bytes, subclave_hex) {
                 if let Ok(docx_bytes) = descomprimir_b64(&b64_docx) {
                     let docx_tmp = tmp_dir.join(format!("{}_docx_pdf.docx", nombre));
-                    if fs::write(&docx_tmp, &docx_bytes).is_ok() {
+                    if crate::escribir_privado(&docx_tmp, &docx_bytes).is_ok() {
                         let mut child = std::process::Command::new(soffice)
                             .args(["--headless", "--convert-to", "pdf",
                                    "--outdir", &tmp_dir.to_string_lossy(),
@@ -377,7 +377,7 @@ pub fn procesar_archivo_inteligente(
                                 if let Ok(cifrado_pdf) =
                                     seguridad::blindar_documento(&b64_pdf, subclave_hex)
                                 {
-                                    let _ = fs::write(&salida, cifrado_pdf);
+                                    let _ = crate::escribir_privado(&salida, cifrado_pdf);
                                 }
                             }
                         }
@@ -403,7 +403,7 @@ pub fn procesar_archivo_inteligente(
         if let Ok(cifrado_orig) = seguridad::blindar_documento(&texto, subclave_hex) {
             let salida_orig =
                 archivos_dir.join(format!("{}_{}_{}__orig.babel", id_usuario, par, nombre));
-            let _ = fs::write(&salida_orig, cifrado_orig);
+            let _ = crate::escribir_privado(&salida_orig, cifrado_orig);
         }
 
         // Traducir párrafo a párrafo con contexto del anterior para coherencia
@@ -430,7 +430,7 @@ pub fn procesar_archivo_inteligente(
         // Guardar traducción cifrada
         if let Ok(cifrado) = seguridad::blindar_documento(&traducido_final, subclave_hex) {
             let salida = archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre));
-            let _ = fs::write(&salida, cifrado);
+            let _ = crate::escribir_privado(&salida, cifrado);
         }
     } else {
         return Err(format!("Formato no soportado: {}", ruta_limpia));
@@ -987,7 +987,7 @@ pub fn clonar_y_traducir(
     let b64_orig = comprimir_b64(&raw_bytes);
     if let Ok(cifrado_orig) = seguridad::blindar_documento(&b64_orig, subclave_hex) {
         let salida_orig = archivos_dir.join(format!("{}_{}_{}__orig.babel", id_usuario, par, nombre));
-        let _ = fs::write(&salida_orig, cifrado_orig);
+        let _ = crate::escribir_privado(&salida_orig, cifrado_orig);
     }
 
     progreso(15, "PROCESANDO WORD...");
@@ -1050,7 +1050,7 @@ pub fn clonar_y_traducir(
     let b64 = comprimir_b64(&docx_bytes);
     let cifrado = seguridad::blindar_documento(&b64, subclave_hex)?;
     let salida = archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre));
-    fs::write(&salida, &cifrado)?;
+    crate::escribir_privado(&salida, &cifrado)?;
 
     registrar_evento(&format!("Word procesado: {}", ruta), subclave_hex);
     Ok(())
@@ -1096,7 +1096,7 @@ fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
     if !ok {
         if std::path::Path::new(&tmp_img).exists() {
             let tam = std::fs::metadata(&tmp_img).map(|m| m.len() as usize).unwrap_or(0);
-            if tam > 0 { let _ = fs::write(&tmp_img, vec![0u8; tam]); }
+            if tam > 0 { let _ = crate::escribir_privado(&tmp_img, vec![0u8; tam]); }
             let _ = fs::remove_file(&tmp_img);
         }
         return String::new();
@@ -1113,7 +1113,7 @@ fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
     let tam = std::fs::metadata(&tmp_img)
         .map(|m| m.len() as usize)
         .unwrap_or(0);
-    let _ = fs::write(&tmp_img, vec![0u8; tam]);
+    let _ = crate::escribir_privado(&tmp_img, vec![0u8; tam]);
     let _ = fs::remove_file(&tmp_img);
     resultado
 }
@@ -1790,7 +1790,7 @@ pub fn procesar_pdf(
             );
             let html_tmp = tmp_dir.join(format!("{}_fallback.html", nombre));
             let pdf_lo  = tmp_dir.join(format!("{}_fallback.pdf", nombre));
-            if fs::write(&html_tmp, html_content.as_bytes()).is_ok() {
+            if crate::escribir_privado(&html_tmp, html_content.as_bytes()).is_ok() {
                 let mut child = std::process::Command::new(soffice_bin)
                     .args(["--headless", "--convert-to", "pdf",
                            "--outdir", &tmp_dir.to_string_lossy(),
@@ -1818,7 +1818,7 @@ pub fn procesar_pdf(
                         borrar_seguro_local(&pdf_lo.to_string_lossy());
                         let b64 = comprimir_b64(&pdf_bytes);
                         if let Ok(cifrado) = seguridad::blindar_documento(&b64, subclave_hex) {
-                            let _ = fs::write(
+                            let _ = crate::escribir_privado(
                                 archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre)),
                                 cifrado,
                             );
@@ -1833,7 +1833,7 @@ pub fn procesar_pdf(
                 break 'conv false;
             };
             let md_tmp = tmp_dir.join(format!("{}_fallback.md", nombre));
-            if fs::write(&md_tmp, traducido.as_bytes()).is_err() { break 'conv false; }
+            if crate::escribir_privado(&md_tmp, traducido.as_bytes()).is_err() { break 'conv false; }
             let pdf_out = tmp_dir.join(format!("{}_fallback.pdf", nombre));
             let ok = std::process::Command::new(python3)
                 .args([script.as_str(), &md_tmp.to_string_lossy(), &pdf_out.to_string_lossy()])
@@ -1847,7 +1847,7 @@ pub fn procesar_pdf(
             let b64 = comprimir_b64(&pdf_bytes);
             match seguridad::blindar_documento(&b64, subclave_hex) {
                 Ok(cifrado) => {
-                    let _ = fs::write(
+                    let _ = crate::escribir_privado(
                         archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre)),
                         cifrado,
                     );
@@ -1862,7 +1862,7 @@ pub fn procesar_pdf(
             progreso(93, "CIFRANDO RESULTADO...");
             let contenido = format!("html:{}", markdown_a_html(&traducido));
             let cifrado = seguridad::blindar_documento(&contenido, subclave_hex)?;
-            fs::write(
+            crate::escribir_privado(
                 archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre)),
                 cifrado,
             )?;
@@ -1915,7 +1915,7 @@ pub fn procesar_pdf(
             if let Ok(b64_docx) = seguridad::descifrar_documento(cifrado_bytes, subclave_hex) {
                 if let Ok(docx_bytes) = descomprimir_b64(&b64_docx) {
                     let docx_conv = tmp_dir.join(format!("{}_conv.docx", nombre));
-                    if fs::write(&docx_conv, &docx_bytes).is_ok() {
+                    if crate::escribir_privado(&docx_conv, &docx_bytes).is_ok() {
                         let mut child = std::process::Command::new(soffice_pdf)
                             .args(["--headless", "--convert-to", "pdf",
                                    "--outdir", &tmp_dir.to_string_lossy(),
@@ -1944,7 +1944,7 @@ pub fn procesar_pdf(
                                 borrar_seguro_local(&pdf_out.to_string_lossy());
                                 let b64_pdf = comprimir_b64(&pdf_bytes);
                                 if let Ok(cifrado_pdf) = seguridad::blindar_documento(&b64_pdf, subclave_hex) {
-                                    let _ = fs::write(&salida_final, cifrado_pdf);
+                                    let _ = crate::escribir_privado(&salida_final, cifrado_pdf);
                                 }
                             }
                         }
@@ -2076,7 +2076,7 @@ pub fn guardar_diccionario(nombre: &str, dict: &HashMap<String, String>, subclav
     if let Ok(json) = serde_json::to_string_pretty(dict) {
         match seguridad::blindar_documento(&json, subclave_hex) {
             Ok(cifrado) => {
-                if let Err(e) = fs::write(&ruta_cifrada, cifrado) {
+                if let Err(e) = crate::escribir_privado(&ruta_cifrada, cifrado) {
                     log::error!("[!] Error guardando diccionario cifrado: {}", e);
                 }
             }
@@ -2108,7 +2108,7 @@ pub fn registrar_pendiente(palabra: &str, subclave_hex: &str) {
         if let Ok(json) = serde_json::to_string_pretty(&pendientes) {
             match seguridad::blindar_documento(&json, subclave_hex) {
                 Ok(cifrado) => {
-                    let _ = fs::write(&ruta, cifrado);
+                    let _ = crate::escribir_privado(&ruta, cifrado);
                 }
                 Err(e) => log::warn!("[!] Error cifrando pendientes: {}", e),
             }
@@ -2122,7 +2122,7 @@ pub fn guardar_config_email(creds: &CredencialesEmail, subclave_hex: &str) -> Re
         .map_err(|e| format!("Error serializando config de email: {}", e))?;
     let cifrado = seguridad::blindar_documento(&json, subclave_hex)
         .map_err(|e| format!("Error cifrando config de email: {}", e))?;
-    fs::write(crate::babel_dir().join("config.babel"), cifrado)
+    crate::escribir_privado(crate::babel_dir().join("config.babel"), cifrado)
         .map_err(|e| format!("Error guardando config de email: {}", e))?;
     Ok(())
 }

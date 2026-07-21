@@ -61,8 +61,12 @@ def cargar_modelo():
             intra_threads=4,
             compute_type="int8",
         )
-        tok_src = DIR_MODELO if os.path.isfile(os.path.join(DIR_MODELO, "spiece.model")) else "google/madlad400-3b-mt"
-        _tokenizer = T5Tokenizer.from_pretrained(tok_src)
+        if not os.path.isfile(os.path.join(DIR_MODELO, "spiece.model")):
+            raise RuntimeError(
+                f"[MADLAD] Tokenizer no encontrado en {DIR_MODELO}. "
+                "Reinstala los modelos con preparar_usb.sh o descargar_modelos.py."
+            )
+        _tokenizer = T5Tokenizer.from_pretrained(DIR_MODELO, local_files_only=True)
         print("[MADLAD] Listo.")
 
 

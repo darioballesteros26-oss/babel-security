@@ -447,10 +447,12 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // FINDER — "Guardar con Babel": el backend cifra en silencio y emite un evento por
   // archivo procesado. Mostramos un toast y refrescamos la lista si procede.
-  listen<{ nombre: string; ok: boolean; error?: string }>("finder-guardado", (e) => {
+  listen<{ nombre: string; ok: boolean; error?: string; originalNoBorrado?: boolean }>("finder-guardado", (e) => {
     const p = e.payload;
-    if (p.ok) mostrarToast(`Guardado en Babel: ${p.nombre}`, false);
-    else mostrarToast(`No se pudo guardar ${p.nombre}: ${p.error ?? "error"}`, true);
+    if (p.ok) {
+      mostrarToast(`Guardado en Babel: ${p.nombre}`, false);
+      if (p.originalNoBorrado) mostrarToast(`El original no pudo borrarse — elimínalo manualmente desde el Finder`, true);
+    } else mostrarToast(`No se pudo guardar ${p.nombre}: ${p.error ?? "error"}`, true);
     if (!document.getElementById("pantalla-archivos-guardados")?.classList.contains("hidden")) {
       cargarArchivosGuardados().catch(() => {});
     }
