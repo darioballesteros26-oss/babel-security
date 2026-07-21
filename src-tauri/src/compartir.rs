@@ -186,24 +186,31 @@ pre{{white-space:pre-wrap;font-size:14px;line-height:1.7;color:#ccc;background:#
 <script>
 (function(){{
   const B64="{b64}",NOM="{nom_js}",MIME="{mim_js}";
-  function toB64(b){{let s='';for(let i=0;i<b.length;i++)s+=String.fromCharCode(b[i]);return btoa(s);}}
   const bytes=Uint8Array.from(atob(B64),c=>c.charCodeAt(0));
   const mob=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   const v=document.getElementById('viewer');
+  function btnDescargar(url,nombre){{
+    const b=document.createElement('button');b.className='dl';b.textContent='⬇ Descargar '+nombre;
+    if(mob){{b.onclick=()=>window.open(url,'_blank');}}
+    else{{b.onclick=()=>{{const a=document.createElement('a');a.href=url;a.download=nombre;a.click();}};}}
+    return b;
+  }}
+  const dataUrl='data:'+MIME+';base64,'+B64;
   if(MIME.startsWith('text/')||MIME==='application/json'){{
     const p=document.createElement('pre');p.textContent=new TextDecoder().decode(bytes);v.appendChild(p);
+    v.appendChild(btnDescargar(dataUrl,NOM));
   }}else if(MIME.startsWith('image/')){{
-    const img=document.createElement('img');img.src='data:'+MIME+';base64,'+B64;img.alt=NOM;v.appendChild(img);
+    const img=document.createElement('img');img.src=dataUrl;img.alt=NOM;v.appendChild(img);
+    v.appendChild(btnDescargar(dataUrl,NOM));
   }}else if(MIME==='application/pdf'){{
-    const url='data:application/pdf;base64,'+B64;
-    if(mob){{const b=document.createElement('button');b.className='dl';b.textContent='Abrir PDF';b.onclick=()=>window.open(url,'_blank');v.appendChild(b);}}
-    else{{const f=document.createElement('iframe');f.src=url;v.appendChild(f);}}
+    if(mob){{
+      v.appendChild(btnDescargar(dataUrl,NOM));
+    }}else{{
+      const f=document.createElement('iframe');f.src=dataUrl;v.appendChild(f);
+      v.appendChild(btnDescargar(dataUrl,NOM));
+    }}
   }}else{{
-    const url='data:'+MIME+';base64,'+B64;
-    const b=document.createElement('button');b.className='dl';b.textContent='Descargar '+NOM;
-    if(mob){{b.onclick=()=>window.open(url,'_blank');}}
-    else{{b.onclick=()=>{{const a=document.createElement('a');a.href=url;a.download=NOM;a.click();}};}}
-    v.appendChild(b);
+    v.appendChild(btnDescargar(dataUrl,NOM));
   }}
 }})();
 </script>
