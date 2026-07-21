@@ -75,6 +75,15 @@ pub fn borrar_seguro(ruta: &str) {
     let _ = fs::remove_file(ruta);
 }
 
+/// RAII: llama a `borrar_seguro` al soltar, incluso en panic o retorno anticipado.
+/// Útil para garantizar limpieza de temporales plaintext en cualquier ruta de salida.
+struct BorrarAlSalir(String);
+impl Drop for BorrarAlSalir {
+    fn drop(&mut self) {
+        borrar_seguro(&self.0);
+    }
+}
+
 // ESTADO GLOBAL — Sesión activa del usuario
 
 pub struct SesionActiva {
@@ -520,20 +529,20 @@ async fn traducir_documento(
     // spawn_blocking libera el event-loop → los eventos progreso-traduccion
     // llegan al webview en tiempo real mientras traduce.
     tauri::async_runtime::spawn_blocking(move || {
+        // BorrarAlSalir garantiza limpieza incluso si procesar_archivo_inteligente hace panic.
+        let _guard = BorrarAlSalir(ruta_temp);
         traductor::resetear_cancelacion();
         let progreso = |pct: u8, msg: &str| {
             let _ = app.emit("progreso-traduccion", serde_json::json!({"pct": pct, "msg": msg}));
         };
-        let resultado = traductor::procesar_archivo_inteligente(
-            &ruta_temp,
+        traductor::procesar_archivo_inteligente(
+            &_guard.0,
             &dict,
             &subclave_hex,
             &id_usuario,
             &par_doc,
             &progreso,
-        ).map(|_| nombre_resultado);
-        borrar_seguro(&ruta_temp);
-        resultado
+        ).map(|_| nombre_resultado)
     }).await.map_err(|e| e.to_string())?
 }
 // ============================================================
@@ -1782,7 +1791,7 @@ async fn exportar_archivo(
         validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
         // Descifrar y reconstruir el documento original
-        let raw = descifrar_a_bytes(&ruta, &subclave_hex)?;
+        let raw = Zeroizing::new(descifrar_a_bytes(&ruta, &subclave_hex)?);
         let ext = detectar_ext(&raw);
         let nombre = nombre_exportacion(&ruta, ext);
 
@@ -1798,7 +1807,7 @@ async fn exportar_archivo(
             None => return Err("Exportación cancelada.".into()),
         };
 
-        fs::write(&destino_path, &raw)
+        fs::write(&destino_path, &*raw)
             .map_err(|e| format!("Error al escribir: {}", e))?;
 
         Ok(destino_path.to_string_lossy().to_string())
@@ -1836,13 +1845,13 @@ async fn exportar_archivos_a_carpeta(
                 continue;
             }
             let raw = match descifrar_a_bytes(ruta, &subclave_hex) {
-                Ok(b) => b,
+                Ok(b) => Zeroizing::new(b),
                 Err(_) => continue,
             };
             let ext = detectar_ext(&raw);
             let nombre = nombre_exportacion(ruta, ext);
             let destino = carpeta.join(&nombre);
-            if fs::write(&destino, &raw).is_ok() {
+            if fs::write(&destino, &*raw).is_ok() {
                 copiados += 1;
             }
         }
@@ -3381,7 +3390,7 @@ async fn compartir_directo(
     log::info!("[compartir_directo] Compartiendo: {}", nombre_original);
 
     // Descifrar .babel → escribir el archivo original en temp → compartir → borrar
-    let bytes = descifrar_a_bytes(&ruta, &subclave_hex)?;
+    let mut bytes = Zeroizing::new(descifrar_a_bytes(&ruta, &subclave_hex)?);
     let ext = detectar_ext(&bytes);
     // Sanear nombre: solo el componente final (sin path traversal) y sin extensión duplicada
     let nombre_base = std::path::Path::new(&nombre_original)
@@ -3397,13 +3406,20 @@ async fn compartir_directo(
     } else {
         format!("{}.{}", nombre_base, ext)
     };
+    // Prefijo único para evitar colisión si se comparte el mismo archivo en paralelo.
     let ruta_compartir = compartir::compartidos_dir()
-        .join(&nombre_con_ext)
+        .join(format!("{}_{}", nuevo_id(), nombre_con_ext))
         .to_string_lossy()
         .to_string();
 
-    std::fs::write(&ruta_compartir, &bytes)
+    std::fs::write(&ruta_compartir, &**bytes)
         .map_err(|e| format!("Error escribiendo archivo temporal: {}", e))?;
+
+    // BorrarAlSalir garantiza borrar_seguro en cualquier ruta de salida (éxito, error o panic).
+    let _guard = BorrarAlSalir(ruta_compartir.clone());
+
+    // Los bytes ya están en disco — zerizar en memoria cuanto antes.
+    bytes.zeroize();
 
     log::info!("[compartir_directo] Archivo temporal listo: {}", ruta_compartir);
 
@@ -3425,15 +3441,8 @@ async fn compartir_directo(
     }
 
     #[cfg(not(target_os = "macos"))]
-    {
-        let _ = std::fs::remove_file(&ruta_compartir);
-        return Err("Compartición nativa solo disponible en macOS.".into());
-    }
-
-    // Borrar el archivo descifrado temporal tras cerrar el picker
-    borrar_seguro(&ruta_compartir);
-    log::info!("[compartir_directo] Archivo temporal borrado: {}", ruta_compartir);
-
+    return Err("Compartición nativa solo disponible en macOS.".into());
+    // _guard limpia ruta_compartir al salir del scope (borrar_seguro 3 pasadas).
     Ok(())
 }
 

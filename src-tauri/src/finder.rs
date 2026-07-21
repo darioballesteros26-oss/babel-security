@@ -115,6 +115,29 @@ pub struct ResultadoFinder {
     pub error: Option<String>,
 }
 
+/// Verifica que la ruta del original sea segura para borrar:
+/// - Debe ser absoluta (no relativa).
+/// - No puede estar dentro de ~/Babel/ — impide que un sidecar malicioso
+///   destruya el vault cifrado u otros archivos de la propia app.
+fn ruta_original_segura(orig: &Path) -> bool {
+    if !orig.is_absolute() {
+        log::error!("[finder] sidecar con ruta relativa bloqueada: {}", orig.display());
+        return false;
+    }
+    let babel = crate::babel_dir();
+    // canonicalize resuelve symlinks; si falla (ruta inexistente), rechazar por precaución.
+    if let (Ok(orig_c), Ok(babel_c)) = (fs::canonicalize(orig), fs::canonicalize(&babel)) {
+        if orig_c.starts_with(&babel_c) {
+            log::error!(
+                "[finder] sidecar apunta dentro de ~/Babel/ — bloqueado: {}",
+                orig.display()
+            );
+            return false;
+        }
+    }
+    true
+}
+
 /// Procesa todas las entradas staged en `dir`:
 ///   1. Cifra cada copia staged con `cifrar(nombre, ruta_staged)` (inyectado para
 ///      poder testear sin tocar la criptografía real ni el disco del usuario).
@@ -139,14 +162,16 @@ where
                 // dev/no-sandbox; bajo sandbox firmado requiere el entitlement de
                 // excepción temporal (ver Entitlements.plist / finder-extension/README).
                 if let Some(orig) = &entrada.original {
-                    let orig_str = orig.to_string_lossy().to_string();
-                    if orig.exists() {
-                        crate::borrar_seguro(&orig_str);
-                    } else {
-                        log::warn!(
-                            "[finder] original no accesible para borrado seguro: {}",
-                            orig_str
-                        );
+                    if ruta_original_segura(orig) {
+                        let orig_str = orig.to_string_lossy().to_string();
+                        if orig.exists() {
+                            crate::borrar_seguro(&orig_str);
+                        } else {
+                            log::warn!(
+                                "[finder] original no accesible para borrado seguro: {}",
+                                orig_str
+                            );
+                        }
                     }
                 }
                 if let Some(sc) = &entrada.sidecar {
