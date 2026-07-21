@@ -533,6 +533,167 @@ pub fn generar_archivo_compartir(
     })
 }
 
+// ── Destinos personalizados de compartición ───────────────────────────────────
+
+/// Un destino de compartición personalizado: nombre visible + URL de la app/web.
+/// Si `bundle_id` está presente (macOS), Babel intenta abrir la app instalada;
+/// si no está instalada o no hay bundle_id, abre la URL en el navegador.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct DestinoCompartir {
+    pub nombre: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+}
+
+/// Destino incluido de fábrica. El usuario puede añadir más o eliminarlo.
+pub fn destinos_por_defecto() -> Vec<DestinoCompartir> {
+    vec![DestinoCompartir {
+        nombre: "WhatsApp".into(),
+        url: "https://web.whatsapp.com".into(),
+        bundle_id: Some("net.whatsapp.WhatsApp".into()),
+    }]
+}
+
+fn destinos_path() -> String {
+    crate::babel_path("destinos_compartir.babel")
+}
+
+/// Carga los destinos del disco. Devuelve los por defecto si el archivo no existe.
+pub fn cargar_destinos(subclave_hex: &str) -> Vec<DestinoCompartir> {
+    let ruta = destinos_path();
+    fs::read(&ruta)
+        .ok()
+        .and_then(|b| crate::seguridad::descifrar_documento(b, subclave_hex).ok())
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_else(destinos_por_defecto)
+}
+
+/// Guarda la lista de destinos en disco, cifrada con la subclave del usuario.
+pub fn guardar_destinos(destinos: &[DestinoCompartir], subclave_hex: &str) -> Result<(), String> {
+    let json = serde_json::to_string(destinos)
+        .map_err(|e| format!("Error serializando destinos: {}", e))?;
+    let cifrado = crate::seguridad::blindar_documento(&json, subclave_hex)
+        .map_err(|e| format!("Error cifrando destinos: {}", e))?;
+    crate::escribir_privado(destinos_path(), cifrado)
+        .map_err(|e| format!("Error guardando destinos: {}", e))
+}
+
+// ── Portapapeles y detección de apps (macOS) ─────────────────────────────────
+//
+// Los destinos "personalizados" del menú compartir (WhatsApp, Telegram, LexNET)
+// NO son integración nativa real con esas apps — no exponen API pública de
+// compartición de archivos en macOS y WhatsApp/Telegram no se integran con el
+// NSSharingServicePicker del sistema.
+//
+// En su lugar, Babel descifra el archivo, lo copia al portapapeles como NSURL
+// y lanza la app/web por comodidad. El usuario pega con Cmd+V en el chat.
+// El picker nativo del sistema (Grupo 1) sigue disponible para AirDrop, Mail, etc.
+
+/// Copia el archivo al portapapeles del sistema como objeto de archivo (no texto).
+/// En macOS usa NSPasteboard + NSURL; en Windows usa PowerShell Set-Clipboard.
+/// Un Cmd+V / Ctrl+V posterior en cualquier app lo adjunta como archivo real.
+pub fn copiar_archivo_al_portapapeles(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc::runtime::Object;
+        use objc::{class, msg_send, sel, sel_impl};
+        use std::ffi::CString;
+
+        let c_path = CString::new(path).map_err(|_| "Ruta contiene bytes nulos")?;
+
+        unsafe {
+            let ns_string: *mut Object = msg_send![
+                class!(NSString),
+                stringWithUTF8String: c_path.as_ptr()
+            ];
+            if ns_string.is_null() {
+                return Err("Error creando NSString con la ruta".into());
+            }
+
+            let file_url: *mut Object = msg_send![class!(NSURL), fileURLWithPath: ns_string];
+            if file_url.is_null() {
+                return Err("Error creando NSURL para el archivo".into());
+            }
+
+            let pasteboard: *mut Object = msg_send![class!(NSPasteboard), generalPasteboard];
+            let (): () = msg_send![pasteboard, clearContents];
+
+            let array: *mut Object = msg_send![class!(NSArray), arrayWithObject: file_url];
+            let _: i64 = msg_send![pasteboard, writeObjects: array];
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Set-Clipboard -LiteralPath copia el archivo como CF_HDROP (igual que Ctrl+C en Explorer)
+        // Escapamos comillas simples duplicándolas (convención PowerShell)
+        let path_esc = path.replace('\'', "''");
+        let script = format!("Set-Clipboard -LiteralPath '{}'", path_esc);
+        std::process::Command::new("powershell")
+            .args(["-NonInteractive", "-NoProfile", "-NoLogo", "-Command", &script])
+            .output()
+            .map_err(|e| format!("Error ejecutando PowerShell: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        // Linux y otros: el archivo queda en compartidos/ para adjuntarlo manualmente
+        let _ = path;
+        Ok(())
+    }
+}
+
+/// Comprueba si una app con el bundle ID dado está instalada en este Mac.
+/// Usa NSWorkspace (sin Spotlight) para mayor fiabilidad.
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)]
+pub fn verificar_app_instalada(bundle_id: &str) -> bool {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    use std::ffi::CString;
+
+    let c_bundle = match CString::new(bundle_id) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    unsafe {
+        let ns_bundle: *mut Object = msg_send![
+            class!(NSString),
+            stringWithUTF8String: c_bundle.as_ptr()
+        ];
+        if ns_bundle.is_null() {
+            return false;
+        }
+
+        let workspace: *mut Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let url: *mut Object = msg_send![
+            workspace,
+            URLForApplicationWithBundleIdentifier: ns_bundle
+        ];
+        !url.is_null()
+    }
+}
+
+/// Lanza/activa la app con el bundle ID dado mediante `open -b <bundle_id>`.
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)]
+pub fn abrir_app_bundle(bundle_id: &str) -> Result<(), String> {
+    let output = std::process::Command::new("open")
+        .args(["-b", bundle_id])
+        .output()
+        .map_err(|e| format!("Error ejecutando open: {}", e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!("No se pudo abrir la app con bundle '{}'", bundle_id))
+    }
+}
+
 // ── NSSharingServicePicker (macOS) ─────────────────────────────────────────
 
 /// Muestra el selector nativo de compartición de macOS anclado a la ventana principal.
@@ -720,5 +881,91 @@ mod tests {
             .unwrap_or(nombre_original);
         let nombre_html = format!("{}_seguro.html", stem);
         assert_eq!(nombre_html, "contrato_seguro.html");
+    }
+
+    // ── Tests de portapapeles y detección de apps (macOS) ─────────────────
+
+    // Safari siempre está instalado en cualquier Mac — verifica verificar_app_instalada
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn safari_siempre_instalado() {
+        assert!(
+            verificar_app_instalada("com.apple.Safari"),
+            "Safari debe estar instalado en cualquier Mac"
+        );
+    }
+
+    // Bundle ID inventado → false
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn bundle_id_inventado_no_instalado() {
+        assert!(
+            !verificar_app_instalada("com.babel.app.que.jamas.existira.xyzzy.9999"),
+            "Bundle ID inventado no debe aparecer como instalado"
+        );
+    }
+
+    // copiar_archivo_al_portapapeles con archivo real → Ok
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn copiar_archivo_real_al_portapapeles() {
+        use std::io::Write;
+        let ruta = std::env::temp_dir().join("babel_test_clipboard_compartir.txt");
+        {
+            let mut f = std::fs::File::create(&ruta).expect("crear archivo de prueba");
+            f.write_all(b"babel-portapapeles-test").expect("escribir");
+        }
+        let res = copiar_archivo_al_portapapeles(ruta.to_str().unwrap());
+        std::fs::remove_file(&ruta).ok();
+        assert!(
+            res.is_ok(),
+            "copiar al portapapeles no debe fallar con ruta válida: {:?}", res
+        );
+    }
+
+    // La URL de LexNET es HTTPS y tiene el dominio correcto
+    #[test]
+    fn url_lexnet_formato_correcto() {
+        let url = "https://lexnet.justicia.es";
+        assert!(url.starts_with("https://"), "LexNET debe usar HTTPS");
+        assert!(url.contains("lexnet"), "URL debe contener lexnet");
+        assert!(url.contains("justicia.es"), "URL debe ser del dominio justicia.es");
+    }
+
+    // ── Tests de destinos personalizados ─────────────────────────────────────
+
+    #[test]
+    fn destino_por_defecto_es_whatsapp_web() {
+        let d = destinos_por_defecto();
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].nombre, "WhatsApp");
+        assert_eq!(d[0].url, "https://web.whatsapp.com");
+        assert_eq!(d[0].bundle_id.as_deref(), Some("net.whatsapp.WhatsApp"));
+    }
+
+    #[test]
+    fn destinos_json_roundtrip() {
+        let destinos = vec![
+            DestinoCompartir { nombre: "WhatsApp".into(), url: "https://web.whatsapp.com".into(), bundle_id: Some("net.whatsapp.WhatsApp".into()) },
+            DestinoCompartir { nombre: "LexNET".into(), url: "https://lexnet.justicia.es".into(), bundle_id: None },
+        ];
+        let json = serde_json::to_string(&destinos).expect("serializar");
+        let cargados: Vec<DestinoCompartir> = serde_json::from_str(&json).expect("deserializar");
+        assert_eq!(destinos, cargados, "roundtrip JSON debe conservar todos los campos");
+    }
+
+    #[test]
+    fn agregar_y_eliminar_destino_sin_corrupcion() {
+        let mut lista = destinos_por_defecto();
+        // Añadir destino sin bundle_id (añadido por el usuario)
+        lista.push(DestinoCompartir { nombre: "LexNET".into(), url: "https://lexnet.justicia.es".into(), bundle_id: None });
+        assert_eq!(lista.len(), 2);
+        // Editar
+        lista[1].nombre = "LexNET Justicia".into();
+        assert_eq!(lista[1].nombre, "LexNET Justicia");
+        // Eliminar
+        lista.remove(1);
+        assert_eq!(lista.len(), 1);
+        assert_eq!(lista[0].nombre, "WhatsApp", "el destino restante debe ser el original");
     }
 }

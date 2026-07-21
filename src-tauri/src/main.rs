@@ -1524,12 +1524,18 @@ fn descifrar_a_bytes(ruta: &str, subclave_hex: &str) -> Result<Vec<u8>, String> 
 // Detecta la extensión real de un archivo por sus magic bytes.
 fn detectar_ext(bytes: &[u8]) -> &'static str {
     if bytes.len() >= 4 && &bytes[..4] == b"%PDF" { return "pdf"; }
-    if bytes.len() >= 2 && &bytes[..2] == b"PK" { return "docx"; }
     if bytes.len() >= 4 && &bytes[..4] == b"\x89PNG" { return "png"; }
     if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8 { return "jpg"; }
-    if bytes.len() >= 6 && &bytes[..6] == b"GIF89a" { return "gif"; }
-    if bytes.len() >= 6 && &bytes[..6] == b"GIF87a" { return "gif"; }
+    if bytes.len() >= 6 && (&bytes[..6] == b"GIF89a" || &bytes[..6] == b"GIF87a") { return "gif"; }
     if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" { return "webp"; }
+    // Formatos ZIP: Office Open XML comparte magic bytes PK — hay que mirar dentro
+    if bytes.len() >= 2 && &bytes[..2] == b"PK" {
+        let head = &bytes[..bytes.len().min(4096)];
+        if head.windows(5).any(|w| w == b"word/")  { return "docx"; }
+        if head.windows(3).any(|w| w == b"xl/")    { return "xlsx"; }
+        if head.windows(4).any(|w| w == b"ppt/")   { return "pptx"; }
+        return "zip";
+    }
     "txt"
 }
 
@@ -3601,6 +3607,122 @@ fn actualizar_password_contacto(
     compartir::guardar_contactos(&contactos, &subclave_hex)
 }
 
+// ── Destinos personalizados de compartición ───────────────────────────────────
+
+/// Devuelve la lista de destinos cifrada en disco, o los destinos por defecto
+/// si el archivo no existe todavía.
+#[tauri::command]
+fn cargar_destinos_compartir(
+    sesion: tauri::State<SesionActiva>,
+) -> Result<Vec<compartir::DestinoCompartir>, String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    Ok(compartir::cargar_destinos(&subclave_hex))
+}
+
+/// Valida y persiste la lista completa de destinos.
+#[tauri::command]
+fn guardar_destinos_compartir(
+    destinos: Vec<compartir::DestinoCompartir>,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    for d in &destinos {
+        if d.nombre.is_empty() || d.nombre.len() > 64 {
+            return Err(format!("Nombre inválido: '{}'", d.nombre));
+        }
+        if d.url.is_empty() || d.url.len() > 512 {
+            return Err(format!("URL inválida: '{}'", d.url));
+        }
+        if !d.url.starts_with("http://") && !d.url.starts_with("https://") {
+            return Err(format!("La URL debe empezar con http:// o https://: '{}'", d.url));
+        }
+    }
+    compartir::guardar_destinos(&destinos, &subclave_hex)
+}
+
+/// Descifra el .babel, copia el archivo al portapapeles (macOS) y abre la URL
+/// del destino en el navegador por defecto. Devuelve el mensaje de confirmación.
+/// Si se pasa `bundle_id` y la app está instalada (macOS), la abre en lugar de la URL.
+#[tauri::command]
+fn compartir_a_url(
+    ruta: String,
+    nombre_original: String,
+    url: String,
+    bundle_id: Option<String>,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<String, String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+
+    validar_ruta_en(&ruta, archivos_dir())
+        .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(format!("URL inválida: '{}'", url));
+    }
+
+    let bytes = descifrar_a_bytes(&ruta, &subclave_hex)?;
+    let ext = detectar_ext(&bytes);
+
+    let nombre_base = std::path::Path::new(&nombre_original)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&nombre_original);
+
+    let nombre_con_ext = if std::path::Path::new(nombre_base)
+        .extension()
+        .map(|e| !e.is_empty())
+        .unwrap_or(false)
+    {
+        nombre_base.to_string()
+    } else {
+        format!("{}.{}", nombre_base, ext)
+    };
+
+    let ruta_temporal = compartir::compartidos_dir()
+        .join(format!("{}_{}", nuevo_id(), nombre_con_ext))
+        .to_string_lossy()
+        .to_string();
+
+    escribir_privado(&ruta_temporal, &bytes)
+        .map_err(|e| format!("Error guardando archivo temporal: {}", e))?;
+
+    compartir::copiar_archivo_al_portapapeles(&ruta_temporal)
+        .map_err(|e| {
+            log::error!("compartir_a_url: fallo portapapeles: {}", e);
+            format!("Error copiando al portapapeles: {}", e)
+        })?;
+
+    // Si hay bundle_id y la app está instalada → abrirla; si no → abrir URL
+    #[cfg(target_os = "macos")]
+    if let Some(ref bid) = bundle_id {
+        if compartir::verificar_app_instalada(bid) {
+            compartir::abrir_app_bundle(bid)
+                .map_err(|e| {
+                    log::error!("compartir_a_url: fallo abriendo app {}: {}", bid, e);
+                    format!("Error abriendo app: {}", e)
+                })?;
+            return Ok("Archivo copiado al portapapeles. Pégalo (Cmd+V) en el chat.".into());
+        }
+    }
+
+    tauri_plugin_opener::open_url(&url, None::<&str>)
+        .map_err(|e| {
+            log::error!("compartir_a_url: fallo open_url {}: {}", url, e);
+            format!("Error abriendo URL: {}", e)
+        })?;
+
+    Ok("Archivo copiado al portapapeles. Pégalo (Cmd+V) en el chat o súbelo desde ahí.".into())
+}
+
 /// Elimina un contacto y su contraseña de la tabla.
 #[tauri::command]
 fn olvidar_contacto(
@@ -3843,6 +3965,9 @@ fn main() {
             compartir_directo,
             generar_archivo_compartir,
             compartir_archivo_nativo,
+            cargar_destinos_compartir,
+            guardar_destinos_compartir,
+            compartir_a_url,
             revelar_en_finder,
             listar_contactos_compartir,
             ver_password_contacto,

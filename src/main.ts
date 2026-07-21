@@ -325,7 +325,13 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "eliminar-seleccionados": eliminarSeleccionados(); break;
     // Archivos guardados
     case "ver-archivo-guardado": verArchivoGuardado(); break;
-    case "compartir-archivo-guardado": compartirDirecto(); break;
+    case "compartir-archivo-guardado":   mostrarMenuCompartir(); break;
+    case "cerrar-menu-compartir":        cerrarMenuCompartir(); break;
+    case "mas-opciones-compartir":       cerrarMenuCompartir(); compartirDirecto(); break;
+    case "cerrar-onboarding-compartir":  void cerrarOnboardingCompartir(); break;
+    case "mostrar-form-destino":         mostrarFormDestino(); break;
+    case "cancelar-form-destino":        ocultarFormDestino(); break;
+    case "guardar-form-destino":         void guardarFormDestino(); break;
     case "cerrar-modal-compartir": cerrarModalCompartir(); break;
     case "confirmar-compartir": confirmarCompartir(); break;
     case "revelar-en-finder": revelarEnFinder(); break;
@@ -1441,6 +1447,177 @@ async function compartirDirecto(): Promise<void> {
   } catch (e) {
     mostrarToast("Error al compartir: " + e, true);
   }
+}
+
+// ── Menú compartir Babel — destinos personalizados por URL ───────────────────
+
+interface DestinoCompartir { nombre: string; url: string; }
+let _destinosCompartir: DestinoCompartir[] = [];
+let _editandoDestinoIdx = -1;
+
+function mostrarMenuCompartir(): void {
+  const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
+  if (checkboxes.length !== 1) return;
+  if (!localStorage.getItem("babel_compartir_onboarding")) {
+    document.getElementById("modal-compartir-onboarding")?.classList.remove("hidden");
+    return;
+  }
+  void abrirMenuCompartir();
+}
+
+async function cerrarOnboardingCompartir(): Promise<void> {
+  localStorage.setItem("babel_compartir_onboarding", "1");
+  document.getElementById("modal-compartir-onboarding")?.classList.add("hidden");
+  await abrirMenuCompartir();
+}
+
+async function abrirMenuCompartir(): Promise<void> {
+  try {
+    _destinosCompartir = await invoke<DestinoCompartir[]>("cargar_destinos_compartir");
+  } catch {
+    _destinosCompartir = [{ nombre: "WhatsApp", url: "https://web.whatsapp.com" }];
+  }
+  ocultarFormDestino();
+  renderizarDestinos();
+  document.getElementById("modal-menu-compartir")?.classList.remove("hidden");
+}
+
+function cerrarMenuCompartir(): void {
+  document.getElementById("modal-menu-compartir")?.classList.add("hidden");
+  ocultarFormDestino();
+}
+
+function renderizarDestinos(): void {
+  const contenedor = document.getElementById("lista-destinos-compartir");
+  if (!contenedor) return;
+  while (contenedor.firstChild) contenedor.removeChild(contenedor.firstChild);
+
+  if (_destinosCompartir.length === 0) {
+    const p = document.createElement("p");
+    p.style.cssText = "font-size:0.62rem;color:var(--texto-secundario);margin:6px 0;";
+    p.textContent = "Sin destinos. Pulsa ⊕ para añadir.";
+    contenedor.appendChild(p);
+    return;
+  }
+
+  _destinosCompartir.forEach((d, idx) => {
+    const fila = document.createElement("div");
+    fila.style.cssText = "display:flex;align-items:center;gap:6px;";
+
+    const btnNombre = document.createElement("button");
+    btnNombre.type = "button";
+    btnNombre.style.cssText = `flex:1;text-align:left;background:transparent;
+      border:1px solid var(--borde);color:var(--texto);padding:8px 12px;
+      cursor:pointer;font-size:0.68rem;letter-spacing:0.5px;border-radius:2px;
+      font-family:'Times New Roman',Times,serif;`;
+    btnNombre.textContent = d.nombre;
+    btnNombre.addEventListener("mouseenter", () => { btnNombre.style.borderColor = "var(--dorado)"; });
+    btnNombre.addEventListener("mouseleave", () => { btnNombre.style.borderColor = "var(--borde)"; });
+    btnNombre.addEventListener("click", () => { void compartirAUrl(idx); });
+
+    const btnEditar = document.createElement("button");
+    btnEditar.type = "button";
+    btnEditar.title = "Editar";
+    btnEditar.style.cssText = `background:transparent;border:1px solid var(--borde);
+      color:var(--texto-secundario);width:24px;height:24px;border-radius:2px;
+      cursor:pointer;font-size:0.65rem;padding:0;flex-shrink:0;`;
+    btnEditar.textContent = "✎";
+    btnEditar.addEventListener("click", () => { editarDestino(idx); });
+
+    const btnElim = document.createElement("button");
+    btnElim.type = "button";
+    btnElim.title = "Eliminar";
+    btnElim.style.cssText = `background:transparent;border:1px solid var(--borde);
+      color:var(--texto-secundario);width:24px;height:24px;border-radius:2px;
+      cursor:pointer;font-size:0.7rem;padding:0;flex-shrink:0;`;
+    btnElim.textContent = "✕";
+    btnElim.addEventListener("click", () => { void eliminarDestino(idx); });
+
+    fila.appendChild(btnNombre);
+    fila.appendChild(btnEditar);
+    fila.appendChild(btnElim);
+    contenedor.appendChild(fila);
+  });
+}
+
+async function compartirAUrl(idx: number): Promise<void> {
+  const destino = _destinosCompartir[idx];
+  if (!destino) return;
+  cerrarMenuCompartir();
+  const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
+  if (checkboxes.length !== 1) return;
+  const card = checkboxes[0].closest(".archivo-card") as HTMLElement;
+  const ruta = card?.dataset.ruta ?? "";
+  if (!ruta) return;
+  const nombreOriginal = card.dataset.base ?? ruta.split("/").pop() ?? ruta;
+  try {
+    const msg = await invoke<string>("compartir_a_url", { ruta, nombreOriginal, url: destino.url, bundleId: destino.bundle_id ?? null });
+    mostrarToast(msg, false);
+  } catch (e) {
+    mostrarToast("Error al compartir: " + e, true);
+  }
+}
+
+function mostrarFormDestino(editIdx = -1): void {
+  _editandoDestinoIdx = editIdx;
+  const inputNombre = document.getElementById("input-destino-nombre") as HTMLInputElement;
+  const inputUrl = document.getElementById("input-destino-url") as HTMLInputElement;
+  const btnGuardar = document.getElementById("btn-guardar-destino");
+  if (editIdx >= 0 && _destinosCompartir[editIdx]) {
+    inputNombre.value = _destinosCompartir[editIdx].nombre;
+    inputUrl.value = _destinosCompartir[editIdx].url;
+    if (btnGuardar) btnGuardar.textContent = "GUARDAR";
+  } else {
+    inputNombre.value = "";
+    inputUrl.value = "";
+    if (btnGuardar) btnGuardar.textContent = "AÑADIR";
+  }
+  document.getElementById("lista-destinos-compartir")?.classList.add("hidden");
+  document.getElementById("btn-add-destino")?.classList.add("hidden");
+  document.getElementById("form-destino-compartir")?.classList.remove("hidden");
+  inputNombre.focus();
+}
+
+function ocultarFormDestino(): void {
+  document.getElementById("form-destino-compartir")?.classList.add("hidden");
+  document.getElementById("lista-destinos-compartir")?.classList.remove("hidden");
+  document.getElementById("btn-add-destino")?.classList.remove("hidden");
+  _editandoDestinoIdx = -1;
+}
+
+function editarDestino(idx: number): void {
+  mostrarFormDestino(idx);
+}
+
+async function eliminarDestino(idx: number): Promise<void> {
+  _destinosCompartir.splice(idx, 1);
+  try {
+    await invoke("guardar_destinos_compartir", { destinos: _destinosCompartir });
+  } catch (e) {
+    mostrarToast("Error guardando destinos: " + e, true);
+  }
+  renderizarDestinos();
+}
+
+async function guardarFormDestino(): Promise<void> {
+  const nombre = (document.getElementById("input-destino-nombre") as HTMLInputElement).value.trim();
+  const url = (document.getElementById("input-destino-url") as HTMLInputElement).value.trim();
+  if (!nombre) { mostrarToast("El nombre no puede estar vacío.", true); return; }
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    mostrarToast("La URL debe empezar con http:// o https://", true); return;
+  }
+  if (_editandoDestinoIdx >= 0) {
+    _destinosCompartir[_editandoDestinoIdx] = { nombre, url };
+  } else {
+    _destinosCompartir.push({ nombre, url });
+  }
+  try {
+    await invoke("guardar_destinos_compartir", { destinos: _destinosCompartir });
+  } catch (e) {
+    mostrarToast("Error guardando destinos: " + e, true);
+  }
+  ocultarFormDestino();
+  renderizarDestinos();
 }
 
 async function revelarEnFinder(): Promise<void> {
@@ -3542,7 +3719,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const modales = [
       "modal-visor", "modal-paralelo", "modal-frase-app",
       "modal-renombrar", "modal-solicitud-p2p", "modal-renombrar-archivo",
-      "modal-compartir",
+      "modal-compartir-onboarding", "modal-menu-compartir", "modal-compartir",
     ];
     for (const id of modales) {
       const el = document.getElementById(id);

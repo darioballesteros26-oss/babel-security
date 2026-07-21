@@ -1315,6 +1315,121 @@
     </div>
   </div>
 
+  <!-- MENÚ COMPARTIR BABEL — picker nativo + destinos personalizados por URL -->
+  <div id="modal-menu-compartir" class="hidden" style="
+    position:fixed;inset:0;background:rgba(0,0,0,0.92);
+    display:flex;align-items:center;justify-content:center;z-index:3000;">
+    <div style="background:var(--fondo-panel,#0d0d0d);border:1px solid var(--borde,#333);
+      border-radius:4px;padding:24px 24px;width:380px;max-width:92vw;
+      display:flex;flex-direction:column;max-height:80vh;">
+
+      <p style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;
+        letter-spacing:2px;color:var(--dorado);margin:0 0 16px;flex-shrink:0;">
+        COMPARTIR ARCHIVO</p>
+
+      <!-- Picker nativo del sistema -->
+      <button type="button" data-action="mas-opciones-compartir"
+        style="width:100%;text-align:left;background:transparent;
+          border:1px solid var(--borde);color:var(--texto);padding:10px 14px;
+          cursor:pointer;font-size:0.68rem;letter-spacing:1px;border-radius:2px;
+          font-family:'Times New Roman',Times,serif;margin-bottom:16px;flex-shrink:0;
+          display:flex;align-items:center;gap:10px;"
+        onmouseenter="this.style.borderColor='var(--dorado)'"
+        onmouseleave="this.style.borderColor='var(--borde)'">
+        <span style="font-size:1.1rem;">⇧</span>
+        <span>Compartir via sistema</span>
+        <span style="font-size:0.6rem;color:var(--texto-secundario);margin-left:auto;">
+          AirDrop · Mail · Mensajes</span>
+      </button>
+
+      <!-- Cabecera destinos personalizados -->
+      <div style="display:flex;justify-content:space-between;align-items:center;
+        margin-bottom:6px;flex-shrink:0;">
+        <p style="font-size:0.6rem;letter-spacing:1.5px;color:var(--texto-secundario);
+          margin:0;text-transform:uppercase;">Destinos personalizados</p>
+        <button type="button" id="btn-add-destino" data-action="mostrar-form-destino"
+          title="Añadir destino"
+          style="background:transparent;border:1px solid var(--borde);
+            color:var(--dorado);width:22px;height:22px;border-radius:2px;
+            cursor:pointer;font-size:0.85rem;line-height:1;padding:0;"
+          onmouseenter="this.style.borderColor='var(--dorado)'"
+          onmouseleave="this.style.borderColor='var(--borde)'">⊕</button>
+      </div>
+
+      <!-- Lista dinámica (la rellena JS) -->
+      <div id="lista-destinos-compartir"
+        style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:5px;
+          min-height:40px;"></div>
+
+      <!-- Formulario añadir / editar (oculto por defecto) -->
+      <div id="form-destino-compartir" class="hidden"
+        style="display:flex;flex-direction:column;gap:8px;margin-top:6px;flex-shrink:0;">
+        <input type="text" id="input-destino-nombre" maxlength="64"
+          placeholder="Nombre (ej: WhatsApp)"
+          style="background:var(--fondo,#111);border:1px solid var(--borde,#333);color:var(--texto,#e8e0cc);
+            padding:8px 10px;font-size:0.68rem;border-radius:2px;
+            font-family:'Times New Roman',Times,serif;letter-spacing:0.5px;">
+        <input type="url" id="input-destino-url" maxlength="512"
+          placeholder="URL (ej: https://web.whatsapp.com)"
+          style="background:var(--fondo,#111);border:1px solid var(--borde,#333);color:var(--texto,#e8e0cc);
+            padding:8px 10px;font-size:0.68rem;border-radius:2px;
+            font-family:'Times New Roman',Times,serif;letter-spacing:0.5px;">
+        <div style="display:flex;gap:8px;">
+          <button type="button" data-action="cancelar-form-destino"
+            style="flex:1;background:transparent;border:1px solid var(--borde);
+              color:var(--texto-secundario);padding:7px;cursor:pointer;
+              font-size:0.62rem;letter-spacing:1px;border-radius:2px;
+              font-family:'Times New Roman',Times,serif;">CANCELAR</button>
+          <button type="button" id="btn-guardar-destino" data-action="guardar-form-destino"
+            style="flex:1;background:transparent;border:1px solid var(--dorado);
+              color:var(--dorado);padding:7px;cursor:pointer;
+              font-size:0.62rem;letter-spacing:1px;border-radius:2px;
+              font-family:'Times New Roman',Times,serif;">AÑADIR</button>
+        </div>
+      </div>
+
+      <button type="button" data-action="cerrar-menu-compartir"
+        style="width:100%;margin-top:14px;background:transparent;border:none;
+          color:var(--texto-secundario);padding:6px;cursor:pointer;flex-shrink:0;
+          font-size:0.65rem;letter-spacing:1px;font-family:'Times New Roman',Times,serif;">
+        CANCELAR</button>
+    </div>
+  </div>
+
+  <!-- ONBOARDING COMPARTIR — solo la primera vez -->
+  <div id="modal-compartir-onboarding" class="hidden" style="
+    position:fixed;inset:0;background:rgba(0,0,0,0.95);
+    display:flex;align-items:center;justify-content:center;z-index:3100;">
+    <div style="background:var(--fondo-panel,#0d0d0d);border:1px solid var(--borde,#333);
+      border-radius:4px;padding:28px 28px;width:400px;max-width:92vw;">
+
+      <p style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;
+        letter-spacing:2px;color:var(--dorado);margin:0 0 18px;">
+        CÓMO FUNCIONA COMPARTIR</p>
+
+      <div style="display:flex;gap:12px;margin-bottom:14px;align-items:flex-start;">
+        <span style="font-size:1.2rem;flex-shrink:0;">⇧</span>
+        <p style="font-size:0.65rem;color:var(--texto);line-height:1.6;margin:0;">
+          <strong>Compartir via sistema</strong> abre AirDrop, Mail, Mensajes
+          y el resto de servicios nativos de macOS.</p>
+      </div>
+
+      <div style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-start;">
+        <span style="font-size:1.2rem;flex-shrink:0;">⊕</span>
+        <p style="font-size:0.65rem;color:var(--texto);line-height:1.6;margin:0;">
+          <strong>Destinos personalizados</strong> copian el archivo al portapapeles
+          y abren la URL elegida (p.ej. WhatsApp Web). Solo tienes que
+          pegar con <strong>Cmd+V</strong> en el chat o subir desde ahí.</p>
+      </div>
+
+      <button type="button" data-action="cerrar-onboarding-compartir"
+        style="width:100%;background:transparent;border:1px solid var(--dorado);
+          color:var(--dorado);padding:9px;cursor:pointer;font-size:0.68rem;
+          letter-spacing:1.5px;border-radius:2px;
+          font-family:'Times New Roman',Times,serif;">ENTENDIDO</button>
+    </div>
+  </div>
+
   <!-- MODAL COMPARTIR -->
   <div id="modal-compartir" class="hidden" style="
     position:fixed;inset:0;background:rgba(0,0,0,0.75);
