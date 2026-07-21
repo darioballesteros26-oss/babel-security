@@ -44,6 +44,11 @@
   "plugins": {
     "shell": {
       "open": false
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["babel"]
+      }
     }
   }
 }

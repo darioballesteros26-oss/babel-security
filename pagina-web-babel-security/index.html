@@ -246,6 +246,25 @@
       to   { opacity: 1; transform: translateY(0); }
     }
 
+    /* ── Animación de "enviado": el bloque entra, el círculo y el check se dibujan ── */
+    #form-success:not(.hidden) { animation: successPop 0.45s cubic-bezier(0.22, 1, 0.36, 1); }
+    @keyframes successPop {
+      from { opacity: 0; transform: scale(0.92) translateY(8px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .success-check { display: block; margin: 0 auto; }
+    .success-check-circle {
+      stroke: currentColor; stroke-width: 3; stroke-dasharray: 151; stroke-dashoffset: 151;
+      animation: successCircle 0.5s ease-out 0.1s forwards;
+    }
+    .success-check-mark {
+      stroke: currentColor; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round;
+      stroke-dasharray: 48; stroke-dashoffset: 48;
+      animation: successMark 0.35s ease-out 0.5s forwards;
+    }
+    @keyframes successCircle { to { stroke-dashoffset: 0; } }
+    @keyframes successMark   { to { stroke-dashoffset: 0; } }
+
     /* ── Responsive: solo aplicar hover-lift en dispositivos con puntero ── */
     @media (hover: none) {
       .card-lift:hover { transform: none; box-shadow: none; }
@@ -990,15 +1009,9 @@
       <p class="text-slate-400 text-lg" data-i18n="contact_subtitle">Cuéntame qué ocurrió y lo soluciono personalmente.</p>
     </div>
 
-    <!-- Formulario
-         ┌─────────────────────────────────────────────────────┐
-         │ IMPORTANTE: sustituye el action por tu endpoint     │
-         │ real de Formspree o Web3Forms.                      │
-         │ Formspree:  action="https://formspree.io/f/XXXXXX"  │
-         │ Web3Forms:  action="https://api.web3forms.com/submit"│
-         └─────────────────────────────────────────────────────┘ -->
+    <!-- Formulario de reporte de bugs → Formspree -->
     <form id="contact-form"
-          action="https://formspree.io/f/TU_ID_AQUI"
+          action="https://formspree.io/f/xwvgvvyk"
           method="POST"
           class="sr space-y-5"
           novalidate>
@@ -1036,8 +1049,12 @@
       </button>
 
       <!-- Estado enviado -->
-      <div id="form-success" class="hidden text-center py-4 rounded-xl c-gold font-semibold glass border border-gold" data-i18n="contact_sent">
-        ¡Recibido! Me pondré en contacto contigo para solucionarlo.
+      <div id="form-success" class="hidden text-center py-8 px-4 rounded-xl c-gold font-semibold glass border border-gold">
+        <svg class="success-check" width="56" height="56" viewBox="0 0 52 52" aria-hidden="true">
+          <circle class="success-check-circle" cx="26" cy="26" r="24" fill="none"/>
+          <path class="success-check-mark" fill="none" d="M15 27l7 7 15-16"/>
+        </svg>
+        <p class="mt-4" data-i18n="contact_sent">Gracias por tu aviso. Lo solucionaremos lo antes posible.</p>
       </div>
       <div id="form-error" class="hidden text-center py-4 rounded-xl text-red-400 font-semibold glass border border-red-500/30" data-i18n="contact_error">
         Error al enviar. Por favor inténtalo de nuevo.
@@ -1323,7 +1340,7 @@ const translations = {
     contact_message_ph: "¿Qué pasó? ¿En qué parte de la app? ¿Con qué sistema operativo? Cuanta más información mejor.",
     contact_submit:  "Enviar mensaje",
     contact_sending: "Enviando...",
-    contact_sent:    "¡Recibido! Me pondré en contacto contigo para solucionarlo.",
+    contact_sent:    "Gracias por tu aviso. Lo solucionaremos lo antes posible.",
     contact_error:   "Error al enviar. Por favor inténtalo de nuevo.",
     tooltip_aes: "Cifrado de grado militar. Tus archivos son ilegibles sin tu clave personal.",
     faq_title: "Preguntas frecuentes",
@@ -1467,7 +1484,7 @@ const translations = {
     contact_message_ph: "What happened? Which part of the app? Which OS? The more detail the better.",
     contact_submit:  "Send message",
     contact_sending: "Sending...",
-    contact_sent:    "Received! I'll get back to you to fix it.",
+    contact_sent:    "Thank you for your report. We'll fix it as soon as possible.",
     contact_error:   "Send failed. Please try again.",
     tooltip_aes: "Military-grade encryption. Your files are unreadable without your personal key.",
     faq_title: "Frequently Asked Questions",
@@ -1606,7 +1623,7 @@ const translations = {
     contact_message_ph: "Что произошло? В какой части приложения? Какая ОС? Чем подробнее, тем лучше.",
     contact_submit:  "Отправить сообщение",
     contact_sending: "Отправка...",
-    contact_sent:    "Получено! Свяжусь с вами, чтобы решить проблему.",
+    contact_sent:    "Спасибо за сообщение. Мы исправим это как можно скорее.",
     contact_error:   "Ошибка отправки. Пожалуйста, попробуйте снова.",
     tooltip_aes: "Военное шифрование. Ваши файлы нечитаемы без вашего личного ключа.",
     faq_title: "Часто задаваемые вопросы",
@@ -1745,7 +1762,7 @@ const translations = {
     contact_message_ph: "ماذا حدث؟ في أي جزء من التطبيق؟ أي نظام تشغيل؟ كلما زادت التفاصيل كان أفضل.",
     contact_submit:  "إرسال الرسالة",
     contact_sending: "جارٍ الإرسال...",
-    contact_sent:    "تم الاستلام! سأتواصل معك لحل المشكلة.",
+    contact_sent:    "شكرًا على إبلاغك. سنحل المشكلة في أقرب وقت ممكن.",
     contact_error:   "فشل الإرسال. يرجى المحاولة مرة أخرى.",
     tooltip_aes: "تشفير عسكري الدرجة. ملفاتك غير قابلة للقراءة بدون مفتاحك الشخصي.",
     faq_title: "الأسئلة الشائعة",
@@ -2019,8 +2036,18 @@ form.addEventListener('submit', async (e) => {
     });
 
     if (res.ok) {
+      form.reset();
       form.classList.add('hidden');
       successDiv.classList.remove('hidden');
+      // Tras unos segundos, vuelve al formulario limpio y listo para otro reporte.
+      setTimeout(() => {
+        successDiv.classList.add('hidden');
+        form.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitText.textContent = translations[currentLang]['contact_submit'];
+        document.getElementById('submit-icon').classList.remove('hidden');
+        document.getElementById('submit-spinner').classList.add('hidden');
+      }, 5000);
     } else {
       throw new Error('bad response');
     }

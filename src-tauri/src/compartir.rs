@@ -203,8 +203,9 @@ button:disabled{{opacity:.4;cursor:default}}
   </div>
   <form id="frm" onsubmit="return false">
     <label for="pwd">Contraseña</label>
-    <input type="password" id="pwd" name="password" autocomplete="current-password"
-           placeholder="Introduce la contraseña" autofocus>
+    <input type="text" id="pwd" name="password" autocomplete="off" inputmode="numeric"
+           placeholder="Introduce la contraseña" autofocus
+           style="letter-spacing:4px;font-size:18px;text-align:center;">
     <button id="btn" onclick="descifrar()">Descifrar</button>
     <div class="error" id="err">Contraseña incorrecta. Inténtalo de nuevo.</div>
     <div class="spinner" id="spin">Descifrando&hellip;</div>
@@ -258,36 +259,51 @@ async function descifrar(){{
   }}
 }}
 
+function toB64(bytes){{
+  let s='';for(let i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);return btoa(s);
+}}
+
 function mostrar(nombre,mime,bytes){{
   const titulo=document.getElementById('viewer-title');
   const textEl=document.getElementById('text-content');
   const dlBtn=document.getElementById('dl-btn');
+  const viewer=document.getElementById('viewer');
   titulo.textContent=nombre;
-  const esTexto=mime.startsWith('text/')||mime==='application/json';
+  const esTexto=mime.startsWith('text/')||mime==='application/json'||mime==='application/octet-stream'&&nombre.endsWith('.txt');
   const esImagen=mime.startsWith('image/');
+  const esPDF=mime==='application/pdf';
   if(esTexto){{
     textEl.textContent=new TextDecoder().decode(bytes);
     textEl.style.display='block';
   }}else if(esImagen){{
-    let b64str='';for(let i=0;i<bytes.length;i++)b64str+=String.fromCharCode(bytes[i]);const b64=btoa(b64str);
     const img=document.createElement('img');
-    img.src='data:'+mime+';base64,'+b64;
+    img.src='data:'+mime+';base64,'+toB64(bytes);
     img.style.cssText='max-width:100%;border-radius:4px;display:block;margin-top:8px';
-    document.getElementById('viewer').appendChild(img);
+    viewer.appendChild(img);
+  }}else if(esPDF){{
+    // data URI funciona en iOS Safari; iframe para desktop
+    const dataUrl='data:application/pdf;base64,'+toB64(bytes);
+    const isMobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if(isMobile){{
+      // En iOS abrir en nueva pestaña (los iframes PDF no se ven en Safari)
+      dlBtn.style.display='block';
+      dlBtn.textContent='Abrir PDF';
+      dlBtn.onclick=function(){{window.open(dataUrl,'_blank');}};
+    }}else{{
+      const fr=document.createElement('iframe');
+      fr.src=dataUrl;
+      fr.style.cssText='width:100%;height:500px;border:none;border-radius:4px;margin-top:8px;background:#222';
+      viewer.appendChild(fr);
+    }}
   }}else{{
-    prepararDescarga(nombre,mime,bytes,dlBtn);
+    // Otros (DOCX, etc.): data URI descarga directa (funciona en iOS sin blob URL)
+    const dataUrl='data:'+mime+';base64,'+toB64(bytes);
+    dlBtn.style.display='block';
+    dlBtn.onclick=function(){{
+      const a=document.createElement('a');
+      a.href=dataUrl;a.download=nombre;a.click();
+    }};
   }}
-}}
-
-function prepararDescarga(nombre,mime,bytes,btn){{
-  const blob=new Blob([bytes],{{type:mime}});
-  if(blobUrl)URL.revokeObjectURL(blobUrl);
-  blobUrl=URL.createObjectURL(blob);
-  btn.style.display='block';
-  btn.onclick=function(){{
-    const a=document.createElement('a');
-    a.href=blobUrl;a.download=nombre;a.click();
-  }};
 }}
 
 document.getElementById('pwd').addEventListener('keydown',function(e){{

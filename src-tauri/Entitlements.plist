@@ -34,6 +34,25 @@
     <true/>
 
     <!-- ═══════════════════════════════════════════════════════════
+         FINDER — "Guardar con Babel" (clic derecho → babel://guardar)
+         ═══════════════════════════════════════════════════════════
+         El Quick Action deja una copia en ~/Babel/entrada_finder/ (dentro del
+         contenedor) que la app SÍ puede leer sin permisos extra. Lo único que el
+         sandbox bloquea es el BORRADO SEGURO del archivo ORIGINAL, que vive fuera
+         del contenedor y no es "user-selected".
+
+         En el build de desarrollo/DMG NO sandboxed (el actual) el borrado del
+         original funciona sin nada de esto. Para un build FIRMADO + sandboxed,
+         descomenta la excepción temporal siguiente (o migra a FinderSync .appex +
+         App Group). Ver finder-extension/README.md §3.
+
+         <key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
+         <array>
+             <string>/Users/</string>
+         </array>
+    -->
+
+    <!-- ═══════════════════════════════════════════════════════════
          TODO LO DEMÁS ESTÁ BLOQUEADO POR DEFECTO (no necesita declararse):
          - Micrófono:   com.apple.security.device.audio-input        → NO
          - Cámara:      com.apple.security.device.camera             → NO

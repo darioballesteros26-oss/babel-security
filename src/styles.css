@@ -573,18 +573,37 @@ body {
 .procesando-info { display: flex; flex-direction: column; gap: 4px; flex: 1; }
 
 .procesando-barra-wrap {
-  height: 2px;
+  height: 5px;
   background: rgba(197, 160, 89, 0.15);
-  border-radius: 1px;
+  border-radius: 3px;
   overflow: hidden;
   width: 100%;
+  position: relative;
 }
 
 .procesando-barra {
   height: 100%;
   background: var(--dorado);
-  border-radius: 1px;
-  transition: width 0.4s ease;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Shimmer que viaja de izquierda a derecha para indicar actividad */
+.procesando-barra::after {
+  content: "";
+  position: absolute;
+  top: 0; left: -60%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.45) 50%, transparent 100%);
+  animation: barra-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes barra-shimmer {
+  0%   { left: -60%; }
+  100% { left: 110%; }
 }
 
 @keyframes pulso {

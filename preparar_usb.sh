@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# preparar_usb.sh — USB autocontenido de Babel Security (MarianMT tc-big + Qwen)
+# preparar_usb.sh — USB autocontenido de Babel Security (auto-tier MADLAD-3B / SMaLL-100)
 #
 # USO:
 #   ./preparar_usb.sh /Volumes/BABEL_USB
@@ -13,13 +13,12 @@
 # PREREQUISITO (solo una vez):
 #   cd ~/Desktop/Babel/babel-interfaz && npm run tauri -- build
 #
-# Contenido del USB (total ~5.6 GB incluyendo PaddleOCR-VL cuantizado):
+# Contenido del USB (total ~2.0 GB incluyendo PaddleOCR-VL cuantizado):
 #   App:               ~26 MB  (babel Security.app + dylibs)
 #   tessdata:          ~150 MB (8 idiomas Tesseract)
-#   Python + pkgs:     ~450 MB (Flask, CTranslate2, Qwen, pymupdf, pdf2docx, pymupdf4llm…)
-#   MarianMT:          ~2.9 GB (13 pares tc-big int8)
-#   Qwen 1.5B Q4:      ~1.0 GB (revisor/limpiador/PDF cleanup)
-#   Tokenizadores:     ~46 MB
+#   Python + pkgs:     ~450 MB (Flask, CTranslate2, pymupdf, pdf2docx, pymupdf4llm…)
+#   MADLAD-400-3B int8: ~2.8 GB (calidad legal/profesional, Apache 2.0 — máquinas ≥12 GB)
+#   SMaLL-100 int8:    ~330 MB (ligero y rápido, MIT — máquinas de 8 GB; el servidor elige según RAM)
 #   PaddleOCR-VL-1.5:  ~1.1 GB (LM Q4_K_M 286 MB + mmproj BF16 841 MB, Apache 2.0)
 #
 # Tiempos esperados:
@@ -55,7 +54,7 @@ T_TOTAL=$SECONDS
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
-echo "║    BABEL USB — PREPARADOR v4 (tc-big)    ║"
+echo "║   BABEL USB — PREPARADOR v6 (auto-tier)  ║"
 echo "╚══════════════════════════════════════════╝"
 echo "  Destino : $USB"
 echo "  Arch    : $ARCH"
@@ -86,35 +85,41 @@ check_ruta "$BREW/opt/leptonica" \
 check_ruta "$BREW/Cellar/tesseract-lang" \
            "tesseract-lang" "brew install tesseract-lang"
 
-check_ruta "$SERVIDOR_SRC/modelos_usb/modelos" \
-           "modelos MarianMT tc-big (modelos_usb/modelos/)" \
-           "Ejecuta: python3 $SERVIDOR_SRC/descargar_modelos_premium.py"
-
-# Al menos un par de idiomas debe existir
-if [[ -d "$SERVIDOR_SRC/modelos_usb/modelos" ]]; then
-  _n_pares=$(ls "$SERVIDOR_SRC/modelos_usb/modelos" 2>/dev/null | wc -l | tr -d ' ')
-  if [[ $_n_pares -lt 1 ]]; then
-    echo "  ✗ modelos_usb/modelos/ está vacío — ejecuta descargar_modelos_premium.py"
-    _prereq_ok=0
+# Auto-tier: el servidor elige MADLAD (≥12 GB) o SMaLL-100 (menos) según la RAM del destino,
+# así que el USB lleva LOS DOS modelos. Ambos deben estar presentes.
+check_ruta "$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8" \
+           "modelo MADLAD-400-3B int8 (modelos_usb/madlad400-3b-int8/)" \
+           "Convierte: python3 -m ctranslate2.converters.transformers --model google/madlad400-3b-mt --output_dir $SERVIDOR_SRC/modelos_usb/madlad400-3b-int8 --quantization int8 --force"
+if [[ -d "$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8" ]]; then
+  if [[ ! -f "$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8/model.bin" ]]; then
+    echo "  ✗ falta model.bin — reconvierte MADLAD-3B"; _prereq_ok=0
+  elif [[ ! -f "$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8/spiece.model" ]]; then
+    echo "  ✗ falta el tokenizer — guarda T5Tokenizer en la carpeta del modelo"; _prereq_ok=0
   else
-    echo "  ✓ $_n_pares pares MarianMT encontrados"
+    echo "  ✓ MADLAD-400-3B int8 ($(du -sh "$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8" | cut -f1))"
   fi
 fi
 
-check_ruta "$SERVIDOR_SRC/modelos_usb/qwen.gguf" \
-           "Qwen 1.5B Q4_K_M (modelos_usb/qwen.gguf)" \
-           "Descarga de HuggingFace: Qwen/Qwen2.5-1.5B-Instruct-GGUF"
-
-check_ruta "$SERVIDOR_SRC/modelos_usb/tokenizers" \
-           "tokenizadores MarianMT (modelos_usb/tokenizers/)" \
-           "Ejecuta: python3 $SERVIDOR_SRC/descargar_modelos_premium.py"
+check_ruta "$SERVIDOR_SRC/modelos_usb/small100-int8" \
+           "modelo SMaLL-100 int8 (modelos_usb/small100-int8/)" \
+           "Convierte: python3 -m ctranslate2.converters.transformers --model alirezamsh/small100 --output_dir $SERVIDOR_SRC/modelos_usb/small100-int8 --quantization int8 --force  (y copia sentencepiece.bpe.model + tokenization_small100.py del repo HF a esa carpeta)"
+if [[ -d "$SERVIDOR_SRC/modelos_usb/small100-int8" ]]; then
+  if [[ ! -f "$SERVIDOR_SRC/modelos_usb/small100-int8/model.bin" ]]; then
+    echo "  ✗ falta model.bin — reconvierte el modelo SMaLL-100"; _prereq_ok=0
+  elif [[ ! -f "$SERVIDOR_SRC/modelos_usb/small100-int8/sentencepiece.bpe.model" ]]; then
+    echo "  ✗ falta el tokenizer — copia sentencepiece.bpe.model del repo a la carpeta del modelo"; _prereq_ok=0
+  elif [[ ! -f "$SERVIDOR_SRC/modelos_usb/small100-int8/tokenization_small100.py" ]]; then
+    echo "  ✗ falta tokenization_small100.py — el tokenizer propio de SMaLL-100 no está en transformers"; _prereq_ok=0
+  else
+    echo "  ✓ SMaLL-100 int8 ($(du -sh "$SERVIDOR_SRC/modelos_usb/small100-int8" | cut -f1))"
+  fi
+fi
 
 check_ruta "$SERVIDOR_SRC/server.py"              "server.py"
-check_ruta "$SERVIDOR_SRC/revisor.py"             "revisor.py"
-check_ruta "$SERVIDOR_SRC/traductor_usb.py"       "traductor_usb.py"
-check_ruta "$SERVIDOR_SRC/traductor.py"           "traductor.py (fallback)"
+check_ruta "$SERVIDOR_SRC/traduccion_madlad.py"   "traduccion_madlad.py (motor MADLAD, tier ≥12 GB)"
+check_ruta "$SERVIDOR_SRC/traduccion_small100.py" "traduccion_small100.py (motor SMaLL-100, tier 8 GB)"
+check_ruta "$SERVIDOR_SRC/traduccion_comun.py"    "traduccion_comun.py (utilidades compartidas)"
 check_ruta "$SERVIDOR_SRC/pymupdf4llm_extract.py" "pymupdf4llm_extract.py (primera pasada PDF)"
-check_ruta "$SERVIDOR_SRC/paddleocr_extract.py"   "paddleocr_extract.py (segunda pasada PDF OCR)"
 check_ruta "$SERVIDOR_SRC/md_to_pdf.py"           "md_to_pdf.py (PDF desde Markdown con reportlab)"
 
 if [[ $_prereq_ok -eq 0 ]]; then
@@ -235,8 +240,8 @@ echo "└─ $(ls "$FRAMEWORKS/"*.dylib 2>/dev/null | wc -l | tr -d ' ') dylibs 
 
 # ── 3. tessdata + modelos + tokenizadores (en paralelo) ─────────────────
 echo ""
-echo "┌─ [3/7] Copiando tessdata, modelos MarianMT, tokenizadores y Qwen..."
-echo "  (esto puede tardar varios minutos — ~4 GB)"
+echo "┌─ [3/7] Copiando tessdata y modelos (MADLAD-3B + SMaLL-100)..."
+echo "  (esto puede tardar un par de minutos — ~1.2 GB)"
 T3=$SECONDS
 
 # tessdata
@@ -253,45 +258,27 @@ T3=$SECONDS
 ) &
 PID_TESS=$!
 
-# Modelos MarianMT tc-big (~2.9 GB)
+# Ambos modelos (auto-tier): MADLAD-3B (~2.8 GB) + SMaLL-100 (~330 MB)
 (
-  rm -rf "$RESOURCES/servidor/modelos_usb/modelos"
-  rsync -a --info=progress2 \
-    "$SERVIDOR_SRC/modelos_usb/modelos/" \
-    "$RESOURCES/servidor/modelos_usb/modelos/" 2>/dev/null || \
-  cp -R "$SERVIDOR_SRC/modelos_usb/modelos" \
-        "$RESOURCES/servidor/modelos_usb/"
-  echo "  ✓ modelos MarianMT ($(du -sh "$RESOURCES/servidor/modelos_usb/modelos" | cut -f1))"
+  for m in madlad400-3b-int8 small100-int8; do
+    rm -rf "$RESOURCES/servidor/modelos_usb/$m"
+    rsync -a --info=progress2 \
+      "$SERVIDOR_SRC/modelos_usb/$m/" \
+      "$RESOURCES/servidor/modelos_usb/$m/" 2>/dev/null || \
+    cp -R "$SERVIDOR_SRC/modelos_usb/$m" "$RESOURCES/servidor/modelos_usb/"
+  done
+  echo "  ✓ MADLAD-3B ($(du -sh "$RESOURCES/servidor/modelos_usb/madlad400-3b-int8" | cut -f1)) + SMaLL-100 ($(du -sh "$RESOURCES/servidor/modelos_usb/small100-int8" | cut -f1))"
 ) &
 PID_MOD=$!
 
-# Tokenizadores (~46 MB)
-(
-  rm -rf "$RESOURCES/servidor/modelos_usb/tokenizers"
-  cp -R "$SERVIDOR_SRC/modelos_usb/tokenizers" \
-        "$RESOURCES/servidor/modelos_usb/"
-  echo "  ✓ tokenizadores"
-) &
-PID_TOK=$!
-
-# Qwen 1.5B Q4_K_M (~1 GB) — también como modelos/qwen-1.5b-q4.gguf para revisor.py
-(
-  cp "$SERVIDOR_SRC/modelos_usb/qwen.gguf" \
-     "$RESOURCES/servidor/modelos/qwen-1.5b-q4.gguf"
-  echo "  ✓ Qwen 1.5B ($(du -sh "$RESOURCES/servidor/modelos/qwen-1.5b-q4.gguf" | cut -f1))"
-) &
-PID_QWEN=$!
-
-# Código del servidor (7 archivos: pipeline PDF de doble pasada incluido)
-for f in server.py revisor.py traductor_usb.py traductor.py \
-          pymupdf4llm_extract.py paddleocr_extract.py md_to_pdf.py; do
+# Código del servidor (pipeline PDF de doble pasada incluido)
+for f in server.py traduccion_madlad.py traduccion_small100.py traduccion_comun.py \
+          pymupdf4llm_extract.py md_to_pdf.py; do
   [[ -f "$SERVIDOR_SRC/$f" ]] && cp "$SERVIDOR_SRC/$f" "$RESOURCES/servidor/"
 done
 echo "  ✓ código servidor (6 archivos, pipeline PDF doble pasada)"
 
 wait $PID_TESS
-wait $PID_TOK
-wait $PID_QWEN
 wait $PID_MOD
 
 # PaddleOCR-VL-1.5 (~1.1 GB tras cuantización) — copia si está descargado localmente,
@@ -425,12 +412,15 @@ print(hits[0] if hits else '')
   # 1. __pycache__ y .pyc (~25 MB)
   find "$PY_CACHE_ENV" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
   find "$PY_CACHE_ENV" -name "*.pyc" -delete 2>/dev/null || true
-  # 2. Modelos transformers no usados — solo conservar marian y auto (~46 MB)
+  # 2. Modelos transformers no usados — conservar t5 (tokenizer MADLAD) y auto.
+  #    SMaLL-100 usa su propio SMALL100Tokenizer (tokenization_small100.py, va con el
+  #    modelo) que solo importa transformers.tokenization_utils (core, no en models/);
+  #    m2m_100 se conserva por prudencia (misma arquitectura), no es estrictamente necesario.
   TRANS_MODELS="$PY_CACHE_ENV/lib/python3.*/site-packages/transformers/models"
   for model_dir in $TRANS_MODELS/*/; do
     model_name=$(basename "$model_dir")
     case "$model_name" in
-      marian|auto) ;;  # conservar
+      m2m_100|t5|auto) ;;  # conservar — T5Tokenizer de MADLAD (t5); m2m_100 por prudencia
       *) rm -rf "$model_dir" 2>/dev/null || true ;;
     esac
   done
@@ -474,18 +464,11 @@ echo "┌─ [5/7] Creando launchers..."
 # Copiar recursos Windows fuera del .app
 mkdir -p "$USB/win/recursos"
 rsync -a --delete "$RESOURCES/tessdata/"  "$USB/win/recursos/tessdata/"
-rsync -a --delete "$RESOURCES/servidor/"  "$USB/win/recursos/servidor/"
+# De-dup: los modelos de traducción (~4 GB) NO se copian a Windows. Viven una sola vez
+# dentro del bundle .app y el .bat apunta BABEL_DIR_USB ahí (ahorra ~4 GB en el USB).
+rsync -a --delete --exclude 'modelos_usb' --exclude 'modelos' "$RESOURCES/servidor/"  "$USB/win/recursos/servidor/"
 
-# Windows: el symlink Unix modelos/qwen-1.5b-q4.gguf no funciona en NTFS/exFAT.
-# Si rsync lo copió como symlink, reemplazarlo con el archivo real.
-_qwen_win="$USB/win/recursos/servidor/modelos/qwen-1.5b-q4.gguf"
-_qwen_real="$RESOURCES/servidor/modelos_usb/qwen.gguf"
-if [[ -L "$_qwen_win" || ! -f "$_qwen_win" ]]; then
-  [[ -L "$_qwen_win" ]] && rm "$_qwen_win"
-  mkdir -p "$(dirname "$_qwen_win")"
-  cp "$_qwen_real" "$_qwen_win"
-fi
-echo "  ✓ win/recursos/ sincronizado (Qwen symlink resuelto)"
+echo "  ✓ win/recursos/ sincronizado (modelos compartidos desde el bundle, no duplicados)"
 
 cat > "$USB/LANZAR_BABEL.bat" << 'WIN_EOF'
 @echo off
@@ -497,7 +480,12 @@ set "USB=%~dp0"
 set "WIN_EXE=%USB%win\babel-interfaz.exe"
 set "PYWIN=%USB%win\python_win\python.exe"
 set "SERVIDOR=%USB%win\recursos\servidor\server.py"
-set "USB_MOD=%USB%win\recursos\servidor\modelos_usb"
+:: Modelos de traducción compartidos: viven UNA sola vez dentro del bundle .app
+:: (no duplicados en win\). Se localiza la carpeta .app dinámicamente.
+:: Modelos compartidos desde el bundle .app (traducción + OCR), no duplicados en win\.
+set "APP_SRV="
+for /d %%A in ("%USB%*.app") do set "APP_SRV=%%A\Contents\Resources\servidor"
+set "USB_MOD=%APP_SRV%\modelos_usb"
 set "LOG=%USB%win\servidor_log.txt"
 
 if not exist "%WIN_EXE%" (
@@ -514,6 +502,11 @@ if not exist "%SERVIDOR%" (
   echo [ERROR] Falta el servidor. Regenera el USB con preparar_usb.sh
   pause & exit /b 1
 )
+if not exist "%USB_MOD%\" (
+  echo [ERROR] No se encontraron los modelos en el bundle .app
+  echo         La carpeta *.app debe estar en la raiz del USB (modelos compartidos)
+  pause & exit /b 1
+)
 
 :: Token aleatorio de 32 hex
 for /f "delims=" %%i in ('powershell -NoProfile -Command "[guid]::NewGuid().ToString(\"N\")"') do set "BABEL_NLLB_TOKEN=babel_%%i"
@@ -524,10 +517,11 @@ set "TRANSFORMERS_OFFLINE=1"
 set "HF_DATASETS_OFFLINE=1"
 set "TOKENIZERS_PARALLELISM=false"
 set "BABEL_DIR_USB=%USB_MOD%"
+set "BABEL_DIR_MODELOS=%APP_SRV%\modelos"
 set "PATH=%USB%win\python_win;%PATH%"
 
 :: Arrancar servidor en segundo plano; log en win\servidor_log.txt
-echo Iniciando servidor Babel (MarianMT + Qwen)...
+echo Iniciando servidor Babel (auto-tier MADLAD/SMaLL-100 segun RAM)...
 start /B "" cmd /c ""%PYWIN%" "%SERVIDOR%" >> "%LOG%" 2>&1"
 
 :: Esperar hasta que el puerto 5002 responda (máx. 90 s, sondeo cada 2 s)
@@ -572,27 +566,39 @@ echo "┌─ [6/7] Verificando integridad..."
 T6=$SECONDS
 _smoke_ok=1
 
-# Modelos: al menos 5 pares MarianMT
-_n=$(ls "$RESOURCES/servidor/modelos_usb/modelos" 2>/dev/null | wc -l | tr -d ' ')
-if [[ $_n -lt 5 ]]; then
-  echo "  ✗ Solo $_n pares MarianMT (esperados ≥5)"
+# Modelo MADLAD-3B (tier ≥12 GB): model.bin + tokenizer T5 (spiece.model)
+MADLAD_DIR="$RESOURCES/servidor/modelos_usb/madlad400-3b-int8"
+if [[ ! -f "$MADLAD_DIR/model.bin" ]] || [[ ! -f "$MADLAD_DIR/spiece.model" ]]; then
+  echo "  ✗ MADLAD-3B incompleto (falta model.bin o spiece.model)"
   _smoke_ok=0
 else
-  echo "  ✓ $_n pares MarianMT ($(du -sh "$RESOURCES/servidor/modelos_usb/modelos" | cut -f1))"
-fi
-
-# Qwen
-QWEN_USB="$RESOURCES/servidor/modelos/qwen-1.5b-q4.gguf"
-if [[ ! -f "$QWEN_USB" ]]; then
-  echo "  ✗ Falta qwen-1.5b-q4.gguf"
-  _smoke_ok=0
-else
-  QWEN_MB=$(du -m "$QWEN_USB" | cut -f1)
-  if [[ $QWEN_MB -lt 900 ]]; then
-    echo "  ✗ qwen-1.5b-q4.gguf parece incompleto (${QWEN_MB}MB, esperado ≥900MB)"
+  MADLAD_MB=$(du -m "$MADLAD_DIR/model.bin" | cut -f1)
+  if [[ $MADLAD_MB -lt 2500 ]]; then
+    echo "  ✗ MADLAD model.bin parece incompleto (${MADLAD_MB}MB, esperado ≥2500MB)"
     _smoke_ok=0
   else
-    echo "  ✓ Qwen (${QWEN_MB}MB)"
+    echo "  ✓ MADLAD-400-3B int8 ($(du -sh "$MADLAD_DIR" | cut -f1))"
+  fi
+fi
+
+# Modelo SMaLL-100 (tier 8 GB): model.bin + tokenizer SentencePiece + tokenizer propio
+SMALL_DIR="$RESOURCES/servidor/modelos_usb/small100-int8"
+if [[ ! -f "$SMALL_DIR/model.bin" ]]; then
+  echo "  ✗ Falta small100-int8/model.bin"
+  _smoke_ok=0
+elif [[ ! -f "$SMALL_DIR/sentencepiece.bpe.model" ]]; then
+  echo "  ✗ Falta el tokenizer small100-int8/sentencepiece.bpe.model"
+  _smoke_ok=0
+elif [[ ! -f "$SMALL_DIR/tokenization_small100.py" ]]; then
+  echo "  ✗ Falta small100-int8/tokenization_small100.py (tokenizer propio de SMaLL-100)"
+  _smoke_ok=0
+else
+  SMALL_MB=$(du -m "$SMALL_DIR/model.bin" | cut -f1)
+  if [[ $SMALL_MB -lt 250 ]]; then
+    echo "  ✗ model.bin parece incompleto (${SMALL_MB}MB, esperado ≥250MB)"
+    _smoke_ok=0
+  else
+    echo "  ✓ SMaLL-100 int8 ($(du -sh "$SMALL_DIR" | cut -f1))"
   fi
 fi
 
@@ -640,7 +646,7 @@ else
 fi
 
 # Archivos servidor
-for f in server.py revisor.py traductor_usb.py; do
+for f in server.py traduccion_madlad.py traduccion_small100.py traduccion_comun.py; do
   if [[ ! -f "$RESOURCES/servidor/$f" ]]; then
     echo "  ✗ Falta servidor/$f"
     _smoke_ok=0
@@ -664,7 +670,7 @@ echo "╚═══════════════════════�
 echo ""
 printf "  %-22s %s\n" "Tiempo total:"    "${T_FINAL}s (~$((T_FINAL/60))m $((T_FINAL%60))s)"
 printf "  %-22s %s\n" "Tamaño USB:"      "$USB_SIZE"
-printf "  %-22s %s\n" "Pares idiomas:"   "$_n"
+printf "  %-22s %s\n" "Modelos:" "MADLAD-3B (≥12GB) / SMaLL-100 (8GB) — auto"
 printf "  %-22s %s\n" "Caché Python:"    "$CACHE_DIR"
 echo ""
 echo "  Contenido USB:"
@@ -672,7 +678,7 @@ ls -1 "$USB"
 echo ""
 echo "  macOS   → doble clic en ${APP_NAME}"
 echo "            (1ª vez: clic derecho → Abrir para pasar Gatekeeper)"
-echo "            El servidor MarianMT + Qwen arranca automáticamente."
+echo "            El servidor arranca solo y elige modelo según la RAM."
 echo "  Windows → doble clic en LANZAR_BABEL.bat"
 echo "            (requiere añadir win/babel-interfaz.exe y win/python_win/)"
 echo ""

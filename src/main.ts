@@ -325,10 +325,9 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "eliminar-seleccionados": eliminarSeleccionados(); break;
     // Archivos guardados
     case "ver-archivo-guardado": verArchivoGuardado(); break;
-    case "compartir-archivo-guardado": abrirModalCompartir(); break;
+    case "compartir-archivo-guardado": compartirDirecto(); break;
     case "cerrar-modal-compartir": cerrarModalCompartir(); break;
     case "confirmar-compartir": confirmarCompartir(); break;
-    case "compartir-nativo": compartirNativo(); break;
     case "revelar-en-finder": revelarEnFinder(); break;
     case "copiar-pass-compartir": copiarPassCompartir(); break;
     case "eliminar-sel-guardados": eliminarSeleccionadosGuardados(); break;
@@ -373,6 +372,14 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "guardar-smtp": guardarConfigSmtp(); break;
     case "seleccionar-archivo-email": seleccionarArchivoEmail(); break;
     case "enviar-email": enviarEmail(); break;
+    case "enviar-email-seleccion": {
+      const sel = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
+      if (!sel) break;
+      const selCard = sel.closest(".archivo-card") as HTMLElement;
+      const selRuta = selCard?.dataset.ruta ?? "";
+      if (selRuta) enviarArchivoDesdeArchivos(selRuta);
+      break;
+    }
     case "responder-email": responderEmail(); break;
     case "marcar-no-leido": marcarEmailNoLeido(); break;
     case "copiar-cuerpo-email": copiarCuerpoEmail(); break;
@@ -422,20 +429,38 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (barraEl) barraEl.style.width = `${Math.min(pct, 100)}%`;
   }).catch(() => {});
 
-  // Parche 1: bloquear la sesión al perder el foco de ventana (cambio de app, screen-lock
-  // del SO). Reduce la ventana en la que la subclave existe en RAM: bloquearPantalla() llama
-  // a cerrar_sesion_rust → limpiar(), que zeroiza la clave en el backend. Gracia de 20s para
-  // no bloquear en un alt-tab momentáneo; sólo bloquea si el foco sigue perdido al vencer.
-  getCurrentWindow().onFocusChanged(({ payload: enfocado }) => {
-    if (!enfocado && _sesionActiva) {
-      if (_blurLockTimer) clearTimeout(_blurLockTimer);
-      _blurLockTimer = setTimeout(() => {
-        if (!document.hasFocus() && _sesionActiva) bloquearPantalla();
-      }, 120_000);
-    } else if (enfocado && _blurLockTimer) {
-      clearTimeout(_blurLockTimer);
-      _blurLockTimer = null;
+  // MODO SEGUNDO PLANO (fricción cero para "Guardar con Babel" desde el Finder):
+  // ya NO bloqueamos la sesión al perder el foco de la ventana. El único cierre por
+  // seguridad es el timeout de inactividad configurable (resetearTimerInactividad), que
+  // sigue corriendo aunque la ventana esté en segundo plano/oculta y nunca puede
+  // desactivarse del todo. Así, mientras la sesión esté viva, el clic derecho del Finder
+  // cifra al instante sin ventana ni contraseña.
+
+  // Al cerrar la ventana con sesión activa, ocultarla en vez de salir: el proceso sigue
+  // vivo para servir guardados en segundo plano. Cmd+Q cierra Babel del todo.
+  getCurrentWindow().onCloseRequested(async (event) => {
+    if (_sesionActiva) {
+      event.preventDefault();
+      await getCurrentWindow().hide().catch(() => {});
     }
+  }).catch(() => {});
+
+  // FINDER — "Guardar con Babel": el backend cifra en silencio y emite un evento por
+  // archivo procesado. Mostramos un toast y refrescamos la lista si procede.
+  listen<{ nombre: string; ok: boolean; error?: string }>("finder-guardado", (e) => {
+    const p = e.payload;
+    if (p.ok) mostrarToast(`Guardado en Babel: ${p.nombre}`, false);
+    else mostrarToast(`No se pudo guardar ${p.nombre}: ${p.error ?? "error"}`, true);
+    if (!document.getElementById("pantalla-archivos-guardados")?.classList.contains("hidden")) {
+      cargarArchivosGuardados().catch(() => {});
+    }
+  }).catch(() => {});
+
+  // FINDER — llegó un archivo pero la sesión estaba cerrada/caducada: mostrar la ventana
+  // para pedir login. Tras autenticar, la cola se drena (ver intentarAcceso/desbloquear).
+  listen("finder-necesita-login", () => {
+    getCurrentWindow().show().catch(() => {});
+    getCurrentWindow().setFocus().catch(() => {});
   }).catch(() => {});
 
   // Ocultar sidebar en fullscreen nativo (botón verde macOS)
@@ -557,6 +582,8 @@ async function intentarAcceso(): Promise<void> {
       if (bienvenida) bienvenida.textContent = nombre ? `Bienvenido, ${nombre}` : "Bienvenido";
 
       activarTimerInactividad();
+      // FINDER — drenar la cola de "Guardar con Babel" acumulada mientras no había sesión.
+      invoke("procesar_entrada_finder").catch(() => {});
       invoke<boolean>("tiene_config_email").then(ok => {
         _smtpConfigurado = ok;
         if (ok) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
@@ -735,6 +762,28 @@ function toggleSidebar(): void {
 
 function toggleBorrarOriginal(activado: boolean): void {
   localStorage.setItem(LS_NO_PREG_BORRAR_ORIG, activado ? "si" : "");
+}
+
+// Modo rápido: pide al backend beam=1 (más rápido, algo menos de calidad).
+// Se persiste en localStorage y se sincroniza con el atomic de Rust al arrancar.
+function toggleModoRapido(activado: boolean): void {
+  localStorage.setItem(LS_MODO_RAPIDO, activado ? "si" : "no");
+  invoke("set_modo_rapido", { activado }).catch(() => {});
+}
+
+// Default de MODO RÁPIDO según el hardware (solo si el usuario nunca lo tocó):
+// el servidor elige el modelo por la RAM (SMaLL-100 en <12 GB, MADLAD en ≥12 GB). En el
+// tier pequeño (SMaLL-100) el rápido acelera aún más → default ON; en el grande (MADLAD)
+// sobra RAM y se prioriza calidad → default OFF. Si el servidor aún no responde, tira a lo
+// conservador (rápido = menos RAM).
+async function modoRapidoPorDefecto(): Promise<boolean> {
+  try {
+    const res = await fetch("http://127.0.0.1:5002/ping", { signal: AbortSignal.timeout(2000) });
+    const data = await res.json();
+    return !String(data?.modelo ?? "").includes("madlad");
+  } catch {
+    return true;
+  }
 }
 
 function toggleBorradoAutomatico(activado: boolean): void {
@@ -944,10 +993,8 @@ async function cargarArchivosGuardados(): Promise<void> {
   </div>
   <div class="archivo-card-botones">
     <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver-comparacion">◫ VER COMPARACIÓN</button>
-    <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar-traducido" title="Descargar versión traducida">↓ TRAD</button>
-    <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar-original" title="Descargar versión original">↓ ORIG</button>
+    <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar-con-opcion">EXPORTAR</button>
     <button type="button" class="btn-archivo" data-action="mover" style="opacity:0.7;">MOVER</button>
-    <button type="button" class="btn-archivo" data-action="enviar" style="opacity:0.7;">✉</button>
   </div>
 </div>`;
         }
@@ -970,7 +1017,6 @@ async function cargarArchivosGuardados(): Promise<void> {
     <button type="button" class="btn-archivo" data-action="traducir-guardado" style="color:var(--dorado);border-color:var(--dorado);">TRADUCIR</button>
     <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar">EXPORTAR</button>
     <button type="button" class="btn-archivo" data-action="mover" style="opacity:0.7;">MOVER</button>
-    <button type="button" class="btn-archivo" data-action="enviar" style="opacity:0.7;">✉</button>
   </div>
 </div>`;
       }).join("");
@@ -1018,8 +1064,7 @@ async function cargarArchivosGuardados(): Promise<void> {
           verArchivo(ruta); break;
         case "traducir-guardado": traducirArchivoGuardado(ruta); break;
         case "exportar": exportarArchivo(ruta); break;
-        case "exportar-traducido": exportarArchivo(ruta); break;
-        case "exportar-original": exportarArchivo(rutaOrig || ruta); break;
+        case "exportar-con-opcion": mostrarPopupExportar(btn, ruta, rutaOrig); break;
         case "mover": moverArchivoGuardadoPopup(ruta, e); break;
         case "enviar": enviarArchivoDesdeArchivos(ruta); break;
         case "renombrar": e.stopPropagation(); iniciarRenombradoArchivo(ruta, base2); break;
@@ -1046,6 +1091,8 @@ function actualizarSeleccionGuardados(): void {
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.toggle("hidden", !hay);
   document.getElementById("btn-compartir-sel-g")?.classList.toggle("hidden", !unico);
+  document.getElementById("btn-mail-sel-g")?.classList.toggle("hidden", !unico);
+  document.getElementById("ui-exportar-todo")?.classList.toggle("hidden", hay);
   document.getElementById("ui-finder")?.classList.toggle("hidden", hay);
   document.getElementById("ui-importar")?.classList.toggle("hidden", hay);
 }
@@ -1181,6 +1228,7 @@ function filtrarArchivosGuardados(texto: string): void {
 // LS keys para preferencias "no volver a preguntar"
 const LS_NO_PREG_BORRAR_ORIG = "babel_noPreg_borrarOrig";
 const LS_NO_PREG_ELIMINAR    = "babel_noPreg_eliminar";
+const LS_MODO_RAPIDO         = "babel_modoRapido";
 
 async function confirmarEliminar(n: number): Promise<boolean> {
   return confirmarConCheckbox({
@@ -1330,27 +1378,7 @@ async function verArchivoGuardado(): Promise<void> {
 }
 // ── COMPARTIR ARCHIVO CIFRADO ────────────────────────────────────────────────
 
-let _rutaCompartir = "";
-let _nombreCompartir = "";
 let _rutaHtmlCompartir = "";
-
-function abrirModalCompartir(): void {
-  const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
-  if (checkboxes.length !== 1) return;
-  const card = checkboxes[0].closest(".archivo-card") as HTMLElement;
-  _rutaCompartir = card?.dataset.ruta ?? "";
-  _nombreCompartir = _rutaCompartir.split("/").pop() ?? _rutaCompartir;
-  const modal = document.getElementById("modal-compartir");
-  const paso1 = document.getElementById("modal-compartir-paso1");
-  const paso2 = document.getElementById("modal-compartir-paso2");
-  const input = document.getElementById("input-contacto-compartir") as HTMLInputElement;
-  if (!modal || !paso1 || !paso2 || !input) return;
-  paso1.classList.remove("hidden");
-  paso2.classList.add("hidden");
-  input.value = "";
-  modal.classList.remove("hidden");
-  input.focus();
-}
 
 function cerrarModalCompartir(): void {
   document.getElementById("modal-compartir")?.classList.add("hidden");
@@ -1367,10 +1395,15 @@ async function confirmarCompartir(): Promise<void> {
   const input = document.getElementById("input-contacto-compartir") as HTMLInputElement;
   const contacto = input?.value.trim();
   if (!contacto) { input?.focus(); return; }
+  const checked = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
+  const checkedCard = checked?.closest(".archivo-card") as HTMLElement | null;
+  const rutaCompartir = checkedCard?.dataset.ruta ?? "";
+  const nombreCompartir = rutaCompartir.split("/").pop() ?? rutaCompartir;
+  if (!rutaCompartir) return;
   try {
     const res = await invoke<ResultadoCompartir>("generar_archivo_compartir", {
-      ruta: _rutaCompartir,
-      nombreOriginal: _nombreCompartir,
+      ruta: rutaCompartir,
+      nombreOriginal: nombreCompartir,
       contacto,
     });
     _rutaHtmlCompartir = res.ruta_html;
@@ -1394,12 +1427,17 @@ async function confirmarCompartir(): Promise<void> {
   }
 }
 
-async function compartirNativo(): Promise<void> {
-  if (!_rutaHtmlCompartir) return;
+async function compartirDirecto(): Promise<void> {
+  const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
+  if (checkboxes.length !== 1) return;
+  const card = checkboxes[0].closest(".archivo-card") as HTMLElement;
+  const ruta = card?.dataset.ruta ?? "";
+  if (!ruta) return;
+  const nombreOriginal = card.dataset.base ?? ruta.split("/").pop() ?? ruta;
   try {
-    await invoke("compartir_archivo_nativo", { rutaHtml: _rutaHtmlCompartir });
+    await invoke("compartir_directo", { ruta, nombreOriginal });
   } catch (e) {
-    mostrarToast("Error compartiendo: " + e, true);
+    mostrarToast("Error al compartir: " + e, true);
   }
 }
 
@@ -1473,6 +1511,8 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.add("hidden");
   document.getElementById("btn-compartir-sel-g")?.classList.add("hidden");
+  document.getElementById("btn-mail-sel-g")?.classList.add("hidden");
+  document.getElementById("ui-exportar-todo")?.classList.remove("hidden");
   document.getElementById("ui-finder")?.classList.remove("hidden");
   document.getElementById("ui-importar")?.classList.remove("hidden");
   mostrarToast(errores ? `${errores} errores al eliminar` : "✓ Destruido de forma segura — irrecuperable", errores > 0);
@@ -1754,6 +1794,54 @@ async function exportarArchivo(ruta: string): Promise<void> {
     mostrarToast("Error exportando: " + msg, true);
   }
 }
+let _popupExportar: HTMLElement | null = null;
+
+function mostrarPopupExportar(ancla: HTMLElement, rutaTrad: string, rutaOrig: string): void {
+  cerrarPopupExportar();
+  const popup = document.createElement("div");
+  popup.style.cssText = `
+    position:fixed;z-index:4000;background:var(--fondo-panel);
+    border:1px solid var(--borde);border-radius:3px;
+    padding:6px 0;min-width:160px;box-shadow:0 4px 16px rgba(0,0,0,0.5);
+  `;
+  const rect = ancla.getBoundingClientRect();
+  popup.style.top = (rect.bottom + 4) + "px";
+  popup.style.left = rect.left + "px";
+
+  const btnStyle = `display:block;width:100%;text-align:left;background:none;border:none;
+    color:var(--texto);padding:8px 16px;cursor:pointer;font-size:0.68rem;
+    letter-spacing:1px;font-family:'Times New Roman',Times,serif;`;
+
+  popup.innerHTML = `
+    <button style="${btnStyle}" id="pop-exp-trad">↓ TRADUCIDO</button>
+    <button style="${btnStyle}" id="pop-exp-orig">↓ ORIGINAL</button>
+  `;
+  document.body.appendChild(popup);
+  _popupExportar = popup;
+
+  popup.querySelector("#pop-exp-trad")?.addEventListener("click", () => {
+    cerrarPopupExportar(); exportarArchivo(rutaTrad);
+  });
+  popup.querySelector("#pop-exp-orig")?.addEventListener("click", () => {
+    cerrarPopupExportar(); exportarArchivo(rutaOrig || rutaTrad);
+  });
+
+  requestAnimationFrame(() => {
+    document.addEventListener("click", cerrarPopupExportarClick, { once: true });
+  });
+}
+
+function cerrarPopupExportar(): void {
+  _popupExportar?.remove();
+  _popupExportar = null;
+}
+
+function cerrarPopupExportarClick(e: MouseEvent): void {
+  if (_popupExportar && !_popupExportar.contains(e.target as Node)) {
+    cerrarPopupExportar();
+  }
+}
+
 // Exporta múltiples archivos con un único folder picker
 async function exportarTodo(): Promise<void> {
   try {
@@ -1850,8 +1938,7 @@ async function eliminarSeleccionados(): Promise<void> {
 // CIERRE AUTOMÁTICO POR INACTIVIDAD
 let timerInactividad: ReturnType<typeof setTimeout> | null = null;
 let timerAvisoLock: ReturnType<typeof setTimeout> | null = null;
-let _blurLockTimer: ReturnType<typeof setTimeout> | null = null; // Parche 1: bloqueo al perder foco
-let _tiempoLockMs: number = 15 * 60 * 1000; // default hasta que carguen los ajustes
+let _tiempoLockMs: number = 60 * 60 * 1000; // default 60 min hasta que carguen los ajustes
 
 function resetearTimerInactividad(): void {
   if (timerInactividad) clearTimeout(timerInactividad);
@@ -1901,6 +1988,8 @@ async function desbloquearPantalla(): Promise<void> {
       _sesionUsuario = localStorage.getItem("babel-nombre-display") ?? "";
       document.getElementById("pantalla-bloqueo")?.classList.add("hidden");
       activarTimerInactividad();
+      // FINDER — drenar la cola de "Guardar con Babel" acumulada durante el bloqueo.
+      invoke("procesar_entrada_finder").catch(() => {});
       invoke<boolean>("tiene_config_email").then(ok2 => {
         _smtpConfigurado = ok2;
         if (ok2) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
@@ -2060,13 +2149,13 @@ async function verComparacion(): Promise<void> {
   const cont2 = document.getElementById("par-contenido-2");
 
   if (titulo1) titulo1.textContent = datos[0].nombre;
-  if (cont1) renderizarEnContenedor(datos[0].texto, cont1, "55vh");
+  if (cont1) renderizarEnContenedor(datos[0].texto, cont1, "100%");
 
   if (datos.length === 2 && divisor && panel2 && titulo2 && cont2) {
     divisor.style.display = "block";
     panel2.style.display = "flex";
     titulo2.textContent = datos[1].nombre;
-    renderizarEnContenedor(datos[1].texto, cont2, "55vh");
+    renderizarEnContenedor(datos[1].texto, cont2, "100%");
   } else {
     if (divisor) divisor.style.display = "none";
     if (panel2) panel2.style.display = "none";
@@ -2090,11 +2179,11 @@ async function verComparacionRutas(rutaOrig: string, rutaTrad: string): Promise<
     const cont2 = document.getElementById("par-contenido-2");
     if (!modal || !cont1) return;
     if (titulo1) titulo1.textContent = "ORIGINAL";
-    if (cont1) renderizarEnContenedor(textoOrig, cont1, "55vh");
+    if (cont1) renderizarEnContenedor(textoOrig, cont1, "100%");
     if (divisor) divisor.style.display = "block";
     if (panel2) panel2.style.display = "flex";
     if (titulo2) titulo2.textContent = "TRADUCCIÓN";
-    if (cont2) renderizarEnContenedor(textoTrad, cont2, "55vh");
+    if (cont2) renderizarEnContenedor(textoTrad, cont2, "100%");
     modal.classList.remove("hidden");
   } catch (error) {
     mostrarToast("Error abriendo comparación: " + String(error), true);
@@ -2469,7 +2558,7 @@ async function guardarAjustesTraduccion(): Promise<void> {
   const destino = (document.getElementById("selector-destino") as HTMLSelectElement)?.value ?? "en";
   const categoria = (document.getElementById("tipo-diccionario") as HTMLSelectElement)?.value ?? "todos";
   const borradoAuto = (document.getElementById("toggle-borrado") as HTMLInputElement)?.checked ?? true;
-  const timeoutMin = parseInt((document.getElementById("selector-timeout") as HTMLSelectElement)?.value ?? "15", 10);
+  const timeoutMin = parseInt((document.getElementById("selector-timeout") as HTMLSelectElement)?.value ?? "60", 10);
 
   await invoke("save_settings", {
     settings: {
@@ -2484,7 +2573,7 @@ async function guardarAjustesTraduccion(): Promise<void> {
 }
 
 async function guardarTimeoutSesion(minutos: string): Promise<void> {
-  const min = Math.max(2, Math.min(60, parseInt(minutos, 10)));
+  const min = Math.max(2, Math.min(120, parseInt(minutos, 10)));
   _tiempoLockMs = min * 60 * 1000;
   resetearTimerInactividad();
   await guardarAjustesTraduccion();
@@ -2497,7 +2586,7 @@ async function cargarAjustesTraduccion(): Promise<void> {
   const destino = s.idioma_destino ?? "en";
   const categoria = s.categoria ?? "todos";
   const borradoAuto = s.borrar_al_salir ?? false;
-  const timeoutMin: number = Math.max(2, Math.min(60, s.timeout_sesion_minutos ?? 15));
+  const timeoutMin: number = Math.max(2, Math.min(120, s.timeout_sesion_minutos ?? 60));
 
   _tiempoLockMs = timeoutMin * 60 * 1000;
   if (_sesionActiva) resetearTimerInactividad();
@@ -2519,6 +2608,15 @@ async function cargarAjustesTraduccion(): Promise<void> {
   if (sidebar) sidebar.classList.toggle("hidden", !sidebarAbierto);
   const toggleBorrarOrig = document.getElementById("toggle-borrar-orig") as HTMLInputElement | null;
   if (toggleBorrarOrig) toggleBorrarOrig.checked = localStorage.getItem(LS_NO_PREG_BORRAR_ORIG) === "si";
+  const toggleRapido = document.getElementById("toggle-modo-rapido") as HTMLInputElement | null;
+  // MODO RÁPIDO: si el usuario lo fijó a mano ("si"/"no") se respeta; si nunca lo tocó
+  // (null) el default lo decide el hardware — ON en 8 GB (SMaLL-100), OFF en 16 GB (MADLAD).
+  const lsRapido = localStorage.getItem(LS_MODO_RAPIDO);
+  const modoRapidoAct = lsRapido === "si" ? true
+    : lsRapido === "no" ? false
+    : await modoRapidoPorDefecto();
+  if (toggleRapido) toggleRapido.checked = modoRapidoAct;
+  invoke("set_modo_rapido", { activado: modoRapidoAct }).catch(() => {});
   const savedBuzonG = localStorage.getItem("babel-buzon-activo-g");
   if (savedBuzonG && savedBuzonG !== "todos") {
     const nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados");
@@ -3199,6 +3297,7 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).intentarAcceso = intentarAcceso;
 (window as any).manejarSeleccion = manejarSeleccion;
 (window as any).toggleBorrarOriginal = toggleBorrarOriginal;
+(window as any).toggleModoRapido = toggleModoRapido;
 (window as any).toggleBorradoAutomatico = toggleBorradoAutomatico;
 (window as any).cambiarIdiomaDesdeSelectores = cambiarIdiomaDesdeSelectores;
 (window as any).cambiarIdiomaDesdeAjustes = cambiarIdiomaDesdeAjustes;
@@ -3349,8 +3448,7 @@ function cambiarIdiomaUI(idioma: string): void {
     "ui-proximamente": t.proximamente, "ui-diccionario": t.diccionario,
     "ui-vocabulario-activo": t.vocabularioActivo, "ui-volver-archivos": t.volver,
     "btn-ver-sel-g": t.verArchivo, "btn-compartir-sel-g": t.compartir, "btn-eliminar-sel-g": t.eliminar,
-    "ui-exportar-todo": t.exportarTodo,
-    "ui-importar": t.importar, "ui-tema": t.tema,
+    "ui-exportar-todo": t.exportarTodo, "ui-importar": t.importar, "ui-tema": t.tema,
     "ui-idioma-interfaz": t.idiomaInterfaz, "ui-bienvenido-sistema": t.bienvenidoSistema,
     "ui-acceder-bunker": t.accederBunker, "ui-autenticacion-requerida": t.autenticacion,
     "ui-ajustes-titulo": t.ajustesTitulo, "ui-volver-panel": t.volverPanel,

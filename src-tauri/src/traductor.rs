@@ -8,6 +8,15 @@ use tesseract::Tesseract;
 // lo comprueban entre párrafos/trozos y abortan devolviendo Err("cancelada").
 pub static CANCELAR_TRADUCCION: AtomicBool = AtomicBool::new(false);
 
+// Modo rápido: si está activo, la app pide beam=1 al servidor (más rápido, algo menos
+// de calidad). Por defecto false = calidad (beam por defecto del modelo). Lo activa el
+// toggle del sidebar vía el comando `set_modo_rapido`.
+pub static MODO_RAPIDO: AtomicBool = AtomicBool::new(true);
+
+pub fn set_modo_rapido(v: bool) {
+    MODO_RAPIDO.store(v, Ordering::Relaxed);
+}
+
 pub fn cancelar_traduccion() {
     CANCELAR_TRADUCCION.store(true, Ordering::Relaxed);
 }
@@ -315,6 +324,67 @@ pub fn procesar_archivo_inteligente(
         log::warn!("Detectado documento Word. Iniciando Preservador...");
         clonar_y_traducir(ruta_limpia, dict, subclave_hex, id_usuario, par, progreso)
             .map_err(|e| format!("Error en Word: {}", e))?;
+
+        // DOCX traducido → PDF con LibreOffice (layout fijo, sin reflujo de párrafos).
+        // Si LibreOffice no está o falla, el babel DOCX queda intacto como fallback.
+        let nombre = std::path::Path::new(ruta_limpia)
+            .file_stem().unwrap_or_default().to_string_lossy();
+        let archivos_dir = crate::babel_dir().join("archivos");
+        let tmp_dir = crate::babel_dir().join("tmp");
+        let _ = fs::create_dir_all(&tmp_dir);
+        let salida = archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre));
+        progreso(96, "GENERANDO PDF...");
+        let soffice = [
+            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            "/opt/homebrew/bin/soffice",
+            "/usr/local/bin/soffice",
+            "soffice",
+        ].iter().copied()
+         .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
+         .unwrap_or("soffice");
+        if let Ok(cifrado_bytes) = fs::read(&salida) {
+            if let Ok(b64_docx) = seguridad::descifrar_documento(cifrado_bytes, subclave_hex) {
+                if let Ok(docx_bytes) = descomprimir_b64(&b64_docx) {
+                    let docx_tmp = tmp_dir.join(format!("{}_docx_pdf.docx", nombre));
+                    if fs::write(&docx_tmp, &docx_bytes).is_ok() {
+                        let mut child = std::process::Command::new(soffice)
+                            .args(["--headless", "--convert-to", "pdf",
+                                   "--outdir", &tmp_dir.to_string_lossy(),
+                                   &docx_tmp.to_string_lossy()])
+                            .spawn().ok();
+                        let lo_ok = match child.as_mut() {
+                            None => false,
+                            Some(c) => {
+                                let deadline = std::time::Instant::now()
+                                    + std::time::Duration::from_secs(180);
+                                loop {
+                                    match c.try_wait() {
+                                        Ok(Some(s)) => break s.success(),
+                                        Ok(None) if std::time::Instant::now() < deadline => {
+                                            std::thread::sleep(std::time::Duration::from_millis(300));
+                                        }
+                                        _ => { let _ = c.kill(); break false; }
+                                    }
+                                }
+                            }
+                        };
+                        borrar_seguro_local(&docx_tmp.to_string_lossy());
+                        if lo_ok {
+                            let pdf_out = tmp_dir.join(format!("{}_docx_pdf.pdf", nombre));
+                            if let Ok(pdf_bytes) = fs::read(&pdf_out) {
+                                borrar_seguro_local(&pdf_out.to_string_lossy());
+                                let b64_pdf = comprimir_b64(&pdf_bytes);
+                                if let Ok(cifrado_pdf) =
+                                    seguridad::blindar_documento(&b64_pdf, subclave_hex)
+                                {
+                                    let _ = fs::write(&salida, cifrado_pdf);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     } else if ruta_limpia.ends_with(".pdf") {
         log::warn!("Detectado archivo PDF. Iniciando Extractor...");
         procesar_pdf(ruta_limpia, dict, subclave_hex, id_usuario, par, progreso)
@@ -341,7 +411,6 @@ pub fn procesar_archivo_inteligente(
         let total_p = parrafos.iter().filter(|p| !p.trim().is_empty()).count().max(1);
         let mut traducidos_p = 0usize;
         let mut traducido_final = String::new();
-        let mut ultimo_trad = String::new();
         for parrafo in &parrafos {
             if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
                 return Err("Traducción cancelada.".into());
@@ -353,9 +422,7 @@ pub fn procesar_archivo_inteligente(
             let pct = (10 + traducidos_p * 80 / total_p).min(90) as u8;
             progreso(pct, &format!("TRADUCIENDO... {}%", pct));
             traducidos_p += 1;
-            let ctx_prev = if ultimo_trad.is_empty() { None } else { Some(ultimo_trad.clone()) };
-            let traducido = traducir_texto_largo(parrafo, par, ctx_prev.as_deref(), dict, subclave_hex, false);
-            ultimo_trad = traducido.clone();
+            let traducido = traducir_texto_largo(parrafo, par, dict, subclave_hex);
             traducido_final.push_str(&traducido);
             traducido_final.push('\n');
         }
@@ -453,7 +520,7 @@ fn traducir_xml_at(
         let trad = if dec.trim().is_empty() || dec.trim().parse::<f64>().is_ok() {
             dec
         } else {
-            match traducir_con_marian(dec.trim(), par, None, false) {
+            match traducir_via_servidor(dec.trim(), par) {
                 Ok(t) => t,
                 Err(_) => {
                     let (fallback, _) = motor_atomico(dec.trim(), dict, subclave_hex);
@@ -528,15 +595,11 @@ fn traducir_xml_batch(
         .collect();
 
     let total = traducibles.len().max(1);
-    let rango = pct_fin as usize - pct_inicio as usize;
-    let pct_marian = (pct_inicio as usize + rango * 60 / 100) as u8;
-    let pct_qwen   = pct_fin.saturating_sub(2);
+    let pct_marian = pct_fin.saturating_sub(2);
     let mut hechos = 0usize;
-    let mut para_qwen: Vec<usize> = Vec::new();
-    let es_usb = servidor_usa_usb();
 
-    const BATCH: usize = 50;
-    for lote in traducibles.chunks(BATCH) {
+    let batch = batch_por_tier();
+    for lote in traducibles.chunks(batch) {
         if CANCELAR_TRADUCCION.load(Ordering::Relaxed) { break; }
         let pct = (pct_inicio as usize
             + hechos * (pct_marian as usize).saturating_sub(pct_inicio as usize) / total)
@@ -549,55 +612,34 @@ fn traducir_xml_batch(
 
         for &bi in lote {
             let t = bloques[bi].texto.as_str();
-            if t.len() <= 1800 { batch_idxs.push(bi); batch_txts.push(t); }
+            // 1400 chars ≈ 400 tokens — margen seguro bajo el límite de 512 del tokenizador
+            if t.len() <= 1400 { batch_idxs.push(bi); batch_txts.push(t); }
             else { largos.push(bi); }
         }
 
         if !batch_txts.is_empty() {
-            match traducir_batch_con_marian(&batch_txts, par) {
+            match traducir_batch_via_servidor(&batch_txts, par) {
                 Ok(trs) if trs.len() == batch_txts.len() => {
                     for (&bi, t) in batch_idxs.iter().zip(trs) { traducciones[bi] = t; }
                 }
                 _ => {
                     for (&bi, &txt) in batch_idxs.iter().zip(batch_txts.iter()) {
-                        traducciones[bi] = traducir_texto_largo(txt, par, None, dict, subclave_hex, true);
+                        traducciones[bi] = traducir_texto_largo(txt, par, dict, subclave_hex);
                     }
                 }
             }
         }
         for bi in largos {
-            traducciones[bi] = traducir_texto_largo(&bloques[bi].texto, par, None, dict, subclave_hex, true);
+            traducciones[bi] = traducir_texto_largo(&bloques[bi].texto, par, dict, subclave_hex);
         }
 
-        // Marcar candidatos Qwen
-        for &bi in lote {
-            let orig = &bloques[bi].texto;
-            let n = orig.split_whitespace().count();
-            if n >= 25 && necesita_revision_qwen(orig, &traducciones[bi], n, par, es_usb) {
-                para_qwen.push(bi);
-            }
-        }
         hechos += lote.len();
+        let pct_post = (pct_inicio as usize
+            + hechos * (pct_marian as usize).saturating_sub(pct_inicio as usize) / total)
+            .min(pct_marian as usize) as u8;
+        progreso(pct_post, &format!("TRADUCIENDO... {}%", pct_post));
     }
-    progreso(pct_marian, &format!("REVISANDO CALIDAD... {}%", pct_marian));
-
-    // Fase 3: Qwen selectivo
-    let total_rev = para_qwen.len().max(1);
-    for (i, &bi) in para_qwen.iter().enumerate() {
-        if CANCELAR_TRADUCCION.load(Ordering::Relaxed) { break; }
-        let pct = (pct_marian as usize
-            + i * (pct_qwen - pct_marian) as usize / total_rev)
-            .min(pct_qwen as usize) as u8;
-        progreso(pct, &format!("REVISANDO CALIDAD... {}%", pct));
-        let base = traducciones[bi].clone();
-        if !base.is_empty() {
-            if let Ok(rev) = revisar_con_qwen(&bloques[bi].texto, &base, par) {
-                traducciones[bi] = rev;
-            }
-        }
-    }
-
-    // Fase 4: reconstruir XML
+    // Fase 3: reconstruir XML
     let mut resultado = String::with_capacity(xml.len() + 512);
     let mut cursor = 0usize;
     for (i, bloque) in bloques.iter().enumerate() {
@@ -660,14 +702,12 @@ fn partir_en_oraciones(texto: &str) -> Vec<String> {
 fn traducir_texto_largo(
     texto: &str,
     par: &str,
-    contexto: Option<&str>,
     dict: &HashMap<String, String>,
     subclave_hex: &str,
-    sin_revision: bool,
 ) -> String {
     const MAX_CHARS: usize = 1800;
     if texto.len() <= MAX_CHARS {
-        return match traducir_con_marian(texto, par, contexto, sin_revision) {
+        return match traducir_via_servidor(texto, par) {
             Ok(t) => t,
             Err(_) => motor_atomico(texto, dict, subclave_hex).0,
         };
@@ -689,16 +729,14 @@ fn traducir_texto_largo(
     if !trozo.is_empty() { trozos.push(trozo); }
 
     let mut resultado_partes: Vec<String> = Vec::with_capacity(trozos.len());
-    let mut ctx_local: Option<String> = contexto.map(|s| s.to_string());
     for trozo in &trozos {
         if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
             return "[[CANCELADA]]".to_string();
         }
-        let t = match traducir_con_marian(trozo, par, ctx_local.as_deref(), sin_revision) {
+        let t = match traducir_via_servidor(trozo, par) {
             Ok(t) => t,
             Err(_) => motor_atomico(trozo, dict, subclave_hex).0,
         };
-        ctx_local = Some(t.clone());
         resultado_partes.push(t);
     }
     resultado_partes.join(" ")
@@ -830,12 +868,17 @@ fn reconstruir_parrafo(parrafo: &str, traduccion: &str) -> String {
                 .replace("&amp;", "&").replace("&lt;", "<")
                 .replace("&gt;", ">").replace("&apos;", "'").replace("&quot;", "\"");
             if !dec.trim().is_empty() {
-                orig_lens.push(dec.trim().len());
+                // Runs sin letras (": ", ".", " ") → peso 0: no compiten por palabras.
+                // La puntuación llega embebida en la traducción de los runs alfa adyacentes.
+                let len = if dec.chars().any(|c| c.is_alphabetic()) { dec.trim().len() } else { 0 };
+                orig_lens.push(len);
             }
             scan = &tras[k + 6..];
         }
     }
 
+    // Si ningún run tiene letras (separadores, líneas de guiones…) → comportamiento original
+    let any_alpha = orig_lens.iter().any(|&l| l > 0);
     let trad_parts = distribuir_por_runs(traduccion, &orig_lens);
     let mut run_idx = 0usize;
 
@@ -873,15 +916,23 @@ fn reconstruir_parrafo(parrafo: &str, traduccion: &str) -> String {
         if !dec.trim().is_empty() {
             let chunk = if run_idx < trad_parts.len() { &trad_parts[run_idx] } else { "" };
             run_idx += 1;
-            let esc = chunk.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-            // Preservar espacios si el chunk limita con espacio o el tag ya usaba preserve
-            if chunk.starts_with(' ') || chunk.ends_with(' ') || tag.contains("preserve") {
-                resultado.push_str("<w:t xml:space=\"preserve\">");
+            let es_alfa = dec.chars().any(|c| c.is_alphabetic());
+            if !any_alpha || es_alfa {
+                // Run con letras (o párrafo 100% puntuación): usar chunk de traducción
+                let esc = chunk.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+                if chunk.starts_with(' ') || chunk.ends_with(' ') || tag.contains("preserve") {
+                    resultado.push_str("<w:t xml:space=\"preserve\">");
+                } else {
+                    resultado.push_str("<w:t>");
+                }
+                resultado.push_str(&esc);
+                resultado.push_str("</w:t>");
             } else {
-                resultado.push_str("<w:t>");
+                // Run de puntuación en párrafo con contenido alfa: vaciar.
+                // La puntuación queda embebida en el chunk del run alfa adyacente.
+                resultado.push_str(tag);
+                resultado.push_str("</w:t>");
             }
-            resultado.push_str(&esc);
-            resultado.push_str("</w:t>");
         } else {
             // Runs vacíos/espacios: conservar tal cual (pueden ser separadores tipográficos)
             resultado.push_str(tag);
@@ -1092,60 +1143,6 @@ fn encontrar_script_servidor(python3: &str, nombre_script: &str) -> Option<Strin
     None
 }
 
-fn limpiar_bloques_con_qwen(texto: &str, subclave_hex: &str) -> String {
-    // Lotes de 100 líneas: ~2-3 llamadas Qwen × ~40s = 80-120s por lote,
-    // dentro del timeout de 180s. Lotes más grandes agotarían el timeout.
-    const LOTE: usize = 100;
-    // Timeout generoso — Qwen en CPU puede tardar ~40s por llamada interna.
-    let agente_pdf = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(5))
-        .timeout(std::time::Duration::from_secs(180))
-        .build();
-    let _ = subclave_hex;
-
-    let bloques: Vec<String> = texto
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| l.to_string())
-        .collect();
-    if bloques.is_empty() {
-        return texto.to_string();
-    }
-
-    let token = token_efectivo();
-    let mut resultado: Vec<String> = Vec::with_capacity(bloques.len());
-
-    for lote in bloques.chunks(LOTE) {
-        let body = serde_json::json!({
-            "bloques": lote.iter().map(|s| serde_json::Value::String(s.clone())).collect::<Vec<_>>()
-        });
-        let resp = agente_pdf
-            .post("http://127.0.0.1:5002/limpiar_pdf")
-            .set("X-Babel-Token", &token)
-            .set("Content-Type", "application/json")
-            .send_string(&body.to_string());
-        match resp {
-            Ok(r) if r.status() == 200 => {
-                if let Ok(json) = r.into_json::<serde_json::Value>() {
-                    if let Some(arr) = json["bloques"].as_array() {
-                        let limpios: Vec<String> = arr
-                            .iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect();
-                        if !limpios.is_empty() {
-                            resultado.extend(limpios);
-                            continue;
-                        }
-                    }
-                }
-                resultado.extend(lote.iter().cloned());
-            }
-            _ => resultado.extend(lote.iter().cloned()),
-        }
-    }
-
-    if resultado.is_empty() { texto.to_string() } else { resultado.join("\n") }
-}
 
 /// Une líneas partidas a mitad de frase en texto extraído de PDF.
 /// Heurísticas:
@@ -1404,8 +1401,13 @@ fn unir_lineas_partidas(texto: &str) -> String {
         let sig = lineas.get(i + 1).map(|s| s.trim()).unwrap_or("");
         let trim_acum = acum.trim_end();
 
-        // Guión silábico al final: quitar guión, continuar sin espacio
-        if trim_acum.ends_with('-') && trim_acum.len() > 1 && !sig.is_empty() {
+        // Guión silábico al final: quitar guión, continuar sin espacio.
+        // Excluir líneas que son SOLO guiones (separadores de página: ---, -----, etc.)
+        if trim_acum.ends_with('-')
+            && trim_acum.len() > 1
+            && !sig.is_empty()
+            && !trim_acum.chars().all(|c| c == '-')
+        {
             let new_len = trim_acum.len() - 1;
             acum.truncate(new_len);
             continue;
@@ -1489,11 +1491,16 @@ pub fn procesar_pdf(
             Some(c) => {
                 let deadline = std::time::Instant::now()
                     + std::time::Duration::from_secs(120);
+                let inicio = std::time::Instant::now();
                 loop {
                     match c.try_wait() {
                         Ok(Some(s)) => break s.success(),
                         Ok(None) if std::time::Instant::now() < deadline => {
                             std::thread::sleep(std::time::Duration::from_millis(500));
+                            // Avanzar de 5% a 14% durante la conversión (cada ~3s = 1%)
+                            let elapsed = inicio.elapsed().as_secs();
+                            let pct = (5 + (elapsed / 3).min(9)) as u8;
+                            progreso(pct, "CONVIRTIENDO PDF...");
                         }
                         _ => {
                             let _ = c.kill();
@@ -1503,6 +1510,73 @@ pub fn procesar_pdf(
                 }
             }
         }
+    };
+
+    // PASO 1b: si pdf2docx falló, intentar con LibreOffice antes de caer a texto plano.
+    // LibreOffice preserva tablas, columnas e índices mejor que cualquier extractor de texto.
+    let ok = if !ok {
+        progreso(6, "CONVIRTIENDO PDF (LibreOffice)...");
+        let soffice = [
+            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            "/opt/homebrew/bin/soffice",
+            "/usr/local/bin/soffice",
+            "soffice",
+        ]
+        .iter()
+        .copied()
+        .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
+        .unwrap_or("soffice");
+
+        let lo_ok = {
+            let mut child = std::process::Command::new(soffice)
+                .args([
+                    "--headless",
+                    "--convert-to", "docx",
+                    "--outdir", &tmp_dir.to_string_lossy(),
+                    ruta,
+                ])
+                .spawn()
+                .ok();
+            match child.as_mut() {
+                None => false,
+                Some(c) => {
+                    let deadline = std::time::Instant::now()
+                        + std::time::Duration::from_secs(180);
+                    let inicio = std::time::Instant::now();
+                    loop {
+                        match c.try_wait() {
+                            Ok(Some(s)) => break s.success(),
+                            Ok(None) if std::time::Instant::now() < deadline => {
+                                std::thread::sleep(std::time::Duration::from_millis(500));
+                                let elapsed = inicio.elapsed().as_secs();
+                                let pct = (6 + (elapsed / 4).min(8)) as u8;
+                                progreso(pct, "CONVIRTIENDO PDF (LibreOffice)...");
+                            }
+                            _ => { let _ = c.kill(); break false; }
+                        }
+                    }
+                }
+            }
+        };
+
+        if lo_ok {
+            // LibreOffice genera el DOCX con el mismo nombre del PDF de entrada en tmp_dir
+            let pdf_stem = std::path::Path::new(ruta)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy();
+            let lo_docx = tmp_dir.join(format!("{}.docx", pdf_stem));
+            if lo_docx.exists() {
+                let _ = fs::rename(&lo_docx, &ruta_docx_tmp);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        true
     };
 
     if !ok {
@@ -1559,8 +1633,7 @@ pub fn procesar_pdf(
                 .unwrap_or_default();
 
             if texto_pdftotext.split_whitespace().count() > 20 {
-                progreso(12, "ESTRUCTURANDO TEXTO...");
-                break 'extraccion limpiar_bloques_con_qwen(&texto_pdftotext, subclave_hex);
+                break 'extraccion texto_pdftotext;
             }
 
             // PASO 5: Tesseract OCR — último recurso para PDFs completamente escaneados
@@ -1574,7 +1647,7 @@ pub fn procesar_pdf(
                 ocr_total.push_str(&pag_text);
                 ocr_total.push('\n');
             }
-            limpiar_bloques_con_qwen(&ocr_total, subclave_hex)
+            ocr_total
         };
 
         // Bucle de traducción por lotes (batch HTTP) para máxima velocidad
@@ -1597,11 +1670,19 @@ pub fn procesar_pdf(
             // Líneas solo estructurales (guiones, pipes, iguales) sin texto alfabético
             let solo_estructura = !trim.chars().any(|c| c.is_alphabetic())
                 && trim.chars().any(|c| c == '-' || c == '=' || c == '|' || c == '_');
+            // Cabeceras/pies correntes del PDF: "Página Uno", "Page 1", "1 de 50", etc.
+            // Son artefactos de extracción — cortan el flujo del texto y no deben traducirse.
+            let trim_low = trim.to_lowercase();
+            let es_cabecera_pagina = trim.len() < 50 && (
+                (trim_low.starts_with("página ") || trim_low.starts_with("page ") || trim_low.starts_with("pág. ") || trim_low.starts_with("pag. "))
+                    && trim.split_whitespace().count() <= 3
+            );
             let es_artefacto = trim.len() < 2
                 || trim.parse::<u64>().is_ok()
                 || (trim.starts_with("http") && !trim.contains(' '))
                 || (trim.starts_with("www.") && !trim.contains(' '))
-                || solo_estructura;
+                || solo_estructura
+                || es_cabecera_pagina;
             if es_artefacto {
                 salida.push(format!("{}\n", parrafo));
                 continue;
@@ -1618,12 +1699,12 @@ pub fn procesar_pdf(
             salida.push(String::new()); // marcador de posición
         }
 
-        // Segunda pasada: traducir en lotes de 50 con un solo HTTP request por lote
-        const BATCH_PDF: usize = 50;
+        // Segunda pasada: traducir en lotes (tamaño según tier de RAM) con un HTTP request por lote
+        let batch_pdf = batch_por_tier();
         let total_trad = pendientes.len().max(1);
         let mut hechos = 0usize;
 
-        for lote in pendientes.chunks(BATCH_PDF) {
+        for lote in pendientes.chunks(batch_pdf) {
             if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
                 return Err("Traducción cancelada.".into());
             }
@@ -1639,7 +1720,7 @@ pub fn procesar_pdf(
             let mut largos: Vec<(usize, &str)> = Vec::new();
 
             for (out_idx, texto) in lote {
-                if texto.len() <= 1800 {
+                if texto.len() <= 1400 {
                     batch_ids.push(*out_idx);
                     batch_txts.push(texto.as_str());
                 } else {
@@ -1648,7 +1729,7 @@ pub fn procesar_pdf(
             }
 
             if !batch_txts.is_empty() {
-                match traducir_batch_con_marian(&batch_txts, par) {
+                match traducir_batch_via_servidor(&batch_txts, par) {
                     Ok(traducciones) if traducciones.len() == batch_txts.len() => {
                         for (out_idx, t) in batch_ids.iter().zip(traducciones) {
                             salida[*out_idx] = format!("{}\n", t);
@@ -1656,52 +1737,19 @@ pub fn procesar_pdf(
                     }
                     _ => {
                         for (out_idx, texto) in batch_ids.iter().zip(&batch_txts) {
-                            let t = traducir_texto_largo(texto, par, None, dict, subclave_hex, true);
+                            let t = traducir_texto_largo(texto, par, dict, subclave_hex);
                             salida[*out_idx] = format!("{}\n", t);
                         }
                     }
                 }
             }
             for (out_idx, texto) in largos {
-                let t = traducir_texto_largo(texto, par, None, dict, subclave_hex, true);
+                let t = traducir_texto_largo(texto, par, dict, subclave_hex);
                 salida[out_idx] = format!("{}\n", t);
             }
 
             hechos += lote.len();
             progreso(pct_fin, &format!("TRADUCIENDO... {}%", pct_fin));
-        }
-
-        // Fase 2: revisión Qwen selectiva.
-        // Para pares tc-big directos (25-44 palabras): solo si el ratio output/input es anómalo.
-        // Para pares de cadena o párrafos ≥45 palabras: siempre.
-        // Usa el resultado de MarianMT ya en salida[] — no relanza MarianMT.
-        let es_usb = servidor_usa_usb();
-        let para_revisar: Vec<(usize, &str)> = pendientes
-            .iter()
-            .filter(|(idx, t)| {
-                let n = t.split_whitespace().count();
-                if n < 25 {
-                    return false;
-                }
-                let trad = salida[*idx].trim_end_matches('\n');
-                necesita_revision_qwen(t, trad, n, par, es_usb)
-            })
-            .map(|(idx, t)| (*idx, t.as_str()))
-            .collect();
-
-        let total_rev = para_revisar.len().max(1);
-        for (i, (out_idx, texto)) in para_revisar.iter().enumerate() {
-            if CANCELAR_TRADUCCION.load(Ordering::Relaxed) {
-                break;
-            }
-            let pct = (70 + i * 20 / total_rev).min(90) as u8;
-            progreso(pct, &format!("REVISANDO CALIDAD... {}%", pct));
-            let traduccion_base = salida[*out_idx].trim_end_matches('\n').to_string();
-            if !traduccion_base.is_empty() {
-                if let Ok(revisada) = revisar_con_qwen(texto, &traduccion_base, par) {
-                    salida[*out_idx] = format!("{}\n", revisada);
-                }
-            }
         }
 
         // Restaurar prefijos Markdown separados antes de traducir
@@ -1717,8 +1765,70 @@ pub fn procesar_pdf(
         let traducido: String = salida.concat();
         progreso(91, "GENERANDO PDF...");
 
-        // Markdown traducido → PDF vía reportlab (md_to_pdf.py)
+        let soffice_bin = [
+            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            "/opt/homebrew/bin/soffice",
+            "/usr/local/bin/soffice",
+            "soffice",
+        ]
+        .iter().copied()
+        .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
+        .unwrap_or("soffice");
+
+        // Intento 1: LibreOffice HTML→PDF (layout y tipografía profesionales)
         let guardado_como_pdf = 'conv: {
+            let html_content = format!(
+                "<!DOCTYPE html><html><head><meta charset='utf-8'>\
+                 <style>@page{{margin:2.5cm 2cm}}body{{font-family:Georgia,serif;\
+                 font-size:11pt;line-height:1.6;color:#111}}h1{{font-size:18pt;\
+                 margin-top:1em}}h2{{font-size:14pt}}h3{{font-size:12pt}}\
+                 p{{margin:.4em 0 .8em}}table{{border-collapse:collapse;width:100%;\
+                 margin:1em 0}}td,th{{border:1px solid #aaa;padding:4px 8px}}\
+                 th{{background:#eee}}pre{{background:#f4f4f4;padding:8px;\
+                 font-size:9pt}}</style></head><body>{}</body></html>",
+                markdown_a_html(&traducido)
+            );
+            let html_tmp = tmp_dir.join(format!("{}_fallback.html", nombre));
+            let pdf_lo  = tmp_dir.join(format!("{}_fallback.pdf", nombre));
+            if fs::write(&html_tmp, html_content.as_bytes()).is_ok() {
+                let mut child = std::process::Command::new(soffice_bin)
+                    .args(["--headless", "--convert-to", "pdf",
+                           "--outdir", &tmp_dir.to_string_lossy(),
+                           &html_tmp.to_string_lossy()])
+                    .spawn().ok();
+                let lo_ok = match child.as_mut() {
+                    None => false,
+                    Some(c) => {
+                        let deadline = std::time::Instant::now()
+                            + std::time::Duration::from_secs(120);
+                        loop {
+                            match c.try_wait() {
+                                Ok(Some(s)) => break s.success(),
+                                Ok(None) if std::time::Instant::now() < deadline => {
+                                    std::thread::sleep(std::time::Duration::from_millis(300));
+                                }
+                                _ => { let _ = c.kill(); break false; }
+                            }
+                        }
+                    }
+                };
+                borrar_seguro_local(&html_tmp.to_string_lossy());
+                if lo_ok {
+                    if let Ok(pdf_bytes) = fs::read(&pdf_lo) {
+                        borrar_seguro_local(&pdf_lo.to_string_lossy());
+                        let b64 = comprimir_b64(&pdf_bytes);
+                        if let Ok(cifrado) = seguridad::blindar_documento(&b64, subclave_hex) {
+                            let _ = fs::write(
+                                archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre)),
+                                cifrado,
+                            );
+                            break 'conv true;
+                        }
+                    }
+                }
+            }
+
+            // Intento 2: reportlab (md_to_pdf.py) — fallback si LibreOffice no está
             let Some(script) = encontrar_script_servidor(python3, "md_to_pdf.py") else {
                 break 'conv false;
             };
@@ -1726,14 +1836,8 @@ pub fn procesar_pdf(
             if fs::write(&md_tmp, traducido.as_bytes()).is_err() { break 'conv false; }
             let pdf_out = tmp_dir.join(format!("{}_fallback.pdf", nombre));
             let ok = std::process::Command::new(python3)
-                .args([
-                    script.as_str(),
-                    &md_tmp.to_string_lossy(),
-                    &pdf_out.to_string_lossy(),
-                ])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
+                .args([script.as_str(), &md_tmp.to_string_lossy(), &pdf_out.to_string_lossy()])
+                .status().map(|s| s.success()).unwrap_or(false);
             borrar_seguro_local(&md_tmp.to_string_lossy());
             if !ok { break 'conv false; }
             let pdf_bytes = match fs::read(&pdf_out) {
@@ -1791,6 +1895,62 @@ pub fn procesar_pdf(
             archivos_dir.join(format!("{}_{}_{}__orig.babel", id_usuario, par, nombre));
         if orig_tmp.exists() {
             let _ = fs::rename(&orig_tmp, &orig_final);
+        }
+
+        // PASO 3: DOCX traducido → PDF con LibreOffice (PDF entra, PDF sale con layout real)
+        // Descifrar el DOCX babel, convertir a PDF, reemplazar el babel con el PDF.
+        // Si LibreOffice falla, el DOCX babel queda intacto como fallback.
+        progreso(95, "GENERANDO PDF...");
+        let soffice_pdf = [
+            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            "/opt/homebrew/bin/soffice",
+            "/usr/local/bin/soffice",
+            "soffice",
+        ]
+        .iter().copied()
+        .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
+        .unwrap_or("soffice");
+
+        if let Ok(cifrado_bytes) = fs::read(&salida_final) {
+            if let Ok(b64_docx) = seguridad::descifrar_documento(cifrado_bytes, subclave_hex) {
+                if let Ok(docx_bytes) = descomprimir_b64(&b64_docx) {
+                    let docx_conv = tmp_dir.join(format!("{}_conv.docx", nombre));
+                    if fs::write(&docx_conv, &docx_bytes).is_ok() {
+                        let mut child = std::process::Command::new(soffice_pdf)
+                            .args(["--headless", "--convert-to", "pdf",
+                                   "--outdir", &tmp_dir.to_string_lossy(),
+                                   &docx_conv.to_string_lossy()])
+                            .spawn().ok();
+                        let lo_ok = match child.as_mut() {
+                            None => false,
+                            Some(c) => {
+                                let deadline = std::time::Instant::now()
+                                    + std::time::Duration::from_secs(180);
+                                loop {
+                                    match c.try_wait() {
+                                        Ok(Some(s)) => break s.success(),
+                                        Ok(None) if std::time::Instant::now() < deadline => {
+                                            std::thread::sleep(std::time::Duration::from_millis(300));
+                                        }
+                                        _ => { let _ = c.kill(); break false; }
+                                    }
+                                }
+                            }
+                        };
+                        borrar_seguro_local(&docx_conv.to_string_lossy());
+                        if lo_ok {
+                            let pdf_out = tmp_dir.join(format!("{}_conv.pdf", nombre));
+                            if let Ok(pdf_bytes) = fs::read(&pdf_out) {
+                                borrar_seguro_local(&pdf_out.to_string_lossy());
+                                let b64_pdf = comprimir_b64(&pdf_bytes);
+                                if let Ok(cifrado_pdf) = seguridad::blindar_documento(&b64_pdf, subclave_hex) {
+                                    let _ = fs::write(&salida_final, cifrado_pdf);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -2459,13 +2619,36 @@ fn agente_http() -> &'static ureq::Agent {
     })
 }
 
+// Tamaño de lote de traducción según el tier de RAM de la máquina.
+// El servidor elige el modelo por la RAM total (SMaLL-100 en <12 GB, MADLAD-3B en ≥12 GB);
+// reutilizamos esa decisión como proxy del tier. SMaLL-100 (~0.6 GB, decoder de 3 capas)
+// tiene una huella de memoria de activación mucho menor que el viejo M2M-100 (~2 GB), así
+// que en el tier ligero cabe un lote bastante mayor sin disparar el swap; aun así lo
+// mantenemos por debajo del de MADLAD por prudencia en máquinas de 8 GB muy cargadas.
+// Se consulta /ping una sola vez y se cachea. Ante cualquier error → valor conservador.
+static BATCH_TIER: OnceLock<usize> = OnceLock::new();
+
+fn batch_por_tier() -> usize {
+    *BATCH_TIER.get_or_init(|| {
+        let modelo = agente_http()
+            .get("http://127.0.0.1:5002/ping")
+            .set("X-Babel-Token", &token_efectivo())
+            .call()
+            .ok()
+            .and_then(|r| r.into_json::<serde_json::Value>().ok())
+            .and_then(|j| j["modelo"].as_str().map(|s| s.to_string()))
+            .unwrap_or_default();
+        if modelo.contains("madlad") { 150 } else { 80 }
+    })
+}
+
 static UREQ_AGENTE_BATCH: OnceLock<ureq::Agent> = OnceLock::new();
 
 fn agente_http_batch() -> &'static ureq::Agent {
     UREQ_AGENTE_BATCH.get_or_init(|| {
         ureq::AgentBuilder::new()
             .timeout_connect(std::time::Duration::from_secs(5))
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(600))
             .build()
     })
 }
@@ -2497,78 +2680,15 @@ fn ocr_via_servidor(ruta_pdf: &str) -> Option<String> {
     json["texto"].as_str().map(|s| s.to_string())
 }
 
-/// Consulta /ping para saber si el servidor cargó modelos tc-big USB.
-/// Resultado cacheado: solo una llamada por sesión.
-static ES_SERVIDOR_USB: OnceLock<bool> = OnceLock::new();
-fn servidor_usa_usb() -> bool {
-    *ES_SERVIDOR_USB.get_or_init(|| {
-        agente_http()
-            .get("http://127.0.0.1:5002/ping")
-            .call()
-            .ok()
-            .and_then(|r| r.into_json::<serde_json::Value>().ok())
-            .and_then(|j| j["usb"].as_bool())
-            .unwrap_or(false)
-    })
-}
 
-/// Decide si un párrafo necesita revisión Qwen después del batch MarianMT.
-/// Para pares con modelo tc-big directo (calidad base 8.5/10): solo si ratio anómalo o ≥45 palabras.
-/// Para pares de cadena (calidad base 7.5/10): siempre que tenga ≥25 palabras.
-fn necesita_revision_qwen(original: &str, traduccion: &str, n_orig: usize, par: &str, es_usb: bool) -> bool {
-    // Textos muy largos: Qwen 1.5B no puede revisar sin truncar el output
-    // (max_tokens en revisor.py capado a 400; un texto >280 palabras necesita >360 tokens de output)
-    if n_orig > 280 || original.len() > 1800 {
-        return false;
-    }
-    // Párrafos largos (45-280 palabras): siempre revisar, alta probabilidad de error estructural
-    if n_orig >= 45 {
-        return true;
-    }
-    // El filtro de confianza solo aplica con modelos tc-big USB (8.5/10 base).
-    // Con modelos opus-mt dev (7/10), Qwen mejora más y no conviene saltarlo.
-    if !es_usb {
-        return true;
-    }
-    // Pares con modelo tc-big directo en el USB — calidad base ya buena (8.5/10)
-    const DIRECTOS_TC_BIG: &[&str] = &[
-        "ar-en", "ar-es", "de-es", "en-ar", "en-es", "en-fr", "en-ru",
-        "es-en", "es-ru", "fr-en", "ru-en", "ru-es",
-    ];
-    if !DIRECTOS_TC_BIG.contains(&par) {
-        // Par de cadena: MarianMT acumula error en cada paso → Qwen siempre necesario
-        return true;
-    }
-    // Par directo, 25-44 palabras: revisar solo si el ratio output/input es anómalo.
-    // Un ratio normal (0.60–1.70) indica que MarianMT no truncó ni hallucinó.
-    let n_trad = traduccion.split_whitespace().count();
-    let ratio = n_trad as f64 / n_orig as f64;
-    ratio < 0.60 || ratio > 1.70
-}
-
-fn revisar_con_qwen(original: &str, traduccion: &str, par: &str) -> Result<String, String> {
-    let body = serde_json::json!({ "original": original, "traduccion": traduccion, "par": par });
-    let resp = agente_http()
-        .post("http://127.0.0.1:5002/revisar_solo")
-        .set("Content-Type", "application/json")
-        .set("X-Babel-Token", &token_efectivo())
-        .send_json(&body)
-        .map_err(|e| format!("Revisor no disponible: {}", e))?;
-    let json: serde_json::Value = resp
-        .into_json()
-        .map_err(|e| format!("Revisor respuesta inválida: {}", e))?;
-    json["traduccion"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| "Revisor: campo traduccion ausente".to_string())
-}
-
-fn traducir_batch_con_marian(textos: &[&str], par: &str) -> Result<Vec<String>, String> {
-    let body = serde_json::json!({
+fn traducir_batch_via_servidor(textos: &[&str], par: &str) -> Result<Vec<String>, String> {
+    let mut body = serde_json::json!({
         "textos": textos,
         "par": par,
-        "sin_revision": true,
     });
+    if MODO_RAPIDO.load(Ordering::Relaxed) {
+        body["beam"] = serde_json::json!(1);
+    }
     let resp = agente_http_batch()
         .post("http://127.0.0.1:5002/traducir_batch")
         .set("Content-Type", "application/json")
@@ -2584,21 +2704,18 @@ fn traducir_batch_con_marian(textos: &[&str], par: &str) -> Result<Vec<String>, 
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
 }
 
-/// Llama al servidor Python MarianMT en localhost:5002.
-/// `contexto` es el párrafo anterior traducido: el revisor Qwen lo usa
-/// para corregir concordancia de pronombres y tiempos verbales entre párrafos.
-pub fn traducir_con_marian(texto: &str, par: &str, contexto: Option<&str>, sin_revision: bool) -> Result<String, String> {
+/// Traduce un texto llamando al servidor Python local (127.0.0.1:5002/traducir).
+pub fn traducir_via_servidor(texto: &str, par: &str) -> Result<String, String> {
     const MAX_BYTES: usize = 50_000;
     if texto.len() > MAX_BYTES {
         return Err(format!("Texto demasiado grande ({} bytes, máx {} KB)", texto.len(), MAX_BYTES / 1000));
     }
     let url = "http://127.0.0.1:5002/traducir";
     let token = token_efectivo();
-    let body = match (contexto.filter(|c| !c.is_empty()), sin_revision) {
-        (Some(ctx), true)  => serde_json::json!({ "texto": texto, "par": par, "contexto": ctx, "sin_revision": true }),
-        (Some(ctx), false) => serde_json::json!({ "texto": texto, "par": par, "contexto": ctx }),
-        (None,      true)  => serde_json::json!({ "texto": texto, "par": par, "sin_revision": true }),
-        (None,      false) => serde_json::json!({ "texto": texto, "par": par }),
+    let body = if MODO_RAPIDO.load(Ordering::Relaxed) {
+        serde_json::json!({ "texto": texto, "par": par, "beam": 1 })
+    } else {
+        serde_json::json!({ "texto": texto, "par": par })
     };
 
     let respuesta = agente_http()
@@ -2631,7 +2748,7 @@ pub fn traducir_inteligente(
     subclave_hex: &str,
     par: &str,
 ) -> (String, usize) {
-    match traducir_con_marian(texto, par, None, false) {
+    match traducir_via_servidor(texto, par) {
         Ok(traduccion) => (traduccion, 0),
         Err(_) => motor_atomico(texto, dict, subclave_hex),
     }

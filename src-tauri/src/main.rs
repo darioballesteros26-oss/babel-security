@@ -6,6 +6,7 @@
 mod babel_p2p;
 mod bip39_words;
 mod compartir;
+mod finder;
 mod seguridad;
 mod traductor;
 
@@ -473,20 +474,23 @@ fn cambiar_categoria_diccionario(
 // COMANDO 5 — Traducir documento vía selector de archivo
 
 #[tauri::command]
-fn traducir_documento(
+async fn traducir_documento(
     app: tauri::AppHandle,
     nombre_archivo: String,
     contenido: Vec<u8>,
-    sesion: tauri::State<SesionActiva>,
+    sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
+    // Extraer datos de sesión ANTES de spawn_blocking — State no es Send.
     let subclave_hex = sesion.subclave_hex()?;
-
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa. Inicia sesión primero.".into());
     }
+    let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
+    let dict = sesion.diccionario.lock().map_err(|_| "Error leyendo diccionario.".to_string())?.clone();
+    let idioma_doc = sesion.idioma.lock().map_err(|_| "Error leyendo idioma.".to_string())?.clone();
+    let par_doc = idioma_a_par(&idioma_doc).to_string();
 
-    // Guardamos el temporal en ~/Babel/tmp/ — ruta absoluta, siempre funciona.
-    // Extraemos solo el nombre base para evitar path traversal (../../etc/passwd).
+    // Extraemos solo el nombre base para evitar path traversal.
     let nombre_solo = std::path::Path::new(&nombre_archivo)
         .file_name()
         .and_then(|n| n.to_str())
@@ -506,57 +510,31 @@ fn traducir_documento(
     fs::write(&ruta_temp, &contenido).map_err(|e| format!("Error guardando temporal: {}", e))?;
     drop(Zeroizing::new(contenido));
 
-    // Toda la lógica posterior se envuelve en closure para garantizar que
-    // borrar_seguro se ejecute incluso si un mutex falla (early return).
-    let resultado = (|| -> Result<String, String> {
-        let id_usuario = sesion
-            .usuario
-            .lock()
-            .map_err(|_| "Error".to_string())?
-            .clone();
+    let nombre_base = std::path::Path::new(&nombre_archivo)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&nombre_archivo)
+        .to_string();
+    let nombre_resultado = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
 
-        let nombre_base = std::path::Path::new(&nombre_archivo)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&nombre_archivo);
-
-        // El resultado va a ~/Babel/archivos/ — carpeta visible en Finder
-        let nombre_resultado = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
-
-        let dict = sesion
-            .diccionario
-            .lock()
-            .map_err(|_| "Error leyendo diccionario.".to_string())?
-            .clone();
-
-        let idioma_doc = sesion
-            .idioma
-            .lock()
-            .map_err(|_| "Error leyendo idioma.".to_string())?
-            .clone();
-
-        let par_doc = idioma_a_par(&idioma_doc);
-
+    // spawn_blocking libera el event-loop → los eventos progreso-traduccion
+    // llegan al webview en tiempo real mientras traduce.
+    tauri::async_runtime::spawn_blocking(move || {
+        traductor::resetear_cancelacion();
         let progreso = |pct: u8, msg: &str| {
             let _ = app.emit("progreso-traduccion", serde_json::json!({"pct": pct, "msg": msg}));
         };
-        traductor::procesar_archivo_inteligente(
+        let resultado = traductor::procesar_archivo_inteligente(
             &ruta_temp,
             &dict,
             &subclave_hex,
             &id_usuario,
-            par_doc,
+            &par_doc,
             &progreso,
-        )?;
-
-        Ok(nombre_resultado)
-    })();
-
-    // Borrado seguro: sobreescribe con ceros antes de eliminar.
-    // Se ejecuta siempre, tanto en éxito como en error.
-    borrar_seguro(&ruta_temp);
-
-    resultado
+        ).map(|_| nombre_resultado);
+        borrar_seguro(&ruta_temp);
+        resultado
+    }).await.map_err(|e| e.to_string())?
 }
 // ============================================================
 // COMANDO 5b — Traducir texto plano (chat de traducción)
@@ -801,6 +779,104 @@ fn borrar_archivo_fuente(ruta: String, sesion: tauri::State<SesionActiva>) -> Re
     }
     borrar_seguro(path.to_str().unwrap_or(&ruta));
     Ok(())
+}
+
+// ============================================================
+// FINDER — "Guardar con Babel" desde el clic derecho del Finder (macOS).
+// El Quick Action copia cada archivo a ~/Babel/entrada_finder/ y dispara
+// babel://guardar. Aquí ciframos e importamos reutilizando el núcleo existente
+// (cifrar_y_guardar_desde_ruta) y borramos de forma segura staged + original.
+// Ver módulo finder.rs y finder-extension/README.md.
+// ============================================================
+
+#[derive(serde::Serialize)]
+struct FinderResultado {
+    necesita_login: bool,
+    procesados: usize,
+    nombres: Vec<String>,
+}
+
+// Cifra e importa todo lo pendiente en entrada_finder/. Emite un evento
+// "finder-guardado" por cada archivo. Devuelve cuántos se guardaron correctamente.
+fn procesar_finder_bloqueante(
+    app: &tauri::AppHandle,
+    subclave_hex: &str,
+    id_usuario: &str,
+) -> usize {
+    let dir = finder::entrada_finder_dir();
+    let resultados = finder::procesar_entradas(&dir, |nombre, staged| {
+        cifrar_y_guardar_desde_ruta(nombre, staged, subclave_hex, id_usuario)
+    });
+    for r in &resultados {
+        let _ = app.emit(
+            "finder-guardado",
+            serde_json::json!({ "nombre": r.nombre, "ok": r.ok, "error": r.error }),
+        );
+    }
+    resultados.iter().filter(|r| r.ok).count()
+}
+
+// Comando invocado por el frontend tras el login para drenar la cola de staging.
+// Sin sesión activa devuelve necesita_login=true y no procesa nada.
+#[tauri::command]
+async fn procesar_entrada_finder(
+    app: tauri::AppHandle,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<FinderResultado, String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Ok(FinderResultado {
+            necesita_login: true,
+            procesados: 0,
+            nombres: vec![],
+        });
+    }
+    let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let procesados = procesar_finder_bloqueante(&app, &subclave_hex, &id_usuario);
+        // Recuperar los nombres OK que ya se emitieron requiere re-escanear; para el
+        // frontend basta con el conteo — la lista se refresca por los eventos emitidos.
+        Ok(FinderResultado {
+            necesita_login: false,
+            procesados,
+            nombres: vec![],
+        })
+    })
+    .await
+    .map_err(|e| format!("Error interno finder: {}", e))?
+}
+
+// Handler del URL scheme babel://. Con sesión activa cifra en silencio (fricción cero);
+// sin sesión, muestra la ventana y pide login — la cola se procesa tras autenticar.
+fn manejar_url_babel(app: &tauri::AppHandle, urls: Vec<String>) {
+    let hay_guardar = urls.iter().any(|u| finder::parsear_url_babel(u).is_some());
+    if !hay_guardar {
+        return;
+    }
+    let sesion = app.state::<SesionActiva>();
+    let subclave_hex = sesion
+        .subclave_hex()
+        .unwrap_or_else(|_| Zeroizing::new(String::new()));
+
+    if subclave_hex.is_empty() {
+        // Sin sesión: mostrar la ventana y pedir login. La cola queda en entrada_finder/.
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.show();
+            let _ = win.unminimize();
+            let _ = win.set_focus();
+        }
+        let _ = app.emit("finder-necesita-login", ());
+        return;
+    }
+
+    let id_usuario = sesion.usuario.lock().map(|u| u.clone()).unwrap_or_default();
+    let app2 = app.clone();
+    // Hilo dedicado: el cifrado puede tardar y no debe bloquear el hilo principal.
+    // subclave_hex (Zeroizing) se mueve al hilo y se borra al terminar.
+    std::thread::spawn(move || {
+        procesar_finder_bloqueante(&app2, &subclave_hex, &id_usuario);
+    });
 }
 
 // ============================================================
@@ -1436,6 +1512,11 @@ fn nombre_exportacion(ruta: &str, ext: &str) -> String {
 #[tauri::command]
 fn cancelar_traduccion_activa() {
     traductor::cancelar_traduccion();
+}
+
+#[tauri::command]
+fn set_modo_rapido(activado: bool) {
+    traductor::set_modo_rapido(activado);
 }
 
 #[tauri::command]
@@ -2292,7 +2373,7 @@ fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Strin
 
 // COMANDO 18 — Guardar y cargar ajustes
 
-fn default_timeout() -> u32 { 15 }
+fn default_timeout() -> u32 { 60 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct AppSettings {
@@ -2329,7 +2410,7 @@ fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, Stri
         idioma_origen: "es".to_string(),
         idioma_destino: "en".to_string(),
         categoria: "todos".to_string(),
-        timeout_sesion_minutos: 15,
+        timeout_sesion_minutos: 60,
     };
 
     if let Ok(cifrado) = fs::read(&babel_path("settings.babel")) {
@@ -3274,6 +3355,89 @@ async fn compartir_archivo_nativo(
     Err("Compartición nativa no disponible en esta plataforma. Usa 'Revelar en Finder'.".into())
 }
 
+/// Genera HTML cifrado con contraseña aleatoria y abre el share sheet nativo inmediatamente.
+/// No pide nombre de contacto ni guarda la contraseña en la tabla de contactos.
+/// La contraseña se devuelve al frontend para que la copie al portapapeles.
+#[tauri::command]
+async fn compartir_directo(
+    ruta: String,
+    nombre_original: String,
+    app: tauri::AppHandle,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<(), String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        log::error!("[compartir_directo] No hay sesión activa");
+        return Err("No hay sesión activa.".into());
+    }
+
+    validar_ruta_en(&ruta, archivos_dir())
+        .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))
+        .map_err(|_| {
+            log::error!("[compartir_directo] Ruta fuera de directorios permitidos: {}", ruta);
+            "Ruta fuera de los directorios de Babel.".to_string()
+        })?;
+
+    log::info!("[compartir_directo] Compartiendo: {}", nombre_original);
+
+    // Descifrar .babel → escribir el archivo original en temp → compartir → borrar
+    let bytes = descifrar_a_bytes(&ruta, &subclave_hex)?;
+    let ext = detectar_ext(&bytes);
+    // Sanear nombre: solo el componente final (sin path traversal) y sin extensión duplicada
+    let nombre_base = std::path::Path::new(&nombre_original)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&nombre_original);
+    let nombre_con_ext = if std::path::Path::new(nombre_base)
+        .extension()
+        .map(|e| !e.is_empty())
+        .unwrap_or(false)
+    {
+        nombre_base.to_string()
+    } else {
+        format!("{}.{}", nombre_base, ext)
+    };
+    let ruta_compartir = compartir::compartidos_dir()
+        .join(&nombre_con_ext)
+        .to_string_lossy()
+        .to_string();
+
+    std::fs::write(&ruta_compartir, &bytes)
+        .map_err(|e| format!("Error escribiendo archivo temporal: {}", e))?;
+
+    log::info!("[compartir_directo] Archivo temporal listo: {}", ruta_compartir);
+
+    // Abrir share sheet nativo en el hilo principal
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+        let app_clone = app.clone();
+        let path_clone = ruta_compartir.clone();
+        app.run_on_main_thread(move || {
+            let result = compartir::mostrar_share_picker_macos(&app_clone, &path_clone);
+            match &result {
+                Ok(_) => log::info!("[compartir_directo] Share sheet abierto OK"),
+                Err(e) => log::error!("[compartir_directo] Share sheet falló: {}", e),
+            }
+            let _ = tx.send(result);
+        }).map_err(|e| format!("Error en hilo principal: {}", e))?;
+        rx.await.map_err(|_| "Error de comunicación interna".to_string())??;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = std::fs::remove_file(&ruta_compartir);
+        return Err("Compartición nativa solo disponible en macOS.".into());
+    }
+
+    // Borrar el archivo descifrado temporal tras cerrar el picker
+    borrar_seguro(&ruta_compartir);
+    log::info!("[compartir_directo] Archivo temporal borrado: {}", ruta_compartir);
+
+    Ok(())
+}
+
+
 /// Abre el Finder con el archivo HTML seleccionado, para arrastrar a WhatsApp/Telegram.
 #[tauri::command]
 fn revelar_en_finder(
@@ -3404,10 +3568,37 @@ fn main() {
     }));
 
     let app = tauri::Builder::default()
+        // single_instance debe ir PRIMERO: si Babel ya corre, un segundo lanzamiento
+        // (p. ej. `open babel://…` con la app cerrada y varios archivos) re-enfoca la
+        // instancia viva en vez de abrir otra.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            // FINDER — registrar el handler del URL scheme babel://.
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle_dl = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    let urls: Vec<String> =
+                        event.urls().iter().map(|u| u.to_string()).collect();
+                    manejar_url_babel(&handle_dl, urls);
+                });
+                // En dev (binario sin bundle) el esquema no está en Info.plist. En Linux/
+                // Windows se puede registrar en runtime; en macOS viene del Info.plist del
+                // bundle (ver tauri.conf.json → plugins.deep-link).
+                #[cfg(any(target_os = "linux", target_os = "windows"))]
+                {
+                    let _ = app.deep_link().register("babel");
+                }
+            }
             let exe_dir = std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()));
@@ -3416,7 +3607,7 @@ fn main() {
             // Fallback legacy: python + script en Resources/ (USBs anteriores)
             let legacy_exists = app.path().resource_dir().ok().map(|res| {
                 res.join("python").join("bin").join("python3").exists()
-                    && res.join("servidor").join("marian_server_usb.py").exists()
+                    && res.join("servidor").join("server.py").exists()
             }).unwrap_or(false);
             // Puerto libre = no hay servidor externo arrancado en modo dev
             let puerto_libre = std::net::TcpStream::connect_timeout(
@@ -3441,7 +3632,7 @@ fn main() {
                 } else {
                     let res = app.path().resource_dir().unwrap();
                     let py_bin = res.join("python").join("bin").join("python3");
-                    let servidor = res.join("servidor").join("marian_server_usb.py");
+                    let servidor = res.join("servidor").join("server.py");
                     std::process::Command::new(&py_bin)
                         .arg(&servidor)
                         .env("BABEL_NLLB_TOKEN", &token)
@@ -3518,6 +3709,7 @@ fn main() {
             traducir_archivo_guardado,
             traducir_documento_dialogo,
             cancelar_traduccion_activa,
+            set_modo_rapido,
             seleccionar_ruta_dialogo,
             leer_resultado,
             traducir_texto,
@@ -3557,6 +3749,7 @@ fn main() {
             importar_archivo_dialogo,
             borrar_archivo_original,
             borrar_archivo_fuente,
+            procesar_entrada_finder,
             archivo_guardado_existe,
             verificar_herramientas_pdf,
             listar_archivos_guardados,
@@ -3574,6 +3767,7 @@ fn main() {
             marcar_no_leido_tauri,
             guardar_html_frase,
             borrar_html_frase,
+            compartir_directo,
             generar_archivo_compartir,
             compartir_archivo_nativo,
             revelar_en_finder,

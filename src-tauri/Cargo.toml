@@ -47,6 +47,8 @@ lettre = { version = "0.11", features = ["smtp-transport", "builder", "tokio1-na
 ureq = { version = "2.9", features = ["json"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2.3.5"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = "2"
 log = "0.4"
 env_logger = "0.11"
 zip = "8.6.0"
