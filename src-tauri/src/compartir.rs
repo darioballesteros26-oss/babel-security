@@ -150,6 +150,72 @@ pub fn descifrar_con_pbkdf2(b64: &str, password: &str) -> Result<Vec<u8>, String
         .map_err(|_| "Contraseña incorrecta".to_string())
 }
 
+// ── HTML sin contraseña ────────────────────────────────────────────────────
+
+/// HTML autónomo que muestra el archivo directamente, sin contraseña.
+/// El contenido va embebido como base64; el receptor solo necesita abrir el .html.
+pub fn generar_html_simple(b64_data: &str, nombre: &str, mime: &str) -> String {
+    let title  = nombre.replace('&',"&amp;").replace('<',"&lt;").replace('>',"&gt;");
+    let nom_js = nombre.replace('\\', "\\\\").replace('"', "\\\"");
+    let mim_js = mime.replace('"', "\\\"");
+    format!(r##"<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:24px}}
+.hdr{{text-align:center;margin-bottom:28px}}
+.hdr h1{{font-size:13px;letter-spacing:6px;color:#888;font-weight:400;text-transform:uppercase}}
+.hdr p{{font-size:11px;color:#555;letter-spacing:2px;margin-top:6px}}
+#viewer{{width:100%;max-width:820px}}
+img{{max-width:100%;border-radius:6px;display:block;margin:0 auto}}
+iframe{{width:100%;height:80vh;border:none;border-radius:6px;background:#1a1a1a}}
+pre{{white-space:pre-wrap;font-size:14px;line-height:1.7;color:#ccc;background:#111;padding:20px;border-radius:6px;border:1px solid #222;max-height:70vh;overflow-y:auto}}
+.dl{{display:block;margin:20px auto 0;padding:14px 32px;background:transparent;border:1px solid #444;color:#e0e0e0;font-size:12px;letter-spacing:3px;text-transform:uppercase;cursor:pointer;border-radius:4px;max-width:320px;text-align:center}}
+.dl:hover{{border-color:#888}}
+.foot{{margin-top:28px;font-size:10px;color:#333;letter-spacing:1px;text-align:center}}
+</style>
+</head>
+<body>
+<div class="hdr"><h1>Babel Security</h1><p>{title}</p></div>
+<div id="viewer"></div>
+<p class="foot">Compartido con Babel Security &mdash; babel-security.com</p>
+<script>
+(function(){{
+  const B64="{b64}",NOM="{nom_js}",MIME="{mim_js}";
+  function toB64(b){{let s='';for(let i=0;i<b.length;i++)s+=String.fromCharCode(b[i]);return btoa(s);}}
+  const bytes=Uint8Array.from(atob(B64),c=>c.charCodeAt(0));
+  const mob=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const v=document.getElementById('viewer');
+  if(MIME.startsWith('text/')||MIME==='application/json'){{
+    const p=document.createElement('pre');p.textContent=new TextDecoder().decode(bytes);v.appendChild(p);
+  }}else if(MIME.startsWith('image/')){{
+    const img=document.createElement('img');img.src='data:'+MIME+';base64,'+B64;img.alt=NOM;v.appendChild(img);
+  }}else if(MIME==='application/pdf'){{
+    const url='data:application/pdf;base64,'+B64;
+    if(mob){{const b=document.createElement('button');b.className='dl';b.textContent='Abrir PDF';b.onclick=()=>window.open(url,'_blank');v.appendChild(b);}}
+    else{{const f=document.createElement('iframe');f.src=url;v.appendChild(f);}}
+  }}else{{
+    const url='data:'+MIME+';base64,'+B64;
+    const b=document.createElement('button');b.className='dl';b.textContent='Descargar '+NOM;
+    if(mob){{b.onclick=()=>window.open(url,'_blank');}}
+    else{{b.onclick=()=>{{const a=document.createElement('a');a.href=url;a.download=NOM;a.click();}};}}
+    v.appendChild(b);
+  }}
+}})();
+</script>
+</body>
+</html>"##,
+        title  = title,
+        b64    = b64_data,
+        nom_js = nom_js,
+        mim_js = mim_js,
+    )
+}
+
 // ── Generación del HTML autónomo ───────────────────────────────────────────
 
 /// Genera el HTML completo para compartir. nombre_original solo se usa para el <title>.

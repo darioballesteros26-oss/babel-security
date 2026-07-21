@@ -3389,60 +3389,86 @@ async fn compartir_directo(
 
     log::info!("[compartir_directo] Compartiendo: {}", nombre_original);
 
-    // Descifrar .babel → escribir el archivo original en temp → compartir → borrar
+    // Descifrar → base64 → HTML sin contraseña → compartir
     let mut bytes = Zeroizing::new(descifrar_a_bytes(&ruta, &subclave_hex)?);
     let ext = detectar_ext(&bytes);
-    // Sanear nombre: solo el componente final (sin path traversal) y sin extensión duplicada
+    let mime = match ext {
+        "pdf"  => "application/pdf",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "png"  => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif"  => "image/gif",
+        "webp" => "image/webp",
+        _      => "text/plain; charset=utf-8",
+    };
+    // Sanear nombre base (sin path traversal)
     let nombre_base = std::path::Path::new(&nombre_original)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(&nombre_original);
-    let nombre_con_ext = if std::path::Path::new(nombre_base)
-        .extension()
-        .map(|e| !e.is_empty())
-        .unwrap_or(false)
+    let nombre_con_ext = if std::path::Path::new(nombre_base).extension()
+        .map(|e| !e.is_empty()).unwrap_or(false)
     {
         nombre_base.to_string()
     } else {
         format!("{}.{}", nombre_base, ext)
     };
-    // Prefijo único para evitar colisión si se comparte el mismo archivo en paralelo.
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&**bytes);
+    let html = compartir::generar_html_simple(&b64, &nombre_con_ext, mime);
+    bytes.zeroize();  // bytes ya no se necesitan — zerizar antes de tocar el disco
+
+    // Nombre único para el .html: evita colisión en shares paralelos del mismo archivo
+    let stem = std::path::Path::new(&nombre_con_ext)
+        .file_stem().and_then(|s| s.to_str()).unwrap_or(&nombre_con_ext);
     let ruta_compartir = compartir::compartidos_dir()
-        .join(format!("{}_{}", nuevo_id(), nombre_con_ext))
+        .join(format!("{}_{}.html", nuevo_id(), stem))
         .to_string_lossy()
         .to_string();
 
-    std::fs::write(&ruta_compartir, &**bytes)
-        .map_err(|e| format!("Error escribiendo archivo temporal: {}", e))?;
+    std::fs::write(&ruta_compartir, html.as_bytes())
+        .map_err(|e| format!("Error escribiendo HTML temporal: {}", e))?;
 
-    // BorrarAlSalir garantiza borrar_seguro en cualquier ruta de salida (éxito, error o panic).
-    let _guard = BorrarAlSalir(ruta_compartir.clone());
+    log::info!("[compartir_directo] HTML listo: {}", ruta_compartir);
 
-    // Los bytes ya están en disco — zerizar en memoria cuanto antes.
-    bytes.zeroize();
-
-    log::info!("[compartir_directo] Archivo temporal listo: {}", ruta_compartir);
-
-    // Abrir share sheet nativo en el hilo principal
+    // macOS: NSSharingServicePicker (bloquea hasta que el usuario termina de compartir)
+    // → BorrarAlSalir limpia el HTML al salir, incluso en error.
     #[cfg(target_os = "macos")]
     {
+        let _guard = BorrarAlSalir(ruta_compartir.clone());
         let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
         let app_clone = app.clone();
         let path_clone = ruta_compartir.clone();
         app.run_on_main_thread(move || {
             let result = compartir::mostrar_share_picker_macos(&app_clone, &path_clone);
             match &result {
-                Ok(_) => log::info!("[compartir_directo] Share sheet abierto OK"),
+                Ok(_)  => log::info!("[compartir_directo] Share sheet OK"),
                 Err(e) => log::error!("[compartir_directo] Share sheet falló: {}", e),
             }
             let _ = tx.send(result);
         }).map_err(|e| format!("Error en hilo principal: {}", e))?;
         rx.await.map_err(|_| "Error de comunicación interna".to_string())??;
+        return Ok(());
+        // _guard sale de scope aquí → borrar_seguro
     }
 
-    #[cfg(not(target_os = "macos"))]
-    return Err("Compartición nativa solo disponible en macOS.".into());
-    // _guard limpia ruta_compartir al salir del scope (borrar_seguro 3 pasadas).
+    // Windows / Linux: abrir el HTML con la app por defecto (navegador).
+    // El archivo queda en compartidos/ — sin NSSharingServicePicker no sabemos
+    // cuándo el usuario termina de enviarlo, así que no lo borramos automáticamente.
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &ruta_compartir])
+            .spawn()
+            .map_err(|e| format!("Error abriendo HTML: {}", e))?;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&ruta_compartir)
+            .spawn()
+            .map_err(|e| format!("Error abriendo HTML: {}", e))?;
+    }
     Ok(())
 }
 
