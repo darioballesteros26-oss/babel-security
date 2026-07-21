@@ -175,8 +175,8 @@ body{{min-height:100vh;display:flex;align-items:center;justify-content:center;ba
 .lock{{width:40px;height:40px;margin:0 auto 20px;opacity:.3}}
 form{{display:flex;flex-direction:column;gap:14px}}
 label{{font-size:11px;color:#555;letter-spacing:1.5px;text-transform:uppercase}}
-input[type=password]{{width:100%;padding:12px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#e0e0e0;font-size:14px;letter-spacing:1px;outline:none;transition:border-color .2s}}
-input[type=password]:focus{{border-color:#444}}
+#pwd{{width:100%;padding:12px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#e0e0e0;font-size:18px;letter-spacing:4px;text-align:center;outline:none;transition:border-color .2s}}
+#pwd:focus{{border-color:#444}}
 button{{padding:13px;background:#e0e0e0;color:#0a0a0a;border:none;border-radius:4px;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;font-weight:600;transition:opacity .2s}}
 button:hover{{opacity:.85}}
 button:disabled{{opacity:.4;cursor:default}}
@@ -203,9 +203,9 @@ button:disabled{{opacity:.4;cursor:default}}
   </div>
   <form id="frm" onsubmit="return false">
     <label for="pwd">Contraseña</label>
-    <input type="text" id="pwd" name="password" autocomplete="off" inputmode="numeric"
+    <input type="text" id="pwd" name="password" autocomplete="off" inputmode="text"
            placeholder="Introduce la contraseña" autofocus
-           style="letter-spacing:4px;font-size:18px;text-align:center;">
+           spellcheck="false" autocorrect="off" autocapitalize="off">
     <button id="btn" onclick="descifrar()">Descifrar</button>
     <div class="error" id="err">Contraseña incorrecta. Inténtalo de nuevo.</div>
     <div class="spinner" id="spin">Descifrando&hellip;</div>
@@ -296,13 +296,19 @@ function mostrar(nombre,mime,bytes){{
       viewer.appendChild(fr);
     }}
   }}else{{
-    // Otros (DOCX, etc.): data URI descarga directa (funciona en iOS sin blob URL)
+    // Otros (DOCX, etc.): en móvil a.download no funciona en iOS Safari → abrir en pestaña.
     const dataUrl='data:'+mime+';base64,'+toB64(bytes);
+    const isMobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     dlBtn.style.display='block';
-    dlBtn.onclick=function(){{
-      const a=document.createElement('a');
-      a.href=dataUrl;a.download=nombre;a.click();
-    }};
+    dlBtn.textContent='Descargar '+nombre;
+    if(isMobile){{
+      dlBtn.onclick=function(){{window.open(dataUrl,'_blank');}};
+    }}else{{
+      dlBtn.onclick=function(){{
+        const a=document.createElement('a');
+        a.href=dataUrl;a.download=nombre;a.click();
+      }};
+    }}
   }}
 }}
 

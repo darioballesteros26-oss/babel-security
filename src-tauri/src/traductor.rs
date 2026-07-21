@@ -2582,6 +2582,7 @@ static UREQ_AGENT: OnceLock<ureq::Agent> = OnceLock::new();
 // - Elimina set_var() (UB en contexto multihilo, B7)
 // - El token ya no aparece en `ps aux` ni /proc/self/environ (B8)
 static NLLB_TOKEN: OnceLock<String> = OnceLock::new();
+static TOKEN_DESDE_ARCHIVO: OnceLock<String> = OnceLock::new();
 
 // Token por defecto FIJO, idéntico al de server.py (_TOKEN_DEFECTO). Permite que la app
 // se autentique con el servidor local aunque se abra con doble clic (sin BABEL_NLLB_TOKEN
@@ -2606,6 +2607,17 @@ fn token_efectivo() -> String {
         if !t.is_empty() {
             return t;
         }
+    }
+    // Si server.py arrancó manualmente sin BABEL_NLLB_TOKEN, habrá persistido
+    // el token en ~/Babel/servidor_token.txt. Lo leemos una sola vez.
+    let desde_archivo = TOKEN_DESDE_ARCHIVO.get_or_init(|| {
+        let path = crate::babel_dir().join("servidor_token.txt");
+        std::fs::read_to_string(path)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    });
+    if desde_archivo.len() >= 32 {
+        return desde_archivo.clone();
     }
     NLLB_TOKEN_DEFECTO.to_string()
 }

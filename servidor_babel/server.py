@@ -46,6 +46,54 @@ else:
 
 print(f"[server] modelo {_MODELO_NOMBRE} ({_MOTIVO})", flush=True)
 
+# Cache de traducciones: evita re-traducir párrafos idénticos en el mismo documento.
+# Clave (texto, par, beam) → traducción. FIFO simple: borra la mitad al llegar al límite.
+_cache_trad: dict = {}
+_CACHE_MAX = 4096
+
+
+def _cache_get(texto: str, par: str, beam: int):
+    return _cache_trad.get((texto, par, beam))
+
+
+def _cache_set(texto: str, par: str, beam: int, resultado: str) -> None:
+    if len(_cache_trad) >= _CACHE_MAX:
+        n = _CACHE_MAX // 2
+        for k in list(_cache_trad)[:n]:
+            del _cache_trad[k]
+    _cache_trad[(texto, par, beam)] = resultado
+
+
+def _traducir_uno(texto: str, par: str, beam: int) -> str:
+    hit = _cache_get(texto, par, beam)
+    if hit is not None:
+        return hit
+    result = mt.traducir(texto, par, beam)
+    _cache_set(texto, par, beam, result)
+    return result
+
+
+def _traducir_batch_con_cache(textos: list, par: str, beam: int) -> list:
+    """Traduce en batch aprovechando el cache: solo llama al modelo para los miss."""
+    resultados = [""] * len(textos)
+    miss_idx, miss_txt = [], []
+    for i, t in enumerate(textos):
+        if not t:
+            continue
+        hit = _cache_get(t, par, beam)
+        if hit is not None:
+            resultados[i] = hit
+        else:
+            miss_idx.append(i)
+            miss_txt.append(t)
+    if miss_txt:
+        trad_batch = mt.traducir_batch(miss_txt, par, beam)
+        for idx, txt, trad in zip(miss_idx, miss_txt, trad_batch):
+            resultados[idx] = trad
+            _cache_set(txt, par, beam, trad)
+    return resultados
+
+
 _tasa_lock = threading.Lock()
 _tasa_por_ip: dict = defaultdict(list)
 _MAX_PETICIONES = 600
@@ -72,7 +120,31 @@ CORS(app, origins=[
 ])
 
 _TOKEN_DEFECTO = "babel-local-default-token-2026-no-compartir"
-BABEL_TOKEN = os.environ.get("BABEL_NLLB_TOKEN") or _TOKEN_DEFECTO
+_TOKEN_FILE = os.path.join(os.path.expanduser("~"), "Babel", "servidor_token.txt")
+
+
+def _obtener_o_generar_token() -> str:
+    """Lee ~/Babel/servidor_token.txt o genera uno nuevo y lo persiste."""
+    try:
+        with open(_TOKEN_FILE) as f:
+            tok = f.read().strip()
+        if len(tok) >= 32:
+            return tok
+    except (OSError, IOError):
+        pass
+    import secrets
+    tok = "babel_" + secrets.token_hex(24)
+    try:
+        os.makedirs(os.path.dirname(_TOKEN_FILE), exist_ok=True)
+        with open(_TOKEN_FILE, "w") as f:
+            f.write(tok)
+        os.chmod(_TOKEN_FILE, 0o600)
+    except (OSError, IOError):
+        pass
+    return tok
+
+
+BABEL_TOKEN = os.environ.get("BABEL_NLLB_TOKEN") or _obtener_o_generar_token()
 MAX_INPUT_CHARS = 10_000
 
 PARES_PERMITIDOS = {
@@ -175,7 +247,7 @@ def traducir_endpoint():
     beam = beam if isinstance(beam, int) and 1 <= beam <= 8 else 0
     _marcar_uso()
     try:
-        return jsonify({"traduccion": mt.traducir(texto, par, beam), "revisada": False})
+        return jsonify({"traduccion": _traducir_uno(texto, par, beam), "revisada": False})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except RuntimeError as e:
@@ -213,7 +285,7 @@ def traducir_batch_endpoint():
     beam = beam if isinstance(beam, int) and 1 <= beam <= 8 else 0
     _marcar_uso()
     try:
-        return jsonify({"traducciones": mt.traducir_batch(textos, par, beam)})
+        return jsonify({"traducciones": _traducir_batch_con_cache(textos, par, beam)})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
