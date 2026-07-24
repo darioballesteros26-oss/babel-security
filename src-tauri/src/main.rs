@@ -742,6 +742,11 @@ fn guardar_documento_desde_bytes(
     }
     let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
 
+    // S-4: rechazar por tamaño ANTES de decodificar (base64 infla ~4/3; así no se
+    // reserva memoria de un string enorme antes de validar).
+    if contenido_b64.len() > 140 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 100 MB.".into());
+    }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(contenido_b64.as_bytes())
         .map_err(|_| "Datos del archivo no válidos.".to_string())?;
@@ -750,6 +755,36 @@ fn guardar_documento_desde_bytes(
     }
 
     cifrar_y_guardar_desde_bytes(&nombre_archivo, &bytes, &subclave_hex, &id_usuario)
+}
+
+// Borrado seguro de temporales de arrastre viejos (>1h) que hayan quedado de un
+// fallo previo, para que nunca se acumule plaintext en el temp del contenedor.
+fn barrer_temp_dnd(base: &std::path::Path) {
+    let Ok(entradas) = std::fs::read_dir(base) else { return };
+    let ahora = std::time::SystemTime::now();
+    for e in entradas.flatten() {
+        let viejo = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| ahora.duration_since(t).ok())
+            .map(|d| d.as_secs() > 3600)
+            .unwrap_or(false);
+        if !viejo {
+            continue;
+        }
+        let p = e.path();
+        if p.is_dir() {
+            if let Ok(hijos) = std::fs::read_dir(&p) {
+                for h in hijos.flatten() {
+                    borrar_seguro(&h.path().to_string_lossy());
+                }
+            }
+            let _ = std::fs::remove_dir_all(&p);
+        } else {
+            borrar_seguro(&p.to_string_lossy());
+        }
+    }
 }
 
 // COMANDO — Escribe unos bytes (base64) a un temporal fuera del área de Babel y
@@ -762,14 +797,33 @@ fn preparar_temp_bytes(nombre_archivo: String, contenido_b64: String) -> Result<
         .and_then(|n| n.to_str())
         .filter(|n| !n.is_empty())
         .ok_or("Nombre de archivo inválido")?;
+    // S-4: rechazar por tamaño antes de decodificar.
+    if contenido_b64.len() > 140 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 100 MB.".into());
+    }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(contenido_b64.as_bytes())
         .map_err(|_| "Datos del archivo no válidos.".to_string())?;
     if bytes.len() > 100 * 1024 * 1024 {
         return Err("El archivo supera el límite de 100 MB.".into());
     }
-    let dir = std::env::temp_dir().join("babel_dnd");
-    let _ = std::fs::create_dir_all(&dir);
+    let base = std::env::temp_dir().join("babel_dnd");
+    let _ = std::fs::create_dir_all(&base);
+    // S-3: limpia restos viejos de fallos anteriores.
+    barrer_temp_dnd(&base);
+    // S-3: subdirectorio único → sin colisiones entre archivos con el mismo nombre,
+    // conservando el nombre de archivo limpio para la UI.
+    static CTR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let uniq = format!(
+        "{}_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        CTR.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let dir = base.join(uniq);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("No se pudo preparar el archivo: {}", e))?;
     let ruta = dir.join(nombre);
     escribir_privado(&ruta, &bytes).map_err(|e| format!("No se pudo preparar el archivo: {}", e))?;
     Ok(ruta.to_string_lossy().to_string())
