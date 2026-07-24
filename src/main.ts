@@ -325,6 +325,9 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "eliminar-seleccionados": eliminarSeleccionados(); break;
     // Archivos guardados
     case "ver-archivo-guardado": verArchivoGuardado(); break;
+    case "abrir-union-pdfs":             void abrirPanelUnion(); break;
+    case "cerrar-union-pdfs":            cerrarPanelUnion(); break;
+    case "confirmar-union-pdfs":         void confirmarUnion(); break;
     case "compartir-archivo-guardado":   mostrarMenuCompartir(); break;
     case "cerrar-menu-compartir":        cerrarMenuCompartir(); break;
     case "mas-opciones-compartir":       cerrarMenuCompartir(); compartirDirecto(); break;
@@ -401,9 +404,24 @@ window.addEventListener("DOMContentLoaded", async () => {
   invoke("borrar_html_frase").catch(() => {});
   mostrarPantalla("carga");
 
-  // Evento Rust: servidor USB listo → toast
+  // Evento Rust: servidor USB listo → ocultar overlay + toast
   listen("servidor-usb-listo", () => {
+    document.getElementById("servidor-cargando-overlay")?.classList.add("hidden");
     mostrarToast("Traductor listo", false);
+  }).catch(() => {});
+
+  // Evento Rust: el sidecar no pudo arrancar o expiró el timeout
+  listen<string>("servidor-error", (ev) => {
+    document.getElementById("servidor-cargando-overlay")?.classList.add("hidden");
+    const msg = ev.payload ?? "El traductor no pudo iniciarse. Reinicia Babel.";
+    mostrarToast(`⚠ ${msg}`, true);
+  }).catch(() => {});
+
+  // Verificar estado inicial del servidor (el sidecar puede llevar ya varios segundos arrancando)
+  invoke<string>("estado_servidor_cmd").then((estado) => {
+    if (estado === "cargando") {
+      document.getElementById("servidor-cargando-overlay")?.classList.remove("hidden");
+    }
   }).catch(() => {});
 
   // Evento Rust: monitor periódico detectó nueva amenaza de seguridad
@@ -431,6 +449,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
     const textoEl = document.querySelector<HTMLElement>(".procesando-texto");
     const barraEl = document.getElementById("procesando-barra");
+    if (textoEl) textoEl.textContent = msg;
+    if (barraEl) barraEl.style.width = `${Math.min(pct, 100)}%`;
+  }).catch(() => {});
+
+  // Progreso de la unión de PDFs (panel modal, no la pantalla de traducción).
+  listen<{ pct: number; msg: string }>("progreso-union", (evento) => {
+    const { pct, msg } = evento.payload;
+    const textoEl = document.getElementById("union-progreso-texto");
+    const barraEl = document.getElementById("union-progreso-barra");
     if (textoEl) textoEl.textContent = msg;
     if (barraEl) barraEl.style.width = `${Math.min(pct, 100)}%`;
   }).catch(() => {});
@@ -1100,6 +1127,7 @@ function actualizarSeleccionGuardados(): void {
   document.getElementById("btn-eliminar-sel-g")?.classList.toggle("hidden", !hay);
   document.getElementById("btn-compartir-sel-g")?.classList.toggle("hidden", !unico);
   document.getElementById("btn-mail-sel-g")?.classList.toggle("hidden", !unico);
+  document.getElementById("btn-unir-pdfs-g")?.classList.toggle("hidden", seleccionados.length < 2);
   document.getElementById("ui-exportar-todo")?.classList.toggle("hidden", hay);
   document.getElementById("ui-finder")?.classList.toggle("hidden", hay);
   document.getElementById("ui-importar")?.classList.toggle("hidden", hay);
@@ -1451,7 +1479,7 @@ async function compartirDirecto(): Promise<void> {
 
 // ── Menú compartir Babel — destinos personalizados por URL ───────────────────
 
-interface DestinoCompartir { nombre: string; url: string; }
+interface DestinoCompartir { nombre: string; url: string; bundle_id?: string; }
 let _destinosCompartir: DestinoCompartir[] = [];
 let _editandoDestinoIdx = -1;
 
@@ -1698,39 +1726,243 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   await cargarArchivosGuardados();
 }
 
+// ── UNIR PDFs ────────────────────────────────────────────────────────────────
+// Une varios PDFs guardados en uno solo, 100% local (PDFium nativo, en RAM),
+// conservando texto seleccionable. El resultado se guarda cifrado en el buzón.
+
+interface PdfUnionInfo { ruta: string; nombre: string; paginas: number; error: string | null; }
+
+let _bloquesUnion: PdfUnionInfo[] = [];
+let _dragUnionIdx = -1;
+let _unionEnCurso = false;
+
+async function abrirPanelUnion(): Promise<void> {
+  const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
+  const rutas: string[] = [];
+  checkboxes.forEach(cb => {
+    const card = cb.closest(".archivo-card") as HTMLElement | null;
+    if (card?.dataset.ruta) rutas.push(card.dataset.ruta);
+  });
+  if (rutas.length < 2) { mostrarToast("Selecciona al menos 2 PDFs", true); return; }
+
+  let infos: PdfUnionInfo[];
+  try {
+    infos = await invoke<PdfUnionInfo[]>("preparar_union_pdfs", { rutas });
+  } catch (e) {
+    mostrarToast("Error preparando la unión: " + String(e), true);
+    return;
+  }
+
+  // Requisito: solo PDFs. Si algún seleccionado no es PDF, no se puede unir.
+  const noPdf = infos.filter(i => i.error === "No es un PDF");
+  if (noPdf.length > 0) {
+    const nombres = noPdf.map(i => `"${i.nombre}"`).join(", ");
+    mostrarToast(
+      `No es posible unir: ${nombres} ${noPdf.length > 1 ? "no son PDF" : "no es un PDF"}. Solo se pueden unir archivos PDF.`,
+      true,
+    );
+    return;
+  }
+  // Otros errores (corrupto, protegido por contraseña, sin permisos).
+  const conError = infos.find(i => i.error);
+  if (conError) { mostrarToast(conError.error ?? "No se pudo leer un PDF", true); return; }
+
+  _bloquesUnion = infos;
+  const inputNombre = document.getElementById("input-nombre-union") as HTMLInputElement | null;
+  if (inputNombre) inputNombre.value = "documento_unido";
+  document.getElementById("union-progreso")?.classList.add("hidden");
+  const barra = document.getElementById("union-progreso-barra");
+  if (barra) barra.style.width = "0%";
+  const btn = document.getElementById("btn-confirmar-union") as HTMLButtonElement | null;
+  if (btn) btn.disabled = false;
+  renderBloquesUnion();
+  document.getElementById("modal-union-pdfs")?.classList.remove("hidden");
+}
+
+function renderBloquesUnion(): void {
+  const cont = document.getElementById("lista-union-pdfs");
+  if (!cont) return;
+  cont.innerHTML = _bloquesUnion.map((b, i) => `
+    <div class="union-bloque" draggable="true" data-idx="${i}"
+      style="display:flex;align-items:center;gap:10px;padding:9px 11px;
+        border:1px solid var(--borde);border-radius:3px;background:rgba(255,255,255,0.02);cursor:grab;">
+      <span style="color:var(--texto-secundario);font-size:0.9rem;">≡</span>
+      <span style="color:var(--dorado);font-size:0.7rem;min-width:18px;text-align:center;">${i + 1}</span>
+      <span style="flex:1;font-size:0.7rem;color:var(--texto);overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap;" title="${escapeHTML(b.nombre)}">${escapeHTML(b.nombre)}</span>
+      <span style="font-size:0.62rem;color:var(--texto-secundario);white-space:nowrap;">${b.paginas} pág.</span>
+    </div>`).join("");
+
+  cont.querySelectorAll<HTMLElement>(".union-bloque").forEach(el => {
+    el.addEventListener("dragstart", () => { _dragUnionIdx = Number(el.dataset.idx); el.style.opacity = "0.4"; });
+    el.addEventListener("dragend", () => { el.style.opacity = "1"; });
+    el.addEventListener("dragover", (e) => { e.preventDefault(); el.style.borderColor = "var(--dorado)"; });
+    el.addEventListener("dragleave", () => { el.style.borderColor = "var(--borde)"; });
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      el.style.borderColor = "var(--borde)";
+      const destino = Number(el.dataset.idx);
+      if (_dragUnionIdx < 0 || _dragUnionIdx === destino) return;
+      const [movido] = _bloquesUnion.splice(_dragUnionIdx, 1);
+      _bloquesUnion.splice(destino, 0, movido);
+      _dragUnionIdx = -1;
+      renderBloquesUnion();
+    });
+  });
+}
+
+function cerrarPanelUnion(): void {
+  if (_unionEnCurso) return; // no cerrar mientras se une
+  document.getElementById("modal-union-pdfs")?.classList.add("hidden");
+  _bloquesUnion = [];
+  _dragUnionIdx = -1;
+}
+
+async function confirmarUnion(): Promise<void> {
+  if (_unionEnCurso || _bloquesUnion.length < 2) return;
+  const inputNombre = document.getElementById("input-nombre-union") as HTMLInputElement | null;
+  const nombreSalida = (inputNombre?.value ?? "").trim() || "documento_unido";
+  const rutas = _bloquesUnion.map(b => b.ruta);
+  const borrarOriginales =
+    (document.getElementById("chk-borrar-originales-union") as HTMLInputElement | null)?.checked ?? true;
+
+  _unionEnCurso = true;
+  const btn = document.getElementById("btn-confirmar-union") as HTMLButtonElement | null;
+  if (btn) btn.disabled = true;
+  document.getElementById("union-progreso")?.classList.remove("hidden");
+
+  try {
+    await invoke<string>("unir_pdfs", {
+      rutas,
+      nombreSalida,
+      buzonId: buzonActivoGuardados,
+      borrarOriginales,
+    });
+    _unionEnCurso = false;
+    document.getElementById("modal-union-pdfs")?.classList.add("hidden");
+    _bloquesUnion = [];
+    mostrarToast("✓ PDFs unidos y guardados", false);
+    await cargarArchivosGuardados();
+  } catch (e) {
+    _unionEnCurso = false;
+    if (btn) btn.disabled = false;
+    document.getElementById("union-progreso")?.classList.add("hidden");
+    mostrarToast("Error al unir: " + String(e), true);
+  }
+}
+
+
 let dropZoneInicializada = false;
 
+// Importación por arrastre. Usa drag&drop HTML5 (NO el nativo de wry, que en
+// macOS reciente aborta el proceso con un unwrap sobre el pasteboard). El webview
+// navegaría al archivo soltado (pantalla completa) si no hacemos preventDefault;
+// aquí lo interceptamos y guardamos por bytes. Los arrastres internos (reordenar
+// bloques de la unión) NO llevan "Files" en dataTransfer → pasan intactos.
 async function iniciarDropZone(): Promise<void> {
   if (dropZoneInicializada) return;
+  dropZoneInicializada = true;
 
-  await getCurrentWindow().onDragDropEvent(async (event) => {
+  const tieneArchivos = (dt: DataTransfer | null) =>
+    !!dt && Array.from(dt.types).includes("Files");
+  const barra = () => document.getElementById("chat-input-barra");
+  const zona = () => document.getElementById("drop-zone-guardados");
+  const resetZona = () => {
+    barra()?.classList.remove("drag-activo");
+    const z = zona();
+    if (z) { z.style.borderColor = "var(--borde)"; z.style.background = "transparent"; }
+  };
+
+  // preventDefault en dragover es imprescindible para que 'drop' llegue a dispararse
+  // y para impedir que el webview abra el archivo a pantalla completa.
+  window.addEventListener("dragover", (e) => {
+    if (!tieneArchivos(e.dataTransfer)) return;
+    e.preventDefault();
+    const enTraduccion = !document.getElementById("pantalla-traduccion")?.classList.contains("hidden");
+    const enGuardados = !document.getElementById("pantalla-archivos-guardados")?.classList.contains("hidden");
+    if (enTraduccion) barra()?.classList.add("drag-activo");
+    const z = zona();
+    if (enGuardados && z) { z.style.borderColor = "var(--dorado)"; z.style.background = "rgba(197,160,89,0.05)"; }
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (tieneArchivos(e.dataTransfer)) resetZona();
+  });
+  window.addEventListener("drop", async (e) => {
+    if (!tieneArchivos(e.dataTransfer)) return; // arrastre interno (reorden) → intacto
+    e.preventDefault();
+    resetZona();
     const enTraduccion = !document.getElementById("pantalla-traduccion")?.classList.contains("hidden");
     const enGuardados = !document.getElementById("pantalla-archivos-guardados")?.classList.contains("hidden");
     if (!enTraduccion && !enGuardados) return;
-
-    const barra = document.getElementById("chat-input-barra");
-    const zona = document.getElementById("drop-zone-guardados");
-    const resetZona = () => {
-      barra?.classList.remove("drag-activo");
-      if (zona) { zona.style.borderColor = "var(--borde)"; zona.style.background = "transparent"; }
-    };
-
-    if (event.payload.type === "over") {
-      if (enTraduccion) barra?.classList.add("drag-activo");
-      if (enGuardados && zona) { zona.style.borderColor = "var(--dorado)"; zona.style.background = "rgba(197,160,89,0.05)"; }
-    } else if (event.payload.type === "drop") {
-      resetZona();
-      const rutas = event.payload.paths;
-      if (rutas && rutas.length > 0) {
-        if (enTraduccion) procesarRuta(rutas[0]);
-        if (enGuardados) for (const ruta of rutas) await guardarArchivoSinTraducir(ruta);
-      }
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length === 0) return;
+    if (enGuardados) {
+      for (const f of files) await guardarArchivoDesdeFile(f);
     } else {
-      resetZona();
+      // Traducción: necesita una ruta → escribimos un temporal, traducimos y lo borramos.
+      for (const f of files) {
+        try {
+          const buf = await f.arrayBuffer();
+          const b64 = bytesABase64(new Uint8Array(buf));
+          const tmp = await invoke<string>("preparar_temp_bytes", {
+            nombreArchivo: f.name, contenidoB64: b64,
+          });
+          await procesarRuta(tmp);
+          try { await invoke("borrar_archivo_fuente", { ruta: tmp }); } catch { /* ya borrado */ }
+        } catch (e) {
+          mostrarToast("Error procesando el archivo: " + String(e), true);
+        }
+      }
     }
   });
+}
 
-  dropZoneInicializada = true;
+// Convierte bytes a base64 por bloques (btoa directo revienta la pila con arrays grandes).
+function bytesABase64(bytes: Uint8Array): string {
+  let binario = "";
+  const bloque = 0x8000;
+  for (let i = 0; i < bytes.length; i += bloque) {
+    binario += String.fromCharCode(...bytes.subarray(i, i + bloque));
+  }
+  return btoa(binario);
+}
+
+// Cifra y guarda un File arrastrado (sin ruta, solo bytes vía HTML5 drop).
+async function guardarArchivoDesdeFile(file: File): Promise<void> {
+  const nombre = file.name || "archivo";
+  if (nombre.endsWith(".babel")) {
+    mostrarToast("Los archivos .babel ya están cifrados", true);
+    return;
+  }
+  if (file.size > 100 * 1024 * 1024) {
+    mostrarToast(`"${nombre}" supera el límite de 100 MB`, true);
+    return;
+  }
+  const nombreBase = nombre.replace(/\.[^/.]+$/, "");
+  const yaExiste = await invoke<boolean>("archivo_guardado_existe", { nombreBase }).catch(() => false);
+  if (yaExiste) {
+    mostrarToast(`"${nombre}" ya está guardado`, true);
+    return;
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    const b64 = bytesABase64(new Uint8Array(buf));
+    const rutaCifrada = await invoke<string>("guardar_documento_desde_bytes", {
+      nombreArchivo: nombre,
+      contenidoB64: b64,
+    });
+    if (buzonActivoGuardados !== "todos") {
+      try {
+        await invoke("mover_archivo_guardado", { ruta: rutaCifrada, buzonDestino: buzonActivoGuardados });
+      } catch (e) {
+        console.error("Error moviendo al buzón:", e);
+      }
+    }
+    mostrarToast(`✓ ${nombre} guardado y cifrado`, false);
+    await cargarArchivosGuardados();
+  } catch (error) {
+    mostrarToast(`Error guardando: ${error}`, true);
+  }
 }
 // NAVEGACIÓN — ENTRE PANTALLAS Y ACCIONES DE ARCHIVO
 
@@ -1746,48 +1978,6 @@ async function abrirCarpetaBabelGuardados(): Promise<void> {
 function irATraduccion(): void {
   mostrarPantalla("traduccion");
   setTimeout(() => iniciarDropZone(), 100);
-}
-
-// Cifra y guarda un archivo arrastrado sin traducirlo (solo cifrado)
-async function guardarArchivoSinTraducir(rutaArchivo: string): Promise<void> {
-  const nombre = rutaArchivo.split("/").pop() || "archivo";
-
-  if (nombre.endsWith(".babel")) {
-    mostrarToast("Los archivos .babel ya están cifrados", true);
-    return;
-  }
-
-  // Verificar duplicados contra el sistema de archivos real (no solo DOM visible)
-  const nombreBase = nombre.replace(/\.[^/.]+$/, "");
-  const yaExiste = await invoke<boolean>("archivo_guardado_existe", { nombreBase }).catch(() => false);
-  if (yaExiste) {
-    mostrarToast(`"${nombre}" ya está guardado`, true);
-    return;
-  }
-
-  try {
-    const rutaCifrada = await invoke<string>("guardar_documento_sin_traducir", {
-      nombreArchivo: nombre,
-      rutaCompleta: rutaArchivo,
-
-    });
-    if (buzonActivoGuardados !== "todos") {
-      try {
-        await invoke("mover_archivo_guardado", { ruta: rutaCifrada, buzonDestino: buzonActivoGuardados });
-      } catch (e) {
-        console.error("Error moviendo al buzón:", e);
-      }
-    }
-    let sufijo = "";
-    if (localStorage.getItem(LS_NO_PREG_BORRAR_ORIG) === "si") {
-      try { await invoke("borrar_archivo_fuente", { ruta: rutaArchivo }); sufijo = " · original destruido"; } catch { /* silencioso */ }
-    }
-    mostrarToast(`✓ ${nombre} guardado y cifrado${sufijo}`, false);
-    await cargarArchivosGuardados();
-
-  } catch (error) {
-    mostrarToast(`Error guardando: ${error}`, true);
-  }
 }
 
 async function irAArchivos(): Promise<void> {
@@ -3562,7 +3752,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     borrarChat: "BORRAR CHAT", configuracion: "CONFIGURACIÓN", borrarAlSalir: "BORRAR AL SALIR",
     borrarAlSalirDesc: "Limpia el chat al volver al panel", emailAuto: "EMAIL AUTO", proximamente: "Próximamente",
     diccionario: "DICCIONARIO", vocabularioActivo: "Vocabulario activo", volver: "← VOLVER",
-    verArchivo: "◫ VER ARCHIVO", eliminar: "✕ ELIMINAR", compartir: "⇪ COMPARTIR",
+    verArchivo: "◫ VER ARCHIVO", eliminar: "✕ ELIMINAR", compartir: "⇪ COMPARTIR", unirPdfs: "⊕ UNIR PDFs",
     exportarTodo: "↓ EXPORTAR TODO", importar: "+ IMPORTAR", tema: "TEMA", idiomaInterfaz: "IDIOMA DE LA INTERFAZ",
     bienvenido: "BIENVENIDO AL SISTEMA", bienvenidoSistema: "BIENVENIDO AL SISTEMA", accederBunker: "ACCEDER A BÚNKER EXISTENTE",
     autenticacion: "AUTENTICACIÓN REQUERIDA", ajustesTitulo: "AJUSTES", volverPanel: "← VOLVER AL PANEL",
@@ -3576,7 +3766,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     borrarChat: "CLEAR CHAT", configuracion: "SETTINGS", borrarAlSalir: "CLEAR ON EXIT",
     borrarAlSalirDesc: "Clears chat when returning to panel", emailAuto: "AUTO EMAIL", proximamente: "Coming soon",
     diccionario: "DICTIONARY", vocabularioActivo: "Active vocabulary", volver: "← BACK",
-    verArchivo: "◫ VIEW FILE", eliminar: "✕ DELETE", compartir: "⇪ SHARE",
+    verArchivo: "◫ VIEW FILE", eliminar: "✕ DELETE", compartir: "⇪ SHARE", unirPdfs: "⊕ MERGE PDFs",
     exportarTodo: "↓ EXPORT ALL", importar: "+ IMPORT", tema: "THEME", idiomaInterfaz: "INTERFACE LANGUAGE",
     bienvenido: "WELCOME TO THE SYSTEM", bienvenidoSistema: "WELCOME TO THE SYSTEM", accederBunker: "ACCESS EXISTING VAULT",
     autenticacion: "AUTHENTICATION REQUIRED", ajustesTitulo: "SETTINGS", volverPanel: "← BACK TO PANEL",
@@ -3590,7 +3780,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     borrarChat: "EFFACER CHAT", configuracion: "CONFIGURATION", borrarAlSalir: "EFFACER EN QUITTANT",
     borrarAlSalirDesc: "Efface le chat au retour au panneau", emailAuto: "EMAIL AUTO", proximamente: "Bientôt",
     diccionario: "DICTIONNAIRE", vocabularioActivo: "Vocabulaire actif", volver: "← RETOUR",
-    verArchivo: "◫ VOIR FICHIER", eliminar: "✕ SUPPRIMER", compartir: "⇪ PARTAGER",
+    verArchivo: "◫ VOIR FICHIER", eliminar: "✕ SUPPRIMER", compartir: "⇪ PARTAGER", unirPdfs: "⊕ FUSIONNER PDF",
     exportarTodo: "↓ TOUT EXPORTER", importar: "+ IMPORTER", tema: "THÈME", idiomaInterfaz: "LANGUE DE L'INTERFACE",
     bienvenido: "BIENVENUE DANS LE SYSTÈME", bienvenidoSistema: "BIENVENUE DANS LE SYSTÈME", accederBunker: "ACCÉDER AU COFFRE EXISTANT",
     autenticacion: "AUTHENTIFICATION REQUISE", ajustesTitulo: "PARAMÈTRES", volverPanel: "← RETOUR AU PANNEAU",
@@ -3604,7 +3794,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     borrarChat: "مسح المحادثة", configuracion: "الإعدادات", borrarAlSalir: "مسح عند الخروج",
     borrarAlSalirDesc: "يمسح المحادثة عند العودة", emailAuto: "بريد تلقائي", proximamente: "قريباً",
     diccionario: "القاموس", vocabularioActivo: "المفردات النشطة", volver: "→ رجوع",
-    verArchivo: "◫ عرض الملف", eliminar: "✕ حذف", compartir: "⇪ مشاركة",
+    verArchivo: "◫ عرض الملف", eliminar: "✕ حذف", compartir: "⇪ مشاركة", unirPdfs: "⊕ دمج PDF",
     exportarTodo: "↓ تصدير الكل", importar: "+ استيراد", tema: "المظهر", idiomaInterfaz: "لغة الواجهة",
     bienvenido: "مرحباً بك في النظام", bienvenidoSistema: "مرحباً بك في النظام", accederBunker: "الدخول إلى الخزنة",
     autenticacion: "المصادقة مطلوبة", ajustesTitulo: "الإعدادات", volverPanel: "→ العودة إلى اللوحة",
@@ -3627,6 +3817,7 @@ function cambiarIdiomaUI(idioma: string): void {
     "ui-proximamente": t.proximamente, "ui-diccionario": t.diccionario,
     "ui-vocabulario-activo": t.vocabularioActivo, "ui-volver-archivos": t.volver,
     "btn-ver-sel-g": t.verArchivo, "btn-compartir-sel-g": t.compartir, "btn-eliminar-sel-g": t.eliminar,
+    "btn-unir-pdfs-g": t.unirPdfs,
     "ui-exportar-todo": t.exportarTodo, "ui-importar": t.importar, "ui-tema": t.tema,
     "ui-idioma-interfaz": t.idiomaInterfaz, "ui-bienvenido-sistema": t.bienvenidoSistema,
     "ui-acceder-bunker": t.accederBunker, "ui-autenticacion-requerida": t.autenticacion,

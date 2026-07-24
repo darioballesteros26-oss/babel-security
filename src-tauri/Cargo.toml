@@ -27,6 +27,7 @@ hex          = "0.4"
 zeroize      = { version = "1.7", features = ["derive"] }
 pdf-extract  = "0.7"
 lopdf        = "0.32"
+pdfium-render = "0.9.3"
 docx-rs      = "0.4"
 imap         = { version = "=3.0.0-alpha.15", features = ["native-tls"] }
 native-tls   = "0.2"

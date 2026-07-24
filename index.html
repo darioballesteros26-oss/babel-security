@@ -166,6 +166,13 @@
     <!-- PANTALLA 6 — TRADUCCIÓN CHAT -->
     <div id="pantalla-traduccion" class="pantalla pantalla-chat hidden">
 
+      <!-- Overlay visible mientras el sidecar Python arranca (~30-90s en arranque en frío) -->
+      <div id="servidor-cargando-overlay" class="hidden" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(9,9,11,0.93);z-index:50;gap:14px;pointer-events:all;">
+        <div style="font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:3px;color:var(--dorado);">CARGANDO TRADUCTOR</div>
+        <div style="font-size:0.58rem;letter-spacing:1.5px;color:var(--texto-secundario);opacity:0.55;text-align:center;max-width:260px;">El motor de IA está iniciando.<br>Listo en ~30-90 segundos.</div>
+        <div id="servidor-cargando-dot" style="width:6px;height:6px;border-radius:50%;background:var(--dorado);opacity:0.7;animation:parpadeo 1.2s ease-in-out infinite;"></div>
+      </div>
+
       <div class="chat-header">
         <div class="chat-header-izquierda">
           <button type="button" data-action="volver-al-panel" class="btn-link">← PANEL</button>
@@ -334,6 +341,10 @@
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">⇪ COMPARTIR</button>
+          <button type="button" id="btn-unir-pdfs-g" data-action="abrir-union-pdfs" class="hidden"
+            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+            onmouseleave="this.style.background='transparent'">⊕ UNIR PDFs</button>
           <button type="button" id="btn-eliminar-sel-g" data-action="eliminar-sel-guardados" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
@@ -1496,6 +1507,69 @@
             color:var(--texto-secundario);padding:6px;cursor:pointer;
             font-size:0.65rem;letter-spacing:1px;font-family:'Times New Roman',Times,serif;">
           CERRAR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL UNIR PDFs — reordenar por arrastre + nombre de salida -->
+  <div id="modal-union-pdfs" class="hidden" style="
+    position:fixed;inset:0;background:rgba(0,0,0,0.92);
+    display:flex;align-items:center;justify-content:center;z-index:3000;">
+    <div style="background:var(--fondo-panel,#0d0d0d);border:1px solid var(--borde,#333);
+      border-radius:4px;padding:24px;width:440px;max-width:92vw;
+      display:flex;flex-direction:column;max-height:82vh;">
+
+      <p style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;
+        letter-spacing:2px;color:var(--dorado);margin:0 0 6px;flex-shrink:0;">
+        UNIR PDFs</p>
+      <p style="font-size:0.62rem;color:var(--texto-secundario);margin:0 0 16px;
+        letter-spacing:0.5px;flex-shrink:0;">
+        Arrastra los bloques para ordenarlos. Todo el proceso es local y cifrado.</p>
+
+      <!-- Lista reordenable de PDFs (la rellena JS) -->
+      <div id="lista-union-pdfs"
+        style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:6px;
+          min-height:60px;margin-bottom:14px;"></div>
+
+      <label style="font-size:0.6rem;letter-spacing:1.5px;color:var(--texto-secundario);
+        text-transform:uppercase;margin-bottom:4px;flex-shrink:0;">Nombre del archivo</label>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:16px;flex-shrink:0;">
+        <input type="text" id="input-nombre-union" maxlength="80" placeholder="documento_unido"
+          style="flex:1;background:transparent;border:1px solid var(--borde);color:var(--texto);
+            padding:8px 10px;font-size:0.7rem;border-radius:2px;
+            font-family:'Times New Roman',Times,serif;">
+        <span style="font-size:0.65rem;color:var(--texto-secundario);">.pdf</span>
+      </div>
+
+      <!-- Eliminar los PDFs originales tras unir (marcado por defecto) -->
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
+        font-size:0.63rem;color:var(--texto-secundario);margin-bottom:16px;flex-shrink:0;">
+        <input type="checkbox" id="chk-borrar-originales-union" checked
+          style="accent-color:var(--dorado);width:14px;height:14px;cursor:pointer;">
+        Eliminar los PDFs originales tras unir (no se repetirán)
+      </label>
+
+      <!-- Barra de progreso (oculta hasta empezar) -->
+      <div id="union-progreso" class="hidden" style="margin-bottom:14px;flex-shrink:0;">
+        <div style="font-size:0.62rem;color:var(--texto-secundario);margin-bottom:5px;"
+          id="union-progreso-texto">Uniendo…</div>
+        <div style="height:4px;background:var(--borde);border-radius:2px;overflow:hidden;">
+          <div id="union-progreso-barra"
+            style="height:100%;width:0%;background:var(--dorado);transition:width 0.3s;"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-shrink:0;">
+        <button type="button" data-action="cerrar-union-pdfs"
+          style="flex:1;background:transparent;border:1px solid var(--borde);
+            color:var(--texto-secundario);padding:9px;cursor:pointer;
+            font-size:0.65rem;letter-spacing:1px;border-radius:2px;
+            font-family:'Times New Roman',Times,serif;">CANCELAR</button>
+        <button type="button" id="btn-confirmar-union" data-action="confirmar-union-pdfs"
+          style="flex:2;background:var(--dorado);border:1px solid var(--dorado);
+            color:#0d0d0d;padding:9px;cursor:pointer;font-weight:bold;
+            font-size:0.65rem;letter-spacing:1.5px;border-radius:2px;
+            font-family:'Times New Roman',Times,serif;">UNIR</button>
       </div>
     </div>
   </div>

@@ -16,7 +16,8 @@
       {
         "title": "Babel Security",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -39,6 +40,9 @@
     },
     "externalBin": [
       "binaries/servidor_babel"
+    ],
+    "resources": [
+      "binaries/pdfium/*"
     ]
   },
   "plugins": {

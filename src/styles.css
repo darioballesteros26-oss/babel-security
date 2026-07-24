@@ -364,6 +364,12 @@ body {
   padding: 0;
   justify-content: space-between;
   overflow: hidden;
+  position: relative;
+}
+
+@keyframes parpadeo {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
 }
 
 /* ── Cabecera ── */
