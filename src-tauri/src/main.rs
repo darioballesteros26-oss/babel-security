@@ -657,6 +657,9 @@ fn traducir_texto(
 // El contenido se convierte a base64 antes de cifrar con AES-256-GCM.
 // ============================================================
 
+// Límite de tamaño por archivo importado (bytes). Debe coincidir con el del frontend.
+const LIMITE_IMPORT_BYTES: u64 = 150 * 1024 * 1024;
+
 // Núcleo compartido: lee un archivo en claro desde una ruta del sistema, lo cifra
 // con AES-256-GCM y lo guarda en ~/Babel/guardados/. Lo usan tanto la importación
 // por drag-and-drop (guardar_documento_sin_traducir) como la importación por diálogo
@@ -676,8 +679,8 @@ fn cifrar_y_guardar_desde_ruta(
 
     // S-1: límite de tamaño antes de leer en memoria
     let meta = std::fs::metadata(&ruta_canon).map_err(|e| format!("Error accediendo archivo: {}", e))?;
-    if meta.len() > 100 * 1024 * 1024 {
-        return Err("El archivo supera el límite de 100 MB.".into());
+    if meta.len() > LIMITE_IMPORT_BYTES {
+        return Err("El archivo supera el límite de 150 MB.".into());
     }
 
     let contenido =
@@ -707,8 +710,8 @@ fn cifrar_y_guardar_desde_bytes(
     if !["pdf", "docx", "txt", "png", "jpg", "jpeg"].contains(&ext.as_str()) {
         return Err(format!("Tipo de archivo no permitido: .{}", ext));
     }
-    if contenido.len() > 100 * 1024 * 1024 {
-        return Err("El archivo supera el límite de 100 MB.".into());
+    if contenido.len() as u64 > LIMITE_IMPORT_BYTES {
+        return Err("El archivo supera el límite de 150 MB.".into());
     }
 
     // Auto-reducción: TODO PDF que entra a Babel se optimiza (imágenes grandes →
@@ -954,6 +957,104 @@ async fn importar_archivo_dialogo(
 }
 
 // ============================================================
+// COMANDO — Importar una CARPETA entera por diálogo nativo. Cifra cada archivo
+// aplanando las subcarpetas (las carpetas de Babel son de un solo nivel). Devuelve
+// el nombre de la carpeta elegida y las rutas .babel creadas; el frontend decide el
+// destino (crear una carpeta con ese nombre, o volcar en la carpeta activa), igual
+// que en el arrastre. NO borra los originales.
+// ============================================================
+#[derive(serde::Serialize)]
+struct ImportarCarpetaResultado {
+    nombre_carpeta: String,
+    rutas: Vec<String>,
+    guardados: u32,
+    omitidos: u32,
+}
+
+// Recolecta rutas de archivo bajo `dir`, descendiendo en subcarpetas (aplanado).
+fn recolectar_archivos(dir: &std::path::Path, salida: &mut Vec<std::path::PathBuf>) {
+    let Ok(entradas) = std::fs::read_dir(dir) else { return };
+    for entrada in entradas.flatten() {
+        let p = entrada.path();
+        if p.is_dir() {
+            recolectar_archivos(&p, salida);
+        } else if p.is_file() {
+            salida.push(p);
+        }
+    }
+}
+
+#[tauri::command]
+async fn importar_carpeta_dialogo(
+    app: tauri::AppHandle,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<Option<ImportarCarpetaResultado>, String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let id_usuario = sesion
+        .usuario
+        .lock()
+        .map_err(|_| "Error".to_string())?
+        .clone();
+
+    // spawn_blocking por el mismo motivo que importar_archivo_dialogo: los diálogos
+    // blocking_* deadlockan si corren en el hilo principal.
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+
+        let carpeta = match app.dialog().file().blocking_pick_folder() {
+            Some(fp) => fp,
+            None => return Ok(None), // usuario canceló — sin error
+        };
+        let ruta_carpeta = carpeta
+            .into_path()
+            .map_err(|e| format!("Ruta de carpeta inválida: {}", e))?;
+        let nombre_carpeta = ruta_carpeta
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("carpeta")
+            .to_string();
+
+        let mut archivos = Vec::new();
+        recolectar_archivos(&ruta_carpeta, &mut archivos);
+
+        let mut rutas = Vec::new();
+        let mut omitidos: u32 = 0;
+        for ruta in archivos {
+            let nombre = match ruta.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => { omitidos += 1; continue; }
+            };
+            // Salta .babel (ya cifrados) y duplicados por nombre base. El resto de
+            // filtros (extensión permitida, tamaño) los aplica cifrar_y_guardar_*.
+            let nombre_base = std::path::Path::new(&nombre)
+                .file_stem().and_then(|s| s.to_str()).unwrap_or(&nombre);
+            if nombre.ends_with(".babel") || nombre_base_ya_guardado(nombre_base) {
+                omitidos += 1;
+                continue;
+            }
+            let ruta_str = ruta.to_string_lossy().to_string();
+            match cifrar_y_guardar_desde_ruta(&nombre, &ruta_str, &subclave_hex, &id_usuario) {
+                Ok(cifrada) => rutas.push(cifrada),
+                Err(_) => omitidos += 1, // tipo no permitido, demasiado grande, etc.
+            }
+        }
+
+        let guardados = rutas.len() as u32;
+        Ok(Some(ImportarCarpetaResultado {
+            nombre_carpeta,
+            rutas,
+            guardados,
+            omitidos,
+        }))
+    })
+    .await
+    .map_err(|e| format!("Error interno al importar la carpeta: {}", e))?
+}
+
+// ============================================================
 // COMANDO — Borrar de forma segura el archivo original tras importar.
 // Recibe el token opaco devuelto por importar_archivo_dialogo.
 // La ruta real se resuelve en Rust usando ese token — nunca cruza el IPC.
@@ -1105,6 +1206,13 @@ fn manejar_url_babel(app: &tauri::AppHandle, urls: Vec<String>) {
 #[tauri::command]
 fn archivo_guardado_existe(nombre_base: String, sesion: tauri::State<SesionActiva>) -> bool {
     let _ = sesion; // requiere sesión activa — si no hay sesión, devuelve false
+    nombre_base_ya_guardado(&nombre_base)
+}
+
+// Verifica contra el sistema de archivos real (guardados/ y archivos/) si ya hay un
+// .babel cuyo nombre base coincide (ignorando mayúsculas). Función libre para poder
+// reutilizarla desde la importación de carpetas, no solo desde el comando.
+fn nombre_base_ya_guardado(nombre_base: &str) -> bool {
     let nombre_base_lower = nombre_base.to_lowercase();
     let carpetas = [guardados_dir(), archivos_dir()];
     for carpeta in &carpetas {
@@ -1878,8 +1986,8 @@ async fn unir_pdfs(
                 log::error!("union: fallo al descifrar una entrada: {}", e);
                 "No se pudo leer uno de los archivos.".to_string()
             })?);
-            if bytes.len() > 100 * 1024 * 1024 {
-                return Err("Un archivo supera el límite de 100 MB.".into());
+            if bytes.len() as u64 > LIMITE_IMPORT_BYTES {
+                return Err("Un archivo supera el límite de 150 MB.".into());
             }
             if detectar_ext(&bytes) != "pdf" {
                 return Err("Solo se pueden unir archivos PDF.".into());
@@ -4374,6 +4482,7 @@ fn main() {
             guardar_documento_desde_bytes,
             preparar_temp_bytes,
             importar_archivo_dialogo,
+            importar_carpeta_dialogo,
             borrar_archivo_original,
             borrar_archivo_fuente,
             procesar_entrada_finder,

@@ -342,7 +342,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "eliminar-sel-guardados": eliminarSeleccionadosGuardados(); break;
     case "abrir-carpeta-guardados": abrirCarpetaBabelGuardados(); break;
     case "exportar-todo": exportarTodo(); break;
-    case "abrir-importar-guardado": abrirImportarGuardado(); break;
+    case "abrir-importar-guardado": mostrarPopupImportar(el); break;
     case "mostrar-input-buzon-guardado": mostrarInputBuzonGuardado(); break;
     case "confirmar-buzon-guardado": confirmarBuzonGuardado(); break;
     case "cancelar-buzon-guardado": cancelarBuzonGuardado(); break;
@@ -1388,6 +1388,95 @@ async function abrirImportarGuardado(): Promise<void> {
   }
 }
 
+// Menú del botón Importar: elegir un archivo suelto o una carpeta entera.
+let _popupImportar: HTMLElement | null = null;
+function mostrarPopupImportar(ancla: HTMLElement): void {
+  cerrarPopupImportar();
+  const popup = document.createElement("div");
+  popup.style.cssText = `
+    position:fixed;z-index:4000;background:var(--fondo-panel);
+    border:1px solid var(--borde);border-radius:3px;
+    padding:6px 0;min-width:150px;box-shadow:0 4px 16px rgba(0,0,0,0.5);
+  `;
+  const rect = ancla.getBoundingClientRect();
+  popup.style.top = (rect.bottom + 4) + "px";
+  popup.style.left = rect.left + "px";
+  const btnStyle = `display:block;width:100%;text-align:left;background:none;border:none;
+    color:var(--texto);padding:8px 16px;cursor:pointer;font-size:0.68rem;
+    letter-spacing:1px;font-family:'Times New Roman',Times,serif;`;
+  popup.innerHTML = `
+    <button style="${btnStyle}" id="pop-imp-archivo">📄 ARCHIVO</button>
+    <button style="${btnStyle}" id="pop-imp-carpeta">📁 CARPETA</button>
+  `;
+  document.body.appendChild(popup);
+  _popupImportar = popup;
+  popup.querySelector("#pop-imp-archivo")?.addEventListener("click", () => {
+    cerrarPopupImportar(); void abrirImportarGuardado();
+  });
+  popup.querySelector("#pop-imp-carpeta")?.addEventListener("click", () => {
+    cerrarPopupImportar(); void abrirImportarCarpeta();
+  });
+  requestAnimationFrame(() => {
+    document.addEventListener("click", cerrarPopupImportarClick, { once: true });
+  });
+}
+
+function cerrarPopupImportar(): void {
+  _popupImportar?.remove();
+  _popupImportar = null;
+}
+
+function cerrarPopupImportarClick(e: MouseEvent): void {
+  if (_popupImportar && !_popupImportar.contains(e.target as Node)) cerrarPopupImportar();
+}
+
+// Importa una carpeta entera vía diálogo nativo. El backend cifra cada archivo y
+// devuelve las rutas .babel; aquí aplicamos el destino por contexto (igual que el
+// arrastre): en "todos" creamos una carpeta con el nombre de la elegida; dentro de
+// una carpeta, todo cae ahí.
+async function abrirImportarCarpeta(): Promise<void> {
+  try {
+    const res = await invoke<{
+      nombre_carpeta: string;
+      rutas: string[];
+      guardados: number;
+      omitidos: number;
+    } | null>("importar_carpeta_dialogo");
+    if (!res) return; // cancelado
+    if (res.rutas.length > 0) {
+      let destino = buzonActivoGuardados;
+      if (destino === "todos") {
+        try {
+          destino = await invoke<string>("crear_buzon_guardado", {
+            nombre: (res.nombre_carpeta || "carpeta").toLowerCase(),
+            parent: null,
+          });
+        } catch (e) {
+          console.error("No se pudo crear la carpeta:", e);
+          destino = "todos";
+        }
+      }
+      if (destino !== "todos") {
+        for (const ruta of res.rutas) {
+          try {
+            await invoke("mover_archivo_guardado", { ruta, buzonDestino: destino });
+          } catch (e) {
+            console.error("Error moviendo a la carpeta:", e);
+          }
+        }
+      }
+    }
+    await cargarBuzonesGuardados();
+    await cargarArchivosGuardados();
+    mostrarToast(
+      `✓ ${res.guardados} guardado(s)${res.omitidos ? `, ${res.omitidos} omitido(s)` : ""}`,
+      res.omitidos > 0 && res.guardados === 0,
+    );
+  } catch (error) {
+    mostrarToast(`Error importando la carpeta: ${error}`, true);
+  }
+}
+
 async function verArchivoGuardado(): Promise<void> {
   const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
   if (checkboxes.length === 0) return;
@@ -1894,27 +1983,107 @@ async function iniciarDropZone(): Promise<void> {
     const enTraduccion = !document.getElementById("pantalla-traduccion")?.classList.contains("hidden");
     const enGuardados = !document.getElementById("pantalla-archivos-guardados")?.classList.contains("hidden");
     if (!enTraduccion && !enGuardados) return;
+
+    if (enGuardados) {
+      // Capturamos las entradas del arrastre de forma SÍNCRONA: webkitGetAsEntry()
+      // debe llamarse dentro del propio evento; tras el primer await, dataTransfer.items
+      // se invalida. Las entradas distinguen archivo de carpeta (dataTransfer.files no).
+      const entradas = Array.from(e.dataTransfer?.items ?? [])
+        .map((it) => it.webkitGetAsEntry?.() ?? null)
+        .filter((x): x is FileSystemEntry => x != null);
+      if (entradas.length > 0) {
+        await importarEntradasGuardados(entradas);
+      } else {
+        // Navegador sin webkitGetAsEntry — degradamos a archivos sueltos.
+        const files = Array.from(e.dataTransfer?.files ?? []);
+        let ok = 0;
+        for (const f of files) if (await guardarArchivoDesdeFile(f, buzonActivoGuardados, false)) ok++;
+        await cargarArchivosGuardados();
+        if (ok > 0) mostrarToast(`✓ ${ok} guardado(s)`, false);
+      }
+      return;
+    }
+
+    // Traducción: necesita una ruta → escribimos un temporal, traducimos y lo borramos.
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
-    if (enGuardados) {
-      for (const f of files) await guardarArchivoDesdeFile(f);
-    } else {
-      // Traducción: necesita una ruta → escribimos un temporal, traducimos y lo borramos.
-      for (const f of files) {
-        try {
-          const buf = await f.arrayBuffer();
-          const b64 = bytesABase64(new Uint8Array(buf));
-          const tmp = await invoke<string>("preparar_temp_bytes", {
-            nombreArchivo: f.name, contenidoB64: b64,
-          });
-          await procesarRuta(tmp);
-          try { await invoke("borrar_archivo_fuente", { ruta: tmp }); } catch { /* ya borrado */ }
-        } catch (e) {
-          mostrarToast("Error procesando el archivo: " + String(e), true);
-        }
+    for (const f of files) {
+      try {
+        const buf = await f.arrayBuffer();
+        const b64 = bytesABase64(new Uint8Array(buf));
+        const tmp = await invoke<string>("preparar_temp_bytes", {
+          nombreArchivo: f.name, contenidoB64: b64,
+        });
+        await procesarRuta(tmp);
+        try { await invoke("borrar_archivo_fuente", { ruta: tmp }); } catch { /* ya borrado */ }
+      } catch (e) {
+        mostrarToast("Error procesando el archivo: " + String(e), true);
       }
     }
   });
+}
+
+// Lee un FileSystemFileEntry a un File (la API es por callback).
+function entradaAFile(entry: FileSystemFileEntry): Promise<File> {
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+// Recorre una carpeta arrastrada devolviendo TODOS sus archivos, aplanando las
+// subcarpetas (las carpetas de Babel son de un solo nivel). readEntries() entrega
+// las entradas en tandas: hay que llamarlo repetidamente hasta que devuelva [].
+async function leerCarpetaRecursivo(dir: FileSystemDirectoryEntry): Promise<File[]> {
+  const out: File[] = [];
+  const reader = dir.createReader();
+  const leerTanda = (): Promise<FileSystemEntry[]> =>
+    new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+  let tanda = await leerTanda();
+  while (tanda.length > 0) {
+    for (const e of tanda) {
+      if (e.isFile) out.push(await entradaAFile(e as FileSystemFileEntry));
+      else if (e.isDirectory) out.push(...(await leerCarpetaRecursivo(e as FileSystemDirectoryEntry)));
+    }
+    tanda = await leerTanda();
+  }
+  return out;
+}
+
+// Importa a "guardados" una mezcla de archivos y carpetas arrastrados. Destino por
+// contexto: una carpeta soltada en la vista "todos" crea una carpeta con su nombre;
+// dentro de una carpeta (o para archivos sueltos) todo cae en la carpeta activa.
+async function importarEntradasGuardados(entradas: FileSystemEntry[]): Promise<void> {
+  let guardados = 0;
+  let omitidos = 0;
+  const importar = async (f: File, destino: string) => {
+    if (await guardarArchivoDesdeFile(f, destino, false)) guardados++;
+    else omitidos++;
+  };
+  for (const entrada of entradas) {
+    if (entrada.isFile) {
+      await importar(await entradaAFile(entrada as FileSystemFileEntry), buzonActivoGuardados);
+    } else if (entrada.isDirectory) {
+      let destino = buzonActivoGuardados;
+      if (destino === "todos") {
+        // Crear una carpeta con el nombre de la soltada. Si falla (nombre inválido,
+        // etc.) caemos a "todos" para no perder los archivos.
+        try {
+          destino = await invoke<string>("crear_buzon_guardado", {
+            nombre: (entrada.name || "carpeta").toLowerCase(),
+            parent: null,
+          });
+        } catch (e) {
+          console.error("No se pudo crear la carpeta:", e);
+          destino = "todos";
+        }
+      }
+      const files = await leerCarpetaRecursivo(entrada as FileSystemDirectoryEntry);
+      for (const f of files) await importar(f, destino);
+    }
+  }
+  await cargarBuzonesGuardados();
+  await cargarArchivosGuardados();
+  if (guardados > 0 || omitidos > 0) {
+    mostrarToast(`✓ ${guardados} guardado(s)${omitidos ? `, ${omitidos} omitido(s)` : ""}`, omitidos > 0 && guardados === 0);
+  }
 }
 
 // Convierte bytes a base64 por bloques (btoa directo revienta la pila con arrays grandes).
@@ -1928,21 +2097,28 @@ function bytesABase64(bytes: Uint8Array): string {
 }
 
 // Cifra y guarda un File arrastrado (sin ruta, solo bytes vía HTML5 drop).
-async function guardarArchivoDesdeFile(file: File): Promise<void> {
+// `destino`: carpeta donde queda; "todos" = sin mover. `recargar`: al importar en
+// lote (una carpeta entera) se pasa false para no recargar la lista ni sacar un toast
+// por cada archivo — quien llama muestra un resumen al final. Devuelve si se guardó.
+async function guardarArchivoDesdeFile(
+  file: File,
+  destino: string = buzonActivoGuardados,
+  recargar: boolean = true,
+): Promise<boolean> {
   const nombre = file.name || "archivo";
   if (nombre.endsWith(".babel")) {
-    mostrarToast("Los archivos .babel ya están cifrados", true);
-    return;
+    if (recargar) mostrarToast("Los archivos .babel ya están cifrados", true);
+    return false;
   }
-  if (file.size > 100 * 1024 * 1024) {
-    mostrarToast(`"${nombre}" supera el límite de 100 MB`, true);
-    return;
+  if (file.size > 150 * 1024 * 1024) {
+    if (recargar) mostrarToast(`"${nombre}" supera el límite de 150 MB`, true);
+    return false;
   }
   const nombreBase = nombre.replace(/\.[^/.]+$/, "");
   const yaExiste = await invoke<boolean>("archivo_guardado_existe", { nombreBase }).catch(() => false);
   if (yaExiste) {
-    mostrarToast(`"${nombre}" ya está guardado`, true);
-    return;
+    if (recargar) mostrarToast(`"${nombre}" ya está guardado`, true);
+    return false;
   }
   try {
     const buf = await file.arrayBuffer();
@@ -1951,17 +2127,21 @@ async function guardarArchivoDesdeFile(file: File): Promise<void> {
       nombreArchivo: nombre,
       contenidoB64: b64,
     });
-    if (buzonActivoGuardados !== "todos") {
+    if (destino !== "todos") {
       try {
-        await invoke("mover_archivo_guardado", { ruta: rutaCifrada, buzonDestino: buzonActivoGuardados });
+        await invoke("mover_archivo_guardado", { ruta: rutaCifrada, buzonDestino: destino });
       } catch (e) {
-        console.error("Error moviendo al buzón:", e);
+        console.error("Error moviendo a la carpeta:", e);
       }
     }
-    mostrarToast(`✓ ${nombre} guardado y cifrado`, false);
-    await cargarArchivosGuardados();
+    if (recargar) {
+      mostrarToast(`✓ ${nombre} guardado y cifrado`, false);
+      await cargarArchivosGuardados();
+    }
+    return true;
   } catch (error) {
-    mostrarToast(`Error guardando: ${error}`, true);
+    if (recargar) mostrarToast(`Error guardando: ${error}`, true);
+    return false;
   }
 }
 // NAVEGACIÓN — ENTRE PANTALLAS Y ACCIONES DE ARCHIVO
