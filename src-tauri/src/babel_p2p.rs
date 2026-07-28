@@ -209,23 +209,20 @@ impl GestorCertificados {
         let clave_der = Zeroizing::new(cert.serialize_private_key_der());
 
         fs::write(ruta_cert(), &cert_der).map_err(|e| format!("Error guardando cert: {}", e))?;
-        // Cifrar la clave privada con HKDF de la subclave del usuario
+        // Cifrar la clave privada con HKDF de la subclave del usuario.
+        // escribir_privado crea el archivo con 0600 de forma atómica: la clave nunca
+        // queda a 0644 (ni siquiera un instante) como sí ocurría con fs::write + chmod.
         if let Some(enc_key) = clave_privada_p2p_enc(subclave_hex) {
             match crate::seguridad::blindar_documento(&hex::encode(clave_der.as_slice()), &enc_key) {
                 Ok(cifrado) => {
-                    fs::write(ruta_clave(), cifrado).map_err(|e| format!("Error guardando clave cifrada: {}", e))?;
+                    crate::escribir_privado(ruta_clave(), cifrado).map_err(|e| format!("Error guardando clave cifrada: {}", e))?;
                 }
                 Err(_) => {
-                    fs::write(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
+                    crate::escribir_privado(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
                 }
             }
         } else {
-            fs::write(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600));
+            crate::escribir_privado(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
         }
 
         log::info!("[OK] Certificado generado en {:?}", ruta_cert());
@@ -251,24 +248,18 @@ impl GestorCertificados {
                             .and_then(|h| hex::decode(h.trim()).map_err(|e| e.to_string()))
                         {
                             Ok(bytes) => {
-                                // Re-cifrar con clave nueva
+                                // Re-cifrar con clave nueva (escritura atómica 0600)
                                 if let Ok(cifrado) = crate::seguridad::blindar_documento(&hex::encode(&bytes), &enc_key) {
-                                    let _ = fs::write(ruta_clave(), cifrado);
-                                    #[cfg(unix)]
-                                    { use std::os::unix::fs::PermissionsExt;
-                                      let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600)); }
+                                    let _ = crate::escribir_privado(ruta_clave(), cifrado);
                                     log::warn!("[P2P] Clave privada migrada a v2 (HKDF de subclave).");
                                 }
                                 Zeroizing::new(bytes)
                             }
                             Err(_) => {
-                                // Texto plano (instalación muy antigua) — re-cifrar
+                                // Texto plano (instalación muy antigua) — re-cifrar (0600 atómico)
                                 let raw = Zeroizing::new(blob);
                                 if let Ok(cifrado) = crate::seguridad::blindar_documento(&hex::encode(&*raw), &enc_key) {
-                                    let _ = fs::write(ruta_clave(), cifrado);
-                                    #[cfg(unix)]
-                                    { use std::os::unix::fs::PermissionsExt;
-                                      let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600)); }
+                                    let _ = crate::escribir_privado(ruta_clave(), cifrado);
                                 }
                                 raw
                             }

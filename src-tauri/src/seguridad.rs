@@ -1567,7 +1567,16 @@ fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
             use sha2::{Digest, Sha256};
             let nuevo_hash: [u8; 32] = Sha256::digest(&cifrado).into();
             use std::io::Write;
-            if let Ok(mut f) = fs::OpenOptions::new().append(true).create(true).open(ruta) {
+            // Crear la bitácora con permisos 0600 (append-only, no se puede usar
+            // escribir_privado porque trunca). Evita que quede 0644 en la primera creación.
+            let mut opts = fs::OpenOptions::new();
+            opts.append(true).create(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            if let Ok(mut f) = opts.open(ruta) {
                 let len = (cifrado.len() as u32).to_le_bytes();
                 if let Err(e) = f.write_all(&len).and_then(|_| f.write_all(&cifrado)) {
                     log::error!("[!] Fallo escribiendo evento de auditoría en {}: {}", ruta, e);

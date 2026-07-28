@@ -83,7 +83,7 @@ pub fn contar_paginas(pdfium: &Pdfium, bytes: &[u8]) -> Result<usize, String> {
 
 /// Une los PDFs de `entradas` en el orden dado y devuelve el PDF resultante en
 /// memoria. Todo-o-nada: si una entrada falla, retorna Err sin salida parcial.
-pub fn unir(pdfium: &Pdfium, entradas: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+pub fn unir(pdfium: &Pdfium, entradas: &[&[u8]]) -> Result<Vec<u8>, String> {
     if entradas.len() < 2 {
         return Err("Se necesitan al menos 2 PDFs para unir.".into());
     }
@@ -92,7 +92,7 @@ pub fn unir(pdfium: &Pdfium, entradas: &[Vec<u8>]) -> Result<Vec<u8>, String> {
         .create_new_pdf()
         .map_err(|e| format!("No se pudo crear el PDF unido: {}", e))?;
 
-    for (i, bytes) in entradas.iter().enumerate() {
+    for (i, &bytes) in entradas.iter().enumerate() {
         let src = cargar(pdfium, bytes).map_err(|e| format!("PDF #{}: {}", i + 1, e))?;
         dest.pages_mut()
             .append(&src)
@@ -191,7 +191,8 @@ mod tests {
     #[test]
     fn unir_dos_pdfs() {
         let p = pdfium();
-        let out = unir(p, &[pdf_de(2), pdf_de(3)]).unwrap();
+        let (a, b) = (pdf_de(2), pdf_de(3));
+        let out = unir(p, &[a.as_slice(), b.as_slice()]).unwrap();
         assert_eq!(contar_paginas(p, &out).unwrap(), 5);
     }
 
@@ -199,8 +200,9 @@ mod tests {
     fn unir_cinco_pdfs() {
         let p = pdfium();
         let entradas: Vec<Vec<u8>> = (1..=5).map(pdf_de).collect();
+        let refs: Vec<&[u8]> = entradas.iter().map(|v| v.as_slice()).collect();
         let esperado: usize = (1..=5).sum();
-        let out = unir(p, &entradas).unwrap();
+        let out = unir(p, &refs).unwrap();
         assert_eq!(contar_paginas(p, &out).unwrap(), esperado);
     }
 
@@ -210,7 +212,7 @@ mod tests {
         let p = pdfium();
         let a = make_pdf(&["SOLO_A"]);
         let b = make_pdf(&["B_UNO", "B_DOS"]);
-        let out = unir(p, &[b, a]).unwrap();
+        let out = unir(p, &[b.as_slice(), a.as_slice()]).unwrap();
         let paginas = texto_por_pagina(p, &out).unwrap();
         let ultima = paginas.last().expect("el PDF unido no tiene páginas");
         assert!(ultima.contains("SOLO_A"), "última página inesperada: {:?}", ultima);
@@ -219,7 +221,8 @@ mod tests {
     #[test]
     fn texto_sigue_extraible() {
         let p = pdfium();
-        let out = unir(p, &[pdf_de(1), pdf_de(1)]).unwrap();
+        let (u, v) = (pdf_de(1), pdf_de(1));
+        let out = unir(p, &[u.as_slice(), v.as_slice()]).unwrap();
         assert!(texto_de(p, &out).contains("Pagina 1"));
     }
 
@@ -228,6 +231,7 @@ mod tests {
         let p = pdfium();
         let basura = b"esto no es un PDF".to_vec();
         assert!(contar_paginas(p, &basura).is_err());
-        assert!(unir(p, &[pdf_de(1), basura]).is_err());
+        let bueno = pdf_de(1);
+        assert!(unir(p, &[bueno.as_slice(), basura.as_slice()]).is_err());
     }
 }

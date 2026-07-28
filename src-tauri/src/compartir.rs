@@ -495,7 +495,8 @@ pub fn generar_archivo_compartir(
     subclave_hex: &str,
 ) -> Result<ResultadoCompartir, String> {
     let mime = mime_de_nombre(nombre_original);
-    let payload = empaquetar_payload(nombre_original, mime, bytes_descifrados);
+    // payload es una copia nueva del plaintext del documento — Zeroizing la borra al salir.
+    let payload = Zeroizing::new(empaquetar_payload(nombre_original, mime, bytes_descifrados));
 
     let (password, es_nuevo) = obtener_o_crear_password(contacto, subclave_hex)?;
 
@@ -523,7 +524,7 @@ pub fn generar_archivo_compartir(
     crate::escribir_privado(&ruta_html, html.as_bytes())
         .map_err(|e| format!("Error guardando HTML: {}", e))?;
 
-    log::info!("[compartir] HTML generado: {}", ruta_html);
+    log::info!("[compartir] HTML de compartición generado.");
 
     Ok(ResultadoCompartir {
         ruta_html,

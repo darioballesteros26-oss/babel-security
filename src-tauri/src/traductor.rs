@@ -2584,19 +2584,18 @@ static UREQ_AGENT: OnceLock<ureq::Agent> = OnceLock::new();
 static NLLB_TOKEN: OnceLock<String> = OnceLock::new();
 static TOKEN_DESDE_ARCHIVO: OnceLock<String> = OnceLock::new();
 
-// Token por defecto FIJO, idéntico al de server.py (_TOKEN_DEFECTO). Permite que la app
-// se autentique con el servidor local aunque se abra con doble clic (sin BABEL_NLLB_TOKEN
-// en el entorno) — antes ese caso caía al diccionario y traducía palabra por palabra.
-// Es defensa en profundidad sobre un puerto solo-localhost; el modo USB lo sobrescribe
-// con un token aleatorio vía inicializar_nllb_token.
-const NLLB_TOKEN_DEFECTO: &str = "babel-local-default-token-2026-no-compartir";
-
 pub fn inicializar_nllb_token(token: String) {
     let _ = NLLB_TOKEN.set(token);
 }
 
 /// Resuelve el token efectivo por prioridad: OnceLock (modo USB) > variable de entorno
-/// (arrancar_babel.sh / npm run tauri dev) > constante por defecto compartida.
+/// (arrancar_babel.sh / npm run tauri dev) > token persistido por server.py.
+///
+/// No hay token por defecto hardcodeado: server.py siempre usa `BABEL_SERVER_TOKEN`/
+/// `BABEL_NLLB_TOKEN` o genera uno aleatorio que persiste en ~/Babel/servidor_token.txt
+/// (0600). Cualquiera de las tres fuentes cubre los casos reales (USB, app empaquetada,
+/// server.py manual). Si ninguna está disponible devolvemos cadena vacía: el servidor
+/// responde 401 igualmente, sin necesidad de un secreto fijo en el binario.
 fn token_efectivo() -> String {
     if let Some(t) = NLLB_TOKEN.get() {
         if !t.is_empty() {
@@ -2619,7 +2618,7 @@ fn token_efectivo() -> String {
     if desde_archivo.len() >= 32 {
         return desde_archivo.clone();
     }
-    NLLB_TOKEN_DEFECTO.to_string()
+    String::new()
 }
 
 fn agente_http() -> &'static ureq::Agent {

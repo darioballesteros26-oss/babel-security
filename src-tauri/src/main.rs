@@ -261,43 +261,80 @@ fn validar_ruta_en(ruta: &str, base: std::path::PathBuf) -> Result<(), String> {
 }
 // COMANDO 1 — Verificación de entorno
 
-fn verificar_licencia_hardware() -> Result<(), String> {
+// Clave HMAC estática usada en versiones anteriores (v1). Se conserva SOLO para
+// migrar licencias antiguas a la v2 (HMAC con master.salt, única por instalación).
+const LICENCIA_KEY_V1: &[u8] = b"babel-license-bind-v1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+
+fn hmac_hex(bytes: &[u8], key: &[u8]) -> String {
     use hmac::{Hmac, Mac};
+    let mut mac = <Hmac<sha2::Sha256> as Mac>::new_from_slice(key)
+        .expect("clave HMAC de longitud válida");
+    mac.update(bytes);
+    hex::encode(mac.finalize().into_bytes())
+}
+
+#[derive(PartialEq, Debug)]
+enum LicenciaEstado {
+    V2Ok,               // firma v2 válida — nada que hacer
+    RequiereMigracion,  // firma v1 (clave estática) o hash SHA-256 legacy — reescribir como v2
+    Invalida,           // no coincide con ninguna → vinculada a otro equipo
+}
+
+/// Clasifica el contenido guardado de licencia.babel contra el serial+salt actuales.
+/// Función pura (sin E/S) para poder testear la migración v1/legacy → v2.
+fn clasificar_licencia(guardado: &str, serial: &[u8], salt: &[u8]) -> LicenciaEstado {
     use sha2::Digest;
+    if guardado == hmac_hex(serial, salt) {
+        return LicenciaEstado::V2Ok;
+    }
+    let firma_v1 = hmac_hex(serial, LICENCIA_KEY_V1);
+    let hash_legacy = format!("{:x}", sha2::Sha256::digest(serial));
+    if guardado == firma_v1 || guardado == hash_legacy {
+        LicenciaEstado::RequiereMigracion
+    } else {
+        LicenciaEstado::Invalida
+    }
+}
+
+fn verificar_licencia_hardware() -> Result<(), String> {
+    // Serial de hardware. Si no se puede leer (system_profiler falla, sin línea
+    // "Serial Number", salida vacía...) devolvemos None y OMITIMOS la verificación:
+    // un fallo transitorio de lectura no debe bloquear a un usuario legítimo. El
+    // vínculo por hardware es una medida anti-copia blanda, no una frontera de
+    // seguridad — antes se comparaba contra "UNKNOWN" y provocaba falsos rechazos.
     #[cfg(target_os = "macos")]
-    let serial = std::process::Command::new("system_profiler")
+    let serial: Option<String> = std::process::Command::new("system_profiler")
         .args(["SPHardwareDataType"])
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.lines().find(|l| l.contains("Serial Number")).map(|l| l.trim().to_string()))
-        .unwrap_or_else(|| "UNKNOWN".to_string());
+        .filter(|s| !s.is_empty());
     #[cfg(not(target_os = "macos"))]
-    let serial = "WINDOWS-NO-SERIAL".to_string();
+    let serial: Option<String> = Some("WINDOWS-NO-SERIAL".to_string());
+
+    let serial = match serial {
+        Some(s) => s,
+        None => {
+            log::warn!("[licencia] No se pudo leer el serial de hardware; se omite la verificación de vínculo en este arranque.");
+            return Ok(());
+        }
+    };
 
     // Clave HMAC derivada de master.salt (única por instalación).
-    // La clave estática usada en versiones anteriores se conserva solo para migración.
     let salt = traductor::cargar_o_crear_salt();
-    let hmac_con_clave = |bytes: &[u8], key: &[u8]| -> String {
-        let mut mac = <Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key)
-            .expect("clave HMAC de longitud válida");
-        mac.update(bytes);
-        hex::encode(mac.finalize().into_bytes())
-    };
-    let firma = hmac_con_clave(serial.as_bytes(), &salt);
+    let firma = hmac_hex(serial.as_bytes(), &salt);
     let ruta = babel_path("licencia.babel");
     if std::path::Path::new(&ruta).exists() {
         let guardado = fs::read_to_string(&ruta).unwrap_or_default().trim().to_string();
-        // Migración: HMAC con clave estática (v1) → HMAC con master.salt (v2)
-        const _LICENCIA_KEY_V1: &[u8] = b"babel-license-bind-v1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-        let firma_v1 = hmac_con_clave(serial.as_bytes(), _LICENCIA_KEY_V1);
-        let hash_legacy = format!("{:x}", sha2::Sha256::digest(serial.as_bytes()));
-        if guardado == firma {
-            // ya en formato v2 — ok
-        } else if guardado == firma_v1 || guardado == hash_legacy {
-            let _ = escribir_privado(&ruta, firma.as_bytes()); // migrar a v2
-        } else {
-            return Err("Licencia inválida. Babel está vinculado a otro equipo.".into());
+        match clasificar_licencia(&guardado, serial.as_bytes(), &salt) {
+            LicenciaEstado::V2Ok => {}
+            LicenciaEstado::RequiereMigracion => {
+                let _ = escribir_privado(&ruta, firma.as_bytes()); // migrar a v2
+            }
+            LicenciaEstado::Invalida => {
+                return Err("Licencia inválida. Babel está vinculado a otro equipo.".into());
+            }
         }
     } else {
         let _ = escribir_privado(&ruta, firma.as_bytes());
@@ -1645,6 +1682,16 @@ fn descifrar_a_bytes(ruta: &str, subclave_hex: &str) -> Result<Vec<u8>, String> 
     Ok(contenido.into_bytes())
 }
 
+/// Valida que `ruta` esté dentro del vault (archivos/ o guardados/), la descifra con
+/// la sesión activa y devuelve el plaintext en un buffer que se zeroiza al soltarse.
+/// Centraliza el patrón validar-ruta + descifrar + Zeroizing que repetían export,
+/// compartir y otros flujos (evita olvidar la zeroización en cada sitio).
+fn abrir_descifrado_vault(ruta: &str, subclave_hex: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    validar_ruta_en(ruta, archivos_dir())
+        .or_else(|_| validar_ruta_en(ruta, guardados_dir()))?;
+    Ok(Zeroizing::new(descifrar_a_bytes(ruta, subclave_hex)?))
+}
+
 // Detecta la extensión real de un archivo por sus magic bytes.
 fn detectar_ext(bytes: &[u8]) -> &'static str {
     if bytes.len() >= 4 && &bytes[..4] == b"%PDF" { return "pdf"; }
@@ -1810,7 +1857,9 @@ async fn unir_pdfs(
         };
 
         // Descifra cada PDF EN MEMORIA (nunca toca el disco en claro).
-        let mut entradas: Vec<Vec<u8>> = Vec::with_capacity(rutas.len());
+        // Zeroizing: el plaintext de cada PDF se borra de la RAM al salir del scope,
+        // por cualquier ruta (éxito, error, o límite de tamaño superado).
+        let mut entradas: Vec<Zeroizing<Vec<u8>>> = Vec::with_capacity(rutas.len());
         let total = rutas.len();
 
         for (i, ruta) in rutas.iter().enumerate() {
@@ -1821,13 +1870,14 @@ async fn unir_pdfs(
             validar_ruta_en(ruta, guardados_dir())
                 .or_else(|_| validar_ruta_en(ruta, archivos_dir()))
                 .map_err(|e| {
-                    log::error!("union: ruta no válida {}: {}", ruta, e);
+                    // No se loguea la ruta para no filtrar metadatos del vault.
+                    log::error!("union: ruta no válida: {}", e);
                     "Uno de los archivos no es accesible.".to_string()
                 })?;
-            let bytes = descifrar_a_bytes(ruta, &subclave_hex).map_err(|e| {
-                log::error!("union: descifrado {}: {}", ruta, e);
+            let bytes = Zeroizing::new(descifrar_a_bytes(ruta, &subclave_hex).map_err(|e| {
+                log::error!("union: fallo al descifrar una entrada: {}", e);
                 "No se pudo leer uno de los archivos.".to_string()
-            })?;
+            })?);
             if bytes.len() > 100 * 1024 * 1024 {
                 return Err("Un archivo supera el límite de 100 MB.".into());
             }
@@ -1839,11 +1889,13 @@ async fn unir_pdfs(
 
         progreso(70, "Uniendo PDFs…");
         let pdfium = pdf_union::pdfium(&dirs)?;
-        let pdf_unido = pdf_union::unir(pdfium, &entradas).map_err(|msg| {
+        let refs: Vec<&[u8]> = entradas.iter().map(|z| z.as_slice()).collect();
+        let pdf_unido = Zeroizing::new(pdf_union::unir(pdfium, &refs).map_err(|msg| {
             log::error!("union: fallo al unir: {}", msg);
             msg
-        })?;
-        drop(entradas); // libera el plaintext de las entradas cuanto antes
+        })?);
+        drop(refs);
+        drop(entradas); // zeroiza el plaintext de las entradas cuanto antes
 
         progreso(90, "Cifrando y guardando…");
         let base = std::path::Path::new(&nombre_salida)
@@ -1873,10 +1925,27 @@ async fn unir_pdfs(
         // borra el resultado recién creado. Las rutas ya se validaron arriba como
         // dentro de guardados/archivos.
         if borrar_originales {
+            let mut no_borrados = 0u32;
             for ruta in &rutas {
                 if *ruta != ruta_cifrada {
                     borrar_seguro(ruta);
+                    // Verificar que el borrado tuvo efecto y avisar si no (consistencia
+                    // con el flujo de importación / clic derecho). Sin loguear la ruta.
+                    if std::path::Path::new(ruta).exists() {
+                        no_borrados += 1;
+                    }
                 }
+            }
+            if no_borrados > 0 {
+                log::warn!("union: {} original(es) no pudieron borrarse", no_borrados);
+                progreso(
+                    100,
+                    &format!(
+                        "Unido. {} original(es) no pudieron borrarse — elimínalos manualmente.",
+                        no_borrados
+                    ),
+                );
+                return Ok(ruta_cifrada);
             }
         }
 
@@ -2157,10 +2226,8 @@ async fn exportar_archivo(
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-        validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
-
-        // Descifrar y reconstruir el documento original
-        let raw = Zeroizing::new(descifrar_a_bytes(&ruta, &subclave_hex)?);
+        // Descifrar y reconstruir el documento original (valida ruta + zeroiza).
+        let raw = abrir_descifrado_vault(&ruta, &subclave_hex)?;
         let ext = detectar_ext(&raw);
         let nombre = nombre_exportacion(&ruta, ext);
 
@@ -2207,14 +2274,8 @@ async fn exportar_archivos_a_carpeta(
 
         let mut copiados: u32 = 0;
         for ruta in &rutas {
-            if validar_ruta_en(ruta, archivos_dir())
-                .or_else(|_| validar_ruta_en(ruta, guardados_dir()))
-                .is_err()
-            {
-                continue;
-            }
-            let raw = match descifrar_a_bytes(ruta, &subclave_hex) {
-                Ok(b) => Zeroizing::new(b),
+            let raw = match abrir_descifrado_vault(ruta, &subclave_hex) {
+                Ok(b) => b,
                 Err(_) => continue,
             };
             let ext = detectar_ext(&raw);
@@ -3677,9 +3738,6 @@ fn generar_archivo_compartir(
     contacto: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<compartir::ResultadoCompartir, String> {
-    validar_ruta_en(&ruta, archivos_dir())
-        .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
-
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -3694,8 +3752,8 @@ fn generar_archivo_compartir(
         c
     };
 
-    // Descifrar el .babel para obtener los bytes originales
-    let bytes = descifrar_a_bytes(&ruta, &subclave_hex)?;
+    // Descifrar el .babel (valida ruta + zeroiza el plaintext al salir).
+    let bytes = abrir_descifrado_vault(&ruta, &subclave_hex)?;
 
     compartir::generar_archivo_compartir(&bytes, &nombre_original, &contacto, &subclave_hex)
 }
@@ -3751,17 +3809,9 @@ async fn compartir_directo(
         return Err("No hay sesión activa.".into());
     }
 
-    validar_ruta_en(&ruta, archivos_dir())
-        .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))
-        .map_err(|_| {
-            log::error!("[compartir_directo] Ruta fuera de directorios permitidos: {}", ruta);
-            "Ruta fuera de los directorios de Babel.".to_string()
-        })?;
-
-    log::info!("[compartir_directo] Compartiendo: {}", nombre_original);
-
-    // Descifrar → base64 → HTML sin contraseña → compartir
-    let mut bytes = Zeroizing::new(descifrar_a_bytes(&ruta, &subclave_hex)?);
+    // Descifrar → base64 → HTML sin contraseña → compartir (valida ruta + zeroiza).
+    // No se loguean ruta ni nombre del archivo para no filtrar metadatos del documento.
+    let mut bytes = abrir_descifrado_vault(&ruta, &subclave_hex)?;
     let ext = detectar_ext(&bytes);
     let mime = match ext {
         "pdf"  => "application/pdf",
@@ -3785,8 +3835,9 @@ async fn compartir_directo(
         format!("{}.{}", nombre_base, ext)
     };
 
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&**bytes);
+    let mut b64 = base64::engine::general_purpose::STANDARD.encode(&**bytes);
     let html = compartir::generar_html_simple(&b64, &nombre_con_ext, mime);
+    b64.zeroize();    // b64 es una copia base64 del plaintext — borrarla tras usarla
     bytes.zeroize();  // bytes ya no se necesitan — zerizar antes de tocar el disco
 
     // Nombre único para el .html: evita colisión en shares paralelos del mismo archivo
@@ -4365,6 +4416,43 @@ fn main() {
 }
 
 // ─── Tests del sidecar ────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests_licencia {
+    use super::*;
+    use sha2::Digest;
+
+    // Una licencia generada ANTES del fix H2 (HMAC con clave estática v1, o hash
+    // SHA-256 legacy) debe seguir validando y marcarse para migración a v2.
+    #[test]
+    fn migra_v1_y_legacy_a_v2() {
+        let serial = b"C02ABC123XYZ";
+        let salt = b"salt-de-prueba-para-licencia-32b";
+
+        // v2 (formato nuevo) → OK sin tocar nada
+        let firma_v2 = hmac_hex(serial, salt);
+        assert_eq!(clasificar_licencia(&firma_v2, serial, salt), LicenciaEstado::V2Ok);
+
+        // v1 (clave estática antigua) → requiere migración
+        let firma_v1 = hmac_hex(serial, LICENCIA_KEY_V1);
+        assert_eq!(clasificar_licencia(&firma_v1, serial, salt), LicenciaEstado::RequiereMigracion);
+
+        // legacy (SHA-256 del serial) → requiere migración
+        let hash_legacy = format!("{:x}", sha2::Sha256::digest(serial));
+        assert_eq!(clasificar_licencia(&hash_legacy, serial, salt), LicenciaEstado::RequiereMigracion);
+    }
+
+    // El vínculo por hardware sigue funcionando: contenido ajeno o de otro equipo = inválido.
+    #[test]
+    fn rechaza_basura_y_otro_equipo() {
+        let serial = b"C02ABC123XYZ";
+        let salt = b"salt-de-prueba-para-licencia-32b";
+        assert_eq!(clasificar_licencia("deadbeef", serial, salt), LicenciaEstado::Invalida);
+        // firma v2 válida pero calculada con OTRO serial → inválida en este equipo
+        let firma_otro = hmac_hex(b"OTRO-SERIAL", salt);
+        assert_eq!(clasificar_licencia(&firma_otro, serial, salt), LicenciaEstado::Invalida);
+    }
+}
 
 #[cfg(test)]
 mod tests_sidecar {
