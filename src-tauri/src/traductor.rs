@@ -336,6 +336,7 @@ pub fn procesar_archivo_inteligente(
         progreso(96, "GENERANDO PDF...");
         let soffice = [
             "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
             "/opt/homebrew/bin/soffice",
             "/usr/local/bin/soffice",
             "soffice",
@@ -1456,18 +1457,18 @@ pub fn procesar_pdf(
     progreso(5, "CONVIRTIENDO PDF...");
     // PASO 1: PDF → DOCX con pdf2docx (timeout 120 s)
     let ruta_docx_tmp = tmp_dir.join(format!("{}_tmp.docx", nombre));
-    // Buscar el python que tenga pdf2docx: babel_env primero, luego rutas estándar
+    // Buscar el python que tenga pdf2docx. Rutas estándar de macOS/Linux y, al final,
+    // los nombres a resolver por PATH (`python3` en Unix, `python` en Windows).
     let python3 = [
-        "/Users/georgina/Desktop/Babel/babel_env/bin/python3",
         "/opt/homebrew/bin/python3",
         "/usr/local/bin/python3",
         "/usr/bin/python3",
         "python3",
+        "python",
     ]
     .iter()
     .copied()
     .find(|&p| {
-        if p == "python3" { return true; }
         std::process::Command::new(p)
             .args(["-c", "import pdf2docx"])
             .output()
@@ -1518,6 +1519,7 @@ pub fn procesar_pdf(
         progreso(6, "CONVIRTIENDO PDF (LibreOffice)...");
         let soffice = [
             "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
             "/opt/homebrew/bin/soffice",
             "/usr/local/bin/soffice",
             "soffice",
@@ -1767,6 +1769,7 @@ pub fn procesar_pdf(
 
         let soffice_bin = [
             "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
             "/opt/homebrew/bin/soffice",
             "/usr/local/bin/soffice",
             "soffice",
@@ -1903,6 +1906,7 @@ pub fn procesar_pdf(
         progreso(95, "GENERANDO PDF...");
         let soffice_pdf = [
             "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
             "/opt/homebrew/bin/soffice",
             "/usr/local/bin/soffice",
             "soffice",

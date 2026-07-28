@@ -112,8 +112,11 @@ pub(crate) fn escribir_privado(
             .open(ruta.as_ref())
             .and_then(|mut f| f.write_all(datos.as_ref()))
     };
+    // En Windows no hay chmod: escritura normal, heredando las ACL del proceso.
+    // (Antes esta rama se llamaba a sí misma → recursión infinita y crash al primer
+    // guardado interno; en Unix nunca se compilaba, por eso el CI no lo detectaba.)
     #[cfg(not(unix))]
-    let res = escribir_privado(ruta, datos);
+    let res = std::fs::write(ruta.as_ref(), datos.as_ref());
     res
 }
 
@@ -1264,6 +1267,7 @@ fn verificar_herramientas_pdf() -> HerramientasPdf {
         "/opt/homebrew/bin/soffice",
         "/usr/local/bin/soffice",
         "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
     ]
     .iter()
     .any(|&p| std::path::Path::new(p).exists());
