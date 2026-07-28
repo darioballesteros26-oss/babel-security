@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Babel Security",
+  "productName": "Security Babel",
   "version": "0.1.0",
-  "identifier": "com.babel.seguridad",
+  "identifier": "com.security.babel",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "macOSPrivateApi": false,
     "windows": [
       {
-        "title": "Babel Security",
+        "title": "Security Babel",
         "width": 800,
         "height": 600,
         "dragDropEnabled": false
@@ -51,7 +51,9 @@
     },
     "deep-link": {
       "desktop": {
-        "schemes": ["babel"]
+        "schemes": [
+          "babel"
+        ]
       }
     }
   }
