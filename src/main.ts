@@ -113,6 +113,10 @@ function mostrarPantalla(nombre: Pantalla): void {
   document.querySelectorAll<HTMLElement>(".pantalla")
     .forEach(p => p.classList.add("hidden"));
   document.getElementById(`pantalla-${nombre}`)?.classList.remove("hidden");
+  if (pantallaEsSensible(nombre)) iniciarVigilanciaCaptura();
+  else detenerVigilanciaCaptura();
+  // Al llegar al login, escanear keyloggers justo antes de teclear la maestra.
+  if (nombre === "login") escanearKeyloggerAlEntrar();
 }
 
 function mostrarMensaje(id: string, texto: string, esError: boolean): void {
@@ -133,6 +137,139 @@ function limpiarCampo(id: string): void {
 function limpiarCamposSensibles(): void {
   ["master-key", "master-key-confirm", "user-pass", "user-pass-confirm",
     "login-pass", "login-pass-usuario"].forEach(limpiarCampo);
+}
+
+// ENTRADA SEGURA (anti-keylogger) — activa el modo de entrada segura del SO
+// mientras el foco está en cualquier campo de contraseña, y lo desactiva al salir.
+// Se apoya en delegación (focusin/focusout) para cubrir campos que aparecen
+// dinámicamente. El comando Rust es idempotente: activar/desactivar de más es inocuo.
+function esCampoPassword(el: EventTarget | null): boolean {
+  return el instanceof HTMLInputElement && el.type === "password";
+}
+
+function activarEntradaSeguraEnPasswords(): void {
+  document.addEventListener("focusin", (e) => {
+    if (esCampoPassword(e.target)) invoke("activar_entrada_segura").catch(() => {});
+  });
+  document.addEventListener("focusout", (e) => {
+    if (esCampoPassword(e.target)) invoke("desactivar_entrada_segura").catch(() => {});
+  });
+  // Si el usuario cambia de app con el foco aún en la contraseña, liberamos el modo
+  // seguro para no dejar el teclado del sistema bloqueado; lo re-activamos al volver.
+  window.addEventListener("blur", () => {
+    invoke("desactivar_entrada_segura").catch(() => {});
+  });
+  window.addEventListener("focus", () => {
+    if (esCampoPassword(document.activeElement)) {
+      invoke("activar_entrada_segura").catch(() => {});
+    }
+  });
+  // Si al registrar los listeners ya hay un campo de contraseña con foco (p. ej. por
+  // autofocus), el focusin inicial ya ocurrió: lo cubrimos activando aquí.
+  if (esCampoPassword(document.activeElement)) {
+    invoke("activar_entrada_segura").catch(() => {});
+  }
+}
+
+// VIGILANCIA DE CAPTURA DE PANTALLA — mientras se muestra contenido sensible,
+// consulta a Rust cada 3 s si hay grabación/compartición/duplicación activa. Si la
+// hay, cubre la app con un overlay difuminado (oculta el contenido al capturador) y
+// avisa. El contenido reaparece solo al cesar la captura.
+let _vigilanciaCapturaId: number | null = null;
+
+const PANTALLAS_SENSIBLES: Pantalla[] =
+  ["principal", "traduccion", "archivos-guardados", "comunicacion", "frase", "ajustes"];
+
+function pantallaEsSensible(nombre: Pantalla): boolean {
+  return PANTALLAS_SENSIBLES.includes(nombre);
+}
+
+function mostrarOverlayCaptura(indicadores: string[]): void {
+  let ov = document.getElementById("captura-overlay");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "captura-overlay";
+    ov.style.cssText =
+      "position:fixed;inset:0;z-index:11000;backdrop-filter:blur(24px);" +
+      "-webkit-backdrop-filter:blur(24px);background:rgba(10,10,10,0.82);" +
+      "display:flex;align-items:center;justify-content:center;text-align:center;padding:32px;";
+    document.body.appendChild(ov);
+  }
+  const items = indicadores.map(i => `<li style="margin:4px 0;color:#ffd7a8;">${escapeHTML(i)}</li>`).join("");
+  ov.innerHTML = `
+    <div style="max-width:460px;">
+      <div style="font-size:2.6rem;margin-bottom:12px;">🛑</div>
+      <h2 style="color:#c9a227;letter-spacing:2px;font-size:1rem;margin-bottom:10px;">POSIBLE CAPTURA DE PANTALLA</h2>
+      <p style="color:#ccc;font-size:0.82rem;line-height:1.55;margin-bottom:14px;">
+        Babel ha ocultado el contenido sensible porque detectó actividad de grabación o compartición de pantalla:
+      </p>
+      <ul style="list-style:none;padding:0;font-size:0.8rem;margin:0 0 12px;">${items}</ul>
+      <p style="color:#888;font-size:0.72rem;">El contenido volverá a mostrarse automáticamente al detener la captura.</p>
+    </div>`;
+}
+
+function ocultarOverlayCaptura(): void {
+  document.getElementById("captura-overlay")?.remove();
+}
+
+// Aviso discreto (baja confianza): una app capaz de compartir está abierta pero no
+// necesariamente capturando. Chip en la esquina, sin bloquear el contenido.
+function mostrarChipCapturaBaja(avisos: string[]): void {
+  let chip = document.getElementById("captura-aviso-chip");
+  if (!chip) {
+    chip = document.createElement("div");
+    chip.id = "captura-aviso-chip";
+    chip.style.cssText =
+      "position:fixed;bottom:14px;right:14px;z-index:9500;max-width:260px;" +
+      "background:rgba(30,24,10,0.92);border:1px solid rgba(201,162,39,0.5);" +
+      "color:#e8c76b;border-radius:8px;padding:8px 12px;font-size:0.72rem;" +
+      "letter-spacing:0.5px;box-shadow:0 4px 16px rgba(0,0,0,0.5);";
+    document.body.appendChild(chip);
+  }
+  chip.textContent = "⚠ App de captura o videollamada abierta";
+  chip.title = avisos.join("\n");
+}
+
+function ocultarChipCapturaBaja(): void {
+  document.getElementById("captura-aviso-chip")?.remove();
+}
+
+interface EstadoCaptura { bloqueo: string[]; aviso: string[]; }
+
+async function comprobarCapturaUnaVez(): Promise<void> {
+  try {
+    const est = await invoke<EstadoCaptura>("hay_captura_de_pantalla");
+    // Alta confianza → ocultar el contenido con el overlay difuminado.
+    if (est.bloqueo.length > 0) mostrarOverlayCaptura(est.bloqueo);
+    else ocultarOverlayCaptura();
+    // Baja confianza → solo aviso discreto, sin bloquear.
+    if (est.aviso.length > 0) mostrarChipCapturaBaja(est.aviso);
+    else ocultarChipCapturaBaja();
+  } catch { /* silencioso — no bloquear la UI si el comando falla */ }
+}
+
+function iniciarVigilanciaCaptura(): void {
+  if (_vigilanciaCapturaId !== null) return;
+  void comprobarCapturaUnaVez();
+  _vigilanciaCapturaId = window.setInterval(() => void comprobarCapturaUnaVez(), 3000);
+}
+
+function detenerVigilanciaCaptura(): void {
+  if (_vigilanciaCapturaId !== null) {
+    clearInterval(_vigilanciaCapturaId);
+    _vigilanciaCapturaId = null;
+  }
+  ocultarOverlayCaptura();
+  ocultarChipCapturaBaja();
+}
+
+// Escaneo de keyloggers/RATs en el momento exacto en que se va a teclear la maestra
+// (login o desbloqueo), sin esperar al monitor periódico de 5 min. No bloquea la UI:
+// corre en segundo plano y, si hay amenazas, muestra la alerta persistente existente.
+function escanearKeyloggerAlEntrar(): void {
+  invoke<string[]>("escanear_keylogger_ahora")
+    .then(amenazas => { if (amenazas.length > 0) mostrarAlertaAmenaza(amenazas); })
+    .catch(() => { /* silencioso */ });
 }
 
 // CHAT — SISTEMA DE MENSAJES
@@ -429,6 +566,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     const amenazas = evento.payload ?? [];
     if (amenazas.length > 0) mostrarAlertaAmenaza(amenazas);
   }).catch(() => {});
+
+  activarEntradaSeguraEnPasswords();
 
   // El comando traducir_documento_dialogo emite este evento justo tras elegir el archivo,
   // antes de empezar a traducir. Lo usamos para mostrar la burbuja "TÚ" y la barra.
@@ -2508,6 +2647,7 @@ async function bloquearPantalla(): Promise<void> {
   const overlay = document.getElementById("pantalla-bloqueo");
   if (overlay) {
     overlay.classList.remove("hidden");
+    escanearKeyloggerAlEntrar();
     setTimeout(() => {
       (document.getElementById("bloqueo-maestra") as HTMLInputElement | null)?.focus();
     }, 100);

@@ -370,6 +370,40 @@ fn verificar_entorno_seguro() -> Result<String, String> {
     verificar_licencia_hardware()?;
     Ok(format!("BABEL SEGURO — Todos los protocolos activos.{}", aviso_filevault))
 }
+
+// ENTRADA SEGURA — activa/desactiva el modo anti-keylogger del SO mientras el
+// usuario teclea una contraseña. El frontend lo llama en focus/blur de los campos.
+#[tauri::command]
+fn activar_entrada_segura() {
+    seguridad::activar_entrada_segura_os();
+}
+
+#[tauri::command]
+fn desactivar_entrada_segura() {
+    seguridad::desactivar_entrada_segura_os();
+}
+
+// Detección en vivo de captura/compartición de pantalla. El frontend la consulta en
+// bucle corto mientras muestra contenido sensible. Devuelve dos niveles: `bloqueo`
+// (ocultar contenido) y `aviso` (advertir sin bloquear).
+#[tauri::command]
+fn hay_captura_de_pantalla() -> seguridad::EstadoCaptura {
+    seguridad::detectar_captura_pantalla()
+}
+
+// Escaneo de keyloggers/RATs bajo demanda, para lanzarlo JUSTO al mostrar el login o
+// el desbloqueo — el momento exacto en que se teclea la maestra — en vez de esperar
+// al monitor periódico de 5 min. Es async + spawn_blocking porque analizar_entorno()
+// llama a codesign/ioreg/sqlite y no debe bloquear el event-loop.
+#[tauri::command]
+async fn escanear_keylogger_ahora() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        seguridad::AntiKeylogger::analizar_entorno().amenazas
+    })
+    .await
+    .unwrap_or_default()
+}
+
 // COMANDO 2 — Comprobar si el búnker existe
 
 #[tauri::command]
@@ -4228,6 +4262,33 @@ fn olvidar_contacto(
     compartir::guardar_contactos(&contactos, &subclave_hex)
 }
 
+// EXCLUSIÓN DE CAPTURA — marca la ventana de Babel para que su contenido no se
+// comparta al hacer screen sharing / capturas por window-sharing.
+#[cfg(target_os = "macos")]
+fn excluir_ventana_de_captura(win: &tauri::WebviewWindow) {
+    use objc::runtime::Object;
+    use objc::{msg_send, sel, sel_impl};
+    if let Ok(ptr) = win.ns_window() {
+        let ns_window = ptr as *mut Object;
+        // NSWindowSharingNone = 0 → el contenido de la ventana no se expone a otros
+        // procesos vía window-sharing. Best-effort: no bloquea ScreenCaptureKit en
+        // todas las versiones de macOS (ahí actúa la detección en vivo del paso N2).
+        unsafe {
+            let _: () = msg_send![ns_window, setSharingType: 0u64];
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn excluir_ventana_de_captura(_win: &tauri::WebviewWindow) {
+    // PENDIENTE (fase Windows): SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+    // ofrece bloqueo REAL de captura en Win10 2004+ (la ventana sale en negro para el
+    // capturador). Requiere añadir el crate `windows` a Cargo.toml.
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn excluir_ventana_de_captura(_win: &tauri::WebviewWindow) {}
+
 // PUNTO DE ENTRADA — Arranca Tauri, registra todos los comandos — y gestiona el estado global de sesión (SesionActiva).
 
 fn main() {
@@ -4279,6 +4340,11 @@ fn main() {
                 {
                     let _ = app.deep_link().register("babel");
                 }
+            }
+
+            // Excluir la ventana de Babel de la captura/compartición de pantalla.
+            if let Some(win) = app.get_webview_window("main") {
+                excluir_ventana_de_captura(&win);
             }
             let exe_dir = std::env::current_exe()
                 .ok()
@@ -4426,6 +4492,9 @@ fn main() {
         })
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::Destroyed = event {
+                // Nunca dejar el SO colgado en modo de entrada segura al cerrar Babel:
+                // dejaría el teclado del usuario en modo protegido para el resto del sistema.
+                seguridad::desactivar_entrada_segura_os();
                 if let Ok(mut guard) = USB_CHILD.lock() {
                     if let Some(mut c) = guard.take() {
                         let _ = c.kill();
@@ -4437,6 +4506,10 @@ fn main() {
         .manage(SesionActiva::nueva())
         .invoke_handler(tauri::generate_handler![
             verificar_entorno_seguro,
+            activar_entrada_segura,
+            desactivar_entrada_segura,
+            hay_captura_de_pantalla,
+            escanear_keylogger_ahora,
             comprobar_estado_bunker,
             crear_acceso_bunker,
             verificar_login,
