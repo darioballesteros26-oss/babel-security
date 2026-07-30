@@ -472,6 +472,10 @@ body {
   letter-spacing: 0.5px;
   line-height: 1.6;
   font-weight: 400;
+  /* La burbuja crece con el contenido; rompemos palabras/URLs muy
+     largas para que una traducción larga nunca desborde el ancho. */
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .chat-burbuja.usuario .burbuja-texto {
@@ -2152,6 +2156,51 @@ body {
 #modal-terminos div::-webkit-scrollbar { width: 4px; }
 
 #modal-terminos div::-webkit-scrollbar-thumb { background: var(--dorado-oscuro); border-radius: 2px; }
+
+/* ============================================================
+   VISORES DE TEXTO TRADUCIDO — scrollbar SIEMPRE visible
+   ------------------------------------------------------------
+   Los cuadros de comparación original/traducción y el visor
+   simple ya recortan el layout con overflow-y:auto, pero en
+   macOS el scrollbar overlay se autooculta: cuando la traducción
+   es más larga que el original (típico EN→ES) el texto se corta
+   sin ningún indicador. Al declarar ::-webkit-scrollbar forzamos
+   el scrollbar clásico, siempre presente, para que el overflow
+   nunca sea un corte silencioso.
+   ============================================================ */
+#par-contenido-1,
+#par-contenido-2,
+#modal-visor-contenido,
+.email-visor-cuerpo {
+  scrollbar-width: thin;
+  scrollbar-color: var(--dorado-oscuro) rgba(201, 168, 76, 0.06);
+}
+
+#par-contenido-1::-webkit-scrollbar,
+#par-contenido-2::-webkit-scrollbar,
+#modal-visor-contenido::-webkit-scrollbar,
+.email-visor-cuerpo::-webkit-scrollbar { width: 8px; }
+
+#par-contenido-1::-webkit-scrollbar-track,
+#par-contenido-2::-webkit-scrollbar-track,
+#modal-visor-contenido::-webkit-scrollbar-track,
+.email-visor-cuerpo::-webkit-scrollbar-track {
+  background: rgba(201, 168, 76, 0.06);
+  border-radius: 4px;
+}
+
+#par-contenido-1::-webkit-scrollbar-thumb,
+#par-contenido-2::-webkit-scrollbar-thumb,
+#modal-visor-contenido::-webkit-scrollbar-thumb,
+.email-visor-cuerpo::-webkit-scrollbar-thumb {
+  background: var(--dorado-oscuro);
+  border-radius: 4px;
+}
+
+#par-contenido-1::-webkit-scrollbar-thumb:hover,
+#par-contenido-2::-webkit-scrollbar-thumb:hover,
+#modal-visor-contenido::-webkit-scrollbar-thumb:hover,
+.email-visor-cuerpo::-webkit-scrollbar-thumb:hover { background: var(--dorado); }
 
 /* ============================================================
    TEMAS — Ajustes
