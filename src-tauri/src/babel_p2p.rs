@@ -142,7 +142,7 @@ pub const PUERTO_DESCUBRIMIENTO: u16 = 47823;
 pub const PUERTO_TRANSFERENCIA: u16 = 47824;
 pub const TAMAÑO_CABECERA: usize = 304;
 pub const MAX_NOMBRE: usize = 256;
-pub const MAX_TAMAÑO_ARCHIVO: u64 = 100 * 1024 * 1024; // 100MB
+pub const MAX_TAMAÑO_ARCHIVO: u64 = 150 * 1024 * 1024; // 150MB (igual que el límite de import)
 // V2: incluye timestamp Unix para invalidar replays > 60 s y fingerprint del cert.
 // V3: añade HMAC-SHA256 de 8 bytes (clave interna de app) — impide que escáneres genéricos
 //     procesen los anuncios como si fueran Babel. La autenticación real es mTLS.
@@ -795,19 +795,16 @@ impl rustls::server::danger::ClientCertVerifier for VerificadorClienteP2P {
         }
         let fp = fingerprint_cert(end_entity);
         let _guard = CERTS_AUTORIZADOS_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-        let mut autorizados = cargar_certs_autorizados();
+        let autorizados = cargar_certs_autorizados();
 
         if autorizados.contains(&fp) {
             // Fingerprint ya autorizado — aceptar sin re-guardar
             Ok(rustls::server::danger::ClientCertVerified::assertion())
-        } else if autorizados.is_empty() {
-            // TOFU bootstrap: primer peer ever — auto-aceptar
-            autorizados.insert(fp);
-            guardar_certs_autorizados(&autorizados);
-            log::warn!("[P2P] Primer peer registrado por TOFU (bootstrap).");
-            Ok(rustls::server::danger::ClientCertVerified::assertion())
         } else {
-            // Peer desconocido — añadir a pendientes para que el usuario lo apruebe
+            // Sin auto-aceptación de bootstrap: TODO peer nuevo (incluido el primero que
+            // conecta) queda pendiente de aprobación explícita del usuario. Antes, el primer
+            // dispositivo que conectaba en la LAN quedaba confiado en silencio y podía enviar
+            // archivos; ahora la confianza siempre la concede el usuario vía aprobar_peer_pendiente.
             let ip_red = PEER_IP_ACTUAL.with(|c| redactar_ip(&c.borrow()));
             if let Ok(mut pending) = PEERS_PENDIENTES.lock() {
                 if !pending.iter().any(|(f, _)| f == &fp) {

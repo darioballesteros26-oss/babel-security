@@ -180,6 +180,9 @@ impl SesionActiva {
         if let Ok(mut b) = self.buzon_activo.lock() {
             b.clear();
         }
+        if let Ok(mut c) = self.contador.lock() {
+            *c = 0; // no arrastrar intentos fallidos entre sesiones
+        }
     }
 }
 
@@ -348,9 +351,17 @@ fn verificar_licencia_hardware() -> Result<(), String> {
 #[tauri::command]
 fn verificar_entorno_seguro() -> Result<String, String> {
     let sandbox = seguridad::AntiSandbox::analizar_entorno();
-    if !sandbox.seguro {
-        return Err(format!("Entorno comprometido: {} amenaza(s) detectada(s)", sandbox.amenazas.len()));
-    }
+    // La detección de virtualización YA NO bloquea: ejecutar Babel en una VM, un VDI
+    // corporativo o un laboratorio de seguridad es un uso legítimo, y el cifrado
+    // AES-256-GCM opera con seguridad total igualmente. Solo se informa como aviso.
+    let aviso_sandbox = if !sandbox.seguro {
+        format!(
+            " — Aviso: entorno virtualizado detectado ({} indicador(es)).",
+            sandbox.amenazas.len()
+        )
+    } else {
+        String::new()
+    };
     if let Ok(keylogger) = seguridad::AntiKeylogger::blindaje_total(None) {
         if !keylogger.amenazas.is_empty() {
             return Err(format!("Procesos sospechosos: {} proceso(s) detectado(s)", keylogger.amenazas.len()));
@@ -368,7 +379,10 @@ fn verificar_entorno_seguro() -> Result<String, String> {
     }
 
     verificar_licencia_hardware()?;
-    Ok(format!("BABEL SEGURO — Todos los protocolos activos.{}", aviso_filevault))
+    Ok(format!(
+        "BABEL SEGURO — Todos los protocolos activos.{}{}",
+        aviso_filevault, aviso_sandbox
+    ))
 }
 
 // ENTRADA SEGURA — activa/desactiva el modo anti-keylogger del SO mientras el
@@ -482,16 +496,16 @@ fn incrementar_contador_y_bloquear(sesion: &tauri::State<SesionActiva>) -> Resul
     // HMAC-SHA256 con master.salt: borrar intentos.dat no resetea el valor si hay sesión
     // activa en RAM, y el HMAC impide modificar el número sin conocer master.salt.
     let disco: u32 = seguridad::leer_contador_intentos();
-    if let Ok(mut c) = sesion.contador.lock() {
-        *c = (*c).max(disco) + 1;
-        seguridad::escribir_contador_intentos(*c);
-        if *c >= 5 {
-            *c = 0;
-            seguridad::borrar_contador_intentos();
-            traductor::activar_bloqueo_disco()
-                .map_err(|e| format!("Error crítico activando bloqueo: {}", e))?;
-            return Err("Bloqueado 10 minutos por demasiados intentos fallidos.".into());
-        }
+    // into_inner ante lock envenenado: un panic previo no debe permitir saltarse el lockout.
+    let mut c = sesion.contador.lock().unwrap_or_else(|e| e.into_inner());
+    *c = (*c).max(disco) + 1;
+    seguridad::escribir_contador_intentos(*c);
+    if *c >= 5 {
+        *c = 0;
+        seguridad::borrar_contador_intentos();
+        traductor::activar_bloqueo_disco()
+            .map_err(|e| format!("Error crítico activando bloqueo: {}", e))?;
+        return Err("Bloqueado 10 minutos por demasiados intentos fallidos.".into());
     }
     Ok(())
 }
@@ -629,7 +643,12 @@ async fn traducir_documento(
         return Err(format!("Tipo de archivo no permitido: .{}", ext_doc));
     }
 
-    let ruta_temp = tmp_path(&nombre_solo);
+    // Subdirectorio único: dos traducciones del mismo nombre no colisionan en tmp/.
+    // El nombre del archivo se conserva para que procesar_archivo_inteligente derive
+    // el mismo stem que usamos abajo. cerrar_sesion limpia estos subdirectorios.
+    let sub_tmp = tmp_dir().join(nuevo_id());
+    let _ = fs::create_dir_all(&sub_tmp);
+    let ruta_temp = sub_tmp.join(&nombre_solo).to_string_lossy().to_string();
     escribir_privado(&ruta_temp, &contenido).map_err(|e| format!("Error guardando temporal: {}", e))?;
     drop(Zeroizing::new(contenido));
 
@@ -638,7 +657,9 @@ async fn traducir_documento(
         .and_then(|s| s.to_str())
         .unwrap_or(&nombre_archivo)
         .to_string();
-    let nombre_resultado = archivos_path(&format!("{}_{}.babel", id_usuario, nombre_base));
+    // El pipeline guarda como {usuario}_{par}_{nombre}.babel — la ruta devuelta debe
+    // incluir el par de idioma o apuntaría a un archivo inexistente.
+    let nombre_resultado = archivos_path(&format!("{}_{}_{}.babel", id_usuario, par_doc, nombre_base));
 
     // spawn_blocking libera el event-loop → los eventos progreso-traduccion
     // llegan al webview en tiempo real mientras traduce.
@@ -821,14 +842,14 @@ fn guardar_documento_desde_bytes(
 
     // S-4: rechazar por tamaño ANTES de decodificar (base64 infla ~4/3; así no se
     // reserva memoria de un string enorme antes de validar).
-    if contenido_b64.len() > 140 * 1024 * 1024 {
-        return Err("El archivo supera el límite de 100 MB.".into());
+    if contenido_b64.len() > 205 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 150 MB.".into());
     }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(contenido_b64.as_bytes())
         .map_err(|_| "Datos del archivo no válidos.".to_string())?;
-    if bytes.len() > 100 * 1024 * 1024 {
-        return Err("El archivo supera el límite de 100 MB.".into());
+    if bytes.len() > 150 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 150 MB.".into());
     }
 
     cifrar_y_guardar_desde_bytes(&nombre_archivo, &bytes, &subclave_hex, &id_usuario)
@@ -875,14 +896,14 @@ fn preparar_temp_bytes(nombre_archivo: String, contenido_b64: String) -> Result<
         .filter(|n| !n.is_empty())
         .ok_or("Nombre de archivo inválido")?;
     // S-4: rechazar por tamaño antes de decodificar.
-    if contenido_b64.len() > 140 * 1024 * 1024 {
-        return Err("El archivo supera el límite de 100 MB.".into());
+    if contenido_b64.len() > 205 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 150 MB.".into());
     }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(contenido_b64.as_bytes())
         .map_err(|_| "Datos del archivo no válidos.".to_string())?;
-    if bytes.len() > 100 * 1024 * 1024 {
-        return Err("El archivo supera el límite de 100 MB.".into());
+    if bytes.len() > 150 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 150 MB.".into());
     }
     let base = std::env::temp_dir().join("babel_dnd");
     let _ = std::fs::create_dir_all(&base);
@@ -1010,12 +1031,30 @@ struct ImportarCarpetaResultado {
 
 // Recolecta rutas de archivo bajo `dir`, descendiendo en subcarpetas (aplanado).
 fn recolectar_archivos(dir: &std::path::Path, salida: &mut Vec<std::path::PathBuf>) {
+    // Cota de profundidad + no seguir symlinks: evita bucles infinitos si la carpeta
+    // elegida contiene un enlace simbólico cíclico o un árbol patológicamente profundo.
+    recolectar_archivos_rec(dir, salida, 0);
+}
+
+fn recolectar_archivos_rec(dir: &std::path::Path, salida: &mut Vec<std::path::PathBuf>, prof: u32) {
+    const MAX_PROFUNDIDAD: u32 = 32;
+    if prof > MAX_PROFUNDIDAD {
+        return;
+    }
     let Ok(entradas) = std::fs::read_dir(dir) else { return };
     for entrada in entradas.flatten() {
+        // file_type() de DirEntry NO sigue symlinks — un symlink no cuenta como dir.
+        let ft = match entrada.file_type() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if ft.is_symlink() {
+            continue;
+        }
         let p = entrada.path();
-        if p.is_dir() {
-            recolectar_archivos(&p, salida);
-        } else if p.is_file() {
+        if ft.is_dir() {
+            recolectar_archivos_rec(&p, salida, prof + 1);
+        } else if ft.is_file() {
             salida.push(p);
         }
     }
@@ -1324,118 +1363,45 @@ fn listar_archivos_guardados(
     let subclave_hex = sesion.subclave_hex()?;
 
     let mut archivos = Vec::new();
+    let prefijo = format!("{}_", id_usuario);
 
-    // — ARCHIVOS GUARDADOS —
-    let carpeta_g = guardados_dir();
-    let ruta_index_g = guardados_path(".buzon_index_guardados.babel");
-    let index_g: HashMap<String, String> = fs::read(&ruta_index_g)
-        .ok()
-        .and_then(|b| seguridad::descifrar_documento(b, &subclave_hex).ok())
-        .and_then(|j| serde_json::from_str(&j).ok())
-        .unwrap_or_default();
-    let nodos_g = cargar_nodos(
-        std::path::Path::new(&guardados_path(".buzones_guardados.babel")),
-        &subclave_hex,
-    );
-
-    if let Ok(entries) = fs::read_dir(&carpeta_g) {
-        for entry in entries.flatten() {
-            if archivos.len() >= MAX_ARCHIVOS {
-                break;
-            }
-            let nombre = entry.file_name().to_string_lossy().to_string();
-            if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
-                continue;
-            }
-
-            let buzon_archivo = index_g
-                .get(&nombre)
-                .cloned()
-                .unwrap_or_else(|| "todos".to_string());
-            if buzon != "todos" && buzon_archivo != buzon {
-                continue;
-            }
-
-            let nombre_limpio = nombre
-                .trim_start_matches(&format!("{}_", id_usuario))
-                .to_string();
-            let nombre_buzon = if buzon_archivo == "todos" || buzon_archivo.is_empty() {
-                "todos".to_string()
-            } else {
-                nodos_g
-                    .iter()
-                    .find(|n| n.id == buzon_archivo)
-                    .map(|n| n.nombre.clone())
-                    .unwrap_or_else(|| "todos".to_string())
-            };
-
-            let fecha_g = entry
+    // Guardados sin traducir: idioma fijo "guardado" + fecha relativa por mtime.
+    recolectar_metadatos(
+        &guardados_dir(),
+        &guardados_path(".buzon_index_guardados.babel"),
+        &guardados_path(".buzones_guardados.babel"),
+        &prefijo, &buzon, &subclave_hex, false, &mut archivos,
+        |nombre, entry| {
+            let nombre_limpio = nombre.trim_start_matches(&prefijo).to_string();
+            let fecha = entry
                 .metadata()
                 .ok()
                 .and_then(|m| m.modified().ok())
                 .map(|t| {
-                    let ahora = std::time::SystemTime::now();
-                    let dias = ahora.duration_since(t).unwrap_or_default().as_secs() / 86400;
+                    let dias = std::time::SystemTime::now()
+                        .duration_since(t).unwrap_or_default().as_secs() / 86400;
                     if dias == 0 { "hoy".to_string() }
                     else if dias == 1 { "ayer".to_string() }
                     else if dias < 30 { format!("hace {} días", dias) }
                     else { format!("hace {} meses", dias / 30) }
                 })
                 .unwrap_or_else(|| "—".to_string());
-            archivos.push(MetadatosArchivo {
-                nombre: nombre_limpio,
-                ruta: entry.path().to_string_lossy().to_string(),
-                tamaño: entry.metadata().map(|m| m.len()).unwrap_or(0),
-                fecha: fecha_g,
-                idioma: "guardado".to_string(),
-                buzon: nombre_buzon,
-                buzon_id: buzon_archivo.clone(),
-                es_traduccion: false,
-            });
-        }
-    }
-
-    // — ARCHIVOS TRADUCIDOS —
-    let carpeta_a = archivos_dir();
-    let ruta_index_a = archivos_path(".buzon_index.babel");
-    let index_a: HashMap<String, String> = fs::read(&ruta_index_a)
-        .ok()
-        .and_then(|b| seguridad::descifrar_documento(b, &subclave_hex).ok())
-        .and_then(|j| serde_json::from_str(&j).ok())
-        .unwrap_or_default();
-    let nodos_a = cargar_nodos(
-        std::path::Path::new(&archivos_path(".buzones.babel")),
-        &subclave_hex,
+            (nombre_limpio, "guardado".to_string(), fecha)
+        },
     );
 
-    if let Ok(entries) = fs::read_dir(&carpeta_a) {
-        for entry in entries.flatten() {
-            if archivos.len() >= MAX_ARCHIVOS {
-                break;
-            }
-            let nombre = entry.file_name().to_string_lossy().to_string();
-            if !nombre.starts_with(&format!("{}_", id_usuario)) || nombre.starts_with('.') {
-                continue;
-            }
-
-            let buzon_archivo = index_a
-                .get(&nombre)
-                .cloned()
-                .unwrap_or_else(|| "todos".to_string());
-            if buzon != "todos" && buzon_archivo != buzon {
-                continue;
-            }
-
-            let nombre_limpio = nombre
-                .trim_start_matches(&format!("{}_", id_usuario))
-                .replace("__orig", "")
-                .to_string();
-
+    // Traducidos: idioma derivado del par en el nombre ("original" para los __orig).
+    recolectar_metadatos(
+        &archivos_dir(),
+        &archivos_path(".buzon_index.babel"),
+        &archivos_path(".buzones.babel"),
+        &prefijo, &buzon, &subclave_hex, true, &mut archivos,
+        |nombre, _entry| {
+            let nombre_limpio = nombre.trim_start_matches(&prefijo).replace("__orig", "");
             let idioma = if nombre.contains("__orig") {
                 "original".to_string()
             } else {
                 // Formato nuevo: {usuario}_{par}_{nombre}.babel — par en posición [1]
-                // Formato antiguo (sin par): se muestra vacío en UI
                 let seg = nombre.split('_').nth(1).unwrap_or("");
                 if seg.len() == 5 && seg.as_bytes().get(2) == Some(&b'-') {
                     seg.to_string()
@@ -1443,31 +1409,72 @@ fn listar_archivos_guardados(
                     String::new()
                 }
             };
-
-            let nombre_buzon = if buzon_archivo == "todos" || buzon_archivo.is_empty() {
-                "todos".to_string()
-            } else {
-                nodos_a
-                    .iter()
-                    .find(|n| n.id == buzon_archivo)
-                    .map(|n| n.nombre.clone())
-                    .unwrap_or_else(|| "todos".to_string())
-            };
-
-            archivos.push(MetadatosArchivo {
-                nombre: nombre_limpio,
-                ruta: entry.path().to_string_lossy().to_string(),
-                tamaño: entry.metadata().map(|m| m.len()).unwrap_or(0),
-                fecha: "".to_string(),
-                idioma,
-                buzon: nombre_buzon,
-                buzon_id: buzon_archivo.clone(),
-                es_traduccion: true,
-            });
-        }
-    }
+            (nombre_limpio, idioma, String::new())
+        },
+    );
 
     Ok(archivos)
+}
+
+// Recorre `carpeta` recogiendo los .babel del usuario (prefijo) que casen con `buzon`,
+// resolviendo el nombre del buzón desde su índice/nodos cifrados. `por_entrada` aporta
+// los campos específicos de cada colección: (nombre_limpio, idioma, fecha).
+#[allow(clippy::too_many_arguments)]
+fn recolectar_metadatos(
+    carpeta: &std::path::Path,
+    ruta_index: &str,
+    ruta_buzones: &str,
+    prefijo: &str,
+    buzon: &str,
+    subclave_hex: &str,
+    es_traduccion: bool,
+    archivos: &mut Vec<MetadatosArchivo>,
+    por_entrada: impl Fn(&str, &std::fs::DirEntry) -> (String, String, String),
+) {
+    let index: HashMap<String, String> = fs::read(ruta_index)
+        .ok()
+        .and_then(|b| seguridad::descifrar_documento(b, subclave_hex).ok())
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default();
+    let nodos = cargar_nodos(std::path::Path::new(ruta_buzones), subclave_hex);
+
+    let Ok(entries) = fs::read_dir(carpeta) else { return };
+    for entry in entries.flatten() {
+        if archivos.len() >= MAX_ARCHIVOS {
+            break;
+        }
+        let nombre = entry.file_name().to_string_lossy().to_string();
+        if !nombre.starts_with(prefijo) || nombre.starts_with('.') {
+            continue;
+        }
+
+        let buzon_archivo = index.get(&nombre).cloned().unwrap_or_else(|| "todos".to_string());
+        if buzon != "todos" && buzon_archivo != buzon {
+            continue;
+        }
+
+        let nombre_buzon = if buzon_archivo == "todos" || buzon_archivo.is_empty() {
+            "todos".to_string()
+        } else {
+            nodos
+                .iter()
+                .find(|n| n.id == buzon_archivo)
+                .map(|n| n.nombre.clone())
+                .unwrap_or_else(|| "todos".to_string())
+        };
+
+        let (nombre_limpio, idioma, fecha) = por_entrada(&nombre, &entry);
+        archivos.push(MetadatosArchivo {
+            nombre: nombre_limpio,
+            ruta: entry.path().to_string_lossy().to_string(),
+            tamaño: entry.metadata().map(|m| m.len()).unwrap_or(0),
+            fecha,
+            idioma,
+            buzon: nombre_buzon,
+            buzon_id: buzon_archivo,
+            es_traduccion,
+        });
+    }
 }
 // COMANDO — Mover archivo guardado entre buzones — Actualiza el índice cifrado .buzon_index_guardados.babel con el nuevo buzón destino.
 #[tauri::command]
@@ -1489,13 +1496,26 @@ fn mover_archivo_guardado(
 fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
     babel_p2p::detener_servidor_p2p();
     sesion.limpiar();
+    // Limpiar copias en claro que compartir_a_url pudiera haber dejado en compartidos/.
+    compartir::barrer_plaintext_compartidos();
     // Limpiar todas las rutas pendientes de borrado al cerrar sesión
     if let Ok(mut guard) = PENDING_BORRAR_ORIGINAL.lock() { *guard = None; }
     // Borrar temporales en claro con 3 pasadas (0x00, 0xFF, 0xAA) + fsync antes de eliminar
     let tmp = babel_dir().join("tmp");
     if let Ok(entradas) = fs::read_dir(&tmp) {
         for entrada in entradas.flatten() {
-            borrar_seguro(&entrada.path().to_string_lossy());
+            let p = entrada.path();
+            if p.is_dir() {
+                // Subdirectorios únicos de traducción: borrar su contenido y la carpeta.
+                if let Ok(hijos) = fs::read_dir(&p) {
+                    for h in hijos.flatten() {
+                        borrar_seguro(&h.path().to_string_lossy());
+                    }
+                }
+                let _ = fs::remove_dir_all(&p);
+            } else {
+                borrar_seguro(&p.to_string_lossy());
+            }
         }
     }
 }
@@ -1559,8 +1579,8 @@ async fn traducir_documento_ruta(
 
         let meta = std::fs::metadata(&path_canon)
             .map_err(|e| format!("Error accediendo archivo: {}", e))?;
-        if meta.len() > 100 * 1024 * 1024 {
-            return Err("El archivo supera el límite de 100 MB.".into());
+        if meta.len() > 150 * 1024 * 1024 {
+            return Err("El archivo supera el límite de 150 MB.".into());
         }
 
         let nombre_base = std::path::Path::new(&nombre_archivo)
@@ -1618,8 +1638,8 @@ async fn traducir_archivo_guardado(
         traductor::resetear_cancelacion();
         let bytes = descifrar_a_bytes(&ruta, &subclave_hex)?;
 
-        if bytes.len() > 100 * 1024 * 1024 {
-            return Err("El archivo supera el límite de 100 MB.".into());
+        if bytes.len() > 150 * 1024 * 1024 {
+            return Err("El archivo supera el límite de 150 MB.".into());
         }
 
         let ext = detectar_ext(&bytes);
@@ -1732,8 +1752,8 @@ async fn traducir_documento_dialogo(
 
         let meta = std::fs::metadata(&ruta)
             .map_err(|e| format!("Error accediendo al archivo: {}", e))?;
-        if meta.len() > 100 * 1024 * 1024 {
-            return Err("El archivo supera el límite de 100 MB.".into());
+        if meta.len() > 150 * 1024 * 1024 {
+            return Err("El archivo supera el límite de 150 MB.".into());
         }
 
         let nombre = ruta
@@ -2121,8 +2141,8 @@ fn leer_resultado(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Ve
     validar_ruta_en(&ruta, archivos_dir())?;
 
     let meta = fs::metadata(&ruta).map_err(|e| format!("Error accediendo archivo: {}", e))?;
-    if meta.len() > 100 * 1024 * 1024 {
-        return Err("Archivo supera el límite de 100 MB.".into());
+    if meta.len() > 150 * 1024 * 1024 {
+        return Err("Archivo supera el límite de 150 MB.".into());
     }
 
     descifrar_a_bytes(&ruta, &subclave_hex)
@@ -4210,6 +4230,9 @@ fn compartir_a_url(
     } else {
         format!("{}.{}", nombre_base, ext)
     };
+
+    // Limpiar copias en claro de comparticiones previas antes de crear otra.
+    compartir::barrer_plaintext_compartidos();
 
     let ruta_temporal = compartir::compartidos_dir()
         .join(format!("{}_{}", nuevo_id(), nombre_con_ext))

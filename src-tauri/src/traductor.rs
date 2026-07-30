@@ -9,8 +9,8 @@ use tesseract::Tesseract;
 pub static CANCELAR_TRADUCCION: AtomicBool = AtomicBool::new(false);
 
 // Modo rápido: si está activo, la app pide beam=1 al servidor (más rápido, algo menos
-// de calidad). Por defecto false = calidad (beam por defecto del modelo). Lo activa el
-// toggle del sidebar vía el comando `set_modo_rapido`.
+// de calidad). Por defecto true (beam=1) para no disparar el swap en máquinas de 8 GB;
+// el toggle del sidebar lo desactiva vía `set_modo_rapido` para máxima calidad.
 pub static MODO_RAPIDO: AtomicBool = AtomicBool::new(true);
 
 pub fn set_modo_rapido(v: bool) {
@@ -23,6 +23,71 @@ pub fn cancelar_traduccion() {
 
 pub fn resetear_cancelacion() {
     CANCELAR_TRADUCCION.store(false, Ordering::Relaxed);
+}
+
+// ── Helpers de proceso externo (LibreOffice, pdftotext, …) ──────────────────
+// Antes estas listas de rutas y el bucle "spawn + try_wait con deadline + kill"
+// estaban duplicados ~5 veces a lo largo de procesar_pdf/procesar_archivo_inteligente.
+
+/// Rutas candidatas de LibreOffice (headless) por plataforma. El último es el
+/// comando pelado, que se resuelve por PATH.
+const RUTAS_SOFFICE: &[&str] = &[
+    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
+    "/opt/homebrew/bin/soffice",
+    "/usr/local/bin/soffice",
+    "soffice",
+];
+const RUTAS_PDFTOTEXT: &[&str] = &[
+    "/opt/homebrew/bin/pdftotext",
+    "/usr/local/bin/pdftotext",
+    "/usr/bin/pdftotext",
+    "pdftotext",
+];
+const RUTAS_PDFTOPPM: &[&str] = &[
+    "/opt/homebrew/bin/pdftoppm",
+    "/usr/local/bin/pdftoppm",
+    "/usr/bin/pdftoppm",
+    "pdftoppm",
+];
+
+/// Devuelve el primer binario de `candidatos` que existe en disco, o cuyo nombre es
+/// un comando "pelado" (sin separador de ruta → se resuelve vía PATH). Si ninguno
+/// aplica, devuelve `por_defecto`.
+fn resolver_binario<'a>(candidatos: &[&'a str], por_defecto: &'a str) -> &'a str {
+    candidatos
+        .iter()
+        .copied()
+        .find(|p| (!p.contains('/') && !p.contains('\\')) || std::path::Path::new(p).exists())
+        .unwrap_or(por_defecto)
+}
+
+/// Espera a que un proceso hijo termine con un límite de tiempo, matándolo si se
+/// excede. `tick` se invoca en cada iteración de espera (para progreso); usa `|| {}`
+/// si no hace falta. Devuelve true solo si terminó con éxito.
+fn esperar_proceso(child: &mut std::process::Child, segs: u64, mut tick: impl FnMut()) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(segs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s.success(),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                tick();
+            }
+            _ => {
+                let _ = child.kill();
+                break false;
+            }
+        }
+    }
+}
+
+/// Lanza `cmd` y espera hasta `segs` a que termine. true si terminó con éxito.
+fn ejecutar_con_timeout(cmd: &mut std::process::Command, segs: u64) -> bool {
+    match cmd.spawn() {
+        Ok(mut child) => esperar_proceso(&mut child, segs, || {}),
+        Err(_) => false,
+    }
 }
 pub const ZSTD_MAGIC: &[u8] = b"BZ1:";
 
@@ -334,41 +399,20 @@ pub fn procesar_archivo_inteligente(
         let _ = fs::create_dir_all(&tmp_dir);
         let salida = archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre));
         progreso(96, "GENERANDO PDF...");
-        let soffice = [
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-            "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
-            "/opt/homebrew/bin/soffice",
-            "/usr/local/bin/soffice",
-            "soffice",
-        ].iter().copied()
-         .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
-         .unwrap_or("soffice");
+        let soffice = resolver_binario(RUTAS_SOFFICE, "soffice");
         if let Ok(cifrado_bytes) = fs::read(&salida) {
             if let Ok(b64_docx) = seguridad::descifrar_documento(cifrado_bytes, subclave_hex) {
                 if let Ok(docx_bytes) = descomprimir_b64(&b64_docx) {
                     let docx_tmp = tmp_dir.join(format!("{}_docx_pdf.docx", nombre));
                     if crate::escribir_privado(&docx_tmp, &docx_bytes).is_ok() {
-                        let mut child = std::process::Command::new(soffice)
-                            .args(["--headless", "--convert-to", "pdf",
-                                   "--outdir", &tmp_dir.to_string_lossy(),
-                                   &docx_tmp.to_string_lossy()])
-                            .spawn().ok();
-                        let lo_ok = match child.as_mut() {
-                            None => false,
-                            Some(c) => {
-                                let deadline = std::time::Instant::now()
-                                    + std::time::Duration::from_secs(180);
-                                loop {
-                                    match c.try_wait() {
-                                        Ok(Some(s)) => break s.success(),
-                                        Ok(None) if std::time::Instant::now() < deadline => {
-                                            std::thread::sleep(std::time::Duration::from_millis(300));
-                                        }
-                                        _ => { let _ = c.kill(); break false; }
-                                    }
-                                }
-                            }
-                        };
+                        let lo_ok = ejecutar_con_timeout(
+                            std::process::Command::new(soffice).args([
+                                "--headless", "--convert-to", "pdf",
+                                "--outdir", &tmp_dir.to_string_lossy(),
+                                &docx_tmp.to_string_lossy(),
+                            ]),
+                            180,
+                        );
                         borrar_seguro_local(&docx_tmp.to_string_lossy());
                         if lo_ok {
                             let pdf_out = tmp_dir.join(format!("{}_docx_pdf.pdf", nombre));
@@ -1066,16 +1110,7 @@ fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
     let tmp_base = tmp_dir.join(format!("ocr_{}_{}", pagina, hex::encode(rand_bytes)));
     let tmp_img = format!("{}.png", tmp_base.to_string_lossy());
 
-    let pdftoppm = [
-        "/opt/homebrew/bin/pdftoppm",
-        "/usr/local/bin/pdftoppm",
-        "/usr/bin/pdftoppm",
-        "pdftoppm",
-    ]
-    .iter()
-    .copied()
-    .find(|&p| p == "pdftoppm" || std::path::Path::new(p).exists())
-    .unwrap_or("pdftoppm");
+    let pdftoppm = resolver_binario(RUTAS_PDFTOPPM, "pdftoppm");
 
     let ok = std::process::Command::new(pdftoppm)
         .args([
@@ -1477,88 +1512,49 @@ pub fn procesar_pdf(
     })
     .unwrap_or("python3");
 
-    let ok = {
-        let mut child = std::process::Command::new(python3)
-            .args([
-                "-c",
-                "import fitz; fitz.Rect.get_area = lambda self: self.width * self.height; import sys; from pdf2docx import Converter; cv=Converter(sys.argv[1]); cv.convert(sys.argv[2]); cv.close()",
-                ruta,
-                &ruta_docx_tmp.to_string_lossy(),
-            ])
-            .spawn()
-            .ok();
-        match child.as_mut() {
-            None => false,
-            Some(c) => {
-                let deadline = std::time::Instant::now()
-                    + std::time::Duration::from_secs(120);
-                let inicio = std::time::Instant::now();
-                loop {
-                    match c.try_wait() {
-                        Ok(Some(s)) => break s.success(),
-                        Ok(None) if std::time::Instant::now() < deadline => {
-                            std::thread::sleep(std::time::Duration::from_millis(500));
-                            // Avanzar de 5% a 14% durante la conversión (cada ~3s = 1%)
-                            let elapsed = inicio.elapsed().as_secs();
-                            let pct = (5 + (elapsed / 3).min(9)) as u8;
-                            progreso(pct, "CONVIRTIENDO PDF...");
-                        }
-                        _ => {
-                            let _ = c.kill();
-                            break false;
-                        }
-                    }
-                }
-            }
+    let ok = match std::process::Command::new(python3)
+        .args([
+            "-c",
+            "import fitz; fitz.Rect.get_area = lambda self: self.width * self.height; import sys; from pdf2docx import Converter; cv=Converter(sys.argv[1]); cv.convert(sys.argv[2]); cv.close()",
+            ruta,
+            &ruta_docx_tmp.to_string_lossy(),
+        ])
+        .spawn()
+    {
+        Ok(mut child) => {
+            let inicio = std::time::Instant::now();
+            esperar_proceso(&mut child, 120, || {
+                // Avanzar de 5% a 14% durante la conversión (cada ~3s = 1%)
+                let pct = (5 + (inicio.elapsed().as_secs() / 3).min(9)) as u8;
+                progreso(pct, "CONVIRTIENDO PDF...");
+            })
         }
+        Err(_) => false,
     };
 
     // PASO 1b: si pdf2docx falló, intentar con LibreOffice antes de caer a texto plano.
     // LibreOffice preserva tablas, columnas e índices mejor que cualquier extractor de texto.
     let ok = if !ok {
         progreso(6, "CONVIRTIENDO PDF (LibreOffice)...");
-        let soffice = [
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-            "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
-            "/opt/homebrew/bin/soffice",
-            "/usr/local/bin/soffice",
-            "soffice",
-        ]
-        .iter()
-        .copied()
-        .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
-        .unwrap_or("soffice");
+        let soffice = resolver_binario(RUTAS_SOFFICE, "soffice");
 
-        let lo_ok = {
-            let mut child = std::process::Command::new(soffice)
-                .args([
-                    "--headless",
-                    "--convert-to", "docx",
-                    "--outdir", &tmp_dir.to_string_lossy(),
-                    ruta,
-                ])
-                .spawn()
-                .ok();
-            match child.as_mut() {
-                None => false,
-                Some(c) => {
-                    let deadline = std::time::Instant::now()
-                        + std::time::Duration::from_secs(180);
-                    let inicio = std::time::Instant::now();
-                    loop {
-                        match c.try_wait() {
-                            Ok(Some(s)) => break s.success(),
-                            Ok(None) if std::time::Instant::now() < deadline => {
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                                let elapsed = inicio.elapsed().as_secs();
-                                let pct = (6 + (elapsed / 4).min(8)) as u8;
-                                progreso(pct, "CONVIRTIENDO PDF (LibreOffice)...");
-                            }
-                            _ => { let _ = c.kill(); break false; }
-                        }
-                    }
-                }
+        let lo_ok = match std::process::Command::new(soffice)
+            .args([
+                "--headless",
+                "--convert-to", "docx",
+                "--outdir", &tmp_dir.to_string_lossy(),
+                ruta,
+            ])
+            .spawn()
+        {
+            Ok(mut child) => {
+                let inicio = std::time::Instant::now();
+                esperar_proceso(&mut child, 180, || {
+                    let pct = (6 + (inicio.elapsed().as_secs() / 4).min(8)) as u8;
+                    progreso(pct, "CONVIRTIENDO PDF (LibreOffice)...");
+                })
             }
+            Err(_) => false,
         };
 
         if lo_ok {
@@ -1617,16 +1613,7 @@ pub fn procesar_pdf(
             }
 
             // PASO 4: pdftotext — fallback ligero para PDFs con texto nativo sin estructura
-            let pdftotext_bin = [
-                "/opt/homebrew/bin/pdftotext",
-                "/usr/local/bin/pdftotext",
-                "/usr/bin/pdftotext",
-                "pdftotext",
-            ]
-            .iter()
-            .copied()
-            .find(|&p| p == "pdftotext" || std::path::Path::new(p).exists())
-            .unwrap_or("pdftotext");
+            let pdftotext_bin = resolver_binario(RUTAS_PDFTOTEXT, "pdftotext");
 
             let texto_pdftotext = std::process::Command::new(pdftotext_bin)
                 .args([ruta, "-"])
@@ -1767,16 +1754,7 @@ pub fn procesar_pdf(
         let traducido: String = salida.concat();
         progreso(91, "GENERANDO PDF...");
 
-        let soffice_bin = [
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-            "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
-            "/opt/homebrew/bin/soffice",
-            "/usr/local/bin/soffice",
-            "soffice",
-        ]
-        .iter().copied()
-        .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
-        .unwrap_or("soffice");
+        let soffice_bin = resolver_binario(RUTAS_SOFFICE, "soffice");
 
         // Intento 1: LibreOffice HTML→PDF (layout y tipografía profesionales)
         let guardado_como_pdf = 'conv: {
@@ -1794,27 +1772,14 @@ pub fn procesar_pdf(
             let html_tmp = tmp_dir.join(format!("{}_fallback.html", nombre));
             let pdf_lo  = tmp_dir.join(format!("{}_fallback.pdf", nombre));
             if crate::escribir_privado(&html_tmp, html_content.as_bytes()).is_ok() {
-                let mut child = std::process::Command::new(soffice_bin)
-                    .args(["--headless", "--convert-to", "pdf",
-                           "--outdir", &tmp_dir.to_string_lossy(),
-                           &html_tmp.to_string_lossy()])
-                    .spawn().ok();
-                let lo_ok = match child.as_mut() {
-                    None => false,
-                    Some(c) => {
-                        let deadline = std::time::Instant::now()
-                            + std::time::Duration::from_secs(120);
-                        loop {
-                            match c.try_wait() {
-                                Ok(Some(s)) => break s.success(),
-                                Ok(None) if std::time::Instant::now() < deadline => {
-                                    std::thread::sleep(std::time::Duration::from_millis(300));
-                                }
-                                _ => { let _ = c.kill(); break false; }
-                            }
-                        }
-                    }
-                };
+                let lo_ok = ejecutar_con_timeout(
+                    std::process::Command::new(soffice_bin).args([
+                        "--headless", "--convert-to", "pdf",
+                        "--outdir", &tmp_dir.to_string_lossy(),
+                        &html_tmp.to_string_lossy(),
+                    ]),
+                    120,
+                );
                 borrar_seguro_local(&html_tmp.to_string_lossy());
                 if lo_ok {
                     if let Ok(pdf_bytes) = fs::read(&pdf_lo) {
@@ -1904,43 +1869,21 @@ pub fn procesar_pdf(
         // Descifrar el DOCX babel, convertir a PDF, reemplazar el babel con el PDF.
         // Si LibreOffice falla, el DOCX babel queda intacto como fallback.
         progreso(95, "GENERANDO PDF...");
-        let soffice_pdf = [
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-            "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
-            "/opt/homebrew/bin/soffice",
-            "/usr/local/bin/soffice",
-            "soffice",
-        ]
-        .iter().copied()
-        .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
-        .unwrap_or("soffice");
+        let soffice_pdf = resolver_binario(RUTAS_SOFFICE, "soffice");
 
         if let Ok(cifrado_bytes) = fs::read(&salida_final) {
             if let Ok(b64_docx) = seguridad::descifrar_documento(cifrado_bytes, subclave_hex) {
                 if let Ok(docx_bytes) = descomprimir_b64(&b64_docx) {
                     let docx_conv = tmp_dir.join(format!("{}_conv.docx", nombre));
                     if crate::escribir_privado(&docx_conv, &docx_bytes).is_ok() {
-                        let mut child = std::process::Command::new(soffice_pdf)
-                            .args(["--headless", "--convert-to", "pdf",
-                                   "--outdir", &tmp_dir.to_string_lossy(),
-                                   &docx_conv.to_string_lossy()])
-                            .spawn().ok();
-                        let lo_ok = match child.as_mut() {
-                            None => false,
-                            Some(c) => {
-                                let deadline = std::time::Instant::now()
-                                    + std::time::Duration::from_secs(180);
-                                loop {
-                                    match c.try_wait() {
-                                        Ok(Some(s)) => break s.success(),
-                                        Ok(None) if std::time::Instant::now() < deadline => {
-                                            std::thread::sleep(std::time::Duration::from_millis(300));
-                                        }
-                                        _ => { let _ = c.kill(); break false; }
-                                    }
-                                }
-                            }
-                        };
+                        let lo_ok = ejecutar_con_timeout(
+                            std::process::Command::new(soffice_pdf).args([
+                                "--headless", "--convert-to", "pdf",
+                                "--outdir", &tmp_dir.to_string_lossy(),
+                                &docx_conv.to_string_lossy(),
+                            ]),
+                            180,
+                        );
                         borrar_seguro_local(&docx_conv.to_string_lossy());
                         if lo_ok {
                             let pdf_out = tmp_dir.join(format!("{}_conv.pdf", nombre));

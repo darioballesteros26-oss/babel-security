@@ -25,6 +25,40 @@ pub fn compartidos_dir() -> std::path::PathBuf {
     dir
 }
 
+/// Borra de forma segura las copias EN CLARO que compartir_a_url deja en compartidos/
+/// (el documento descifrado que se copia al portapapeles). El .html de compartición SÍ
+/// se conserva: es el entregable. Solo se limpian los temporales no-.html con > 1 h de
+/// antigüedad, para no borrar un archivo que el usuario aún no ha pegado con Cmd+V.
+pub fn barrer_plaintext_compartidos() {
+    let dir = compartidos_dir();
+    let Ok(entradas) = fs::read_dir(&dir) else { return };
+    let ahora = std::time::SystemTime::now();
+    for e in entradas.flatten() {
+        let p = e.path();
+        if !p.is_file() {
+            continue;
+        }
+        let es_html = p
+            .extension()
+            .and_then(|x| x.to_str())
+            .map(|x| x.eq_ignore_ascii_case("html"))
+            .unwrap_or(false);
+        if es_html {
+            continue;
+        }
+        let viejo = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| ahora.duration_since(t).ok())
+            .map(|d| d.as_secs() > 3600)
+            .unwrap_or(true);
+        if viejo {
+            crate::borrar_seguro(&p.to_string_lossy());
+        }
+    }
+}
+
 fn contactos_path() -> String {
     babel_path("contactos_compartir.babel")
 }
@@ -83,6 +117,19 @@ pub fn desempaquetar_payload(payload: &[u8]) -> Result<(String, String, Vec<u8>)
 
 fn json_str(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Escapa una cadena para incrustarla dentro de un literal JS `"..."` en HTML.
+/// Además de comillas y barra, neutraliza `<`/`>` (→ </>) para que un nombre
+/// con `</script>` no pueda cerrar el bloque de script e inyectar código en el HTML que
+/// abre el receptor. También escapa saltos de línea.
+fn js_str(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 // ── PBKDF2-SHA256 + AES-256-GCM ───────────────────────────────────────────
@@ -156,8 +203,8 @@ pub fn descifrar_con_pbkdf2(b64: &str, password: &str) -> Result<Vec<u8>, String
 /// El contenido va embebido como base64; el receptor solo necesita abrir el .html.
 pub fn generar_html_simple(b64_data: &str, nombre: &str, mime: &str) -> String {
     let title  = nombre.replace('&',"&amp;").replace('<',"&lt;").replace('>',"&gt;");
-    let nom_js = nombre.replace('\\', "\\\\").replace('"', "\\\"");
-    let mim_js = mime.replace('"', "\\\"");
+    let nom_js = js_str(nombre);
+    let mim_js = js_str(mime);
     format!(r##"<!DOCTYPE html>
 <html lang="es">
 <head>

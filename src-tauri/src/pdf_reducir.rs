@@ -51,9 +51,19 @@ pub fn reducir(bytes: &[u8]) -> Option<Vec<u8>> {
             continue;
         }
 
-        // El contenido de un stream DCTDecode ES el JPEG tal cual.
-        let Ok(img) = image::load_from_memory_with_format(&s.content, ImageFormat::Jpeg) else {
-            continue;
+        // El contenido de un stream DCTDecode ES el JPEG tal cual. Decodificamos con
+        // límites de tamaño y de memoria: un JPEG "bomba" (cabecera que declara dimensiones
+        // gigantescas) no debe reservar cientos de MB y tumbar la app. Este reductor corre
+        // AUTOMÁTICAMENTE en cada PDF importado, así que es una vía de DoS a blindar.
+        let mut reader = image::ImageReader::new(std::io::Cursor::new(&s.content));
+        reader.set_format(ImageFormat::Jpeg);
+        let mut limites = image::Limits::default();
+        limites.max_image_width = Some(20_000);
+        limites.max_image_height = Some(20_000);
+        limites.max_alloc = Some(512 * 1024 * 1024); // tope de reserva por imagen
+        reader.limits(limites);
+        let Ok(img) = reader.decode() else {
+            continue; // corrupta, o excede los límites → dejar la imagen intacta
         };
         let (w, h) = img.dimensions();
         let maxdim = w.max(h);
