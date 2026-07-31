@@ -154,22 +154,9 @@ fn manejar_negociacion_receptor(stream: TcpStream, nombre_local: String) {
     stream.set_read_timeout(Some(Duration::from_secs(TIMEOUT_NEGOC_SECS))).ok();
     stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
 
-    // Crear UDP socket y obtener addr STUN antes de leer la solicitud
-    let udp = match UdpSocket::bind("0.0.0.0:0") {
-        Ok(s) => s,
-        Err(e) => { log::error!("[CONEX-R] UDP bind: {}", e); return; }
-    };
-    let mi_local_port = match udp.local_addr() {
-        Ok(a) => a.port(),
-        Err(_) => return,
-    };
-    let mi_stun = match obtener_addr_stun(&udp) {
-        Ok(a) => a,
-        Err(e) => { log::warn!("[CONEX-R] STUN: {}", e); return; }
-    };
-    udp.set_read_timeout(Some(Duration::from_millis(UDP_RECV_TIMEOUT_MS))).ok();
-
-    // Leer solicitud
+    // Leer solicitud PRIMERO — A ya está esperando con timeout de 20s;
+    // si hacemos STUN antes el reloj de A corre durante ~5s antes de que B
+    // siquiera haya leído el request, reduciendo el margen disponible.
     let mut linea = String::new();
     {
         let mut r = BufReader::new(&stream);
@@ -208,6 +195,23 @@ fn manejar_negociacion_receptor(stream: TcpStream, nombre_local: String) {
         Ok(a) => a.ip().to_string(),
         Err(_) => return,
     };
+
+    // Crear UDP socket y obtener addr STUN DESPUÉS de leer y validar el request.
+    // El reloj de timeout de A (20s) empezó cuando A llamó read_line; B ya leyó el
+    // request en <1ms, así que A tiene ~20s disponibles para que B complete STUN.
+    let udp = match UdpSocket::bind("0.0.0.0:0") {
+        Ok(s) => s,
+        Err(e) => { log::error!("[CONEX-R] UDP bind: {}", e); return; }
+    };
+    let mi_local_port = match udp.local_addr() {
+        Ok(a) => a.port(),
+        Err(_) => return,
+    };
+    let mi_stun = match obtener_addr_stun(&udp) {
+        Ok(a) => a,
+        Err(e) => { log::warn!("[CONEX-R] STUN: {}", e); return; }
+    };
+    udp.set_read_timeout(Some(Duration::from_millis(UDP_RECV_TIMEOUT_MS))).ok();
 
     // Enviar respuesta con nuestra addr STUN y puerto local UDP
     let ts_resp = ahora_unix();
@@ -289,6 +293,9 @@ pub fn probar_conexion(
         .map_err(|e| format!("No se pudo obtener IP pública: {}", e))?;
     udp.set_read_timeout(Some(Duration::from_millis(UDP_RECV_TIMEOUT_MS))).ok();
 
+    if clave_hex.len() < 8 {
+        return Err("Clave de emparejamiento inválida (longitud < 8)".into());
+    }
     let key_fp8 = &clave_hex[..8];
     let ts = ahora_unix();
     let req = format!(
@@ -303,7 +310,8 @@ pub fn probar_conexion(
     let mut tcp = TcpStream::connect_timeout(&dest_tcp, Duration::from_secs(5))
         .map_err(|e| format!("No se pudo conectar a {}:{}: {}", ip_destino, PUERTO_CONEX, e))?;
     tcp.set_write_timeout(Some(Duration::from_secs(5))).ok();
-    tcp.set_read_timeout(Some(Duration::from_secs(TIMEOUT_NEGOC_SECS))).ok();
+    // 20s: B necesita hasta ~5s para STUN tras leer el request; 10s era demasiado justo.
+    tcp.set_read_timeout(Some(Duration::from_secs(20))).ok();
 
     tcp.write_all(req.as_bytes())
         .map_err(|e| format!("Error enviando solicitud: {}", e))?;
