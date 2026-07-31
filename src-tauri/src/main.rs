@@ -124,6 +124,32 @@ pub(crate) fn escribir_privado(
     res
 }
 
+/// Escritura atómica via temp-file + rename.
+///
+/// En POSIX, `rename(2)` es atómico: si el proceso muere antes de que el rename
+/// se complete, el archivo destino conserva su contenido anterior íntegro. Solo
+/// cuando el rename tiene éxito el archivo destino pasa a ver el contenido nuevo.
+/// Soluciona el bug B2 del audit: `escribir_privado` no era atómico y un corte de
+/// luz durante `guardar_emparejados` podía dejar `dispositivos.babel` truncado,
+/// haciendo que `cargar_emparejados` devolviera `Vec::new()` y borrara los pares.
+pub(crate) fn escribir_privado_atomico(
+    ruta: impl AsRef<std::path::Path>,
+    datos: impl AsRef<[u8]>,
+) -> std::io::Result<()> {
+    let ruta = ruta.as_ref();
+    let dir = ruta.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let fname = ruta
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "tmp".into());
+    let tmp = dir.join(format!(".{}.tmp", fname));
+
+    // Escribir al temporal (con permisos 0600 en Unix)
+    escribir_privado(&tmp, datos)?;
+    // Rename atómico temporal → destino
+    std::fs::rename(&tmp, ruta)
+}
+
 // ESTADO GLOBAL — Sesión activa del usuario
 
 pub struct SesionActiva {
@@ -4059,11 +4085,46 @@ async fn probar_conexion_dispositivo(
     let clave_b2 = clave.clone();
     let nombre_b2 = nombre.clone();
 
+    let b2_pendiente = disp.b2_pendiente;
+
     let resultado = tauri::async_runtime::spawn_blocking(move || {
         crate::conexion_directa::probar_conexion(&ip, &nombre, &clave)
     })
     .await
     .map_err(|e| e.to_string())?;
+
+    // A2: Si el dispositivo es accesible y tiene b2_pendiente, intentar envío B2.
+    // Si el flag caducó (>48 h, Err(())), limpiarlo.
+    if b2_pendiente {
+        let subclave2 = subclave.clone();
+        let id2 = id.clone();
+        let hostname2 = hostname::get()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let nombre_local = format!("Babel-{}", hostname2);
+        tauri::async_runtime::spawn_blocking(move || {
+            let emparejados = crate::sincronizacion::cargar_emparejados(&subclave2);
+            if let Some(disp2) = emparejados.iter().find(|d| d.id == id2) {
+                match crate::sincronizacion::reenviar_b2_si_pendiente(disp2, &nombre_local) {
+                    Ok(true) | Err(()) => {
+                        // Éxito o caducado → limpiar flag
+                        let mut lista = crate::sincronizacion::cargar_emparejados(&subclave2);
+                        if let Some(d) = lista.iter_mut().find(|d| d.id == id2) {
+                            d.b2_pendiente = false;
+                            d.ts_b2_pendiente = 0;
+                            crate::sincronizacion::guardar_emparejados(&lista, &subclave2);
+                        }
+                    }
+                    Ok(false) => {
+                        log::info!("[SINC] B2 reintento fallido para {} — se intentará de nuevo.", id2);
+                    }
+                }
+            }
+        })
+        .await
+        .ok();
+    }
 
     match resultado {
         Ok(res) => Ok(res),

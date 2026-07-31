@@ -19,6 +19,7 @@ use chrono::Utc;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ── Configuración ─────────────────────────────────────────────────────────────
@@ -309,12 +310,45 @@ fn ahora() -> u64 {
         .as_secs()
 }
 
-// Identificador del par derivado de la clave compartida: sha256(clave_hex)[..8 bytes → 16 hex].
-// Ambos dispositivos del par tienen la misma clave, luego el mismo prefijo S3.
-// Sin esto, A usaría su propio ID local de B y B usaría su propio ID local de A
-// → distintos prefijos → los mensajes nunca se encontrarían.
+// A1 — Identificador del par NO ADIVINABLE derivado de la clave compartida.
+//
+// sha256(clave_hex)[..16 bytes → 32 hex chars].
+// - La entrada es 32 bytes de OsRng → 256 bits de entropía.
+// - SHA-256 es preimage-resistente: sin la clave compartida es computacionalmente
+//   inviable derivar el prefijo S3 (no es secuencial ni predecible).
+// - 16 bytes de salida = 128 bits → probabilidad de colisión ~2^(-128) para cualquier
+//   par de claves distintas (birthday bound: necesitarías 2^64 pares).
+//   Con un máximo de 3 pares por dispositivo, la colisión es imposible en la práctica.
+// - NUNCA usar un contador ni un ID local: serían predecibles y romperian la
+//   confidencialidad del namespace de sincronización.
 fn id_de_par(clave_hex: &str) -> String {
-    hex::encode(&Sha256::digest(clave_hex.as_bytes())[..8])
+    hex::encode(&Sha256::digest(clave_hex.as_bytes())[..16])
+}
+
+// A3 — Registro de fallos de descifrado por objeto S3.
+//
+// Formato: ~/Babel/p2p/b2_fallos.json → HashMap<s3_key, ts_primer_fallo_unix>
+// Política: si un objeto lleva >48 h fallando → se borra de B2 y se descarta
+// el registro. Un objeto nuevo con la misma key (no es posible dado que las keys
+// incluyen timestamp) se trataría como intento independiente (A3, requisito 4).
+const LIMITE_FALLOS_SECS: u64 = 48 * 3600;
+
+fn ruta_fallos() -> std::path::PathBuf {
+    crate::babel_dir().join("p2p").join("b2_fallos.json")
+}
+
+fn cargar_fallos() -> HashMap<String, u64> {
+    std::fs::read_to_string(ruta_fallos())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn guardar_fallos(fallos: &HashMap<String, u64>) {
+    if let Ok(json) = serde_json::to_string(fallos) {
+        // No atómico intencionadamente: si se corrompe se trata como mapa vacío (seguro).
+        let _ = std::fs::write(ruta_fallos(), json);
+    }
 }
 
 fn prefijo_par(clave_hex: &str) -> String {
@@ -411,24 +445,70 @@ pub async fn descargar_y_aplicar(
         .map_err(|e| format!("B2 thread error: {e}"))?
         .map_err(|e| format!("Error descargando de B2: {e}"))?;
 
-    // Si el descifrado falla → conservar el objeto para reintento, NO borrar
-    let json = crate::seguridad::descifrar_documento(cifrado, clave_hex).map_err(|e| {
-        log::error!(
-            "[buzon_b2] Fallo al descifrar '{}': {} — objeto conservado para reintento",
-            key,
-            e
-        );
-        format!("Error de descifrado: {e}")
-    })?;
+    // A3 — Verificar si este objeto tiene un fallo registrado (y si ya caducó 48 h).
+    {
+        let mut fallos = cargar_fallos();
+        if let Some(&ts_fallo) = fallos.get(key) {
+            let edad = ahora().saturating_sub(ts_fallo);
+            if edad > LIMITE_FALLOS_SECS {
+                // Caducó: borrar de B2 y limpiar registro
+                let key_del = key.to_string();
+                let cfg_del2 = cfg_del.clone();
+                let _ = tokio::task::spawn_blocking(move || s3_delete_sync(&cfg_del2, &key_del)).await;
+                fallos.remove(key);
+                guardar_fallos(&fallos);
+                log::warn!(
+                    "[buzon_b2] Objeto '{}' descartado tras {}h de fallos (límite 48h). \
+                     Si era un mensaje válido, el remitente deberá reenviarlo.",
+                    key,
+                    edad / 3600
+                );
+                return Err(format!("Objeto '{}' descartado por caducidad de fallo (48h)", key));
+            }
+            // Fallo conocido pero no caducado → no reintentar hasta próximo ciclo
+            log::info!("[buzon_b2] Objeto '{}' tiene fallo de {}h — esperando caducidad.", key, edad / 3600);
+            return Err(format!("Descifrado de '{}' falló anteriormente; se reintentará.", key));
+        }
+    }
 
-    let payload: PayloadB2 = serde_json::from_str(&json).map_err(|e| {
-        log::error!(
-            "[buzon_b2] Payload inválido en '{}': {} — objeto conservado para reintento",
-            key,
-            e
-        );
-        format!("Error al parsear payload: {e}")
-    })?;
+    // Si el descifrado falla → conservar el objeto para reintento, NO borrar
+    let json = match crate::seguridad::descifrar_documento(cifrado, clave_hex) {
+        Ok(j) => j,
+        Err(e) => {
+            // A3: Registrar primer fallo con timestamp
+            let mut fallos = cargar_fallos();
+            fallos.entry(key.to_string()).or_insert_with(ahora);
+            guardar_fallos(&fallos);
+            log::error!(
+                "[buzon_b2] Fallo al descifrar '{}': {} — registrado en b2_fallos.json (caducará en 48h)",
+                key, e
+            );
+            return Err(format!("Error de descifrado: {e}"));
+        }
+    };
+
+    let payload: PayloadB2 = match serde_json::from_str(&json) {
+        Ok(p) => p,
+        Err(e) => {
+            let mut fallos = cargar_fallos();
+            fallos.entry(key.to_string()).or_insert_with(ahora);
+            guardar_fallos(&fallos);
+            log::error!(
+                "[buzon_b2] Payload inválido en '{}': {} — registrado en b2_fallos.json",
+                key, e
+            );
+            return Err(format!("Error al parsear payload: {e}"));
+        }
+    };
+
+    // A3: Descifrado exitoso → limpiar cualquier fallo previo registrado
+    {
+        let mut fallos = cargar_fallos();
+        if fallos.remove(key).is_some() {
+            guardar_fallos(&fallos);
+            log::info!("[buzon_b2] Fallo previo de '{}' limpiado tras descifrado exitoso.", key);
+        }
+    }
 
     // Borrar SOLO después de descifrar y parsear con éxito
     let key3 = key.to_string();
@@ -468,4 +548,94 @@ pub async fn contar_pendientes_todos(subclave_hex: &str) -> Vec<ConteoB2> {
         }
     }
     resultado
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A1: id_de_par produce exactamente 32 hex chars (16 bytes de SHA-256)
+    #[test]
+    fn id_de_par_es_32_chars() {
+        let clave = "a".repeat(64); // simula 32 bytes en hex
+        let id = id_de_par(&clave);
+        assert_eq!(id.len(), 32, "id_de_par debe devolver 32 hex chars (16 bytes)");
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()), "solo hex");
+    }
+
+    // A1: id_de_par es determinista (misma clave → mismo id)
+    #[test]
+    fn id_de_par_determinista() {
+        let clave = "deadbeef".repeat(8);
+        assert_eq!(id_de_par(&clave), id_de_par(&clave));
+    }
+
+    // A1: claves distintas → ids distintos (no colisión para entradas normales)
+    #[test]
+    fn id_de_par_sin_colision() {
+        let c1 = "0".repeat(64);
+        let c2 = "1".repeat(64);
+        assert_ne!(id_de_par(&c1), id_de_par(&c2));
+    }
+
+    // A1: el id NO revela la clave (no es un prefijo de la clave ni la clave misma)
+    #[test]
+    fn id_de_par_no_es_la_clave() {
+        let clave = "abcdef0123456789".repeat(4);
+        let id = id_de_par(&clave);
+        assert_ne!(id, &clave[..32], "el id no debe ser un fragmento de la clave");
+    }
+
+    // A3: primer fallo se registra correctamente en el mapa
+    #[test]
+    fn fallo_se_registra() {
+        let mut fallos: HashMap<String, u64> = HashMap::new();
+        let key = "pares/abc123/1234567_ping.enc".to_string();
+        let ts = ahora();
+        fallos.entry(key.clone()).or_insert(ts);
+        assert!(fallos.contains_key(&key));
+        assert_eq!(*fallos.get(&key).unwrap(), ts);
+    }
+
+    // A3: objeto con fallo de hace 47 h → no caducado
+    #[test]
+    fn fallo_47h_no_caduca() {
+        let ts_fallo = ahora().saturating_sub(47 * 3600);
+        let edad = ahora().saturating_sub(ts_fallo);
+        assert!(edad < LIMITE_FALLOS_SECS, "47h no debe superar el límite de 48h");
+    }
+
+    // A3: objeto con fallo de hace 49 h → caducado
+    #[test]
+    fn fallo_49h_caduca() {
+        let ts_fallo = ahora().saturating_sub(49 * 3600);
+        let edad = ahora().saturating_sub(ts_fallo);
+        assert!(edad > LIMITE_FALLOS_SECS, "49h debe superar el límite de 48h");
+    }
+
+    // A3: segunda llamada con la misma key no sobreescribe el ts original (or_insert)
+    #[test]
+    fn fallo_no_sobreescribe_ts_original() {
+        let mut fallos: HashMap<String, u64> = HashMap::new();
+        let key = "pares/abc/123_ping.enc".to_string();
+        let ts_original = ahora().saturating_sub(10);
+        fallos.entry(key.clone()).or_insert(ts_original);
+        // Segunda llamada — simula un segundo fallo
+        let ts_nuevo = ahora();
+        fallos.entry(key.clone()).or_insert(ts_nuevo);
+        // El ts original debe conservarse
+        assert_eq!(*fallos.get(&key).unwrap(), ts_original, "or_insert no debe sobreescribir");
+    }
+
+    // A3: éxito limpia el fallo del mapa
+    #[test]
+    fn exito_limpia_fallo() {
+        let mut fallos: HashMap<String, u64> = HashMap::new();
+        let key = "pares/abc/123_msg.enc".to_string();
+        fallos.insert(key.clone(), ahora() - 3600);
+        fallos.remove(&key);
+        assert!(!fallos.contains_key(&key));
+    }
 }

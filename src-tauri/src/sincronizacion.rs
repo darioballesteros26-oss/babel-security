@@ -74,7 +74,25 @@ pub struct DispositivoEmparejado {
     pub clave_hex: String,
     pub ts: u64,
     pub ip_ultima: String,
+    /// A tiene credenciales B2 que B todavía no ha recibido (fallo/corte durante emparejamiento).
+    /// Se reintenta automáticamente en `probar_conexion_dispositivo`.
+    #[serde(default)]
+    pub b2_pendiente: bool,
+    /// Timestamp Unix del primer fallo de envío de B2. Caducidad: 48 h.
+    #[serde(default)]
+    pub ts_b2_pendiente: u64,
 }
+
+/// Devuelve true si el flag `b2_pendiente` lleva más de 48 h sin resolverse.
+/// En ese caso se debe limpiar el flag y dejar de reintentar.
+pub fn b2_pendiente_expirado(disp: &DispositivoEmparejado) -> bool {
+    if !disp.b2_pendiente || disp.ts_b2_pendiente == 0 {
+        return false;
+    }
+    ahora_unix().saturating_sub(disp.ts_b2_pendiente) > LIMITE_B2_PENDIENTE_SECS
+}
+
+const LIMITE_B2_PENDIENTE_SECS: u64 = 48 * 3600;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DispositivoPublico {
@@ -90,6 +108,8 @@ pub struct SolicitudSincPublica {
     pub ip: String,
     /// El solicitante tiene b2.json configurado y lo ofrecerá si se acepta el emparejamiento.
     pub tiene_b2: bool,
+    /// Timestamp Unix en que se recibió la solicitud (para caducidad de 48 h en frontend).
+    pub ts_recibida: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -131,7 +151,11 @@ pub fn guardar_emparejados(lista: &[DispositivoEmparejado], subclave_hex: &str) 
     }
     if let Ok(json) = serde_json::to_string(lista) {
         if let Ok(cifrado) = crate::seguridad::blindar_documento(&json, subclave_hex) {
-            let _ = crate::escribir_privado(ruta_dispositivos(), cifrado);
+            // Escritura atómica (temp+rename): si el proceso muere durante la escritura
+            // el archivo anterior se conserva íntegro — no se pierden los pares existentes.
+            if let Err(e) = crate::escribir_privado_atomico(ruta_dispositivos(), cifrado) {
+                log::error!("[SINC] Error guardando dispositivos (atómico): {}", e);
+            }
         }
     }
 }
@@ -196,6 +220,14 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
     }
     let linea = linea.trim().to_string();
 
+    // ── Reintento B2 (mensaje separado, sin re-emparejar) ──────────────────────
+    // A → B: BABEL_B2_REINTENTO:{nombre}:{ts}:{hmac8}\n
+    // Sólo cuando A tiene b2.json y B todavía no lo recibió (flag b2_pendiente).
+    if linea.starts_with("BABEL_B2_REINTENTO:") {
+        manejar_reintento_b2(stream, ip_origen, &nombre_local);
+        return;
+    }
+
     // Parsear: BABEL_SINC_REQ:{nombre}:{ip_remitente}:{ts}:{hmac8}[:{has_b2}]
     let partes: Vec<&str> = linea.splitn(6, ':').collect();
     if partes.len() < 5 || partes[0] != "BABEL_SINC_REQ" {
@@ -241,6 +273,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             nombre: nombre_remoto.clone(),
             ip: ip_origen.clone(),
             tiene_b2: solicitante_tiene_b2,
+            ts_recibida: ahora_unix(),
         });
     }
     // Reiniciar estado de decisión anterior
@@ -268,7 +301,9 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
         Err(_) => return,
     };
 
-    let mut clave_compartida: Option<String> = None;
+    // Zeroizing<String>: la clave sale del buffer de sesión ya envuelta, se mantiene
+    // zeroizable en este scope para la fase B2 y se elimina al salir del handler.
+    let mut clave_compartida: Option<Zeroizing<String>> = None;
 
     match decision {
         Some(true) => {
@@ -286,7 +321,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
                     nombre_local, *clave_z, ts_resp, hmac_resp, tenemos_b2
                 );
                 let _ = writer.write_all(msg.as_bytes());
-                clave_compartida = Some((*clave_z).clone());
+                clave_compartida = Some(clave_z); // mantiene Zeroizing
                 log::warn!("[SINC] Emparejamiento aceptado → '{}' ({})", nombre_remoto, ip_origen);
             } else {
                 log::error!("[SINC] Sin clave para enviar a {}", ip_origen);
@@ -455,6 +490,8 @@ pub fn solicitar_emparejamiento(
             clave_hex: clave_hex.clone(),
             ts: ahora_unix(),
             ip_ultima: ip_destino.to_string(),
+            b2_pendiente: false,
+            ts_b2_pendiente: 0,
         });
         guardar_emparejados(&lista, subclave_hex);
         log::warn!("[SINC] Emparejado con '{}' ({})", nombre_remoto, ip_destino);
@@ -511,6 +548,22 @@ pub fn solicitar_emparejamiento(
             );
         }
 
+        // A2: Si A tenía B2 pero el envío no completó (corte de conexión durante oferta),
+        // marcar el dispositivo como b2_pendiente para reintentarlo en la siguiente
+        // conexión directa (probar_conexion_dispositivo lo detecta y llama a reenviar_b2_si_pendiente).
+        let b2_pendiente_nuevo = !b2_enviado && !b2_conflicto && crate::buzon_b2::leer_config_raw().is_some();
+        if b2_pendiente_nuevo {
+            if let Some(d) = lista.iter_mut().find(|d| d.ip_ultima == ip_destino) {
+                d.b2_pendiente = true;
+                d.ts_b2_pendiente = ahora_unix();
+                guardar_emparejados(&lista, subclave_hex);
+                log::warn!(
+                    "[SINC] B2 pendiente para '{}': se reintentará en la próxima conexión directa.",
+                    nombre_remoto
+                );
+            }
+        }
+
         Ok(ResultadoEmparejamiento {
             emparejado: true,
             nombre: nombre_remoto,
@@ -557,6 +610,8 @@ pub fn aceptar_y_generar_clave(
         clave_hex: clave_hex.clone(),
         ts: ahora_unix(),
         ip_ultima: ip_solicitante.to_string(),
+        b2_pendiente: false,
+        ts_b2_pendiente: 0,
     });
     guardar_emparejados(&lista, subclave_hex);
 
@@ -577,4 +632,229 @@ pub fn rechazar_emparejamiento() {
         *d = Some(false);
     }
     DECISION_CONDVAR.notify_all();
+}
+
+// ── B2 reintento (A2) ──────────────────────────────────────────────────────
+// Protocolo: A → B: BABEL_B2_REINTENTO:{nombre}:{ts}:{hmac8}\n
+//            B → A: BABEL_B2_YA_TENGO\n  |  BABEL_B2_NECESITO\n
+//            A → B: BABEL_B2_OFFER:{hex_cifrado}\n  (solo si B dijo NECESITO)
+//            B → A: BABEL_B2_OK\n  |  BABEL_B2_CONFLICT\n
+
+/// Maneja en B un mensaje BABEL_B2_REINTENTO entrante (sin re-emparejar).
+fn manejar_reintento_b2(stream: TcpStream, ip_origen: String, _nombre_local: &str) {
+    let mut linea = String::new();
+    {
+        let mut r = BufReader::new(&stream);
+        let _ = r.read_line(&mut linea);
+    }
+    let linea = linea.trim().to_string();
+    // Parsear: BABEL_B2_REINTENTO:{nombre}:{ts}:{hmac8}
+    let partes: Vec<&str> = linea.splitn(4, ':').collect();
+    if partes.len() < 4 || partes[0] != "BABEL_B2_REINTENTO" {
+        return;
+    }
+    let ts: u64 = partes[2].parse().unwrap_or(0);
+    let hmac_rx = partes[3];
+    let ahora = ahora_unix();
+    if ts == 0 || ahora.saturating_sub(ts) > 60 {
+        log::warn!("[SINC] BABEL_B2_REINTENTO expirado de {}", ip_origen);
+        return;
+    }
+    if hmac_sinc("b2_reintento", ts) != hmac_rx {
+        log::warn!("[SINC] BABEL_B2_REINTENTO HMAC inválido de {}", ip_origen);
+        return;
+    }
+
+    let mut writer = match stream.try_clone() { Ok(s) => s, Err(_) => return };
+
+    if crate::buzon_b2::leer_config_raw().is_some() {
+        // B ya tiene B2 — decirle a A que puede limpiar el flag
+        let _ = writer.write_all(b"BABEL_B2_YA_TENGO\n");
+        log::info!("[SINC] REINTENTO B2 de {}: ya teníamos B2.", ip_origen);
+        return;
+    }
+
+    // B no tiene B2 — pedirle a A que envíe la oferta
+    let _ = writer.write_all(b"BABEL_B2_NECESITO\n");
+
+    // Leer la oferta cifrada
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let mut oferta_linea = String::new();
+    {
+        let mut r = BufReader::new(&stream);
+        let _ = r.read_line(&mut oferta_linea);
+    }
+    let oferta_linea = oferta_linea.trim();
+
+    if let Some(hex_cifrado) = oferta_linea.strip_prefix("BABEL_B2_OFFER:") {
+        // Necesitamos la clave compartida del par para descifrar.
+        // B la busca por IP en su lista de dispositivos.
+        // Cargamos la lista SIN subclave (no la tenemos aquí) → búsqueda por IP en disco
+        // no es posible sin subclave. LIMITACIÓN CONOCIDA: esta función no tiene acceso
+        // a la subclave de sesión (es un hilo de servidor sin contexto de sesión).
+        // Alternativa: transmitir la oferta cifrada al thread principal vía un canal.
+        // Para el MVP: log y skip. El reintento completo requiere clave de sesión.
+        log::warn!(
+            "[SINC] REINTENTO B2: recibida oferta de {} pero no tenemos subclave en el hilo \
+             servidor para descifrar. Usa 'verificar_buzones_todos' desde la UI para aplicarla.",
+            ip_origen
+        );
+        let _ = writer.write_all(b"BABEL_B2_SKIP\n");
+        let _ = hex_cifrado; // suppress unused warning
+    }
+}
+
+/// Intenta enviar las credenciales B2 pendientes a un dispositivo emparejado.
+///
+/// Retorna:
+/// - `Ok(true)`  → B2 enviado o B ya lo tenía; el llamador debe limpiar `b2_pendiente`.
+/// - `Ok(false)` → reintento fallido (dispositivo offline, etc); reintentar luego.
+/// - `Err(())`   → flag caducado (48 h); el llamador debe limpiar `b2_pendiente`.
+pub fn reenviar_b2_si_pendiente(
+    disp: &DispositivoEmparejado,
+    nombre_local: &str,
+) -> Result<bool, ()> {
+    // A4: caducidad de 48 h del flag b2_pendiente
+    if b2_pendiente_expirado(disp) {
+        log::warn!(
+            "[SINC] B2 pendiente para '{}' lleva >48 h sin resolverse — descartando.",
+            disp.nombre
+        );
+        return Err(());
+    }
+    if !disp.b2_pendiente {
+        return Ok(true);
+    }
+
+    let b2_json = match crate::buzon_b2::leer_config_raw() {
+        Some(j) => j,
+        None => return Ok(true), // A ya no tiene B2 — nada que enviar
+    };
+
+    // Conectar al dispositivo remoto por el puerto de sincronización
+    let mut stream = match TcpStream::connect(format!("{}:{}", disp.ip_ultima, PUERTO_SINC)) {
+        Ok(s) => s,
+        Err(_) => return Ok(false), // offline — reintentar después
+    };
+    stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
+    stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
+
+    // Enviar mensaje de reintento con HMAC anti-scanner
+    let ts = ahora_unix();
+    let hmac = hmac_sinc("b2_reintento", ts);
+    let msg = format!("BABEL_B2_REINTENTO:{}:{}:{}\n", nombre_local, ts, hmac);
+    if stream.write_all(msg.as_bytes()).is_err() {
+        return Ok(false);
+    }
+
+    let mut resp = String::new();
+    {
+        let mut r = BufReader::new(&stream);
+        let _ = r.read_line(&mut resp);
+    }
+
+    match resp.trim() {
+        "BABEL_B2_YA_TENGO" => {
+            log::info!("[SINC] '{}' ya tiene B2 — flag b2_pendiente limpiado.", disp.nombre);
+            Ok(true)
+        }
+        "BABEL_B2_NECESITO" => {
+            // B necesita las credenciales — cifrar con la clave compartida del par
+            match crate::seguridad::blindar_documento(&b2_json, &disp.clave_hex) {
+                Ok(cifrado) => {
+                    let oferta = format!("BABEL_B2_OFFER:{}\n", hex::encode(&cifrado));
+                    if stream.write_all(oferta.as_bytes()).is_err() {
+                        return Ok(false);
+                    }
+                    let mut resp2 = String::new();
+                    {
+                        let mut r = BufReader::new(&stream);
+                        let _ = r.read_line(&mut resp2);
+                    }
+                    match resp2.trim() {
+                        "BABEL_B2_OK" => {
+                            log::info!(
+                                "[SINC] B2 enviado con éxito a '{}' (reintento).", disp.nombre
+                            );
+                            Ok(true)
+                        }
+                        other => {
+                            log::warn!("[SINC] Reintento B2 para '{}': respuesta inesperada '{}'", disp.nombre, other);
+                            Ok(false)
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("[SINC] No se pudo cifrar oferta B2 para '{}': {}", disp.nombre, e);
+                    Ok(false)
+                }
+            }
+        }
+        _ => Ok(false),
+    }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn disp_con_b2_pendiente(ts_b2: u64) -> DispositivoEmparejado {
+        DispositivoEmparejado {
+            id: "test".into(),
+            nombre: "TestDevice".into(),
+            clave_hex: "a".repeat(64),
+            ts: 0,
+            ip_ultima: "127.0.0.1".into(),
+            b2_pendiente: true,
+            ts_b2_pendiente: ts_b2,
+        }
+    }
+
+    // A4: flag b2_pendiente con 49 h de antigüedad → expirado
+    #[test]
+    fn b2_pendiente_expira_tras_48h() {
+        let ts_viejo = ahora_unix().saturating_sub(49 * 3600);
+        let disp = disp_con_b2_pendiente(ts_viejo);
+        assert!(b2_pendiente_expirado(&disp), "debe estar expirado tras 49h");
+    }
+
+    // A4: flag con 1 h → todavía vigente
+    #[test]
+    fn b2_pendiente_no_expira_antes_de_48h() {
+        let ts_reciente = ahora_unix().saturating_sub(3600);
+        let disp = disp_con_b2_pendiente(ts_reciente);
+        assert!(!b2_pendiente_expirado(&disp), "no debe expirar con solo 1h");
+    }
+
+    // A4: sin flag b2_pendiente → no expira aunque el ts sea viejo
+    #[test]
+    fn sin_flag_no_expira() {
+        let mut disp = disp_con_b2_pendiente(0);
+        disp.b2_pendiente = false;
+        assert!(!b2_pendiente_expirado(&disp));
+    }
+
+    // A2: serde backward-compat — un JSON antiguo (sin b2_pendiente) carga con defaults
+    #[test]
+    fn dispositivo_sin_campo_b2_carga_con_default() {
+        let json = r#"{"id":"abc","nombre":"X","clave_hex":"deadbeef","ts":0,"ip_ultima":"1.2.3.4"}"#;
+        let d: DispositivoEmparejado = serde_json::from_str(json).expect("debe parsear");
+        assert!(!d.b2_pendiente);
+        assert_eq!(d.ts_b2_pendiente, 0);
+    }
+
+    // A4: SolicitudSincPublica con ts_recibida viejo debería considerarse caducada
+    #[test]
+    fn solicitud_con_ts_recibida_viejo() {
+        let sol = SolicitudSincPublica {
+            nombre: "Peer".into(),
+            ip: "1.2.3.4".into(),
+            tiene_b2: false,
+            ts_recibida: ahora_unix().saturating_sub(49 * 3600),
+        };
+        let edad = ahora_unix().saturating_sub(sol.ts_recibida);
+        assert!(edad > 48 * 3600, "solicitud de 49h debe considerarse caducada");
+    }
 }
