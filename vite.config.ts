@@ -2,6 +2,8 @@ import { defineConfig } from "vite";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+// @ts-expect-error process is a nodejs global
+const port = parseInt(process.env.DEV_PORT ?? "1420", 10);
 
 // Plugin que inyecta un mock de __TAURI_INTERNALS__ solo en dev y solo cuando
 // no hay Tauri real (navegador sin backend). No afecta el build de producción.
@@ -44,10 +46,10 @@ export default defineConfig(async () => ({
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 1420,
+    port,
     strictPort: true,
     host: host || false,
-    hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
+    hmr: host ? { protocol: "ws", host, port: port + 1 } : undefined,
     watch: {
       ignored: (path: string) => !path.includes('/src/') && !path.includes('/src-tauri/src/'),
     },
