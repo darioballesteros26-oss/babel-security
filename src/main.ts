@@ -472,6 +472,10 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "abrir-union-pdfs":             void abrirPanelUnion(); break;
     case "cerrar-union-pdfs":            cerrarPanelUnion(); break;
     case "confirmar-union-pdfs":         void confirmarUnion(); break;
+    case "convertir-imagenes-pdf":       abrirModalImgAPdf(); break;
+    case "confirmar-img-pdf-uno":        void convertirImagenesAPdf("uno"); break;
+    case "confirmar-img-pdf-varios":     void convertirImagenesAPdf("varios"); break;
+    case "cerrar-modal-img-pdf":         cerrarModalImgAPdf(); break;
     case "compartir-archivo-guardado":   mostrarMenuCompartir(); break;
     case "cerrar-menu-compartir":        cerrarMenuCompartir(); break;
     case "mas-opciones-compartir":       cerrarMenuCompartir(); compartirDirecto(); break;
@@ -1282,11 +1286,17 @@ function actualizarSeleccionGuardados(): void {
   const seleccionados = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
   const hay = seleccionados.length > 0;
   const unico = seleccionados.length === 1;
+  const bases = Array.from(seleccionados).map(cb => {
+    const card = cb.closest(".archivo-card") as HTMLElement | null;
+    return (card?.dataset.base ?? "").toLowerCase();
+  });
+  const todasImagenes = hay && bases.every(b => /\.(png|jpe?g|webp|bmp|gif|tiff?)$/.test(b));
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.toggle("hidden", !hay);
   document.getElementById("btn-compartir-sel-g")?.classList.toggle("hidden", !unico);
   document.getElementById("btn-mail-sel-g")?.classList.toggle("hidden", !unico);
   document.getElementById("btn-unir-pdfs-g")?.classList.toggle("hidden", seleccionados.length < 2);
+  document.getElementById("btn-convertir-img-pdf-g")?.classList.toggle("hidden", !todasImagenes);
   document.getElementById("ui-exportar-todo")?.classList.toggle("hidden", hay);
   document.getElementById("ui-finder")?.classList.toggle("hidden", hay);
   document.getElementById("ui-importar")?.classList.toggle("hidden", hay);
@@ -2099,6 +2109,55 @@ async function confirmarUnion(): Promise<void> {
   }
 }
 
+
+// ── Convertir imagen(es) → PDF ────────────────────────────────────────────────
+
+function abrirModalImgAPdf(): void {
+  const sel = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
+  if (sel.length === 0) { mostrarToast("Selecciona al menos una imagen", true); return; }
+  if (sel.length === 1) {
+    void convertirImagenesAPdf("uno");
+    return;
+  }
+  document.getElementById("modal-img-a-pdf")?.classList.remove("hidden");
+}
+
+function cerrarModalImgAPdf(): void {
+  document.getElementById("modal-img-a-pdf")?.classList.add("hidden");
+}
+
+async function convertirImagenesAPdf(modo: "uno" | "varios"): Promise<void> {
+  cerrarModalImgAPdf();
+  const sel = Array.from(document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked"));
+  if (sel.length === 0) return;
+
+  const rutas = sel.map(cb => {
+    const card = cb.closest(".archivo-card") as HTMLElement | null;
+    return card?.dataset.ruta ?? "";
+  }).filter(Boolean);
+
+  const nombreSalida = sel.length === 1
+    ? (() => {
+        const card = sel[0].closest(".archivo-card") as HTMLElement | null;
+        return card?.dataset.base ?? "imagen_convertida";
+      })()
+    : "documento_convertido";
+
+  mostrarToast("Convirtiendo imágenes…", false);
+  try {
+    const resultado = await invoke<string[]>("convertir_imagenes_a_pdf", {
+      rutas,
+      nombreSalida,
+      buzonId: buzonActivoGuardados,
+      modo,
+    });
+    const n = resultado.length;
+    mostrarToast(n === 1 ? "✓ PDF generado y guardado" : `✓ ${n} PDFs generados y guardados`, false);
+    await cargarArchivosGuardados();
+  } catch (e) {
+    mostrarToast("Error al convertir: " + String(e), true);
+  }
+}
 
 let dropZoneInicializada = false;
 

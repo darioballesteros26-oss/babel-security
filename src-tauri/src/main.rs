@@ -7,6 +7,7 @@ mod babel_p2p;
 mod bip39_words;
 mod compartir;
 mod finder;
+mod img_a_pdf;
 mod pdf_reducir;
 mod conexion_directa;
 mod buzon_b2;
@@ -2135,6 +2136,98 @@ async fn unir_pdfs(
     })
     .await
     .map_err(|e| format!("Error interno al unir: {}", e))?
+}
+
+/// Convierte una o varias imágenes a PDF.
+///
+/// - `modo = "uno"`: todas las imágenes en un único PDF multi-página (en el
+///   orden de `rutas`). Nombre de salida: `nombre_salida` (con extensión .pdf).
+/// - `modo = "varios"`: un PDF por imagen, con el nombre base de la imagen.
+///
+/// Los PDFs resultantes se cifran con la sesión activa y se guardan en Babel.
+/// Devuelve las rutas cifradas de los archivos creados.
+#[tauri::command]
+async fn convertir_imagenes_a_pdf(
+    rutas: Vec<String>,
+    nombre_salida: String,
+    buzon_id: String,
+    modo: String,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<Vec<String>, String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    if rutas.is_empty() {
+        return Err("No se seleccionaron imágenes.".into());
+    }
+    if modo != "uno" && modo != "varios" {
+        return Err("Modo no válido. Usa 'uno' o 'varios'.".into());
+    }
+    let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // Leer y descifrar cada imagen de Babel
+        let mut blobs: Vec<Vec<u8>> = Vec::with_capacity(rutas.len());
+        for ruta in &rutas {
+            validar_ruta_en(ruta, guardados_dir())
+                .or_else(|_| validar_ruta_en(ruta, archivos_dir()))
+                .map_err(|_| "Un archivo no es accesible.".to_string())?;
+            let bytes = descifrar_a_bytes(ruta, &subclave_hex)
+                .map_err(|_| "No se pudo leer uno de los archivos.".to_string())?;
+            if bytes.len() > 50 * 1024 * 1024 {
+                return Err("Una imagen supera el límite de 50 MB.".into());
+            }
+            blobs.push(bytes);
+        }
+
+        if modo == "uno" {
+            // Todas las imágenes → un PDF multi-página
+            let pdf = img_a_pdf::imagenes_a_pdf_unico(&blobs)?;
+            let base = std::path::Path::new(&nombre_salida)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("documento_convertido");
+            let nombre_final = format!("{}.pdf", base);
+            let ruta = cifrar_y_guardar_desde_bytes(
+                &nombre_final,
+                &pdf,
+                &subclave_hex,
+                &id_usuario,
+            )?;
+            if buzon_id != "todos" && !buzon_id.is_empty() {
+                let _ = asignar_buzon_guardado(&ruta, &buzon_id, &subclave_hex);
+            }
+            Ok(vec![ruta])
+        } else {
+            // Un PDF por imagen
+            let mut rutas_out: Vec<String> = Vec::with_capacity(blobs.len());
+            for (i, (ruta, blob)) in rutas.iter().zip(blobs.iter()).enumerate() {
+                let pdf = img_a_pdf::imagen_a_pdf(blob)
+                    .map_err(|e| format!("Imagen {}: {}", i + 1, e))?;
+                // Nombre de salida: nombre base de la ruta cifrada de origen
+                let base = std::path::Path::new(ruta)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("imagen");
+                // Quitar sufijo _ts si tiene formato usuario_nombre_ts.babel
+                let nombre_final = format!("{}.pdf", base);
+                let ruta_out = cifrar_y_guardar_desde_bytes(
+                    &nombre_final,
+                    &pdf,
+                    &subclave_hex,
+                    &id_usuario,
+                )?;
+                if buzon_id != "todos" && !buzon_id.is_empty() {
+                    let _ = asignar_buzon_guardado(&ruta_out, &buzon_id, &subclave_hex);
+                }
+                rutas_out.push(ruta_out);
+            }
+            Ok(rutas_out)
+        }
+    })
+    .await
+    .map_err(|e| format!("Error interno: {}", e))?
 }
 
 #[tauri::command]
@@ -4915,6 +5008,7 @@ fn main() {
             mover_archivo_guardado,
             preparar_union_pdfs,
             unir_pdfs,
+            convertir_imagenes_a_pdf,
             obtener_usuario_con_maestra,
             renombrar_archivo,
             tiene_config_email,

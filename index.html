@@ -159,11 +159,6 @@
         style="margin-top:20px;letter-spacing:2px;" id="pantalla-texto-ajustes">⚙ AJUSTES</button>
       <button type="button" data-action="cerrar-sesion" class="btn-link" style="margin-top:8px"
         id="pantalla-texto-cerrar">CERRAR SESIÓN</button>
-      <!-- Ver frase desde dentro de la app -->
-      <button type="button" data-action="ver-frase-app" class="btn-link"
-        style="margin-top:6px;font-size:0.6rem;opacity:0.35;letter-spacing:1px;">
-        VER FRASE DE RECUPERACIÓN
-      </button>
     </div>
 
     <!-- PANTALLA 6 — TRADUCCIÓN CHAT -->
@@ -358,6 +353,10 @@
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">⊕ UNIR PDFs</button>
+          <button type="button" id="btn-convertir-img-pdf-g" data-action="convertir-imagenes-pdf" class="hidden"
+            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+            onmouseleave="this.style.background='transparent'">⊞ CONVERTIR A PDF</button>
           <button type="button" id="btn-eliminar-sel-g" data-action="eliminar-sel-guardados" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
@@ -935,7 +934,7 @@
             Máximo 3 dispositivos. La clave compartida se genera al emparejar y no cambia.
           </div>
           <div id="sinc-lista-emparejados" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;"></div>
-          <button type="button" data-action="abrir-sinc-dispositivos" class="btn-vip" style="width:100%;padding:12px 0;">
+          <button type="button" data-action="abrir-sinc-dispositivos" class="btn-secundario-oro" style="width:100%;padding:12px 0;">
             SINCRONIZAR DISPOSITIVOS
           </button>
         </div>
@@ -1346,6 +1345,48 @@
               color:#000;font-family:'Times New Roman',Times,serif;font-size:0.6rem;
               letter-spacing:2px;cursor:pointer;font-weight:700;">
               ACEPTAR
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MODAL CONVERTIR IMÁGENES → PDF (elegir modo)               -->
+    <!-- ============================================================ -->
+    <div id="modal-img-a-pdf" class="hidden" style="
+      position:fixed;inset:0;z-index:1100;background:rgba(0,0,0,0.88);
+      display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:400px;background:var(--fondo-panel,#0d0d0d);
+        border:1px solid var(--dorado);border-radius:4px;overflow:hidden;">
+        <div style="padding:28px 24px;text-align:center;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+            letter-spacing:3px;color:var(--texto-secundario);margin-bottom:18px;opacity:0.6;">
+            CONVERTIR IMÁGENES A PDF
+          </div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;
+            color:var(--texto-principal);margin-bottom:24px;letter-spacing:0.05em;line-height:1.6;">
+            ¿Cómo deseas convertir las imágenes seleccionadas?
+          </div>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <button type="button" data-action="confirmar-img-pdf-uno"
+              style="width:100%;padding:14px 0;background:var(--dorado);border:none;
+              color:#000;font-family:'Times New Roman',Times,serif;font-size:0.62rem;
+              letter-spacing:2px;cursor:pointer;font-weight:700;">
+              UN SOLO PDF (todas las imágenes en orden)
+            </button>
+            <button type="button" data-action="confirmar-img-pdf-varios"
+              style="width:100%;padding:14px 0;background:transparent;
+              border:1px solid var(--dorado);color:var(--dorado);
+              font-family:'Times New Roman',Times,serif;font-size:0.62rem;
+              letter-spacing:2px;cursor:pointer;">
+              UN PDF POR IMAGEN
+            </button>
+            <button type="button" data-action="cerrar-modal-img-pdf"
+              style="width:100%;padding:10px 0;background:transparent;border:none;
+              color:var(--texto-secundario);font-family:'Times New Roman',Times,serif;
+              font-size:0.58rem;letter-spacing:2px;cursor:pointer;opacity:0.5;">
+              CANCELAR
             </button>
           </div>
         </div>
