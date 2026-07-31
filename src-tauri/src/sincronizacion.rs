@@ -224,7 +224,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
     // A → B: BABEL_B2_REINTENTO:{nombre}:{ts}:{hmac8}\n
     // Sólo cuando A tiene b2.json y B todavía no lo recibió (flag b2_pendiente).
     if linea.starts_with("BABEL_B2_REINTENTO:") {
-        manejar_reintento_b2(stream, ip_origen, &nombre_local);
+        manejar_reintento_b2(stream, ip_origen, &nombre_local, &linea);
         return;
     }
 
@@ -641,13 +641,8 @@ pub fn rechazar_emparejamiento() {
 //            B → A: BABEL_B2_OK\n  |  BABEL_B2_CONFLICT\n
 
 /// Maneja en B un mensaje BABEL_B2_REINTENTO entrante (sin re-emparejar).
-fn manejar_reintento_b2(stream: TcpStream, ip_origen: String, _nombre_local: &str) {
-    let mut linea = String::new();
-    {
-        let mut r = BufReader::new(&stream);
-        let _ = r.read_line(&mut linea);
-    }
-    let linea = linea.trim().to_string();
+/// `linea` ya fue leída por `manejar_solicitud_sinc` — no releer del stream.
+fn manejar_reintento_b2(stream: TcpStream, ip_origen: String, _nombre_local: &str, linea: &str) {
     // Parsear: BABEL_B2_REINTENTO:{nombre}:{ts}:{hmac8}
     let partes: Vec<&str> = linea.splitn(4, ':').collect();
     if partes.len() < 4 || partes[0] != "BABEL_B2_REINTENTO" {
