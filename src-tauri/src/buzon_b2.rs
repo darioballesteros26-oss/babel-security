@@ -282,18 +282,25 @@ fn ahora() -> u64 {
         .as_secs()
 }
 
-fn prefijo_par(id_par: &str) -> String {
-    format!("pares/{}/", id_par)
+// Identificador del par derivado de la clave compartida: sha256(clave_hex)[..8 bytes → 16 hex].
+// Ambos dispositivos del par tienen la misma clave, luego el mismo prefijo S3.
+// Sin esto, A usaría su propio ID local de B y B usaría su propio ID local de A
+// → distintos prefijos → los mensajes nunca se encontrarían.
+fn id_de_par(clave_hex: &str) -> String {
+    hex::encode(&Sha256::digest(clave_hex.as_bytes())[..8])
 }
 
-fn clave_objeto(id_par: &str, tipo: &str) -> String {
-    format!("pares/{}/{}_{}.enc", id_par, ahora(), tipo)
+fn prefijo_par(clave_hex: &str) -> String {
+    format!("pares/{}/", id_de_par(clave_hex))
+}
+
+fn clave_objeto(clave_hex: &str, tipo: &str) -> String {
+    format!("pares/{}/{}_{}.enc", id_de_par(clave_hex), ahora(), tipo)
 }
 
 // ── Subir al buzón ────────────────────────────────────────────────────────────
 
 pub async fn subir_al_buzon(
-    id_par: &str,
     tipo: &str,
     contenido: &str,
     nombre_origen: &str,
@@ -314,7 +321,8 @@ pub async fn subir_al_buzon(
     let cifrado = crate::seguridad::blindar_documento(&json, clave_hex)
         .map_err(|e| format!("Error al cifrar payload B2: {e}"))?;
 
-    let key = clave_objeto(id_par, tipo);
+    // Prefijo derivado de la clave — mismo en ambos lados del par
+    let key = clave_objeto(clave_hex, tipo);
     let key2 = key.clone();
 
     tokio::task::spawn_blocking(move || s3_put_sync(&cfg, &key2, &cifrado))
@@ -328,10 +336,12 @@ pub async fn subir_al_buzon(
 
 // ── Listar pendientes para un par ─────────────────────────────────────────────
 
-pub async fn listar_pendientes(id_par: &str) -> Result<Vec<PendienteB2>, String> {
+// clave_hex: la clave compartida del par (misma en ambos dispositivos).
+// El prefijo S3 se deriva de la clave, no del ID local, para que ambos lados coincidan.
+pub async fn listar_pendientes(clave_hex: &str) -> Result<Vec<PendienteB2>, String> {
     let cfg = cargar_config()?;
-    let prefijo = prefijo_par(id_par);
-    let id_par = id_par.to_string();
+    let prefijo = prefijo_par(clave_hex);
+    let par_id = id_de_par(clave_hex);
 
     let keys = tokio::task::spawn_blocking(move || s3_list_sync(&cfg, &prefijo))
         .await
@@ -351,7 +361,7 @@ pub async fn listar_pendientes(id_par: &str) -> Result<Vec<PendienteB2>, String>
                 key,
                 timestamp: ts,
                 nombre_archivo,
-                id_par: id_par.clone(),
+                id_par: par_id.clone(),
             })
         })
         .collect();
@@ -420,9 +430,9 @@ pub async fn contar_pendientes_todos(subclave_hex: &str) -> Vec<ConteoB2> {
     let emparejados = crate::sincronizacion::cargar_emparejados(subclave_hex);
     let mut resultado = Vec::new();
     for disp in emparejados {
-        match listar_pendientes(&disp.id).await {
+        match listar_pendientes(&disp.clave_hex).await {
             Ok(p) if !p.is_empty() => resultado.push(ConteoB2 {
-                id_par: disp.id,
+                id_par: disp.id.clone(),
                 nombre: disp.nombre,
                 n: p.len(),
             }),

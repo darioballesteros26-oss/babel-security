@@ -3982,7 +3982,7 @@ async fn probar_conexion_dispositivo(
         {
             // Dispositivo apagado → caída automática al buzón B2
             let contenido = format!("Intento de conexión directa desde {}", nombre_b2);
-            match crate::buzon_b2::subir_al_buzon(&id, "ping", &contenido, &nombre_b2, &clave_b2)
+            match crate::buzon_b2::subir_al_buzon("ping", &contenido, &nombre_b2, &clave_b2)
                 .await
             {
                 Ok(key) => {
@@ -4018,10 +4018,11 @@ async fn contar_pendientes_b2(
         return Ok(0);
     }
     let emparejados = crate::sincronizacion::cargar_emparejados(&subclave);
-    if !emparejados.iter().any(|d| d.id == id) {
-        return Err("Dispositivo no encontrado.".into());
-    }
-    match crate::buzon_b2::listar_pendientes(&id).await {
+    let disp = match emparejados.into_iter().find(|d| d.id == id) {
+        Some(d) => d,
+        None => return Err("Dispositivo no encontrado.".into()),
+    };
+    match crate::buzon_b2::listar_pendientes(&disp.clave_hex).await {
         Ok(p) => Ok(p.len()),
         Err(_) => Ok(0), // B2 no configurado o sin red: no mostrar error
     }
@@ -4053,7 +4054,7 @@ async fn aplicar_pendientes_buzon(
         .find(|d| d.id == id)
         .ok_or_else(|| "Dispositivo no encontrado.".to_string())?;
 
-    let pendientes = crate::buzon_b2::listar_pendientes(&id).await?;
+    let pendientes = crate::buzon_b2::listar_pendientes(&disp.clave_hex).await?;
     let mut resultados = Vec::new();
     for p in pendientes {
         match crate::buzon_b2::descargar_y_aplicar(&p.key, &disp.clave_hex).await {

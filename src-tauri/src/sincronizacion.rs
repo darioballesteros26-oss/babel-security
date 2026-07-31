@@ -219,9 +219,9 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
 
     log::warn!("[SINC] Solicitud de '{}' ({})", nombre_remoto, ip_origen);
 
-    // Si ya hay otra solicitud en curso, rechazar sin mostrar al usuario
+    // Check-and-set atómico: rechazar solicitudes concurrentes sin ventana de carrera.
     {
-        let slot = SOLICITUD_PENDIENTE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slot = SOLICITUD_PENDIENTE.lock().unwrap_or_else(|e| e.into_inner());
         if slot.is_some() {
             log::warn!("[SINC] Solicitud concurrente de {} — rechazada (ocupado)", ip_origen);
             drop(slot);
@@ -230,10 +230,6 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             let _ = w.write_all(format!("BABEL_SINC_NO:{}\n", ts_resp).as_bytes());
             return;
         }
-    }
-
-    // Publicar solicitud para la UI
-    if let Ok(mut slot) = SOLICITUD_PENDIENTE.lock() {
         *slot = Some(SolicitudSincPublica {
             nombre: nombre_remoto.clone(),
             ip: ip_origen.clone(),
