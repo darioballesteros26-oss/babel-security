@@ -4619,22 +4619,37 @@ async function cargarListaEmparejados(): Promise<void> {
   } catch (_) {}
 }
 
+// Guard para evitar que verificarYAplicarBuzones → cargarListaEmparejados → verificarYAplicarBuzones
+// cause un bucle infinito cuando hay ítems pendientes.
+let _aplicandoBuzon = false;
+
 async function verificarYAplicarBuzones(ids: string[]): Promise<void> {
-  for (const id of ids) {
-    try {
-      const resultados = await invoke<ResultadoAplicarB2[]>("aplicar_pendientes_buzon", { id });
-      for (const r of resultados) {
-        const fecha = new Date(r.timestamp * 1000).toLocaleString("es-ES", {
-          day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
-        });
-        mostrarToast(
-          `Buzón: mensaje de ${escapeHTML(r.nombre_origen)} recibido el ${fecha}`,
-          false
-        );
-      }
-      if (resultados.length > 0) cargarListaEmparejados(); // refrescar badges
-    } catch (_) { /* B2 no configurado o sin red, ignorar */ }
+  if (_aplicandoBuzon) return;
+  _aplicandoBuzon = true;
+  let huboItems = false;
+  try {
+    for (const id of ids) {
+      try {
+        const resultados = await invoke<ResultadoAplicarB2[]>("aplicar_pendientes_buzon", { id });
+        for (const r of resultados) {
+          const fecha = new Date(r.timestamp * 1000).toLocaleString("es-ES", {
+            day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+          });
+          mostrarToast(
+            `Buzón: mensaje de ${escapeHTML(r.nombre_origen)} recibido el ${fecha}`,
+            false
+          );
+          huboItems = true;
+        }
+      } catch (_) { /* B2 no configurado o sin red, ignorar */ }
+    }
+  } finally {
+    _aplicandoBuzon = false;
   }
+  // Refrescar badges solo tras liberar el guard (la segunda llamada a
+  // cargarListaEmparejados vuelve a llamar verificarYAplicarBuzones pero el
+  // guard la hace salir inmediatamente, rompiendo el bucle).
+  if (huboItems) cargarListaEmparejados();
 }
 
 async function aplicarPendientesB2(id: string, btn: HTMLButtonElement): Promise<void> {

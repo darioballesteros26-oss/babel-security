@@ -366,6 +366,7 @@ pub async fn descargar_y_aplicar(
     clave_hex: &str,
 ) -> Result<ResultadoAplicarB2, String> {
     let cfg = cargar_config()?;
+    let cfg_del = cfg.clone(); // clonar antes de que cfg sea movido al GET
     let key2 = key.to_string();
 
     let cifrado = tokio::task::spawn_blocking(move || s3_get_sync(&cfg, &key2))
@@ -393,9 +394,8 @@ pub async fn descargar_y_aplicar(
     })?;
 
     // Borrar SOLO después de descifrar y parsear con éxito
-    let cfg2 = cargar_config()?;
     let key3 = key.to_string();
-    match tokio::task::spawn_blocking(move || s3_delete_sync(&cfg2, &key3)).await {
+    match tokio::task::spawn_blocking(move || s3_delete_sync(&cfg_del, &key3)).await {
         Ok(Ok(_)) => log::info!("[buzon_b2] Borrado tras aplicar: {}", key),
         Ok(Err(e)) => log::warn!("[buzon_b2] No se pudo borrar '{}': {}", key, e),
         Err(e) => log::warn!("[buzon_b2] B2 delete thread error '{}': {}", key, e),
