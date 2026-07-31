@@ -929,6 +929,17 @@
           </button>
         </div>
 
+        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+          <div class="ajuste-label">DISPOSITIVOS EMPAREJADOS</div>
+          <div style="margin-top:8px;margin-bottom:12px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+            Máximo 3 dispositivos. La clave compartida se genera al emparejar y no cambia.
+          </div>
+          <div id="sinc-lista-emparejados" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;"></div>
+          <button type="button" data-action="abrir-sinc-dispositivos" class="btn-vip" style="width:100%;padding:12px 0;">
+            SINCRONIZAR DISPOSITIVOS
+          </button>
+        </div>
+
         <button type="button" data-action="mostrar-pantalla" data-pantalla="principal" class="btn-link"
           style="margin-top:28px;text-align:center;" id="ui-volver-panel">← VOLVER AL PANEL</button>
       </div>
@@ -1236,6 +1247,105 @@
         </div>
       </div>
     </div>
+    <!-- ============================================================ -->
+    <!-- MODAL SINCRONIZAR DISPOSITIVOS                               -->
+    <!-- ============================================================ -->
+    <div id="modal-sinc" class="hidden" style="
+      position:fixed;inset:0;z-index:1050;background:rgba(0,0,0,0.92);
+      display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:480px;background:var(--fondo-panel,#0d0d0d);
+        border:1px solid var(--dorado);border-radius:4px;display:flex;flex-direction:column;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;
+          padding:14px 24px;border-bottom:1px solid rgba(201,168,76,0.2);">
+          <span style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;
+            letter-spacing:3px;color:var(--dorado);">SINCRONIZAR DISPOSITIVOS</span>
+          <button type="button" data-action="cerrar-sinc" style="background:transparent;
+            border:none;color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
+        </div>
+        <!-- Fase 1: Descubrimiento -->
+        <div id="sinc-fase-busqueda" style="padding:24px;">
+          <div id="sinc-msg-buscando" style="text-align:center;color:var(--texto-secundario);
+            font-family:'Times New Roman',Times,serif;font-size:0.6rem;letter-spacing:2px;
+            margin-bottom:16px;opacity:0.7;">Buscando dispositivos Babel en la red local...</div>
+          <div id="sinc-lista-peers-modal" style="display:flex;flex-direction:column;gap:8px;min-height:48px;"></div>
+          <button type="button" data-action="refrescar-sinc" class="btn-secundario-oro"
+            style="margin-top:16px;width:100%;padding:10px;">
+            BUSCAR DE NUEVO
+          </button>
+        </div>
+        <!-- Fase 2: Esperando respuesta -->
+        <div id="sinc-fase-espera" style="padding:32px;text-align:center;display:none;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.6rem;
+            letter-spacing:2px;color:var(--texto-secundario);margin-bottom:12px;opacity:0.7;">
+            SOLICITANDO EMPAREJAMIENTO CON</div>
+          <div id="sinc-nombre-destino" style="font-family:'Times New Roman',Times,serif;
+            font-size:1.1rem;color:var(--dorado);margin-bottom:16px;letter-spacing:0.1em;"></div>
+          <div style="display:flex;justify-content:center;gap:6px;margin-bottom:16px;">
+            <span style="width:6px;height:6px;border-radius:50%;background:var(--dorado);
+              animation:p2p-pulso 1.2s infinite 0s;display:inline-block;"></span>
+            <span style="width:6px;height:6px;border-radius:50%;background:var(--dorado);
+              animation:p2p-pulso 1.2s infinite 0.4s;display:inline-block;"></span>
+            <span style="width:6px;height:6px;border-radius:50%;background:var(--dorado);
+              animation:p2p-pulso 1.2s infinite 0.8s;display:inline-block;"></span>
+          </div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+            letter-spacing:1px;color:var(--texto-secundario);opacity:0.5;">
+            Esperando confirmación en el otro dispositivo (30 s)
+          </div>
+        </div>
+        <!-- Fase 3: Resultado -->
+        <div id="sinc-fase-resultado" style="padding:32px;text-align:center;display:none;">
+          <div id="sinc-resultado-icono" style="font-size:2rem;margin-bottom:12px;"></div>
+          <div id="sinc-resultado-texto" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.75rem;letter-spacing:2px;color:var(--dorado);margin-bottom:6px;"></div>
+          <div id="sinc-resultado-sub" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;margin-bottom:20px;"></div>
+          <button type="button" data-action="cerrar-sinc" class="btn-vip" style="padding:10px 32px;">
+            CERRAR
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MODAL SOLICITUD ENTRANTE DE SINCRONIZACIÓN                   -->
+    <!-- ============================================================ -->
+    <div id="modal-solicitud-sinc" class="hidden" style="
+      position:fixed;inset:0;z-index:1060;background:rgba(0,0,0,0.92);
+      display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:400px;background:var(--fondo-panel,#0d0d0d);
+        border:1px solid var(--dorado);border-radius:4px;overflow:hidden;">
+        <div style="padding:28px 24px;text-align:center;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+            letter-spacing:3px;color:var(--texto-secundario);margin-bottom:16px;opacity:0.6;">
+            SOLICITUD DE SINCRONIZACIÓN
+          </div>
+          <div id="sinc-sol-nombre" style="font-family:'Times New Roman',Times,serif;
+            font-size:1.05rem;color:var(--dorado);margin-bottom:8px;letter-spacing:0.08em;"></div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.62rem;
+            letter-spacing:1px;color:var(--texto-secundario);margin-bottom:8px;opacity:0.7;">
+            quiere emparejarse contigo
+          </div>
+          <div id="sinc-sol-ip" style="font-family:'Times New Roman',Times,serif;font-size:0.55rem;
+            letter-spacing:1px;color:var(--texto-secundario);opacity:0.45;margin-bottom:24px;"></div>
+          <div style="display:flex;gap:12px;justify-content:center;">
+            <button type="button" data-action="rechazar-sinc"
+              style="flex:1;max-width:140px;padding:12px 0;background:transparent;
+              border:1px solid rgba(255,80,80,0.4);color:rgba(255,80,80,0.8);
+              font-family:'Times New Roman',Times,serif;font-size:0.6rem;letter-spacing:2px;cursor:pointer;">
+              RECHAZAR
+            </button>
+            <button type="button" data-action="aceptar-sinc"
+              style="flex:1;max-width:140px;padding:12px 0;background:var(--dorado);border:none;
+              color:#000;font-family:'Times New Roman',Times,serif;font-size:0.6rem;
+              letter-spacing:2px;cursor:pointer;font-weight:700;">
+              ACEPTAR
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="modal-renombrar-archivo" class="hidden" style="
   position:fixed;inset:0;z-index:1100;background:rgba(0,0,0,0.7);
   display:flex;align-items:center;justify-content:center;">

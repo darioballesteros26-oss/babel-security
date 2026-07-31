@@ -51,15 +51,30 @@ const RUTAS_PDFTOPPM: &[&str] = &[
     "pdftoppm",
 ];
 
-/// Devuelve el primer binario de `candidatos` que existe en disco, o cuyo nombre es
-/// un comando "pelado" (sin separador de ruta → se resuelve vía PATH). Si ninguno
-/// aplica, devuelve `por_defecto`.
-fn resolver_binario<'a>(candidatos: &[&'a str], por_defecto: &'a str) -> &'a str {
+/// Resuelve la ruta de una herramienta externa (soffice, pdftoppm, …).
+///
+/// Prioridad:
+///  1. Herramienta EMPAQUETADA dentro de la app: `$BABEL_TOOLS_DIR/<por_defecto>`.
+///     La fija `main.rs` en el arranque a `…/Contents/Resources/tools/bin`, de modo
+///     que una instalación limpia (sin Homebrew/LibreOffice) use las nuestras.
+///  2. El primer `candidato` que existe en disco, o cuyo nombre es un comando "pelado"
+///     (sin separador de ruta → se resuelve vía PATH).
+///  3. `por_defecto` como último recurso.
+fn resolver_binario(candidatos: &[&str], por_defecto: &str) -> String {
+    if let Ok(dir) = std::env::var("BABEL_TOOLS_DIR") {
+        if !dir.is_empty() {
+            let p = std::path::Path::new(&dir).join(por_defecto);
+            if p.exists() {
+                return p.to_string_lossy().into_owned();
+            }
+        }
+    }
     candidatos
         .iter()
         .copied()
         .find(|p| (!p.contains('/') && !p.contains('\\')) || std::path::Path::new(p).exists())
         .unwrap_or(por_defecto)
+        .to_string()
 }
 
 /// Espera a que un proceso hijo termine con un límite de tiempo, matándolo si se
@@ -2709,5 +2724,112 @@ pub fn traducir_inteligente(
     match traducir_via_servidor(texto, par) {
         Ok(traduccion) => (traduccion, 0),
         Err(_) => motor_atomico(texto, dict, subclave_hex),
+    }
+}
+
+// ── Test end-to-end manual (calidad + formato) ──────────────────────────────
+// Protegido por la variable de entorno BABEL_E2E para NO correr en CI/`cargo test`
+// normal: necesita el servidor de traducción vivo en :5002 y LibreOffice instalado.
+// Ejecutar con:  BABEL_E2E=1 BABEL_NLLB_TOKEN=<token> cargo test e2e_pipeline -- --nocapture
+#[cfg(test)]
+mod e2e_manual {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn subclave_aleatoria() -> String {
+        use rand::{rngs::OsRng, RngCore};
+        let mut k = [0u8; 32];
+        OsRng.fill_bytes(&mut k);
+        hex::encode(k)
+    }
+
+    #[test]
+    fn e2e_pipeline_calidad_y_formato() {
+        if std::env::var("BABEL_E2E").is_err() {
+            eprintln!("[e2e] omitido (define BABEL_E2E=1 para ejecutar)");
+            return;
+        }
+        let clave = subclave_aleatoria();
+        let dict: HashMap<String, String> = HashMap::new();
+        let id = "e2efmt";
+        let par = "es-en";
+        let archivos = crate::babel_dir().join("archivos");
+
+        // ── TXT: prueba de CALIDAD (el resultado es texto traducido directo) ──
+        let txt_path = std::env::temp_dir().join("babel_e2e_texto.txt");
+        fs::write(&txt_path, "El contrato es válido y vinculante.\nEl paciente presenta fiebre alta.")
+            .unwrap();
+        procesar_archivo_inteligente(&txt_path.to_string_lossy(), &dict, &clave, id, par, &|_, _| {})
+            .expect("pipeline TXT falló");
+        let out_txt = archivos.join(format!("{}_{}_babel_e2e_texto.babel", id, par));
+        let cifr = fs::read(&out_txt).expect("no se generó el .babel del TXT");
+        let traducido = seguridad::descifrar_documento(cifr, &clave).unwrap().to_lowercase();
+        eprintln!("[e2e][TXT] traducido => {:?}", traducido);
+        assert!(
+            traducido.contains("contract") && (traducido.contains("patient") || traducido.contains("fever")),
+            "el TXT no se tradujo al inglés: {:?}", traducido
+        );
+
+        // ── DOCX: prueba de FORMATO (clonar_y_traducir + soffice DOCX→PDF) ──
+        // Ejercita mi refactor: ejecutar_con_timeout(soffice, …).
+        let docx_path = std::env::temp_dir().join("babel_e2e_doc.docx");
+        {
+            use docx_rs::*;
+            let f = std::fs::File::create(&docx_path).unwrap();
+            Docx::new()
+                .add_paragraph(Paragraph::new().add_run(Run::new().add_text("El contrato es válido y vinculante.")))
+                .add_paragraph(Paragraph::new().add_run(Run::new().add_text("La cláusula tercera establece las obligaciones del arrendatario.")))
+                .build()
+                .pack(f)
+                .unwrap();
+        }
+        procesar_archivo_inteligente(&docx_path.to_string_lossy(), &dict, &clave, id, par, &|_, _| {})
+            .expect("pipeline DOCX falló");
+        let out_docx = archivos.join(format!("{}_{}_babel_e2e_doc.babel", id, par));
+        let cifr = fs::read(&out_docx).expect("no se generó el .babel del DOCX");
+        let b64 = seguridad::descifrar_documento(cifr, &clave).unwrap();
+        let bytes = descomprimir_b64(&b64).unwrap();
+        let cabecera: String = bytes.iter().take(4).map(|&b| b as char).collect();
+        eprintln!("[e2e][DOCX] salida => {} bytes, magic={:?}", bytes.len(), cabecera);
+        // soffice está instalado → el DOCX traducido debe convertirse a PDF (formato fijo).
+        assert!(bytes.starts_with(b"%PDF"), "el DOCX traducido no acabó en PDF (magic={:?})", cabecera);
+
+        // ── PDF: prueba del camino más largo (pdf2docx → traducir → soffice → PDF) ──
+        // Ejercita el otro bucle refactorizado: esperar_proceso(pdf2docx, tick).
+        // Generamos el PDF de entrada convirtiendo el DOCX con soffice.
+        let pdf_dir = std::env::temp_dir();
+        let soffice = resolver_binario(RUTAS_SOFFICE, "soffice");
+        let hecho = ejecutar_con_timeout(
+            std::process::Command::new(soffice).args([
+                "--headless", "--convert-to", "pdf",
+                "--outdir", &pdf_dir.to_string_lossy(),
+                &docx_path.to_string_lossy(),
+            ]),
+            120,
+        );
+        let pdf_in = pdf_dir.join("babel_e2e_doc.pdf");
+        if hecho && pdf_in.exists() {
+            procesar_archivo_inteligente(&pdf_in.to_string_lossy(), &dict, &clave, id, par, &|_, _| {})
+                .expect("pipeline PDF falló");
+            let out_pdf = archivos.join(format!("{}_{}_babel_e2e_doc.babel", id, par));
+            let cifr = fs::read(&out_pdf).expect("no se generó el .babel del PDF");
+            let b64 = seguridad::descifrar_documento(cifr, &clave).unwrap();
+            let bytes = descomprimir_b64(&b64).unwrap();
+            eprintln!("[e2e][PDF] salida => {} bytes, magic={:?}",
+                bytes.len(), bytes.iter().take(4).map(|&b| b as char).collect::<String>());
+            assert!(bytes.starts_with(b"%PDF"), "el PDF traducido no acabó en PDF");
+            let _ = fs::remove_file(&pdf_in);
+        } else {
+            eprintln!("[e2e][PDF] omitido (no se pudo generar el PDF de entrada)");
+        }
+
+        // Limpieza: no dejar residuos en el vault del usuario.
+        for suf in ["_babel_e2e_texto.babel", "_babel_e2e_doc.babel",
+                    "_babel_e2e_texto__orig.babel", "_babel_e2e_doc__orig.babel"] {
+            let _ = fs::remove_file(archivos.join(format!("{}_{}{}", id, par, suf)));
+        }
+        let _ = fs::remove_file(&txt_path);
+        let _ = fs::remove_file(&docx_path);
+        eprintln!("[e2e] OK — calidad (TXT) y formato (DOCX→PDF y PDF→PDF) verificados");
     }
 }

@@ -10,6 +10,7 @@ mod finder;
 mod pdf_reducir;
 mod pdf_union;
 mod seguridad;
+mod sincronizacion;
 mod traductor;
 
 use base64::Engine;
@@ -195,6 +196,18 @@ impl SesionActiva {
 // independientemente de desde dónde se ejecute el .app.
 
 pub fn babel_dir() -> std::path::PathBuf {
+    // BABEL_DATA_DIR permite correr múltiples instancias con datos separados (pruebas).
+    if let Ok(custom) = std::env::var("BABEL_DATA_DIR") {
+        let expanded = if custom.starts_with("~/") {
+            let home = std::env::var("HOME").unwrap_or_default();
+            format!("{}/{}", home, &custom[2..])
+        } else {
+            custom
+        };
+        let dir = std::path::PathBuf::from(expanded);
+        let _ = std::fs::create_dir_all(&dir);
+        return dir;
+    }
     // B1: si dirs::home_dir() falla (p. ej. usuario sin /etc/passwd), probar variables
     // de entorno antes de caer en el directorio de trabajo actual (inseguro en prod).
     let home = dirs::home_dir()
@@ -3782,6 +3795,137 @@ fn obtener_mensajes_p2p(sesion: tauri::State<SesionActiva>) -> Result<Vec<String
         .collect();
     Ok(mensajes)
 }
+
+// COMANDOS SINCRONIZACIÓN — Emparejamiento de dispositivos
+
+#[tauri::command]
+fn iniciar_sinc_servidor(sesion: tauri::State<SesionActiva>) -> Result<String, String> {
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let hostname = hostname::get()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let nombre = format!("Babel-{}", hostname);
+    crate::sincronizacion::iniciar_servidor_sinc(nombre.clone());
+    // Iniciar también el descubrimiento UDP (idempotente: falla silenciosamente si ya corre)
+    crate::babel_p2p::DescubrimientoRed::iniciar_servidor(nombre.clone());
+    Ok(nombre)
+}
+
+#[tauri::command]
+fn buscar_dispositivos_sinc() -> Result<Vec<babel_p2p::PeerDescubierto>, String> {
+    babel_p2p::DescubrimientoRed::buscar_peers(3000)
+}
+
+#[tauri::command]
+async fn solicitar_emparejamiento_sinc(
+    ip: String,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<sincronizacion::ResultadoEmparejamiento, String> {
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let hostname = hostname::get()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let nombre = format!("Babel-{}", hostname);
+    let mi_ip = {
+        let socket =
+            std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+        socket.connect("8.8.8.8:80").map_err(|e| e.to_string())?;
+        socket
+            .local_addr()
+            .map_err(|e| e.to_string())?
+            .ip()
+            .to_string()
+    };
+    let subclave_str = subclave.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::sincronizacion::solicitar_emparejamiento(&ip, &nombre, &mi_ip, &subclave_str)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn obtener_solicitud_sinc() -> Option<sincronizacion::SolicitudSincPublica> {
+    crate::sincronizacion::SOLICITUD_PENDIENTE
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+}
+
+#[tauri::command]
+fn aceptar_emparejamiento_sinc(sesion: tauri::State<SesionActiva>) -> Result<(), String> {
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let solicitud = crate::sincronizacion::SOLICITUD_PENDIENTE
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .ok_or_else(|| "No hay solicitud de emparejamiento pendiente.".to_string())?;
+    crate::sincronizacion::aceptar_y_generar_clave(
+        &solicitud.ip,
+        &solicitud.nombre,
+        &subclave,
+    )
+}
+
+#[tauri::command]
+fn rechazar_emparejamiento_sinc(
+    _sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    crate::sincronizacion::rechazar_emparejamiento();
+    Ok(())
+}
+
+#[tauri::command]
+fn listar_dispositivos_emparejados(
+    sesion: tauri::State<SesionActiva>,
+) -> Result<Vec<sincronizacion::DispositivoPublico>, String> {
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(
+        crate::sincronizacion::cargar_emparejados(&subclave)
+            .into_iter()
+            .map(|d| sincronizacion::DispositivoPublico {
+                id: d.id,
+                nombre: d.nombre,
+                ts: d.ts,
+                ip_ultima: d.ip_ultima,
+            })
+            .collect(),
+    )
+}
+
+#[tauri::command]
+fn desemparejar_dispositivo(
+    id: String,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let mut lista = crate::sincronizacion::cargar_emparejados(&subclave);
+    let antes = lista.len();
+    lista.retain(|d| d.id != id);
+    if lista.len() == antes {
+        return Err("Dispositivo no encontrado.".into());
+    }
+    crate::sincronizacion::guardar_emparejados(&lista, &subclave);
+    Ok(())
+}
+
 // HELPER — Convierte código de idioma al par MarianMT
 // Centralizado aquí para no duplicar el match en cada comando.
 
@@ -4347,6 +4491,29 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            // HERRAMIENTAS EMPAQUETADAS — que la app use soffice/poppler/tessdata de su
+            // propio bundle (Contents/Resources/…) y NO dependa de Homebrew/LibreOffice del
+            // sistema. Debe correr ANTES de lanzar el sidecar o cualquier proceso hijo, ya
+            // que estos heredan el entorno. En dev (sin bundle) las carpetas no existen y
+            // simplemente no se fija nada, cayendo al comportamiento anterior (PATH/absolutos).
+            if let Ok(res) = app.path().resource_dir() {
+                let tools_bin = res.join("tools").join("bin");
+                if tools_bin.is_dir() {
+                    std::env::set_var("BABEL_TOOLS_DIR", &tools_bin);
+                    // Prepender al PATH para procesos hijos que resuelvan por nombre.
+                    let path_actual = std::env::var("PATH").unwrap_or_default();
+                    std::env::set_var(
+                        "PATH",
+                        format!("{}:{}", tools_bin.display(), path_actual),
+                    );
+                    log::info!("[Tools] herramientas empaquetadas: {}", tools_bin.display());
+                }
+                let tessdata = res.join("tessdata");
+                if tessdata.is_dir() {
+                    std::env::set_var("TESSDATA_PREFIX", &tessdata);
+                }
+            }
+
             // FINDER — registrar el handler del URL scheme babel://.
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
@@ -4577,6 +4744,14 @@ fn main() {
             obtener_mensajes_p2p,
             listar_peers_pendientes_cmd,
             aprobar_peer_pendiente_cmd,
+            iniciar_sinc_servidor,
+            buscar_dispositivos_sinc,
+            solicitar_emparejamiento_sinc,
+            obtener_solicitud_sinc,
+            aceptar_emparejamiento_sinc,
+            rechazar_emparejamiento_sinc,
+            listar_dispositivos_emparejados,
+            desemparejar_dispositivo,
             renombrar_buzon,
             guardar_documento_sin_traducir,
             guardar_documento_desde_bytes,

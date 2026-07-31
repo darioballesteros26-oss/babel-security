@@ -115,8 +115,15 @@ function mostrarPantalla(nombre: Pantalla): void {
   document.getElementById(`pantalla-${nombre}`)?.classList.remove("hidden");
   if (pantallaEsSensible(nombre)) iniciarVigilanciaCaptura();
   else detenerVigilanciaCaptura();
-  // Al llegar al login, escanear keyloggers justo antes de teclear la maestra.
   if (nombre === "login") escanearKeyloggerAlEntrar();
+  if (nombre === "principal" || nombre === "ajustes") {
+    // Arrancar servidor sinc al entrar (idempotente) para ser siempre descubrible
+    invoke<string>("iniciar_sinc_servidor").catch(() => {});
+    iniciarPollSolicitudSinc();
+  }
+  if (nombre === "ajustes") {
+    cargarListaEmparejados().catch(() => {});
+  }
 }
 
 function mostrarMensaje(id: string, texto: string, esError: boolean): void {
@@ -511,6 +518,14 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "cambiar-modo-p2p": cambiarModoP2P(el.dataset.modo!); break;
     case "aceptar-solicitud-p2p": aceptarSolicitudP2P(); break;
     case "rechazar-solicitud-p2p": rechazarSolicitudP2P(); break;
+    // Sincronización de dispositivos
+    case "abrir-sinc-dispositivos": abrirSincronizacion(); break;
+    case "cerrar-sinc": cerrarSincronizacion(); break;
+    case "refrescar-sinc": buscarDispositivosSinc(); break;
+    case "aceptar-sinc": aceptarSinc(); break;
+    case "rechazar-sinc": rechazarSinc(); break;
+    case "desemparejar-dispositivo":
+      if (el.dataset.id) desemparejarDispositivo(el.dataset.id); break;
     // Email
     case "sincronizar-email": sincronizarEmail(); break;
     case "abrir-componer-email": abrirComponerEmail(); break;
@@ -994,6 +1009,7 @@ async function cerrarSesion(): Promise<void> {
   _firmaEmail = "0".repeat(_firmaEmail.length); _firmaEmail = "";
   _cuerpoEmailOriginal = "";
   desactivarTimerInactividad();
+  detenerPollSolicitudSinc();
   try { await invoke("cerrar_sesion_rust"); } catch { /* continúa cerrando aunque falle */ }
   limpiarCamposSensibles();
   localStorage.removeItem("babel-nombre-display");
@@ -4230,6 +4246,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const modales = [
       "modal-visor", "modal-paralelo", "modal-frase-app",
       "modal-renombrar", "modal-solicitud-p2p", "modal-renombrar-archivo",
+      "modal-sinc",
       "modal-compartir-onboarding", "modal-menu-compartir", "modal-compartir",
     ];
     for (const id of modales) {
@@ -4348,6 +4365,201 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Enter") desbloquearPantalla();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SINCRONIZACIÓN DE DISPOSITIVOS
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface DispositivoPublico { id: string; nombre: string; ts: number; ip_ultima: string; }
+interface SolicitudSinc { nombre: string; ip: string; }
+interface ResultadoEmparejamiento { emparejado: boolean; nombre: string; }
+
+let _sincPollInterval: number | null = null;
+let _sincDecisionTomada = false; // evita re-mostrar modal tras aceptar/rechazar
+
+function abrirSincronizacion(): void {
+  document.getElementById("modal-sinc")?.classList.remove("hidden");
+  mostrarFaseSinc("busqueda");
+  invoke<string>("iniciar_sinc_servidor").catch(() => {});
+  cargarListaEmparejados();
+  buscarDispositivosSinc();
+  iniciarPollSolicitudSinc();
+}
+
+function cerrarSincronizacion(): void {
+  document.getElementById("modal-sinc")?.classList.add("hidden");
+  // No detenemos el poll de solicitudes — puede haber una solicitud entrante pendiente
+}
+
+function mostrarFaseSinc(fase: "busqueda" | "espera" | "resultado"): void {
+  const fases: Record<string, string> = {
+    busqueda: "sinc-fase-busqueda",
+    espera:   "sinc-fase-espera",
+    resultado: "sinc-fase-resultado",
+  };
+  for (const [key, id] of Object.entries(fases)) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = key === fase ? "" : "none";
+  }
+}
+
+async function buscarDispositivosSinc(): Promise<void> {
+  const lista = document.getElementById("sinc-lista-peers-modal");
+  const msg = document.getElementById("sinc-msg-buscando");
+  if (!lista) return;
+  lista.innerHTML = "";
+  if (msg) msg.textContent = "Buscando dispositivos Babel en la red local...";
+  try {
+    const peers = await invoke<Array<{ip: string; nombre: string; puerto: number}>>("buscar_dispositivos_sinc");
+    if (msg) msg.textContent = peers.length
+      ? `${peers.length} dispositivo(s) encontrado(s)`
+      : "No se encontró ningún Babel en la red local.";
+    for (const p of peers) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.style.cssText = "width:100%;padding:12px 16px;background:rgba(201,168,76,0.05);" +
+        "border:1px solid rgba(201,168,76,0.3);color:var(--dorado);cursor:pointer;" +
+        "font-family:'Times New Roman',Times,serif;font-size:0.7rem;letter-spacing:2px;" +
+        "text-align:left;display:flex;justify-content:space-between;align-items:center;";
+      btn.innerHTML = `<span>${escapeHTML(p.nombre)}</span>` +
+        `<span style="font-size:0.55rem;opacity:0.5;letter-spacing:1px;">${escapeHTML(p.ip)}</span>`;
+      btn.addEventListener("click", () => seleccionarDispSinc(p.ip, p.nombre));
+      lista.appendChild(btn);
+    }
+  } catch (e) {
+    if (msg) msg.textContent = "Error buscando dispositivos: " + String(e);
+  }
+}
+
+async function seleccionarDispSinc(ip: string, nombre: string): Promise<void> {
+  const nomEl = document.getElementById("sinc-nombre-destino");
+  if (nomEl) nomEl.textContent = nombre;
+  mostrarFaseSinc("espera");
+  try {
+    const res = await invoke<ResultadoEmparejamiento>("solicitar_emparejamiento_sinc", { ip });
+    if (res.emparejado) {
+      mostrarResultadoSinc(true, res.nombre);
+      cargarListaEmparejados();
+    } else {
+      mostrarResultadoSinc(false, "");
+    }
+  } catch (e) {
+    mostrarResultadoSinc(false, "", String(e));
+  }
+}
+
+function mostrarResultadoSinc(ok: boolean, nombre: string, error?: string): void {
+  mostrarFaseSinc("resultado");
+  const icono = document.getElementById("sinc-resultado-icono");
+  const texto = document.getElementById("sinc-resultado-texto");
+  const sub   = document.getElementById("sinc-resultado-sub");
+  if (ok) {
+    if (icono) icono.textContent = "◈";
+    if (texto) texto.textContent = `EMPAREJADO CON ${nombre.toUpperCase()}`;
+    if (sub) sub.textContent = "La clave compartida ha sido guardada de forma segura.";
+    mostrarToast(`Emparejado con ${nombre}`, false);
+  } else {
+    if (icono) { icono.textContent = "✕"; icono.style.color = "rgba(255,80,80,0.7)"; }
+    if (texto) { texto.textContent = "EMPAREJAMIENTO RECHAZADO"; texto.style.color = "rgba(255,80,80,0.7)"; }
+    if (sub) sub.textContent = error || "El otro dispositivo rechazó la solicitud o no respondió.";
+  }
+}
+
+async function aceptarSinc(): Promise<void> {
+  _sincDecisionTomada = true;
+  document.getElementById("modal-solicitud-sinc")?.classList.add("hidden");
+  try {
+    await invoke("aceptar_emparejamiento_sinc");
+    cargarListaEmparejados();
+    mostrarToast("Emparejamiento aceptado — clave guardada.", false);
+  } catch (e) {
+    mostrarToast("Error al aceptar: " + String(e), true);
+  }
+}
+
+async function rechazarSinc(): Promise<void> {
+  _sincDecisionTomada = true;
+  document.getElementById("modal-solicitud-sinc")?.classList.add("hidden");
+  try {
+    await invoke("rechazar_emparejamiento_sinc");
+  } catch (_) {}
+}
+
+async function desemparejarDispositivo(id: string): Promise<void> {
+  try {
+    await invoke("desemparejar_dispositivo", { id });
+    cargarListaEmparejados();
+    mostrarToast("Dispositivo desemparejado.", false);
+  } catch (e) {
+    mostrarToast("Error: " + String(e), true);
+  }
+}
+
+async function cargarListaEmparejados(): Promise<void> {
+  const contenedor = document.getElementById("sinc-lista-emparejados");
+  if (!contenedor) return;
+  try {
+    const lista = await invoke<DispositivoPublico[]>("listar_dispositivos_emparejados");
+    if (!lista || lista.length === 0) {
+      contenedor.innerHTML =
+        `<div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;` +
+        `letter-spacing:1px;color:var(--texto-secundario);opacity:0.45;text-align:center;padding:4px 0;">` +
+        `Sin dispositivos emparejados</div>`;
+      return;
+    }
+    contenedor.innerHTML = "";
+    for (const d of lista) {
+      const fecha = new Date(d.ts * 1000).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+      const fila = document.createElement("div");
+      fila.style.cssText = "display:flex;align-items:center;justify-content:space-between;" +
+        "padding:10px 12px;border:1px solid rgba(201,168,76,0.15);";
+      fila.innerHTML =
+        `<div style="flex:1;min-width:0;">` +
+        `<div style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;` +
+        `color:var(--dorado);letter-spacing:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">` +
+        `${escapeHTML(d.nombre)}</div>` +
+        `<div style="font-family:'Times New Roman',Times,serif;font-size:0.55rem;` +
+        `color:var(--texto-secundario);opacity:0.5;letter-spacing:0.5px;margin-top:2px;">` +
+        `${escapeHTML(d.ip_ultima)} · ${fecha}</div>` +
+        `</div>` +
+        `<button type="button" data-action="desemparejar-dispositivo" data-id="${escapeHTML(d.id)}"` +
+        ` style="margin-left:12px;background:transparent;border:1px solid rgba(255,80,80,0.3);` +
+        `color:rgba(255,80,80,0.7);padding:4px 10px;cursor:pointer;font-family:'Times New Roman',Times,serif;` +
+        `font-size:0.52rem;letter-spacing:1.5px;flex-shrink:0;">QUITAR</button>`;
+      contenedor.appendChild(fila);
+      bindOnclicks(fila);
+    }
+  } catch (_) {}
+}
+
+function iniciarPollSolicitudSinc(): void {
+  if (_sincPollInterval !== null) return;
+  _sincPollInterval = window.setInterval(async () => {
+    try {
+      const sol = await invoke<SolicitudSinc | null>("obtener_solicitud_sinc");
+      if (sol && !_sincDecisionTomada) {
+        const modal = document.getElementById("modal-solicitud-sinc");
+        if (modal && modal.classList.contains("hidden")) {
+          _sincDecisionTomada = false;
+          const nomEl = document.getElementById("sinc-sol-nombre");
+          const ipEl  = document.getElementById("sinc-sol-ip");
+          if (nomEl) nomEl.textContent = sol.nombre;
+          if (ipEl)  ipEl.textContent  = sol.ip;
+          modal.classList.remove("hidden");
+        }
+      } else if (!sol) {
+        _sincDecisionTomada = false; // solicitud limpiada por Rust → resetear flag
+      }
+    } catch (_) {}
+  }, 2000);
+}
+
+function detenerPollSolicitudSinc(): void {
+  if (_sincPollInterval !== null) {
+    clearInterval(_sincPollInterval);
+    _sincPollInterval = null;
+  }
+}
 
 // Tauri v2 inyecta nonces en script-src; con nonces 'unsafe-inline' queda ignorado
 // por spec CSP, bloqueando onclick="fn()". Convertimos todos a addEventListener.
