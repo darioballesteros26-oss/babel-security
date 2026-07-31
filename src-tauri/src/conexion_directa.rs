@@ -35,6 +35,7 @@ const TEST_ACK_TIMEOUT_SECS: u64 = 8;
 #[derive(Debug, Clone, Serialize)]
 pub struct ResultadoConexion {
     pub ok: bool,
+    pub via_buzon: bool,   // true cuando Fase 2 falló y se cayó al buzón B2
     pub ip_publica_remota: String,
     pub latencia_ms: u64,
     pub error: String,
@@ -398,6 +399,7 @@ pub fn probar_conexion(
                 return match crate::seguridad::descifrar_documento(ack_buf[..n].to_vec(), clave_hex) {
                     Ok(_) => Ok(ResultadoConexion {
                         ok: true,
+                        via_buzon: false,
                         ip_publica_remota: b_stun_ip.to_string(),
                         latencia_ms,
                         error: String::new(),
@@ -410,7 +412,7 @@ pub fn probar_conexion(
                    || e.kind() == std::io::ErrorKind::WouldBlock =>
             {
                 return Err(
-                    "Conexión directa no fue posible en esta red. \
+                    "NAT_SIMETRICO: Conexión directa no fue posible en esta red. \
                      El NAT de una o ambas redes es simétrico y no permite hole punching. \
                      Ambos dispositivos deben estar en la misma red local, \
                      o en redes con NAT de cono (cone NAT). \

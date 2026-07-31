@@ -9,6 +9,7 @@ mod compartir;
 mod finder;
 mod pdf_reducir;
 mod conexion_directa;
+mod buzon_b2;
 mod pdf_union;
 mod seguridad;
 mod sincronizacion;
@@ -3814,6 +3815,19 @@ fn iniciar_sinc_servidor(sesion: tauri::State<SesionActiva>) -> Result<String, S
     crate::conexion_directa::iniciar_servidor_conex(&subclave, nombre.clone());
     // Iniciar también el descubrimiento UDP (idempotente: falla silenciosamente si ya corre)
     crate::babel_p2p::DescubrimientoRed::iniciar_servidor(nombre.clone());
+
+    // Verificar buzón B2 al arrancar (background, no bloquea la UI)
+    let subclave_b2 = subclave.clone();
+    tauri::async_runtime::spawn(async move {
+        let pendientes = crate::buzon_b2::contar_pendientes_todos(&subclave_b2).await;
+        for c in &pendientes {
+            log::info!(
+                "[B2] {} mensaje(s) pendiente(s) de '{}' en buzón — usa 'BUZÓN' en Ajustes para aplicar",
+                c.n, c.nombre
+            );
+        }
+    });
+
     Ok(nombre)
 }
 
@@ -3949,11 +3963,105 @@ async fn probar_conexion_dispositivo(
         .ok_or_else(|| "Dispositivo no encontrado.".to_string())?;
     let ip = disp.ip_ultima.clone();
     let clave = disp.clave_hex.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let clave_b2 = clave.clone();
+    let nombre_b2 = nombre.clone();
+
+    let resultado = tauri::async_runtime::spawn_blocking(move || {
         crate::conexion_directa::probar_conexion(&ip, &nombre, &clave)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    match resultado {
+        Ok(res) => Ok(res),
+        Err(ref e)
+            if e.contains("No se pudo conectar")
+                || e.contains("timed out")
+                || e.contains("Connection refused")
+                || e.contains("No route to host") =>
+        {
+            // Dispositivo apagado → caída automática al buzón B2
+            let contenido = format!("Intento de conexión directa desde {}", nombre_b2);
+            match crate::buzon_b2::subir_al_buzon(&id, "ping", &contenido, &nombre_b2, &clave_b2)
+                .await
+            {
+                Ok(key) => {
+                    let sufijo = key.rsplit('/').next().unwrap_or(&key).to_string();
+                    Ok(conexion_directa::ResultadoConexion {
+                        ok: false,
+                        via_buzon: true,
+                        ip_publica_remota: String::new(),
+                        latencia_ms: 0,
+                        error: format!(
+                            "Dispositivo offline. Aviso enviado al buzón temporal ({})",
+                            sufijo
+                        ),
+                    })
+                }
+                Err(b2e) => Err(format!(
+                    "Dispositivo offline. Error al acceder al buzón B2: {}",
+                    b2e
+                )),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+#[tauri::command]
+async fn contar_pendientes_b2(
+    id: String,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<usize, String> {
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Ok(0);
+    }
+    let emparejados = crate::sincronizacion::cargar_emparejados(&subclave);
+    if !emparejados.iter().any(|d| d.id == id) {
+        return Err("Dispositivo no encontrado.".into());
+    }
+    match crate::buzon_b2::listar_pendientes(&id).await {
+        Ok(p) => Ok(p.len()),
+        Err(_) => Ok(0), // B2 no configurado o sin red: no mostrar error
+    }
+}
+
+#[tauri::command]
+async fn verificar_buzones_todos(
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<Vec<buzon_b2::ConteoB2>, String> {
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(crate::buzon_b2::contar_pendientes_todos(&subclave).await)
+}
+
+#[tauri::command]
+async fn aplicar_pendientes_buzon(
+    id: String,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<Vec<buzon_b2::ResultadoAplicarB2>, String> {
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let emparejados = crate::sincronizacion::cargar_emparejados(&subclave);
+    let disp = emparejados
+        .into_iter()
+        .find(|d| d.id == id)
+        .ok_or_else(|| "Dispositivo no encontrado.".to_string())?;
+
+    let pendientes = crate::buzon_b2::listar_pendientes(&id).await?;
+    let mut resultados = Vec::new();
+    for p in pendientes {
+        match crate::buzon_b2::descargar_y_aplicar(&p.key, &disp.clave_hex).await {
+            Ok(r) => resultados.push(r),
+            Err(e) => log::error!("[B2] Error aplicando {}: {}", p.key, e),
+        }
+    }
+    Ok(resultados)
 }
 
 // HELPER — Convierte código de idioma al par MarianMT
@@ -4783,6 +4891,9 @@ fn main() {
             listar_dispositivos_emparejados,
             desemparejar_dispositivo,
             probar_conexion_dispositivo,
+            contar_pendientes_b2,
+            verificar_buzones_todos,
+            aplicar_pendientes_buzon,
             renombrar_buzon,
             guardar_documento_sin_traducir,
             guardar_documento_desde_bytes,

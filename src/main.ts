@@ -526,6 +526,8 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "rechazar-sinc": rechazarSinc(); break;
     case "probar-conexion-dispositivo":
       if (el.dataset.id) probarConexionDispositivo(el.dataset.id, el as HTMLButtonElement); break;
+    case "aplicar-buzon-b2":
+      if (el.dataset.id) aplicarPendientesB2(el.dataset.id, el as HTMLButtonElement); break;
     case "desemparejar-dispositivo":
       if (el.dataset.id) desemparejarDispositivo(el.dataset.id); break;
     // Email
@@ -4489,9 +4491,24 @@ async function rechazarSinc(): Promise<void> {
 
 interface ResultadoConexionDirecta {
   ok: boolean;
+  via_buzon: boolean;
   ip_publica_remota: string;
   latencia_ms: number;
   error: string;
+}
+
+interface ConteoB2 {
+  id_par: string;
+  nombre: string;
+  n: number;
+}
+
+interface ResultadoAplicarB2 {
+  key: string;
+  tipo: string;
+  contenido: string;
+  nombre_origen: string;
+  timestamp: number;
 }
 
 async function probarConexionDispositivo(id: string, btn: HTMLButtonElement): Promise<void> {
@@ -4505,6 +4522,12 @@ async function probarConexionDispositivo(id: string, btn: HTMLButtonElement): Pr
       btn.style.color = "rgba(100,200,100,0.9)";
       btn.style.borderColor = "rgba(100,200,100,0.4)";
       mostrarToast(`Conexión directa OK — IP pública: ${res.ip_publica_remota} (${res.latencia_ms} ms)`, false);
+    } else if (res.via_buzon) {
+      btn.textContent = "✉ buzón";
+      btn.style.color = "rgba(201,168,76,0.9)";
+      btn.style.borderColor = "rgba(201,168,76,0.4)";
+      mostrarToast(`Dispositivo offline — ${escapeHTML(res.error)}`, false);
+      cargarListaEmparejados(); // refresca badges de pendientes
     } else {
       btn.textContent = "✗";
       btn.style.color = "rgba(255,80,80,0.7)";
@@ -4548,9 +4571,19 @@ async function cargarListaEmparejados(): Promise<void> {
         `Sin dispositivos emparejados</div>`;
       return;
     }
+    // Obtener conteos de buzón B2 para todos los pares (falla silenciosa si B2 no configurado)
+    let conteos: ConteoB2[] = [];
+    try { conteos = await invoke<ConteoB2[]>("verificar_buzones_todos"); } catch (_) {}
+
     contenedor.innerHTML = "";
     for (const d of lista) {
       const fecha = new Date(d.ts * 1000).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+      const conteo = conteos.find(c => c.id_par === d.id);
+      const nPend = conteo?.n ?? 0;
+      const buzonLabel = nPend > 0 ? `BUZÓN (${nPend})` : "BUZÓN";
+      const buzonColor = nPend > 0 ? "rgba(201,168,76,0.9)" : "rgba(201,168,76,0.35)";
+      const buzonBorder = nPend > 0 ? "rgba(201,168,76,0.5)" : "rgba(201,168,76,0.15)";
+
       const fila = document.createElement("div");
       fila.style.cssText = "display:flex;align-items:center;justify-content:space-between;" +
         "padding:10px 12px;border:1px solid rgba(201,168,76,0.15);";
@@ -4568,6 +4601,10 @@ async function cargarListaEmparejados(): Promise<void> {
         ` style="background:transparent;border:1px solid rgba(197,160,89,0.3);` +
         `color:var(--dorado);padding:4px 10px;cursor:pointer;font-family:'Times New Roman',Times,serif;` +
         `font-size:0.52rem;letter-spacing:1.5px;">PROBAR</button>` +
+        `<button type="button" data-action="aplicar-buzon-b2" data-id="${escapeHTML(d.id)}"` +
+        ` style="background:transparent;border:1px solid ${buzonBorder};` +
+        `color:${buzonColor};padding:4px 10px;cursor:pointer;font-family:'Times New Roman',Times,serif;` +
+        `font-size:0.52rem;letter-spacing:1.5px;">${buzonLabel}</button>` +
         `<button type="button" data-action="desemparejar-dispositivo" data-id="${escapeHTML(d.id)}"` +
         ` style="background:transparent;border:1px solid rgba(255,80,80,0.3);` +
         `color:rgba(255,80,80,0.7);padding:4px 10px;cursor:pointer;font-family:'Times New Roman',Times,serif;` +
@@ -4576,7 +4613,58 @@ async function cargarListaEmparejados(): Promise<void> {
       contenedor.appendChild(fila);
       bindOnclicks(fila);
     }
+
+    // Auto-aplicar pendientes al abrir Ajustes (spec: verificar y aplicar automáticamente al arrancar)
+    verificarYAplicarBuzones(lista.map(d => d.id));
   } catch (_) {}
+}
+
+async function verificarYAplicarBuzones(ids: string[]): Promise<void> {
+  for (const id of ids) {
+    try {
+      const resultados = await invoke<ResultadoAplicarB2[]>("aplicar_pendientes_buzon", { id });
+      for (const r of resultados) {
+        const fecha = new Date(r.timestamp * 1000).toLocaleString("es-ES", {
+          day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+        });
+        mostrarToast(
+          `Buzón: mensaje de ${escapeHTML(r.nombre_origen)} recibido el ${fecha}`,
+          false
+        );
+      }
+      if (resultados.length > 0) cargarListaEmparejados(); // refrescar badges
+    } catch (_) { /* B2 no configurado o sin red, ignorar */ }
+  }
+}
+
+async function aplicarPendientesB2(id: string, btn: HTMLButtonElement): Promise<void> {
+  const textoOriginal = btn.textContent ?? "BUZÓN";
+  btn.textContent = "···";
+  btn.disabled = true;
+  try {
+    const resultados = await invoke<ResultadoAplicarB2[]>("aplicar_pendientes_buzon", { id });
+    if (resultados.length === 0) {
+      mostrarToast("No hay mensajes pendientes en el buzón para este dispositivo.", false);
+    } else {
+      for (const r of resultados) {
+        const fecha = new Date(r.timestamp * 1000).toLocaleString("es-ES", {
+          day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+        });
+        mostrarToast(
+          `Buzón: ${escapeHTML(r.nombre_origen)} — ${escapeHTML(r.tipo)} (${fecha})`,
+          false
+        );
+      }
+      cargarListaEmparejados(); // refrescar badges
+    }
+  } catch (e) {
+    mostrarToast("Error al acceder al buzón B2: " + escapeHTML(String(e)), true);
+  } finally {
+    setTimeout(() => {
+      btn.textContent = textoOriginal;
+      btn.disabled = false;
+    }, 3000);
+  }
 }
 
 function iniciarPollSolicitudSinc(): void {
