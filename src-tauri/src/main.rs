@@ -8,6 +8,7 @@ mod bip39_words;
 mod compartir;
 mod finder;
 mod pdf_reducir;
+mod conexion_directa;
 mod pdf_union;
 mod seguridad;
 mod sincronizacion;
@@ -3810,6 +3811,7 @@ fn iniciar_sinc_servidor(sesion: tauri::State<SesionActiva>) -> Result<String, S
         .to_string();
     let nombre = format!("Babel-{}", hostname);
     crate::sincronizacion::iniciar_servidor_sinc(nombre.clone());
+    crate::conexion_directa::iniciar_servidor_conex(&subclave, nombre.clone());
     // Iniciar también el descubrimiento UDP (idempotente: falla silenciosamente si ya corre)
     crate::babel_p2p::DescubrimientoRed::iniciar_servidor(nombre.clone());
     Ok(nombre)
@@ -3924,6 +3926,34 @@ fn desemparejar_dispositivo(
     }
     crate::sincronizacion::guardar_emparejados(&lista, &subclave);
     Ok(())
+}
+
+#[tauri::command]
+async fn probar_conexion_dispositivo(
+    id: String,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<conexion_directa::ResultadoConexion, String> {
+    let subclave = sesion.subclave_hex()?;
+    if subclave.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let hostname = hostname::get()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let nombre = format!("Babel-{}", hostname);
+    let emparejados = crate::sincronizacion::cargar_emparejados(&subclave);
+    let disp = emparejados
+        .into_iter()
+        .find(|d| d.id == id)
+        .ok_or_else(|| "Dispositivo no encontrado.".to_string())?;
+    let ip = disp.ip_ultima.clone();
+    let clave = disp.clave_hex.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::conexion_directa::probar_conexion(&ip, &nombre, &clave)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // HELPER — Convierte código de idioma al par MarianMT
@@ -4752,6 +4782,7 @@ fn main() {
             rechazar_emparejamiento_sinc,
             listar_dispositivos_emparejados,
             desemparejar_dispositivo,
+            probar_conexion_dispositivo,
             renombrar_buzon,
             guardar_documento_sin_traducir,
             guardar_documento_desde_bytes,
