@@ -4375,8 +4375,8 @@ document.addEventListener("DOMContentLoaded", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 interface DispositivoPublico { id: string; nombre: string; ts: number; ip_ultima: string; }
-interface SolicitudSinc { nombre: string; ip: string; }
-interface ResultadoEmparejamiento { emparejado: boolean; nombre: string; }
+interface SolicitudSinc { nombre: string; ip: string; tiene_b2: boolean; }
+interface ResultadoEmparejamiento { emparejado: boolean; nombre: string; b2_enviado: boolean; b2_conflicto: boolean; }
 
 let _sincPollInterval: number | null = null;
 let _sincDecisionTomada = false; // evita re-mostrar modal tras aceptar/rechazar
@@ -4442,7 +4442,7 @@ async function seleccionarDispSinc(ip: string, nombre: string): Promise<void> {
   try {
     const res = await invoke<ResultadoEmparejamiento>("solicitar_emparejamiento_sinc", { ip });
     if (res.emparejado) {
-      mostrarResultadoSinc(true, res.nombre);
+      mostrarResultadoSinc(true, res.nombre, undefined, res.b2_enviado, res.b2_conflicto);
       cargarListaEmparejados();
     } else {
       mostrarResultadoSinc(false, "");
@@ -4452,7 +4452,7 @@ async function seleccionarDispSinc(ip: string, nombre: string): Promise<void> {
   }
 }
 
-function mostrarResultadoSinc(ok: boolean, nombre: string, error?: string): void {
+function mostrarResultadoSinc(ok: boolean, nombre: string, error?: string, b2Enviado?: boolean, b2Conflicto?: boolean): void {
   mostrarFaseSinc("resultado");
   const icono = document.getElementById("sinc-resultado-icono");
   const texto = document.getElementById("sinc-resultado-texto");
@@ -4460,8 +4460,15 @@ function mostrarResultadoSinc(ok: boolean, nombre: string, error?: string): void
   if (ok) {
     if (icono) icono.textContent = "◈";
     if (texto) texto.textContent = `EMPAREJADO CON ${nombre.toUpperCase()}`;
-    if (sub) sub.textContent = "La clave compartida ha sido guardada de forma segura.";
-    mostrarToast(`Emparejado con ${nombre}`, false);
+    let subTexto = "La clave compartida ha sido guardada de forma segura.";
+    if (b2Conflicto) {
+      subTexto += " — El otro dispositivo ya tiene credenciales de buzón distintas; no se sobreescribieron.";
+    } else if (b2Enviado) {
+      subTexto += " — Credenciales de buzón compartidas con el dispositivo remoto.";
+    }
+    if (sub) sub.textContent = subTexto;
+    const toastExtra = b2Conflicto ? " (conflicto de credenciales B2)" : b2Enviado ? " + acceso al buzón compartido" : "";
+    mostrarToast(`Emparejado con ${nombre}${toastExtra}`, false);
   } else {
     if (icono) { icono.textContent = "✕"; icono.style.color = "rgba(255,80,80,0.7)"; }
     if (texto) { texto.textContent = "EMPAREJAMIENTO RECHAZADO"; texto.style.color = "rgba(255,80,80,0.7)"; }
@@ -4691,10 +4698,12 @@ function iniciarPollSolicitudSinc(): void {
         const modal = document.getElementById("modal-solicitud-sinc");
         if (modal && modal.classList.contains("hidden")) {
           _sincDecisionTomada = false;
-          const nomEl = document.getElementById("sinc-sol-nombre");
-          const ipEl  = document.getElementById("sinc-sol-ip");
+          const nomEl  = document.getElementById("sinc-sol-nombre");
+          const ipEl   = document.getElementById("sinc-sol-ip");
+          const b2El   = document.getElementById("sinc-sol-b2-aviso");
           if (nomEl) nomEl.textContent = sol.nombre;
           if (ipEl)  ipEl.textContent  = sol.ip;
+          if (b2El) b2El.style.display = sol.tiene_b2 ? "" : "none";
           modal.classList.remove("hidden");
         }
       } else if (!sol) {

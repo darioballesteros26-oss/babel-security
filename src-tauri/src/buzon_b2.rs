@@ -36,6 +36,33 @@ pub fn ruta_config() -> std::path::PathBuf {
     crate::babel_dir().join("b2.json")
 }
 
+/// Lee el contenido raw de b2.json para compartirlo durante el emparejamiento.
+/// Devuelve None si el archivo no existe o no es legible.
+pub fn leer_config_raw() -> Option<String> {
+    std::fs::read_to_string(ruta_config()).ok()
+}
+
+/// Devuelve el key_id configurado actualmente (para detectar conflictos).
+pub fn key_id_actual() -> Option<String> {
+    cargar_config().ok().map(|c| c.key_id)
+}
+
+/// Guarda las credenciales B2 recibidas de un par con permisos 0600.
+/// No sobreescribe automáticamente — el llamador debe comprobar conflictos antes.
+pub fn guardar_config_raw(json: &str) -> Result<(), String> {
+    let ruta = ruta_config();
+    if let Some(p) = ruta.parent() {
+        let _ = std::fs::create_dir_all(p);
+    }
+    std::fs::write(&ruta, json).map_err(|e| format!("Error guardando b2.json: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&ruta, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
 fn cargar_config() -> Result<ConfigB2, String> {
     let ruta = ruta_config();
     if !ruta.exists() {

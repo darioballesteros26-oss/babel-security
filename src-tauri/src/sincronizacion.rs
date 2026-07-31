@@ -88,12 +88,18 @@ pub struct DispositivoPublico {
 pub struct SolicitudSincPublica {
     pub nombre: String,
     pub ip: String,
+    /// El solicitante tiene b2.json configurado y lo ofrecerá si se acepta el emparejamiento.
+    pub tiene_b2: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ResultadoEmparejamiento {
     pub emparejado: bool,
     pub nombre: String,
+    /// B confirmó que recibió y guardó las credenciales B2.
+    pub b2_enviado: bool,
+    /// B ya tenía credenciales B2 distintas — no se sobreescribieron (conflicto).
+    pub b2_conflicto: bool,
 }
 
 // ── Estado global ───────────────────────────────────────────────────────────
@@ -190,8 +196,8 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
     }
     let linea = linea.trim().to_string();
 
-    // Parsear: BABEL_SINC_REQ:{nombre}:{ip_remitente}:{ts}:{hmac8}
-    let partes: Vec<&str> = linea.splitn(5, ':').collect();
+    // Parsear: BABEL_SINC_REQ:{nombre}:{ip_remitente}:{ts}:{hmac8}[:{has_b2}]
+    let partes: Vec<&str> = linea.splitn(6, ':').collect();
     if partes.len() < 5 || partes[0] != "BABEL_SINC_REQ" {
         log::warn!("[SINC] Mensaje inesperado de {}: {:.40}", ip_origen, linea);
         return;
@@ -203,6 +209,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
         .collect();
     let ts: u64 = partes[3].parse().unwrap_or(0);
     let hmac_rx = partes[4];
+    let solicitante_tiene_b2 = partes.get(5).map(|s| s.trim() == "1").unwrap_or(false);
 
     let ahora = ahora_unix();
     if ts == 0 || ahora.saturating_sub(ts) > 60 {
@@ -233,6 +240,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
         *slot = Some(SolicitudSincPublica {
             nombre: nombre_remoto.clone(),
             ip: ip_origen.clone(),
+            tiene_b2: solicitante_tiene_b2,
         });
     }
     // Reiniciar estado de decisión anterior
@@ -260,6 +268,8 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
         Err(_) => return,
     };
 
+    let mut clave_compartida: Option<String> = None;
+
     match decision {
         Some(true) => {
             let clave_zeroizing = CLAVE_PARA_ENVIAR
@@ -269,11 +279,14 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             if let Some(clave_z) = clave_zeroizing {
                 let ts_resp = ahora_unix();
                 let hmac_resp = hmac_sinc("resp_ok", ts_resp);
+                // Indicamos si nosotros (B) tenemos b2.json para que A lo sepa
+                let tenemos_b2 = if crate::buzon_b2::leer_config_raw().is_some() { "1" } else { "0" };
                 let msg = format!(
-                    "BABEL_SINC_OK:{}:{}:{}:{}\n",
-                    nombre_local, *clave_z, ts_resp, hmac_resp
+                    "BABEL_SINC_OK:{}:{}:{}:{}:{}\n",
+                    nombre_local, *clave_z, ts_resp, hmac_resp, tenemos_b2
                 );
                 let _ = writer.write_all(msg.as_bytes());
+                clave_compartida = Some((*clave_z).clone());
                 log::warn!("[SINC] Emparejamiento aceptado → '{}' ({})", nombre_remoto, ip_origen);
             } else {
                 log::error!("[SINC] Sin clave para enviar a {}", ip_origen);
@@ -284,6 +297,74 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             let _ = writer.write_all(format!("BABEL_SINC_NO:{}\n", ahora_unix()).as_bytes());
             log::warn!("[SINC] Emparejamiento rechazado a '{}' ({})", nombre_remoto, ip_origen);
         }
+    }
+
+    // ── Fase B2: recibir credenciales del solicitante (si las tiene) ────────────
+    // A enviará BABEL_B2_OFFER:{hex_cifrado}\n  o  BABEL_B2_NONE\n
+    // Timeout corto (5s): si A no envía nada, seguimos sin B2.
+    if let Some(ref clave_hex) = clave_compartida {
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let mut b2_linea = String::new();
+        {
+            let mut r = BufReader::new(&stream);
+            let _ = r.read_line(&mut b2_linea);
+        }
+        let b2_linea = b2_linea.trim();
+
+        let mut writer_b2 = match stream.try_clone() { Ok(s) => s, Err(_) => return };
+
+        if let Some(hex_cifrado) = b2_linea.strip_prefix("BABEL_B2_OFFER:") {
+            // Descifrar con la clave compartida (AES-256-GCM — self-authenticating)
+            match hex::decode(hex_cifrado.trim()) {
+                Ok(bytes) => match crate::seguridad::descifrar_documento(bytes, clave_hex) {
+                    Ok(json) => {
+                        // ¿Ya tenemos credenciales B2?
+                        match crate::buzon_b2::key_id_actual() {
+                            Some(key_id_local) => {
+                                // Comparar con lo que nos ofrecen
+                                let key_id_oferta = serde_json::from_str::<serde_json::Value>(&json)
+                                    .ok()
+                                    .and_then(|v| v["key_id"].as_str().map(|s| s.to_string()))
+                                    .unwrap_or_default();
+                                if key_id_local == key_id_oferta {
+                                    // Mismas credenciales — sin conflicto
+                                    let _ = writer_b2.write_all(b"BABEL_B2_OK\n");
+                                } else {
+                                    // Credenciales distintas — NO sobreescribir
+                                    log::warn!(
+                                        "[SINC] Conflicto B2: ya tenemos credenciales distintas. \
+                                         No se sobreescribe. Resuelve manualmente si es necesario."
+                                    );
+                                    let _ = writer_b2.write_all(b"BABEL_B2_CONFLICT\n");
+                                }
+                            }
+                            None => {
+                                // No tenemos b2.json — guardar
+                                match crate::buzon_b2::guardar_config_raw(&json) {
+                                    Ok(_) => {
+                                        log::info!(
+                                            "[SINC] b2.json recibido de '{}' y guardado (0600).",
+                                            nombre_remoto
+                                        );
+                                        let _ = writer_b2.write_all(b"BABEL_B2_OK\n");
+                                    }
+                                    Err(e) => {
+                                        log::error!("[SINC] Error guardando b2.json: {}", e);
+                                        let _ = writer_b2.write_all(b"BABEL_B2_SKIP\n");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("[SINC] B2: descifrado fallido ({}). Ignorando oferta.", e);
+                        let _ = writer_b2.write_all(b"BABEL_B2_SKIP\n");
+                    }
+                },
+                Err(_) => { let _ = writer_b2.write_all(b"BABEL_B2_SKIP\n"); }
+            }
+        }
+        // Si es BABEL_B2_NONE o timeout, no respondemos (A no espera respuesta en ese caso)
     }
 }
 
@@ -305,7 +386,8 @@ pub fn solicitar_emparejamiento(
 
     let ts = ahora_unix();
     let hmac = hmac_sinc("req", ts);
-    let msg = format!("BABEL_SINC_REQ:{}:{}:{}:{}\n", nombre_local, mi_ip, ts, hmac);
+    let tenemos_b2 = if crate::buzon_b2::leer_config_raw().is_some() { "1" } else { "0" };
+    let msg = format!("BABEL_SINC_REQ:{}:{}:{}:{}:{}\n", nombre_local, mi_ip, ts, hmac, tenemos_b2);
 
     let mut stream = TcpStream::connect(format!("{}:{}", ip_destino, PUERTO_SINC))
         .map_err(|e| format!("No se pudo conectar a {}: {}", ip_destino, e))?;
@@ -331,8 +413,8 @@ pub fn solicitar_emparejamiento(
     let respuesta = respuesta.trim();
 
     if let Some(rest) = respuesta.strip_prefix("BABEL_SINC_OK:") {
-        // BABEL_SINC_OK:{nombre_B}:{clave_hex64}:{ts_resp}:{hmac8}
-        let partes: Vec<&str> = rest.splitn(4, ':').collect();
+        // BABEL_SINC_OK:{nombre_B}:{clave_hex64}:{ts_resp}:{hmac8}[:{has_b2_B}]
+        let partes: Vec<&str> = rest.splitn(5, ':').collect();
         if partes.len() < 4 {
             return Err("Respuesta SINC_OK malformada".into());
         }
@@ -344,6 +426,7 @@ pub fn solicitar_emparejamiento(
         let clave_hex = partes[1].trim().to_string();
         let ts_resp: u64 = partes[2].parse().unwrap_or(0);
         let hmac_resp = partes[3];
+        let b_tiene_b2 = partes.get(4).map(|s| s.trim() == "1").unwrap_or(false);
 
         let ahora = ahora_unix();
         if ts_resp == 0 || ahora.saturating_sub(ts_resp) > 120 {
@@ -369,16 +452,73 @@ pub fn solicitar_emparejamiento(
         lista.push(DispositivoEmparejado {
             id: hex::encode(id_bytes),
             nombre: nombre_remoto.clone(),
-            clave_hex,
+            clave_hex: clave_hex.clone(),
             ts: ahora_unix(),
             ip_ultima: ip_destino.to_string(),
         });
         guardar_emparejados(&lista, subclave_hex);
         log::warn!("[SINC] Emparejado con '{}' ({})", nombre_remoto, ip_destino);
 
-        Ok(ResultadoEmparejamiento { emparejado: true, nombre: nombre_remoto })
+        // ── Fase B2: ofrecer credenciales si A las tiene y B no ─────────────────
+        // Si ambos tienen B2 con distinto key_id → B responderá CONFLICT.
+        // Si B ya tiene el mismo key_id → B responderá OK (sin conflicto real).
+        // B2_NONE si A no tiene configurado B2.
+        let mut b2_enviado = false;
+        let mut b2_conflicto = false;
+
+        // Configurar timeout de lectura para la respuesta B2 (10s)
+        stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
+
+        if let Some(b2_json) = crate::buzon_b2::leer_config_raw() {
+            // Solo ofrecemos si B no tiene B2, o si tiene pero puede ser el mismo
+            // (dejamos que B decida — si tiene el mismo key_id responderá OK)
+            match crate::seguridad::blindar_documento(&b2_json, &clave_hex) {
+                Ok(cifrado) => {
+                    let oferta = format!("BABEL_B2_OFFER:{}\n", hex::encode(&cifrado));
+                    if stream.write_all(oferta.as_bytes()).is_ok() {
+                        // Leer respuesta de B
+                        let mut resp_b2 = String::new();
+                        let mut r = BufReader::new(&stream);
+                        let _ = r.read_line(&mut resp_b2);
+                        match resp_b2.trim() {
+                            "BABEL_B2_OK"       => b2_enviado = true,
+                            "BABEL_B2_CONFLICT"  => {
+                                b2_conflicto = true;
+                                log::warn!(
+                                    "[SINC] '{}' ya tiene credenciales B2 distintas. \
+                                     Ambos dispositivos usan cuentas B2 diferentes.",
+                                    nombre_remoto
+                                );
+                            }
+                            _ => {} // BABEL_B2_SKIP o timeout
+                        }
+                    }
+                }
+                Err(e) => log::warn!("[SINC] B2: no se pudo cifrar oferta: {}", e),
+            }
+        } else {
+            // A no tiene B2 — avisar a B para que sepa que no hay oferta
+            let _ = stream.write_all(b"BABEL_B2_NONE\n");
+            // B no espera respuesta cuando enviamos NONE
+        }
+
+        // Si B tiene B2 y A no → A no puede recibirlo aquí (scope: A→B solo)
+        if b_tiene_b2 && crate::buzon_b2::leer_config_raw().is_none() {
+            log::info!(
+                "[SINC] '{}' tiene B2 pero nosotros no. Para recibir sus credenciales, \
+                 que '{}' inicie el emparejamiento desde su lado.",
+                nombre_remoto, nombre_remoto
+            );
+        }
+
+        Ok(ResultadoEmparejamiento {
+            emparejado: true,
+            nombre: nombre_remoto,
+            b2_enviado,
+            b2_conflicto,
+        })
     } else if respuesta.starts_with("BABEL_SINC_NO:") {
-        Ok(ResultadoEmparejamiento { emparejado: false, nombre: String::new() })
+        Ok(ResultadoEmparejamiento { emparejado: false, nombre: String::new(), b2_enviado: false, b2_conflicto: false })
     } else {
         Err(format!(
             "Respuesta inesperada de {}: {:.80}",
