@@ -831,7 +831,7 @@
      PRECIOS
 ═══════════════════════════════════════════════════════════ -->
 <section id="precios" class="py-24 lg:py-32">
-  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
 
     <!-- Cabecera -->
     <div class="text-center mb-16 sr">
@@ -839,8 +839,8 @@
       <p class="text-slate-400 text-lg" data-i18n="pricing_subtitle">Sin sorpresas. Sin datos en la nube. Sin letra pequeña.</p>
     </div>
 
-    <!-- Dos tarjetas -->
-    <div class="grid md:grid-cols-2 gap-6 lg:gap-8 items-start">
+    <!-- Tres tarjetas -->
+    <div class="grid md:grid-cols-3 gap-4 lg:gap-6 items-start">
 
       <!-- Plan Standard -->
       <div class="sr d1 card-lift rounded-2xl p-8" style="background: #0F1525; border: 1px solid rgba(255,255,255,0.08);">
@@ -878,8 +878,58 @@
         </a>
       </div>
 
+      <!-- Plan Pro -->
+      <div class="sr d2 card-lift rounded-2xl p-8 relative" style="background: #0F1525; border: 1.5px solid rgba(212,175,55,0.3);">
+        <!-- Badge -->
+        <div class="absolute -top-3.5 left-1/2 -translate-x-1/2">
+          <span class="inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-bold" style="color: #D4AF37; background: rgba(212,175,55,0.12); border: 1px solid rgba(212,175,55,0.35);" data-i18n="pricing_mid_badge">Nuevo</span>
+        </div>
+
+        <div class="mb-8 mt-2">
+          <div class="text-slate-400 text-sm font-semibold uppercase tracking-widest mb-2" data-i18n="pricing_mid_name">Pro</div>
+          <div class="flex items-end gap-1 mb-1">
+            <span class="text-5xl font-black text-white" data-i18n="pricing_mid_price">60€</span>
+            <span class="text-slate-400 text-base mb-1.5" data-i18n="pricing_mid_period">/mes</span>
+          </div>
+          <div class="text-slate-500 text-sm" data-i18n="pricing_mid_users">2–3 cuentas incluidas</div>
+        </div>
+
+        <ul class="space-y-3.5 mb-5">
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span class="text-slate-300 text-sm" data-i18n="pricing_mid_f1">Todo lo del plan Standard</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span class="text-slate-300 text-sm" data-i18n="pricing_mid_f2">Sincronización entre dispositivos propios</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 c-gold flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <div>
+              <span class="text-slate-300 text-sm" data-i18n="pricing_mid_f3">Pendrive cifrado incluido sin coste</span>
+              <p class="text-slate-500 text-xs mt-0.5 leading-snug" data-i18n="pricing_mid_f3b">Sin pasar por ningún servidor externo, ni siquiera de paso</p>
+            </div>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-slate-600 flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <div class="flex items-start gap-2 flex-wrap">
+              <span class="text-slate-500 text-sm" data-i18n="pricing_mid_f4">Mensajería privada</span>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0" style="color: #D4AF37; background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2);" data-i18n="pricing_mid_soon">Próximamente</span>
+            </div>
+          </li>
+        </ul>
+
+        <!-- Diferenciador clave -->
+        <p class="text-xs text-slate-500 italic mb-6 pl-3 leading-relaxed" style="border-left: 2px solid rgba(212,175,55,0.3);" data-i18n="pricing_mid_diff">Standard sincroniza vía buzón cifrado en la nube. Pro usa tu propio dispositivo físico — sin tocar ningún servidor externo.</p>
+
+        <!-- Más adelante se integrará Stripe para pago directo desde estos botones — por ahora dirigen al formulario de contacto para gestionar la compra manualmente. -->
+        <a href="#contacto-ventas" class="block text-center w-full py-3.5 rounded-xl font-semibold text-sm c-gold glass border border-gold hover:bg-yellow-500/10 transition-all duration-200" data-i18n="pricing_mid_cta">
+          Comenzar ahora
+        </a>
+      </div>
+
       <!-- Plan Enterprise (destacado) -->
-      <div class="sr d2 enterprise-border card-lift rounded-2xl p-8 relative" style="background: #0F1525;">
+      <div class="sr d3 enterprise-border card-lift rounded-2xl p-8 relative" style="background: #0F1525;">
         <!-- Badge -->
         <div class="absolute -top-3.5 left-1/2 -translate-x-1/2">
           <span class="inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-bold text-white" style="background: linear-gradient(135deg, #D4AF37, #A8860C);" data-i18n="pricing_ent_badge">Para despachos grandes</span>
@@ -1330,6 +1380,19 @@ const translations = {
     pricing_ent_f3: "Despliegue prioritario asistido",
     pricing_ent_f4: "Soporte multiusuario dedicado",
     pricing_ent_cta: "Contactar con Ventas",
+    pricing_mid_badge:  "Nuevo",
+    pricing_mid_name:   "Pro",
+    pricing_mid_price:  "60€",
+    pricing_mid_period: "/mes",
+    pricing_mid_users:  "2–3 cuentas incluidas",
+    pricing_mid_f1: "Todo lo del plan Standard",
+    pricing_mid_f2: "Sincronización entre dispositivos propios",
+    pricing_mid_f3: "Pendrive cifrado incluido sin coste",
+    pricing_mid_f3b: "Sin pasar por ningún servidor externo, ni siquiera de paso",
+    pricing_mid_f4: "Mensajería privada",
+    pricing_mid_soon: "Próximamente",
+    pricing_mid_diff: "Standard sincroniza vía buzón cifrado en la nube. Pro usa tu propio dispositivo físico — sin tocar ningún servidor externo.",
+    pricing_mid_cta:    "Comenzar ahora",
     contact_title:    "¿Encontraste un bug o problema?",
     contact_subtitle: "Cuéntame qué ocurrió y lo soluciono personalmente.",
     contact_name:     "Nombre",
@@ -1401,6 +1464,27 @@ const translations = {
     footer_privacy: "Política de Privacidad",
     footer_terms:   "Términos de Uso",
     footer_copy:    "© 2026 Security Babel. Todos los derechos reservados.",
+    terms_s1_h: "1. Sobre el servicio",
+    terms_s1_p: "Security Babel es un software de cifrado, gestión documental y traducción local, desarrollado y operado por Darío Ballesteros Sánchez.",
+    terms_s2_h: "2. Licencia de uso",
+    terms_s2_p: "El uso de Security Babel se rige por los términos de la licencia contratada (Standard, Pro o Enterprise). El acceso es personal e intransferible según el número de cuentas contratadas.",
+    terms_s3_h: "3. Copias de seguridad",
+    terms_s3_p: "El usuario es responsable de mantener sus propias copias de seguridad de los documentos que gestiona con Babel. Babel no sustituye la necesidad de realizar backups externos de la información del usuario.",
+    terms_s4_h: "4. Discontinuidad del servicio",
+    terms_s4_p: "En caso de que Babel deje de prestar servicio o de mantenerse, el usuario tendrá derecho a exportar la totalidad de sus datos antes del cese definitivo del servicio.",
+    terms_s5_h: "5. Política de reembolso",
+    terms_s5_p_pre: "Si no quedas satisfecho con Security Babel, dispones de 10 días naturales desde la fecha de contratación para solicitar el reembolso completo, escribiendo a ",
+    terms_s6_h: "6. Límites de responsabilidad sobre pérdida de datos",
+    terms_s6_p1: "Babel implementa medidas de seguridad y realiza auditorías periódicas para minimizar riesgos, pero no garantiza de forma absoluta que nunca pueda producirse una pérdida de datos. La responsabilidad de Babel ante incidencias se limita según lo establecido en estos términos.",
+    terms_s6_p2: "Asimismo, Babel no se responsabiliza de la pérdida de datos derivada de la pérdida u olvido de la contraseña maestra o la frase de recuperación por parte del usuario, ni de daños derivados del uso incorrecto del software.",
+    terms_s7_h: "7. Transparencia del equipo de desarrollo",
+    terms_s7_p: "Babel informa de manera transparente que el desarrollo del producto está liderado por un menor de edad, bajo la supervisión, gestión legal y societaria de un adulto responsable designado formalmente en la estructura de la empresa.",
+    terms_s8_h: "8. Dispositivo físico del plan Pro",
+    terms_s8_p: "El dispositivo físico de sincronización (pendrive/placa) entregado con el plan Pro pasa a ser propiedad del usuario desde el momento de la entrega. En caso de pérdida, rotura o mal uso, el coste de reposición corre a cargo del usuario, quien deberá contactar con Babel para solicitar un reemplazo.",
+    terms_s9_h: "9. Modificaciones",
+    terms_s9_p: "Estos términos pueden actualizarse. Se notificará cualquier cambio significativo a los usuarios activos.",
+    terms_s10_h: "10. Jurisdicción",
+    terms_s10_p: "Estos términos se rigen por la legislación española. Cualquier disputa se someterá a los tribunales competentes de Marbella, España.",
   },
 
   /* ── ENGLISH ── */
@@ -1474,6 +1558,19 @@ const translations = {
     pricing_ent_f3: "Priority assisted deployment",
     pricing_ent_f4: "Dedicated multi-user support",
     pricing_ent_cta: "Contact Sales",
+    pricing_mid_badge:  "New",
+    pricing_mid_name:   "Pro",
+    pricing_mid_price:  "€60",
+    pricing_mid_period: "/month",
+    pricing_mid_users:  "2–3 accounts included",
+    pricing_mid_f1: "Everything in Standard",
+    pricing_mid_f2: "Sync between your own devices",
+    pricing_mid_f3: "Encrypted USB drive included at no extra cost",
+    pricing_mid_f3b: "Without going through any external server, not even in transit",
+    pricing_mid_f4: "Private messaging",
+    pricing_mid_soon: "Coming soon",
+    pricing_mid_diff: "Standard syncs via an encrypted cloud vault. Pro uses your own physical device — without touching any external server.",
+    pricing_mid_cta:    "Get Started",
     contact_title:    "Found a bug or issue?",
     contact_subtitle: "Tell me what happened and I'll fix it personally.",
     contact_name:     "Name",
@@ -1540,6 +1637,27 @@ const translations = {
     footer_privacy: "Privacy Policy",
     footer_terms:   "Terms of Use",
     footer_copy:    "© 2026 Security Babel. All rights reserved.",
+    terms_s1_h: "1. About the service",
+    terms_s1_p: "Security Babel is an encryption, document management and local translation software, developed and operated by Darío Ballesteros Sánchez.",
+    terms_s2_h: "2. License",
+    terms_s2_p: "Use of Security Babel is governed by the terms of the contracted license (Standard, Pro or Enterprise). Access is personal and non-transferable per the number of accounts contracted.",
+    terms_s3_h: "3. Backups",
+    terms_s3_p: "The user is responsible for maintaining their own backups of the documents managed with Babel. Babel does not replace the need for external backups of the user's information.",
+    terms_s4_h: "4. Service discontinuation",
+    terms_s4_p: "In the event that Babel ceases to provide service or is discontinued, the user shall have the right to export all their data before the definitive cessation of the service.",
+    terms_s5_h: "5. Refund policy",
+    terms_s5_p_pre: "If you are not satisfied with Security Babel, you have 10 calendar days from the date of purchase to request a full refund by writing to ",
+    terms_s6_h: "6. Limits of liability for data loss",
+    terms_s6_p1: "Babel implements security measures and conducts periodic audits to minimise risk, but does not guarantee that data loss can never occur. Babel's liability for incidents is limited to the extent established in these terms.",
+    terms_s6_p2: "Furthermore, Babel is not liable for data loss resulting from the user losing or forgetting their master password or recovery phrase, nor for damages arising from incorrect use of the software.",
+    terms_s7_h: "7. Development team transparency",
+    terms_s7_p: "Babel transparently discloses that product development is led by a minor, under the supervision and legal and corporate management of a responsible adult formally designated within the company structure.",
+    terms_s8_h: "8. Pro plan physical device",
+    terms_s8_p: "The physical synchronisation device (USB drive/board) delivered with the Pro plan becomes the user's property upon delivery. In the event of loss, breakage or misuse, the cost of replacement is the user's responsibility; the user must contact Babel to request a replacement.",
+    terms_s9_h: "9. Modifications",
+    terms_s9_p: "These terms may be updated. Any significant changes will be communicated to active users.",
+    terms_s10_h: "10. Jurisdiction",
+    terms_s10_p: "These terms are governed by Spanish law. Any dispute shall be submitted to the competent courts of Marbella, Spain.",
   },
 
   /* ── РУССКИЙ ── */
@@ -1613,6 +1731,19 @@ const translations = {
     pricing_ent_f3: "Приоритетное сопровождение при развёртывании",
     pricing_ent_f4: "Выделенная поддержка для нескольких пользователей",
     pricing_ent_cta: "Связаться с отделом продаж",
+    pricing_mid_badge:  "Новинка",
+    pricing_mid_name:   "Pro",
+    pricing_mid_price:  "60€",
+    pricing_mid_period: "/месяц",
+    pricing_mid_users:  "2–3 аккаунта в комплекте",
+    pricing_mid_f1: "Всё включено в Standard",
+    pricing_mid_f2: "Синхронизация между собственными устройствами",
+    pricing_mid_f3: "Зашифрованный USB-накопитель в комплекте",
+    pricing_mid_f3b: "Без прохождения через любые внешние серверы, даже транзитно",
+    pricing_mid_f4: "Приватный мессенджер",
+    pricing_mid_soon: "Скоро",
+    pricing_mid_diff: "Standard синхронизирует через зашифрованное облако. Pro использует ваше физическое устройство — без обращения к любым внешним серверам.",
+    pricing_mid_cta:    "Начать сейчас",
     contact_title:    "Нашли баг или проблему?",
     contact_subtitle: "Опишите, что произошло, и я исправлю лично.",
     contact_name:     "Имя",
@@ -1679,6 +1810,27 @@ const translations = {
     footer_privacy: "Политика конфиденциальности",
     footer_terms:   "Условия использования",
     footer_copy:    "© 2026 Security Babel. Все права защищены.",
+    terms_s1_h: "1. О сервисе",
+    terms_s1_p: "Security Babel — программное обеспечение для шифрования, управления документами и локального перевода, разработанное и поддерживаемое Дарьо Бальестерос Санчесом.",
+    terms_s2_h: "2. Лицензия",
+    terms_s2_p: "Использование Security Babel регулируется условиями приобретённой лицензии (Standard, Pro или Enterprise). Доступ является персональным и непередаваемым в соответствии с количеством приобретённых аккаунтов.",
+    terms_s3_h: "3. Резервное копирование",
+    terms_s3_p: "Пользователь несёт ответственность за хранение собственных резервных копий документов, управляемых через Babel. Babel не заменяет необходимость создания внешних резервных копий информации пользователя.",
+    terms_s4_h: "4. Прекращение сервиса",
+    terms_s4_p: "В случае прекращения работы или поддержки Babel пользователь вправе экспортировать все свои данные до окончательного закрытия сервиса.",
+    terms_s5_h: "5. Политика возврата",
+    terms_s5_p_pre: "Если вас не устраивает Security Babel, у вас есть 10 календарных дней с момента покупки для запроса полного возврата средств, написав на ",
+    terms_s6_h: "6. Ограничение ответственности за потерю данных",
+    terms_s6_p1: "Babel применяет меры безопасности и проводит регулярные аудиты для минимизации рисков, однако не гарантирует абсолютной защиты от потери данных. Ответственность Babel за инциденты ограничена условиями настоящих правил.",
+    terms_s6_p2: "Кроме того, Babel не несёт ответственности за потерю данных, вызванную утратой или забыванием пользователем мастер-пароля или фразы восстановления, а также за ущерб от неправильного использования программы.",
+    terms_s7_h: "7. Прозрачность команды разработчиков",
+    terms_s7_p: "Babel открыто сообщает, что разработку продукта ведёт несовершеннолетний под руководством и юридическим и корпоративным управлением ответственного взрослого, официально назначенного в структуре компании.",
+    terms_s8_h: "8. Физическое устройство тарифа Pro",
+    terms_s8_p: "Физическое устройство синхронизации (USB-накопитель/плата), поставляемое с тарифом Pro, переходит в собственность пользователя с момента получения. В случае утери, поломки или ненадлежащего использования расходы на замену несёт пользователь; для получения замены необходимо обратиться в Babel.",
+    terms_s9_h: "9. Изменения",
+    terms_s9_p: "Настоящие условия могут обновляться. О любых существенных изменениях активные пользователи будут уведомлены.",
+    terms_s10_h: "10. Юрисдикция",
+    terms_s10_p: "Настоящие условия регулируются законодательством Испании. Любые споры передаются на рассмотрение в компетентные суды города Марбельи, Испания.",
   },
 
   /* ── العربية (RTL) ── */
@@ -1752,6 +1904,19 @@ const translations = {
     pricing_ent_f3: "نشر سريع بمساعدة متخصصة",
     pricing_ent_f4: "دعم مخصص متعدد المستخدمين",
     pricing_ent_cta: "التواصل مع المبيعات",
+    pricing_mid_badge:  "جديد",
+    pricing_mid_name:   "Pro",
+    pricing_mid_price:  "60€",
+    pricing_mid_period: "/شهر",
+    pricing_mid_users:  "2–3 حسابات مدرجة",
+    pricing_mid_f1: "كل ما في خطة Standard",
+    pricing_mid_f2: "مزامنة بين أجهزتك الخاصة",
+    pricing_mid_f3: "محرك USB مشفر مجاني",
+    pricing_mid_f3b: "دون المرور بأي خادم خارجي، حتى عبوراً",
+    pricing_mid_f4: "المراسلة الخاصة",
+    pricing_mid_soon: "قريباً",
+    pricing_mid_diff: "تتزامن خطة Standard عبر صندوق مشفر في السحابة. تستخدم خطة Pro جهازك المادي الخاص — دون الاتصال بأي خادم خارجي.",
+    pricing_mid_cta:    "ابدأ الآن",
     contact_title:    "وجدت خطأً أو مشكلة؟",
     contact_subtitle: "أخبرني بما حدث وسأحلها شخصياً.",
     contact_name:     "الاسم",
@@ -1818,6 +1983,27 @@ const translations = {
     footer_privacy: "سياسة الخصوصية",
     footer_terms:   "شروط الاستخدام",
     footer_copy:    "© 2026 Security Babel. جميع الحقوق محفوظة.",
+    terms_s1_h: "1. حول الخدمة",
+    terms_s1_p: "Security Babel هو برنامج للتشفير وإدارة الوثائق والترجمة المحلية، طوّره وتديره دارو باليستيروس سانتشيز.",
+    terms_s2_h: "2. الترخيص",
+    terms_s2_p: "يخضع استخدام Security Babel لشروط الترخيص المُبرَم (Standard أو Pro أو Enterprise). الوصول شخصي وغير قابل للتحويل وفقاً لعدد الحسابات المشتركة.",
+    terms_s3_h: "3. النسخ الاحتياطية",
+    terms_s3_p: "يتحمل المستخدم مسؤولية الاحتفاظ بنسخ احتياطية خاصة به من الوثائق التي يديرها عبر Babel. لا يُغني Babel عن الحاجة إلى إنشاء نسخ احتياطية خارجية لمعلومات المستخدم.",
+    terms_s4_h: "4. انقطاع الخدمة",
+    terms_s4_p: "في حال توقف Babel عن تقديم الخدمة أو صيانتها، يحق للمستخدم تصدير جميع بياناته قبل الإيقاف النهائي للخدمة.",
+    terms_s5_h: "5. سياسة الاسترداد",
+    terms_s5_p_pre: "إذا لم تكن راضياً عن Security Babel، يحق لك طلب استرداد كامل خلال 10 أيام تقويمية من تاريخ الاشتراك، بالكتابة إلى ",
+    terms_s6_h: "6. حدود المسؤولية عن فقدان البيانات",
+    terms_s6_p1: "يطبّق Babel تدابير أمنية ويجري عمليات تدقيق دورية للحد من المخاطر، غير أنه لا يضمن استحالة فقدان البيانات بشكل مطلق. تُحدَّد مسؤولية Babel عن الحوادث وفقاً لما هو منصوص عليه في هذه الشروط.",
+    terms_s6_p2: "علاوة على ذلك، لا يتحمل Babel مسؤولية فقدان البيانات الناجم عن فقدان المستخدم لكلمة المرور الرئيسية أو عبارة الاسترداد أو نسيانها، ولا الأضرار الناتجة عن الاستخدام غير الصحيح للبرنامج.",
+    terms_s7_h: "7. الشفافية في فريق التطوير",
+    terms_s7_p: "يُفصح Babel بشفافية أن تطوير المنتج يقوده قاصر تحت إشراف وإدارة قانونية وشركاتية من قِبَل شخص بالغ مسؤول معيَّن رسمياً في هيكل الشركة.",
+    terms_s8_h: "8. الجهاز الفيزيائي لخطة Pro",
+    terms_s8_p: "يصبح جهاز المزامنة الفيزيائي (محرك USB أو لوحة) المُسلَّم مع خطة Pro ملكاً للمستخدم لحظة التسليم. في حال الفقدان أو التلف أو سوء الاستخدام، تقع تكاليف الاستبدال على عاتق المستخدم، الذي يتعين عليه التواصل مع Babel لطلب بديل.",
+    terms_s9_h: "9. التعديلات",
+    terms_s9_p: "قد تُحدَّث هذه الشروط. سيتم إبلاغ المستخدمين النشطين بأي تغييرات جوهرية.",
+    terms_s10_h: "10. الاختصاص القضائي",
+    terms_s10_p: "تخضع هذه الشروط للقانون الإسباني. تُحال أي نزاعات إلى المحاكم المختصة في ماربيا، إسبانيا.",
   },
 };
 
@@ -2143,25 +2329,38 @@ document.addEventListener('keydown', e => {
     <button class="modal-close" aria-label="Cerrar">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
-    <h2 id="modal-terms-title" class="modal-h1">Términos de Uso</h2>
+    <h2 id="modal-terms-title" class="modal-h1" data-i18n="footer_terms">Términos de Uso</h2>
 
-    <h3 class="modal-h2">1. Sobre el servicio</h3>
-    <p class="modal-p">Security Babel es un software de cifrado, gestión documental y traducción local, desarrollado y operado por Darío Ballesteros Sánchez.</p>
+    <h3 class="modal-h2" data-i18n="terms_s1_h">1. Sobre el servicio</h3>
+    <p class="modal-p" data-i18n="terms_s1_p">Security Babel es un software de cifrado, gestión documental y traducción local, desarrollado y operado por Darío Ballesteros Sánchez.</p>
 
-    <h3 class="modal-h2">2. Licencia de uso</h3>
-    <p class="modal-p">El uso de Security Babel se rige por los términos de la licencia contratada (Standard o Enterprise). El acceso es personal e intransferible según el número de usuarios contratados.</p>
+    <h3 class="modal-h2" data-i18n="terms_s2_h">2. Licencia de uso</h3>
+    <p class="modal-p" data-i18n="terms_s2_p">El uso de Security Babel se rige por los términos de la licencia contratada (Standard, Pro o Enterprise). El acceso es personal e intransferible según el número de cuentas contratadas.</p>
 
-    <h3 class="modal-h2">3. Política de reembolso</h3>
-    <p class="modal-p">Si no quedas satisfecho con Security Babel, dispones de 10 días naturales desde la fecha de contratación para solicitar el reembolso completo, escribiendo a <a href="mailto:darioballesteros26@gmail.com" style="color:#D4AF37">darioballesteros26@gmail.com</a>.</p>
+    <h3 class="modal-h2" data-i18n="terms_s3_h">3. Copias de seguridad</h3>
+    <p class="modal-p" data-i18n="terms_s3_p">El usuario es responsable de mantener sus propias copias de seguridad de los documentos que gestiona con Babel. Babel no sustituye la necesidad de realizar backups externos de la información del usuario.</p>
 
-    <h3 class="modal-h2">4. Limitación de responsabilidad</h3>
-    <p class="modal-p">Security Babel no se responsabiliza de la pérdida de datos derivada de la pérdida u olvido de la contraseña maestra o la frase de recuperación por parte del usuario, ni de daños derivados del uso incorrecto del software.</p>
+    <h3 class="modal-h2" data-i18n="terms_s4_h">4. Discontinuidad del servicio</h3>
+    <p class="modal-p" data-i18n="terms_s4_p">En caso de que Babel deje de prestar servicio o de mantenerse, el usuario tendrá derecho a exportar la totalidad de sus datos antes del cese definitivo del servicio.</p>
 
-    <h3 class="modal-h2">5. Modificaciones</h3>
-    <p class="modal-p">Estos términos pueden actualizarse. Se notificará cualquier cambio significativo a los usuarios activos.</p>
+    <h3 class="modal-h2" data-i18n="terms_s5_h">5. Política de reembolso</h3>
+    <p class="modal-p"><span data-i18n="terms_s5_p_pre">Si no quedas satisfecho con Security Babel, dispones de 10 días naturales desde la fecha de contratación para solicitar el reembolso completo, escribiendo a </span><a href="mailto:darioballesteros26@gmail.com" style="color:#D4AF37">darioballesteros26@gmail.com</a>.</p>
 
-    <h3 class="modal-h2">6. Jurisdicción</h3>
-    <p class="modal-p">Estos términos se rigen por la legislación española. Cualquier disputa se someterá a los tribunales competentes de Marbella, España.</p>
+    <h3 class="modal-h2" data-i18n="terms_s6_h">6. Límites de responsabilidad sobre pérdida de datos</h3>
+    <p class="modal-p" data-i18n="terms_s6_p1">Babel implementa medidas de seguridad y realiza auditorías periódicas para minimizar riesgos, pero no garantiza de forma absoluta que nunca pueda producirse una pérdida de datos. La responsabilidad de Babel ante incidencias se limita según lo establecido en estos términos.</p>
+    <p class="modal-p" data-i18n="terms_s6_p2">Asimismo, Babel no se responsabiliza de la pérdida de datos derivada de la pérdida u olvido de la contraseña maestra o la frase de recuperación por parte del usuario, ni de daños derivados del uso incorrecto del software.</p>
+
+    <h3 class="modal-h2" data-i18n="terms_s7_h">7. Transparencia del equipo de desarrollo</h3>
+    <p class="modal-p" data-i18n="terms_s7_p">Babel informa de manera transparente que el desarrollo del producto está liderado por un menor de edad, bajo la supervisión, gestión legal y societaria de un adulto responsable designado formalmente en la estructura de la empresa.</p>
+
+    <h3 class="modal-h2" data-i18n="terms_s8_h">8. Dispositivo físico del plan Pro</h3>
+    <p class="modal-p" data-i18n="terms_s8_p">El dispositivo físico de sincronización (pendrive/placa) entregado con el plan Pro pasa a ser propiedad del usuario desde el momento de la entrega. En caso de pérdida, rotura o mal uso, el coste de reposición corre a cargo del usuario, quien deberá contactar con Babel para solicitar un reemplazo.</p>
+
+    <h3 class="modal-h2" data-i18n="terms_s9_h">9. Modificaciones</h3>
+    <p class="modal-p" data-i18n="terms_s9_p">Estos términos pueden actualizarse. Se notificará cualquier cambio significativo a los usuarios activos.</p>
+
+    <h3 class="modal-h2" data-i18n="terms_s10_h">10. Jurisdicción</h3>
+    <p class="modal-p" data-i18n="terms_s10_p">Estos términos se rigen por la legislación española. Cualquier disputa se someterá a los tribunales competentes de Marbella, España.</p>
   </div>
 </div>
 

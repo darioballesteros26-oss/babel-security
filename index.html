@@ -933,9 +933,26 @@
           <div style="margin-top:8px;margin-bottom:12px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
             Máximo 3 dispositivos. La clave compartida se genera al emparejar y no cambia.
           </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+            <span style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.75;">SINCRONIZACIÓN ACTIVA</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-sinc" checked onchange="toggleSincronizacion(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
           <div id="sinc-lista-emparejados" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;"></div>
           <button type="button" data-action="abrir-sinc-dispositivos" class="btn-secundario-oro" style="width:100%;padding:12px 0;">
             SINCRONIZAR DISPOSITIVOS
+          </button>
+        </div>
+
+        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+          <div class="ajuste-label">TÉRMINOS DE USO</div>
+          <div style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+            Consulta la política de privacidad y los términos que rigen el uso de Babel Security.
+          </div>
+          <button type="button" data-action="ver-terminos" class="btn-secundario-oro" style="width:100%;padding:12px 0;">
+            VER TÉRMINOS DE USO
           </button>
         </div>
 
@@ -1058,7 +1075,7 @@
 
           <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.56rem;letter-spacing:2.5px;
           color:var(--texto-secundario);opacity:0.45;text-align:center;margin-bottom:20px;">
-            VERSIÓN 2.0 · JUNIO 2026
+            VERSIÓN 3.0 · AGOSTO 2026
           </p>
 
           <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
@@ -1120,28 +1137,57 @@
           <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
           <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
-          color:var(--dorado);margin-bottom:6px;">6. LIMITACIÓN DE RESPONSABILIDAD</p>
+          color:var(--dorado);margin-bottom:6px;">6. COPIAS DE SEGURIDAD</p>
           <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
-            Babel Security no se responsabiliza de pérdida de datos por contraseña olvidada, daños
-            derivados del uso incorrecto, pérdida de la frase de recuperación BIP39, o
-            incompatibilidades con sistemas operativos de terceros.
+            El usuario es responsable de mantener sus propias copias de seguridad de los documentos
+            que gestiona con Babel. Babel no sustituye la necesidad de realizar backups externos
+            de la información del usuario.
           </p>
 
           <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
           <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
-          color:var(--dorado);margin-bottom:6px;">7. GDPR</p>
+          color:var(--dorado);margin-bottom:6px;">7. DISCONTINUIDAD DEL SERVICIO</p>
           <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
-            Babel Security cumple con el RGPD. Al no recopilar datos personales procesables,
-            el usuario es el único responsable del tratamiento de los datos que almacena.
+            En caso de que Babel deje de prestar servicio o de mantenerse, el usuario tendrá derecho
+            a exportar la totalidad de sus datos antes del cese definitivo del servicio.
           </p>
 
           <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
           <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
-          color:var(--dorado);margin-bottom:6px;">8. TRADUCCIÓN OFFLINE</p>
+          color:var(--dorado);margin-bottom:6px;">8. LÍMITES DE RESPONSABILIDAD</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:10px;">
+            Babel implementa medidas de seguridad y realiza auditorías periódicas para minimizar
+            riesgos, pero no garantiza de forma absoluta que nunca pueda producirse una pérdida
+            de datos. La responsabilidad de Babel ante incidencias se limita según estos términos.
+          </p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
+            Babel no se responsabiliza de pérdida de datos por contraseña olvidada, pérdida de la
+            frase BIP39, uso incorrecto del software, o incompatibilidades con sistemas de terceros.
+          </p>
+
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">9. GDPR</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
+            Babel Security cumple con el RGPD. El usuario es responsable del tratamiento de los
+            datos de sus clientes que almacena en Babel. Si se utilizan funciones que implican
+            terceros (p. ej. sincronización con almacenamiento externo), Babel actúa como
+            encargado del tratamiento dentro de los límites que establece el software, y
+            no como responsable último de los datos de los clientes del usuario.
+          </p>
+
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">10. TRADUCCIÓN OFFLINE</p>
           <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
             El motor de traducción opera 100% offline. Ningún texto es enviado a servidores externos.
@@ -1150,7 +1196,30 @@
           <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
           <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
-          color:var(--dorado);margin-bottom:6px;">9. JURISDICCIÓN</p>
+          color:var(--dorado);margin-bottom:6px;">11. TRANSPARENCIA DEL EQUIPO DE DESARROLLO</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
+            Babel informa de manera transparente que el desarrollo del producto está liderado por
+            un menor de edad, bajo la supervisión, gestión legal y societaria de un adulto responsable
+            designado formalmente en la estructura de la empresa.
+          </p>
+
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">12. DISPOSITIVO FÍSICO DEL PLAN PRO</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
+            El dispositivo físico de sincronización (pendrive/placa) entregado con el plan Pro pasa
+            a ser propiedad del usuario desde la entrega. En caso de pérdida, rotura o mal uso,
+            el coste de reposición corre a cargo del usuario, quien deberá contactar con Babel
+            para solicitar un reemplazo.
+          </p>
+
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">13. JURISDICCIÓN</p>
           <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;">
             Esta política se rige por la legislación española. Cualquier disputa se someterá

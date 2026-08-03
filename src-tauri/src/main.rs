@@ -617,6 +617,7 @@ fn verificar_login(
     seguridad::borrar_contador_intentos();
     // Resetear amenazas conocidas para que el monitor periódico las reporte de nuevo
     seguridad::resetear_amenazas_conocidas();
+    crate::sincronizacion::establecer_subclave_sesion(&subclave_hex);
 
     let mut json = Zeroizing::new(json);
     json.zeroize();
@@ -1537,6 +1538,7 @@ fn mover_archivo_guardado(
 #[tauri::command]
 fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
     babel_p2p::detener_servidor_p2p();
+    crate::sincronizacion::limpiar_subclave_sesion();
     sesion.limpiar();
     // Limpiar copias en claro que compartir_a_url pudiera haber dejado en compartidos/.
     compartir::barrer_plaintext_compartidos();
@@ -3295,6 +3297,7 @@ fn recuperar_y_autenticar(
     if let Ok(mut c) = sesion.contador.lock() { *c = 0; }
     seguridad::borrar_contador_intentos();
     seguridad::resetear_amenazas_conocidas();
+    crate::sincronizacion::establecer_subclave_sesion(&subclave_hex);
 
     Ok(aviso)
 }
@@ -3951,6 +3954,13 @@ fn iniciar_sinc_servidor(sesion: tauri::State<SesionActiva>) -> Result<String, S
 }
 
 #[tauri::command]
+fn detener_sinc_servidor(sesion: tauri::State<SesionActiva>) -> Result<(), String> {
+    sesion.subclave_hex()?;
+    crate::sincronizacion::detener_servidor_sinc();
+    Ok(())
+}
+
+#[tauri::command]
 fn buscar_dispositivos_sinc() -> Result<Vec<babel_p2p::PeerDescubierto>, String> {
     babel_p2p::DescubrimientoRed::buscar_peers(3000)
 }
@@ -4472,29 +4482,29 @@ async fn compartir_directo(
             }
             let _ = tx.send(result);
         }).map_err(|e| format!("Error en hilo principal: {}", e))?;
-        rx.await.map_err(|_| "Error de comunicación interna".to_string())??;
-        return Ok(());
+        return rx.await.map_err(|_| "Error de comunicación interna".to_string())?;
         // _guard sale de scope aquí → borrar_seguro
     }
 
     // Windows / Linux: abrir el HTML con la app por defecto (navegador).
     // El archivo queda en compartidos/ — sin NSSharingServicePicker no sabemos
     // cuándo el usuario termina de enviarlo, así que no lo borramos automáticamente.
-    #[cfg(target_os = "windows")]
+    #[cfg(not(target_os = "macos"))]
     {
+        #[cfg(target_os = "windows")]
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &ruta_compartir])
             .spawn()
             .map_err(|e| format!("Error abriendo HTML: {}", e))?;
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
+
+        #[cfg(not(target_os = "windows"))]
         std::process::Command::new("xdg-open")
             .arg(&ruta_compartir)
             .spawn()
             .map_err(|e| format!("Error abriendo HTML: {}", e))?;
+
+        Ok(())
     }
-    Ok(())
 }
 
 
@@ -4784,6 +4794,29 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            // Barrer ~/Babel/tmp/ al arranque para limpiar residuos de sesiones anteriores
+            // que no cerraron limpiamente (SIGKILL, corte de luz). BorrarAlSalir no ejecuta
+            // su destructor en crash abrupto, así que este barrido es la segunda línea de defensa.
+            {
+                let tmp = babel_dir().join("tmp");
+                if let Ok(entradas) = std::fs::read_dir(&tmp) {
+                    for entrada in entradas.flatten() {
+                        let p = entrada.path();
+                        if p.is_dir() {
+                            if let Ok(hijos) = std::fs::read_dir(&p) {
+                                for h in hijos.flatten() {
+                                    borrar_seguro(&h.path().to_string_lossy());
+                                }
+                            }
+                            let _ = std::fs::remove_dir_all(&p);
+                        } else {
+                            borrar_seguro(&p.to_string_lossy());
+                        }
+                    }
+                }
+                log::info!("[Arranque] tmp/ barrido completado.");
+            }
+
             // HERRAMIENTAS EMPAQUETADAS — que la app use soffice/poppler/tessdata de su
             // propio bundle (Contents/Resources/…) y NO dependa de Homebrew/LibreOffice del
             // sistema. Debe correr ANTES de lanzar el sidecar o cualquier proceso hijo, ya
@@ -5038,6 +5071,7 @@ fn main() {
             listar_peers_pendientes_cmd,
             aprobar_peer_pendiente_cmd,
             iniciar_sinc_servidor,
+            detener_sinc_servidor,
             buscar_dispositivos_sinc,
             solicitar_emparejamiento_sinc,
             obtener_solicitud_sinc,

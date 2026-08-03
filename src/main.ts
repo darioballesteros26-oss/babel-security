@@ -449,6 +449,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "desbloquear-pantalla": desbloquearPantalla(); break;
     case "intentar-recuperacion": intentarRecuperacion(); break;
     case "aceptar-terminos": aceptarTerminos(); break;
+    case "ver-terminos": mostrarModalTerminos(); break;
     // UI
     case "toggle-sidebar": toggleSidebar(); break;
     case "toggle-contrasena": toggleContraseña(el.dataset.campo!); break;
@@ -986,6 +987,14 @@ async function modoRapidoPorDefecto(): Promise<boolean> {
 function toggleBorradoAutomatico(activado: boolean): void {
   borradoAutomaticoActivado = activado;
   guardarAjustesTraduccion().catch(() => {});
+}
+
+function toggleSincronizacion(activado: boolean): void {
+  if (activado) {
+    invoke("iniciar_sinc_servidor").catch(() => {});
+  } else {
+    invoke("detener_sinc_servidor").catch(() => {});
+  }
 }
 
 // ============================================================
@@ -4067,6 +4076,7 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).toggleBorrarOriginal = toggleBorrarOriginal;
 (window as any).toggleModoRapido = toggleModoRapido;
 (window as any).toggleBorradoAutomatico = toggleBorradoAutomatico;
+(window as any).toggleSincronizacion = toggleSincronizacion;
 (window as any).cambiarIdiomaDesdeSelectores = cambiarIdiomaDesdeSelectores;
 (window as any).cambiarIdiomaDesdeAjustes = cambiarIdiomaDesdeAjustes;
 (window as any).cambiarCategoriaDiccionario = cambiarCategoriaDiccionario;

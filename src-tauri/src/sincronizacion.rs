@@ -131,6 +131,24 @@ static DECISION_CONDVAR: Condvar = Condvar::new();
 static CLAVE_PARA_ENVIAR: Mutex<Option<Zeroizing<String>>> = Mutex::new(None);
 
 static SINC_SERVIDOR_ACTIVO: AtomicBool = AtomicBool::new(false);
+static SUBCLAVE_SESION: Mutex<Option<Zeroizing<String>>> = Mutex::new(None);
+
+pub fn establecer_subclave_sesion(subclave_hex: &str) {
+    if let Ok(mut g) = SUBCLAVE_SESION.lock() {
+        *g = Some(Zeroizing::new(subclave_hex.to_string()));
+    }
+}
+
+pub fn limpiar_subclave_sesion() {
+    if let Ok(mut g) = SUBCLAVE_SESION.lock() {
+        *g = None;
+    }
+}
+
+pub fn detener_servidor_sinc() {
+    SINC_SERVIDOR_ACTIVO.store(false, Ordering::SeqCst);
+    log::info!("[SINC] Servidor sync detenido por petición.");
+}
 
 // ── Persistencia ─────────────────────────────────────────────────────────────
 
@@ -181,6 +199,10 @@ pub fn iniciar_servidor_sinc(nombre_local: String) {
         log::warn!("[SINC] Servidor sync activo en puerto {}.", PUERTO_SINC);
 
         loop {
+            if !SINC_SERVIDOR_ACTIVO.load(Ordering::SeqCst) {
+                log::info!("[SINC] Servidor sync: flag desactivado, cerrando hilo.");
+                break;
+            }
             match listener.accept() {
                 Ok((stream, addr)) => {
                     // Los streams aceptados heredan el modo non-blocking del listener;
@@ -482,7 +504,7 @@ pub fn solicitar_emparejamiento(
         // Reemplazar si ya existía emparejamiento con esta IP
         lista.retain(|d| d.ip_ultima != ip_destino);
 
-        let mut id_bytes = [0u8; 6];
+        let mut id_bytes = [0u8; 16];
         rand::rngs::OsRng.fill_bytes(&mut id_bytes);
         lista.push(DispositivoEmparejado {
             id: hex::encode(id_bytes),
@@ -602,7 +624,7 @@ pub fn aceptar_y_generar_clave(
     // Reemplazar si ya existía emparejamiento con esta IP
     lista.retain(|d| d.ip_ultima != ip_solicitante);
 
-    let mut id_bytes = [0u8; 6];
+    let mut id_bytes = [0u8; 16];
     rand::rngs::OsRng.fill_bytes(&mut id_bytes);
     lista.push(DispositivoEmparejado {
         id: hex::encode(id_bytes),
@@ -682,20 +704,49 @@ fn manejar_reintento_b2(stream: TcpStream, ip_origen: String, _nombre_local: &st
     let oferta_linea = oferta_linea.trim();
 
     if let Some(hex_cifrado) = oferta_linea.strip_prefix("BABEL_B2_OFFER:") {
-        // Necesitamos la clave compartida del par para descifrar.
-        // B la busca por IP en su lista de dispositivos.
-        // Cargamos la lista SIN subclave (no la tenemos aquí) → búsqueda por IP en disco
-        // no es posible sin subclave. LIMITACIÓN CONOCIDA: esta función no tiene acceso
-        // a la subclave de sesión (es un hilo de servidor sin contexto de sesión).
-        // Alternativa: transmitir la oferta cifrada al thread principal vía un canal.
-        // Para el MVP: log y skip. El reintento completo requiere clave de sesión.
-        log::warn!(
-            "[SINC] REINTENTO B2: recibida oferta de {} pero no tenemos subclave en el hilo \
-             servidor para descifrar. Usa 'verificar_buzones_todos' desde la UI para aplicarla.",
-            ip_origen
-        );
-        let _ = writer.write_all(b"BABEL_B2_SKIP\n");
-        let _ = hex_cifrado; // suppress unused warning
+        let subclave = match SUBCLAVE_SESION.lock().ok()
+            .and_then(|g| g.as_deref().map(|s| s.to_string()))
+        {
+            Some(s) => s,
+            None => {
+                log::warn!("[SINC] REINTENTO B2: sin sesión activa para descifrar oferta de {}", ip_origen);
+                let _ = writer.write_all(b"BABEL_B2_SKIP\n");
+                return;
+            }
+        };
+        let emparejados = cargar_emparejados(&subclave);
+        let clave_hex = match emparejados.iter().find(|d| d.ip_ultima == ip_origen) {
+            Some(d) => d.clave_hex.clone(),
+            None => {
+                log::warn!("[SINC] REINTENTO B2: par no encontrado para IP {} — ¿ya desemparejado?", ip_origen);
+                let _ = writer.write_all(b"BABEL_B2_SKIP\n");
+                return;
+            }
+        };
+        let cifrado_bytes = match hex::decode(hex_cifrado) {
+            Ok(b) => b,
+            Err(_) => {
+                log::warn!("[SINC] REINTENTO B2: oferta hex inválida de {}", ip_origen);
+                let _ = writer.write_all(b"BABEL_B2_SKIP\n");
+                return;
+            }
+        };
+        match crate::seguridad::descifrar_documento(cifrado_bytes, &clave_hex) {
+            Ok(b2_json) => match crate::buzon_b2::guardar_config_raw(&b2_json) {
+                Ok(_) => {
+                    log::info!("[SINC] REINTENTO B2: credenciales B2 aplicadas desde {}", ip_origen);
+                    let _ = writer.write_all(b"BABEL_B2_OK\n");
+                }
+                Err(e) => {
+                    log::warn!("[SINC] REINTENTO B2: error guardando B2 de {}: {}", ip_origen, e);
+                    let _ = writer.write_all(b"BABEL_B2_SKIP\n");
+                }
+            },
+            Err(e) => {
+                log::warn!("[SINC] REINTENTO B2: descifrado fallido de {}: {}", ip_origen, e);
+                let _ = writer.write_all(b"BABEL_B2_SKIP\n");
+            }
+        }
     }
 }
 
