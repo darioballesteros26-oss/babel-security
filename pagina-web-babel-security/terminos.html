@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="es" dir="ltr" id="root">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Términos de Uso — Security Babel</title>
+  <meta name="description" content="Términos de uso de Security Babel. Licencia personal, política de reembolso, jurisdicción española." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { bunker: { 950:'#0B0F19', 900:'#0F1525' } }, fontFamily: { sans:['Inter','system-ui','sans-serif'] } } }
+    }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { background-color: #0B0F19; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #0B0F19; }
+    ::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 3px; }
+    .glass { background: rgba(255,255,255,0.05); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,0.08); }
+    .c-gold { color: #D4AF37; }
+    .lang-dropdown { opacity:0; transform:translateY(-6px) scale(0.97); pointer-events:none; transition:opacity 0.18s ease, transform 0.18s ease; }
+    .lang-dropdown.open { opacity:1; transform:translateY(0) scale(1); pointer-events:auto; }
+    .doc-section { border-top: 1px solid rgba(212,175,55,0.12); padding-top: 2rem; margin-top: 2rem; }
+    .doc-section:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════ NAVBAR ═══════════════ -->
+<nav style="background: rgba(11,15,25,0.95); border-bottom: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(12px); position: sticky; top:0; z-index:50;">
+  <div class="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-6">
+      <a href="/" class="text-white font-black text-lg tracking-widest" style="letter-spacing:.2em;">BABEL</a>
+      <a href="/" class="text-slate-400 hover:text-white text-sm transition-colors flex items-center gap-1">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        <span data-i18n="nav_back">Volver</span>
+      </a>
+    </div>
+    <!-- Selector idioma -->
+    <div class="relative" id="lang-wrapper">
+      <button id="lang-btn"
+        class="glass flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-300 hover:text-white transition-colors"
+        aria-haspopup="listbox" aria-expanded="false">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span id="lang-label">ES</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div id="lang-dropdown" class="lang-dropdown absolute top-full mt-2 right-0 w-32 rounded-xl glass shadow-2xl overflow-hidden" role="listbox">
+        <button class="lang-option w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-white/10 transition-colors" data-lang="es">🇪🇸 ES</button>
+        <button class="lang-option w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-white/10 transition-colors" data-lang="en">🇬🇧 EN</button>
+        <button class="lang-option w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-white/10 transition-colors" data-lang="ru">🇷🇺 RU</button>
+        <button class="lang-option w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-white/10 transition-colors" data-lang="ar">🇸🇦 AR</button>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══════════════ CONTENIDO ═══════════════ -->
+<main class="max-w-3xl mx-auto px-6 py-16">
+
+  <!-- Cabecera -->
+  <div class="mb-12">
+    <p class="c-gold text-xs font-semibold tracking-widest uppercase mb-3" data-i18n="page_label">Legal</p>
+    <h1 class="text-3xl sm:text-4xl font-black text-white mb-4" data-i18n="page_title">Términos de Uso</h1>
+    <p class="text-slate-400 text-sm" data-i18n="page_meta">Última actualización: agosto 2026 · Operador: Darío Ballesteros Sánchez · <a href="mailto:darioballesteros26@gmail.com" class="c-gold hover:text-yellow-300 transition-colors">darioballesteros26@gmail.com</a></p>
+  </div>
+
+  <!-- Card principal -->
+  <div class="glass rounded-2xl p-8 sm:p-10" style="border-color: rgba(212,175,55,0.15);">
+
+    <!-- 1 -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="terms_s1_h">1. Sobre el servicio</h2>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="terms_s1_p">Security Babel es un software de cifrado, gestión documental y traducción local, desarrollado y operado por Darío Ballesteros Sánchez.</p>
+    </div>
+
+    <!-- 2 -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="terms_s2_h">2. Licencia de uso</h2>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="terms_s2_p">El uso de Security Babel se rige por los términos de la licencia contratada (Standard, Pro o Enterprise). El acceso es personal e intransferible según el número de cuentas contratadas.</p>
+    </div>
+
+    <!-- 3 -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="terms_s3_h">3. Copias de seguridad</h2>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="terms_s3_p">El usuario es responsable de mantener sus propias copias de seguridad de los documentos que gestiona con Babel. Babel no sustituye la necesidad de realizar backups externos de la información del usuario.</p>
+    </div>
+
+    <!-- 4 -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="terms_s4_h">4. Discontinuidad del servicio</h2>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="terms_s4_p">En caso de que Babel deje de prestar servicio o de mantenerse, el usuario tendrá derecho a exportar la totalidad de sus datos antes del cese definitivo del servicio.</p>
+    </div>
+
+    <!-- 5 -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="terms_s5_h">5. Política de reembolso</h2>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        <span data-i18n="terms_s5_p_pre">Si no quedas satisfecho con Security Babel, dispones de 10 días naturales desde la fecha de contratación para solicitar el reembolso completo, escribiendo a </span><a href="mailto:darioballesteros26@gmail.com" class="c-gold hover:text-yellow-300 transition-colors">darioballesteros26@gmail.com</a>.
+      </p>
+    </div>
+
+    <!-- 6 -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="terms_s6_h">6. Límites de responsabilidad sobre pérdida de datos</h2>
+      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="terms_s6_p1">Babel implementa medidas de seguridad y realiza auditorías periódicas para minimizar riesgos, pero no garantiza de forma absoluta que nunca pueda producirse una pérdida de datos. La responsabilidad de Babel ante incidencias se limita según lo establecido en estos términos.</p>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="terms_s6_p2">Asimismo, Babel no se responsabiliza de la pérdida de datos derivada de la pérdida u olvido de la contraseña maestra o la frase de recuperación por parte del usuario, ni de daños derivados del uso incorrecto del software.</p>
+    </div>
+
+    <!-- 7 -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="terms_s7_h">7. Transparencia del equipo de desarrollo</h2>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="terms_s7_p">Babel informa de manera transparente que el desarrollo del producto está liderado por un menor de edad, bajo la supervisión, gestión legal y societaria de un adulto responsable designado formalmente en la estructura de la empresa.</p>
+    </div>
+
+    <!-- 8 -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="terms_s8_h">8. Dispositivo físico del plan Pro</h2>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="terms_s8_p">El dispositivo físico de sincronización (pendrive/placa) entregado con el plan Pro pasa a ser propiedad del usuario desde el momento de la entrega. En caso de pérdida, rotura o mal uso, el coste de reposición corre a cargo del usuario, quien deberá contactar con Babel para solicitar un reemplazo.</p>
+    </div>
+
+    <!-- 9 -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="terms_s9_h">9. Modificaciones</h2>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="terms_s9_p">Estos términos pueden actualizarse. Se notificará cualquier cambio significativo a los usuarios activos.</p>
+    </div>
+
+    <!-- 10 -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="terms_s10_h">10. Jurisdicción</h2>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="terms_s10_p">Estos términos se rigen por la legislación española. Cualquier disputa se someterá a los tribunales competentes de Marbella, España.</p>
+    </div>
+
+  </div>
+
+</main>
+
+<!-- ═══════════════ FOOTER ═══════════════ -->
+<footer style="background:#0B0F19; border-top:1px solid rgba(255,255,255,0.05);" class="py-8 mt-8">
+  <div class="max-w-4xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+    <span class="text-slate-500 text-sm" data-i18n="footer_copy">© 2026 Security Babel. Todos los derechos reservados.</span>
+    <div class="flex items-center gap-6">
+      <a href="/privacidad" class="text-slate-400 hover:text-slate-300 text-sm transition-colors" data-i18n="footer_privacy">Política de Privacidad</a>
+      <a href="/terminos" class="c-gold text-sm" data-i18n="footer_terms">Términos de Uso</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+const T = {
+  es: {
+    nav_back: "Volver",
+    page_label: "Legal",
+    page_title: "Términos de Uso",
+    page_meta: "Última actualización: agosto 2026 · Operador: Darío Ballesteros Sánchez",
+    terms_s1_h: "1. Sobre el servicio",
+    terms_s1_p: "Security Babel es un software de cifrado, gestión documental y traducción local, desarrollado y operado por Darío Ballesteros Sánchez.",
+    terms_s2_h: "2. Licencia de uso",
+    terms_s2_p: "El uso de Security Babel se rige por los términos de la licencia contratada (Standard, Pro o Enterprise). El acceso es personal e intransferible según el número de cuentas contratadas.",
+    terms_s3_h: "3. Copias de seguridad",
+    terms_s3_p: "El usuario es responsable de mantener sus propias copias de seguridad de los documentos que gestiona con Babel. Babel no sustituye la necesidad de realizar backups externos de la información del usuario.",
+    terms_s4_h: "4. Discontinuidad del servicio",
+    terms_s4_p: "En caso de que Babel deje de prestar servicio o de mantenerse, el usuario tendrá derecho a exportar la totalidad de sus datos antes del cese definitivo del servicio.",
+    terms_s5_h: "5. Política de reembolso",
+    terms_s5_p_pre: "Si no quedas satisfecho con Security Babel, dispones de 10 días naturales desde la fecha de contratación para solicitar el reembolso completo, escribiendo a ",
+    terms_s6_h: "6. Límites de responsabilidad sobre pérdida de datos",
+    terms_s6_p1: "Babel implementa medidas de seguridad y realiza auditorías periódicas para minimizar riesgos, pero no garantiza de forma absoluta que nunca pueda producirse una pérdida de datos. La responsabilidad de Babel ante incidencias se limita según lo establecido en estos términos.",
+    terms_s6_p2: "Asimismo, Babel no se responsabiliza de la pérdida de datos derivada de la pérdida u olvido de la contraseña maestra o la frase de recuperación por parte del usuario, ni de daños derivados del uso incorrecto del software.",
+    terms_s7_h: "7. Transparencia del equipo de desarrollo",
+    terms_s7_p: "Babel informa de manera transparente que el desarrollo del producto está liderado por un menor de edad, bajo la supervisión, gestión legal y societaria de un adulto responsable designado formalmente en la estructura de la empresa.",
+    terms_s8_h: "8. Dispositivo físico del plan Pro",
+    terms_s8_p: "El dispositivo físico de sincronización (pendrive/placa) entregado con el plan Pro pasa a ser propiedad del usuario desde el momento de la entrega. En caso de pérdida, rotura o mal uso, el coste de reposición corre a cargo del usuario, quien deberá contactar con Babel para solicitar un reemplazo.",
+    terms_s9_h: "9. Modificaciones",
+    terms_s9_p: "Estos términos pueden actualizarse. Se notificará cualquier cambio significativo a los usuarios activos.",
+    terms_s10_h: "10. Jurisdicción",
+    terms_s10_p: "Estos términos se rigen por la legislación española. Cualquier disputa se someterá a los tribunales competentes de Marbella, España.",
+    footer_copy: "© 2026 Security Babel. Todos los derechos reservados.",
+    footer_privacy: "Política de Privacidad",
+    footer_terms: "Términos de Uso",
+  },
+  en: {
+    nav_back: "Back",
+    page_label: "Legal",
+    page_title: "Terms of Use",
+    page_meta: "Last updated: August 2026 · Operator: Darío Ballesteros Sánchez",
+    terms_s1_h: "1. About the service",
+    terms_s1_p: "Security Babel is an encryption, document management and local translation software, developed and operated by Darío Ballesteros Sánchez.",
+    terms_s2_h: "2. License",
+    terms_s2_p: "Use of Security Babel is governed by the terms of the contracted license (Standard, Pro or Enterprise). Access is personal and non-transferable per the number of accounts contracted.",
+    terms_s3_h: "3. Backups",
+    terms_s3_p: "The user is responsible for maintaining their own backups of the documents managed with Babel. Babel does not replace the need for external backups of the user's information.",
+    terms_s4_h: "4. Service discontinuation",
+    terms_s4_p: "In the event that Babel ceases to provide service or is discontinued, the user shall have the right to export all their data before the definitive cessation of the service.",
+    terms_s5_h: "5. Refund policy",
+    terms_s5_p_pre: "If you are not satisfied with Security Babel, you have 10 calendar days from the date of purchase to request a full refund by writing to ",
+    terms_s6_h: "6. Limits of liability for data loss",
+    terms_s6_p1: "Babel implements security measures and conducts periodic audits to minimise risk, but does not guarantee that data loss can never occur. Babel's liability for incidents is limited to the extent established in these terms.",
+    terms_s6_p2: "Furthermore, Babel is not liable for data loss resulting from the user losing or forgetting their master password or recovery phrase, nor for damages arising from incorrect use of the software.",
+    terms_s7_h: "7. Development team transparency",
+    terms_s7_p: "Babel transparently discloses that product development is led by a minor, under the supervision and legal and corporate management of a responsible adult formally designated within the company structure.",
+    terms_s8_h: "8. Pro plan physical device",
+    terms_s8_p: "The physical synchronisation device (USB drive/board) delivered with the Pro plan becomes the user's property upon delivery. In the event of loss, breakage or misuse, the cost of replacement is the user's responsibility; the user must contact Babel to request a replacement.",
+    terms_s9_h: "9. Modifications",
+    terms_s9_p: "These terms may be updated. Any significant changes will be communicated to active users.",
+    terms_s10_h: "10. Jurisdiction",
+    terms_s10_p: "These terms are governed by Spanish law. Any dispute shall be submitted to the competent courts of Marbella, Spain.",
+    footer_copy: "© 2026 Security Babel. All rights reserved.",
+    footer_privacy: "Privacy Policy",
+    footer_terms: "Terms of Use",
+  },
+  ru: {
+    nav_back: "Назад",
+    page_label: "Документы",
+    page_title: "Условия использования",
+    page_meta: "Последнее обновление: август 2026 · Оператор: Дарьо Бальестерос Санчес",
+    terms_s1_h: "1. О сервисе",
+    terms_s1_p: "Security Babel — программное обеспечение для шифрования, управления документами и локального перевода, разработанное и поддерживаемое Дарьо Бальестерос Санчесом.",
+    terms_s2_h: "2. Лицензия",
+    terms_s2_p: "Использование Security Babel регулируется условиями приобретённой лицензии (Standard, Pro или Enterprise). Доступ является персональным и непередаваемым в соответствии с количеством приобретённых аккаунтов.",
+    terms_s3_h: "3. Резервное копирование",
+    terms_s3_p: "Пользователь несёт ответственность за хранение собственных резервных копий документов, управляемых через Babel. Babel не заменяет необходимость создания внешних резервных копий информации пользователя.",
+    terms_s4_h: "4. Прекращение сервиса",
+    terms_s4_p: "В случае прекращения работы или поддержки Babel пользователь вправе экспортировать все свои данные до окончательного закрытия сервиса.",
+    terms_s5_h: "5. Политика возврата",
+    terms_s5_p_pre: "Если вас не устраивает Security Babel, у вас есть 10 календарных дней с момента покупки для запроса полного возврата средств, написав на ",
+    terms_s6_h: "6. Ограничение ответственности за потерю данных",
+    terms_s6_p1: "Babel применяет меры безопасности и проводит регулярные аудиты для минимизации рисков, однако не гарантирует абсолютной защиты от потери данных. Ответственность Babel за инциденты ограничена условиями настоящих правил.",
+    terms_s6_p2: "Кроме того, Babel не несёт ответственности за потерю данных, вызванную утратой или забыванием пользователем мастер-пароля или фразы восстановления, а также за ущерб от неправильного использования программы.",
+    terms_s7_h: "7. Прозрачность команды разработчиков",
+    terms_s7_p: "Babel открыто сообщает, что разработку продукта ведёт несовершеннолетний под руководством и юридическим и корпоративным управлением ответственного взрослого, официально назначенного в структуре компании.",
+    terms_s8_h: "8. Физическое устройство тарифа Pro",
+    terms_s8_p: "Физическое устройство синхронизации (USB-накопитель/плата), поставляемое с тарифом Pro, переходит в собственность пользователя с момента получения. В случае утери, поломки или ненадлежащего использования расходы на замену несёт пользователь; для получения замены необходимо обратиться в Babel.",
+    terms_s9_h: "9. Изменения",
+    terms_s9_p: "Настоящие условия могут обновляться. О любых существенных изменениях активные пользователи будут уведомлены.",
+    terms_s10_h: "10. Юрисдикция",
+    terms_s10_p: "Настоящие условия регулируются законодательством Испании. Любые споры передаются на рассмотрение в компетентные суды города Марбельи, Испания.",
+    footer_copy: "© 2026 Security Babel. Все права защищены.",
+    footer_privacy: "Политика конфиденциальности",
+    footer_terms: "Условия использования",
+  },
+  ar: {
+    nav_back: "رجوع",
+    page_label: "قانوني",
+    page_title: "شروط الاستخدام",
+    page_meta: "آخر تحديث: أغسطس 2026 · المشغّل: دارو باليستيروس سانتشيز",
+    terms_s1_h: "1. حول الخدمة",
+    terms_s1_p: "Security Babel هو برنامج للتشفير وإدارة الوثائق والترجمة المحلية، طوّره وتديره دارو باليستيروس سانتشيز.",
+    terms_s2_h: "2. الترخيص",
+    terms_s2_p: "يخضع استخدام Security Babel لشروط الترخيص المُبرَم (Standard أو Pro أو Enterprise). الوصول شخصي وغير قابل للتحويل وفقاً لعدد الحسابات المشتركة.",
+    terms_s3_h: "3. النسخ الاحتياطية",
+    terms_s3_p: "يتحمل المستخدم مسؤولية الاحتفاظ بنسخ احتياطية خاصة به من الوثائق التي يديرها عبر Babel. لا يُغني Babel عن الحاجة إلى إنشاء نسخ احتياطية خارجية لمعلومات المستخدم.",
+    terms_s4_h: "4. انقطاع الخدمة",
+    terms_s4_p: "في حال توقف Babel عن تقديم الخدمة أو صيانتها، يحق للمستخدم تصدير جميع بياناته قبل الإيقاف النهائي للخدمة.",
+    terms_s5_h: "5. سياسة الاسترداد",
+    terms_s5_p_pre: "إذا لم تكن راضياً عن Security Babel، يحق لك طلب استرداد كامل خلال 10 أيام تقويمية من تاريخ الاشتراك، بالكتابة إلى ",
+    terms_s6_h: "6. حدود المسؤولية عن فقدان البيانات",
+    terms_s6_p1: "يطبّق Babel تدابير أمنية ويجري عمليات تدقيق دورية للحد من المخاطر، غير أنه لا يضمن استحالة فقدان البيانات بشكل مطلق. تُحدَّد مسؤولية Babel عن الحوادث وفقاً لما هو منصوص عليه في هذه الشروط.",
+    terms_s6_p2: "علاوة على ذلك، لا يتحمل Babel مسؤولية فقدان البيانات الناجم عن فقدان المستخدم لكلمة المرور الرئيسية أو عبارة الاسترداد أو نسيانها، ولا الأضرار الناتجة عن الاستخدام غير الصحيح للبرنامج.",
+    terms_s7_h: "7. الشفافية في فريق التطوير",
+    terms_s7_p: "يُفصح Babel بشفافية أن تطوير المنتج يقوده قاصر تحت إشراف وإدارة قانونية وشركاتية من قِبَل شخص بالغ مسؤول معيَّن رسمياً في هيكل الشركة.",
+    terms_s8_h: "8. الجهاز الفيزيائي لخطة Pro",
+    terms_s8_p: "يصبح جهاز المزامنة الفيزيائي (محرك USB أو لوحة) المُسلَّم مع خطة Pro ملكاً للمستخدم لحظة التسليم. في حال الفقدان أو التلف أو سوء الاستخدام، تقع تكاليف الاستبدال على عاتق المستخدم، الذي يتعين عليه التواصل مع Babel لطلب بديل.",
+    terms_s9_h: "9. التعديلات",
+    terms_s9_p: "قد تُحدَّث هذه الشروط. سيتم إبلاغ المستخدمين النشطين بأي تغييرات جوهرية.",
+    terms_s10_h: "10. الاختصاص القضائي",
+    terms_s10_p: "تخضع هذه الشروط للقانون الإسباني. تُحال أي نزاعات إلى المحاكم المختصة في ماربيا، إسبانيا.",
+    footer_copy: "© 2026 Security Babel. جميع الحقوق محفوظة.",
+    footer_privacy: "سياسة الخصوصية",
+    footer_terms: "شروط الاستخدام",
+  },
+};
+
+function setLang(lang) {
+  const t = T[lang];
+  if (!t) return;
+  const root = document.getElementById('root');
+  const isRtl = lang === 'ar';
+  root.setAttribute('lang', lang);
+  root.setAttribute('dir', isRtl ? 'rtl' : 'ltr');
+  document.getElementById('lang-label').textContent = lang.toUpperCase();
+
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    if (t[key] !== undefined) el.textContent = t[key];
+  });
+
+  // El párrafo de reembolso tiene HTML interno (enlace), reconstruir a mano
+  const s5pre = document.querySelector('[data-i18n="terms_s5_p_pre"]');
+  if (s5pre) s5pre.textContent = t.terms_s5_p_pre;
+
+  localStorage.setItem('babel_lang', lang);
+}
+
+// Lang dropdown
+const btn = document.getElementById('lang-btn');
+const dd  = document.getElementById('lang-dropdown');
+btn.addEventListener('click', () => {
+  const open = dd.classList.toggle('open');
+  btn.setAttribute('aria-expanded', open);
+});
+document.addEventListener('click', e => {
+  if (!document.getElementById('lang-wrapper').contains(e.target)) {
+    dd.classList.remove('open');
+    btn.setAttribute('aria-expanded', false);
+  }
+});
+document.querySelectorAll('.lang-option').forEach(opt => {
+  opt.addEventListener('click', () => {
+    setLang(opt.dataset.lang);
+    dd.classList.remove('open');
+    btn.setAttribute('aria-expanded', false);
+  });
+});
+
+// Init
+const saved = localStorage.getItem('babel_lang') || 'es';
+setLang(saved);
+</script>
+</body>
+</html>
