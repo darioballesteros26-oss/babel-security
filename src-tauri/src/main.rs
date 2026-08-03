@@ -7,6 +7,7 @@ mod babel_p2p;
 mod bip39_words;
 mod compartir;
 mod finder;
+mod gmail_oauth;
 mod img_a_pdf;
 mod pdf_reducir;
 mod conexion_directa;
@@ -48,6 +49,10 @@ static SERVIDOR_ESTADO: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU
 // Clave: token opaco generado por nuevo_id(); valor: ruta canónica.
 // Cada import tiene su propio token — evita que imports concurrentes se sobreescriban.
 static PENDING_BORRAR_ORIGINAL: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+// Estado temporal del flujo PKCE Gmail OAuth en curso.
+// Contiene (code_verifier, puerto_callback) mientras el usuario autoriza en el browser.
+static PKCE_EN_CURSO: Mutex<Option<(zeroize::Zeroizing<String>, u16)>> = Mutex::new(None);
 
 // HELPER — Borrado seguro de archivos temporales
 // Sobreescribe el archivo con ceros antes de borrarlo.
@@ -3496,6 +3501,26 @@ fn es_remitente_valido(s: &str) -> bool {
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// HELPER EMAIL — access token OAuth o contraseña convencional
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn credencial_email(
+    creds: &traductor::CredencialesEmail,
+    subclave_hex: &str,
+) -> Result<(String, bool), String> {
+    if creds.usar_oauth {
+        let token = gmail_oauth::obtener_access_token(
+            gmail_oauth::CLIENT_ID,
+            gmail_oauth::CLIENT_SECRET,
+            subclave_hex,
+        )?;
+        Ok((token, true))
+    } else {
+        Ok((creds.password.clone(), false))
+    }
+}
+
 // COMANDO 23 — Guardar configuración del email
 
 #[tauri::command]
@@ -3523,6 +3548,7 @@ fn guardar_config_email_tauri(
         password,
         remitentes_autorizados,
         firma,
+        usar_oauth: false,
     };
 
     traductor::guardar_config_email(&creds, &subclave_hex)?;
@@ -3551,6 +3577,7 @@ fn enviar_archivo_cifrado_tauri(
     let creds = traductor::cargar_config_email(&subclave_hex).ok_or_else(|| {
         "No hay configuración de email guardada. Configura SMTP primero.".to_string()
     })?;
+    let (credencial, usar_oauth) = credencial_email(&creds, &subclave_hex)?;
 
     let resultado = traductor::enviar_archivo_descifrado(
         &ruta,
@@ -3561,8 +3588,9 @@ fn enviar_archivo_cifrado_tauri(
         &cco,
         &creds.smtp_servidor,
         &creds.usuario,
-        &creds.password,
+        &credencial,
         &subclave_hex,
+        usar_oauth,
     )
     .map_err(|e| format!("Error enviando email: {}", e));
 
@@ -3609,6 +3637,7 @@ fn enviar_bytes_cifrados_tauri(
         let creds = traductor::cargar_config_email(&subclave_hex).ok_or_else(|| {
             "No hay configuración de email guardada. Configura SMTP primero.".to_string()
         })?;
+        let (credencial, usar_oauth) = credencial_email(&creds, &subclave_hex)?;
 
         traductor::enviar_archivo_descifrado(
             &ruta_temp,
@@ -3619,8 +3648,9 @@ fn enviar_bytes_cifrados_tauri(
             &cco,
             &creds.smtp_servidor,
             &creds.usuario,
-            &creds.password,
+            &credencial,
             &subclave_hex,
+            usar_oauth,
         )
         .map_err(|e| format!("Error enviando email: {}", e))?;
 
@@ -3648,9 +3678,10 @@ fn obtener_emails_tauri(
     let creds = traductor::cargar_config_email(&subclave_hex).ok_or_else(|| {
         "No hay configuración de email guardada. Configura SMTP primero.".to_string()
     })?;
+    let (credencial, usar_oauth) = credencial_email(&creds, &subclave_hex)?;
 
     let mut emails =
-        traductor::obtener_emails(&creds.imap_dominio, &creds.usuario, &creds.password)
+        traductor::obtener_emails(&creds.imap_dominio, &creds.usuario, &credencial, usar_oauth)
             .map_err(|e| format!("Error obteniendo emails: {}", e))?;
 
     if !creds.remitentes_autorizados.is_empty() {
@@ -3690,9 +3721,10 @@ fn obtener_email_completo_tauri(
 
     let creds = traductor::cargar_config_email(&subclave_hex)
         .ok_or_else(|| "No hay configuración de email guardada.".to_string())?;
+    let (credencial, usar_oauth) = credencial_email(&creds, &subclave_hex)?;
 
     let email =
-        traductor::obtener_email_completo(&creds.imap_dominio, &creds.usuario, &creds.password, id)
+        traductor::obtener_email_completo(&creds.imap_dominio, &creds.usuario, &credencial, id, usar_oauth)
             .map_err(|e| format!("Error obteniendo email: {}", e))?;
 
     if !creds.remitentes_autorizados.is_empty() {
@@ -3749,8 +3781,9 @@ fn eliminar_email_tauri(
 
     let creds = traductor::cargar_config_email(&subclave_hex)
         .ok_or_else(|| "No hay configuración de email guardada.".to_string())?;
+    let (credencial, usar_oauth) = credencial_email(&creds, &subclave_hex)?;
 
-    traductor::eliminar_email(&creds.imap_dominio, &creds.usuario, &creds.password, id)
+    traductor::eliminar_email(&creds.imap_dominio, &creds.usuario, &credencial, id, usar_oauth)
         .map_err(|e| format!("Error eliminando email: {}", e))
 }
 
@@ -3764,8 +3797,135 @@ fn marcar_no_leido_tauri(
     let subclave_hex = sesion.subclave_hex()?;
     let creds = traductor::cargar_config_email(&subclave_hex)
         .ok_or_else(|| "No hay configuración de email guardada.".to_string())?;
-    traductor::marcar_no_leido(&creds.imap_dominio, &creds.usuario, &creds.password, id)
+    let (credencial, usar_oauth) = credencial_email(&creds, &subclave_hex)?;
+    traductor::marcar_no_leido(&creds.imap_dominio, &creds.usuario, &credencial, id, usar_oauth)
         .map_err(|e| format!("Error marcando no leído: {}", e))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// COMANDOS GMAIL OAUTH
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Inicia el flujo OAuth PKCE: genera la URL de autorización, abre el browser,
+/// arranca un servidor local para el callback y, cuando llega el código,
+/// lo intercambia por tokens y los guarda cifrados.
+/// Emite el evento "oauth_gmail_resultado" con { ok: bool, email?: string, error?: string }.
+#[tauri::command]
+fn iniciar_oauth_gmail_tauri(
+    sesion: tauri::State<SesionActiva>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let subclave_hex = sesion.subclave_hex()?;
+
+    if gmail_oauth::CLIENT_ID.starts_with("TU_") {
+        return Err("Credenciales GCP no configuradas. Rellena CLIENT_ID y CLIENT_SECRET en gmail_oauth.rs.".to_string());
+    }
+
+    let flujo = gmail_oauth::construir_flujo(gmail_oauth::CLIENT_ID)?;
+    let url = flujo.url_auth.clone();
+    let verifier = flujo.verifier;
+    let puerto = flujo.puerto;
+
+    // Guardar estado PKCE para el callback
+    {
+        let mut estado = PKCE_EN_CURSO.lock().unwrap_or_else(|p| p.into_inner());
+        *estado = Some((verifier.clone(), puerto));
+    }
+
+    // Hilo que espera el callback, intercambia el código y emite evento
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        let resultado = (|| -> Result<String, String> {
+            let code = gmail_oauth::capturar_codigo(puerto)?;
+
+            let estado = {
+                let guard = PKCE_EN_CURSO.lock().unwrap_or_else(|p| p.into_inner());
+                guard.as_ref().map(|(v, p)| (v.clone(), *p))
+            };
+
+            let (verifier_guardado, puerto_guardado) = estado
+                .ok_or("Estado PKCE perdido entre pasos.".to_string())?;
+
+            let tokens = gmail_oauth::intercambiar_codigo(
+                gmail_oauth::CLIENT_ID,
+                gmail_oauth::CLIENT_SECRET,
+                &code,
+                &verifier_guardado,
+                puerto_guardado,
+            )?;
+
+            let almacenar = gmail_oauth::TokensGmail {
+                refresh_token: tokens.refresh_token.clone().to_string(),
+                email: tokens.email.clone(),
+            };
+            gmail_oauth::guardar_tokens_oauth(&almacenar, &subclave_hex)?;
+
+            // Actualizar CredencialesEmail para activar OAuth mode
+            if let Some(mut creds) = traductor::cargar_config_email(&subclave_hex) {
+                creds.usar_oauth = true;
+                creds.usuario = tokens.email.clone();
+                creds.password = String::new();
+                let _ = traductor::guardar_config_email(&creds, &subclave_hex);
+            } else {
+                // Primera vez: crear config email con OAuth
+                let creds = traductor::CredencialesEmail {
+                    smtp_servidor: "smtp.gmail.com".to_string(),
+                    imap_dominio: "imap.gmail.com".to_string(),
+                    usuario: tokens.email.clone(),
+                    password: String::new(),
+                    remitentes_autorizados: vec![],
+                    firma: String::new(),
+                    usar_oauth: true,
+                };
+                let _ = traductor::guardar_config_email(&creds, &subclave_hex);
+            }
+
+            // Limpiar estado PKCE
+            {
+                let mut estado = PKCE_EN_CURSO.lock().unwrap_or_else(|p| p.into_inner());
+                *estado = None;
+            }
+
+            Ok(tokens.email)
+        })();
+
+        let payload = match resultado {
+            Ok(email) => serde_json::json!({ "ok": true, "email": email }),
+            Err(e) => serde_json::json!({ "ok": false, "error": e }),
+        };
+        let _ = app2.emit("oauth_gmail_resultado", payload);
+    });
+
+    Ok(url)
+}
+
+/// Comprueba si hay tokens OAuth de Gmail guardados y devuelve el email asociado.
+#[tauri::command]
+fn estado_oauth_gmail_tauri(
+    sesion: tauri::State<SesionActiva>,
+) -> Result<Option<String>, String> {
+    if !gmail_oauth::tiene_oauth_guardado() {
+        return Ok(None);
+    }
+    let subclave_hex = sesion.subclave_hex()?;
+    let tokens = gmail_oauth::cargar_tokens_oauth(&subclave_hex);
+    Ok(tokens.map(|t| t.email))
+}
+
+/// Revoca el token en Google y borra las credenciales OAuth locales.
+#[tauri::command]
+fn revocar_oauth_gmail_tauri(
+    sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    gmail_oauth::revocar_oauth(gmail_oauth::CLIENT_ID, gmail_oauth::CLIENT_SECRET, &subclave_hex);
+
+    // Volver a modo contraseña en la config de email
+    if let Some(mut creds) = traductor::cargar_config_email(&subclave_hex) {
+        creds.usar_oauth = false;
+        let _ = traductor::guardar_config_email(&creds, &subclave_hex);
+    }
+    Ok(())
 }
 
 // COMANDO — Comprobar si el email está configurado
@@ -5110,6 +5270,9 @@ fn main() {
             obtener_firma_email,
             eliminar_email_tauri,
             marcar_no_leido_tauri,
+            iniciar_oauth_gmail_tauri,
+            estado_oauth_gmail_tauri,
+            revocar_oauth_gmail_tauri,
             guardar_html_frase,
             borrar_html_frase,
             compartir_directo,

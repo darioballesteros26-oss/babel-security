@@ -903,4 +903,79 @@ mod tests {
         let edad = ahora_unix().saturating_sub(sol.ts_recibida);
         assert!(edad > 48 * 3600, "solicitud de 49h debe considerarse caducada");
     }
+
+    // Fase 1: HMAC de autenticación de broadcast es determinista
+    #[test]
+    fn hmac_es_determinista() {
+        let ts = 1_700_000_000u64;
+        let h1 = hmac_sinc("test.local", ts);
+        let h2 = hmac_sinc("test.local", ts);
+        assert_eq!(h1, h2, "mismo dominio+ts debe producir mismo HMAC");
+    }
+
+    // Fase 1: HMAC cambia al cambiar el dominio (no hay colisión trivial)
+    #[test]
+    fn hmac_difiere_con_dominio_distinto() {
+        let ts = 1_700_000_000u64;
+        let h1 = hmac_sinc("dispositivo-a.local", ts);
+        let h2 = hmac_sinc("dispositivo-b.local", ts);
+        assert_ne!(h1, h2, "distintos dominios deben producir HMAC distintos");
+    }
+
+    // Fase 1: HMAC cambia al cambiar el timestamp (replay attack básico)
+    #[test]
+    fn hmac_difiere_con_ts_distinto() {
+        let h1 = hmac_sinc("test.local", 1_000);
+        let h2 = hmac_sinc("test.local", 2_000);
+        assert_ne!(h1, h2, "distintos timestamps deben producir HMAC distintos");
+    }
+
+    // Fase 1: HMAC es un hex de 16 chars (8 bytes truncados)
+    #[test]
+    fn hmac_formato_16_chars_hex() {
+        let h = hmac_sinc("test.local", 0);
+        assert_eq!(h.len(), 16, "HMAC debe ser 16 chars hex (8 bytes)");
+        assert!(h.chars().all(|c| c.is_ascii_hexdigit()), "debe ser hex válido");
+    }
+
+    // Fase 1/3: DispositivoEmparejado hace round-trip por serde_json
+    #[test]
+    fn dispositivo_emparejado_serde_roundtrip() {
+        let orig = DispositivoEmparejado {
+            id: "abc123".into(),
+            nombre: "MacBook Pro".into(),
+            clave_hex: "f0".repeat(32),
+            ts: 1_700_000_000,
+            ip_ultima: "192.168.1.10".into(),
+            b2_pendiente: true,
+            ts_b2_pendiente: 1_699_990_000,
+        };
+        let json = serde_json::to_string(&orig).expect("debe serializar");
+        let restaurado: DispositivoEmparejado = serde_json::from_str(&json).expect("debe deserializar");
+        assert_eq!(restaurado.id, orig.id);
+        assert_eq!(restaurado.nombre, orig.nombre);
+        assert_eq!(restaurado.clave_hex, orig.clave_hex);
+        assert_eq!(restaurado.b2_pendiente, orig.b2_pendiente);
+        assert_eq!(restaurado.ts_b2_pendiente, orig.ts_b2_pendiente);
+    }
+
+    // Fase 2: SolicitudSincPublica reciente NO está caducada
+    #[test]
+    fn solicitud_reciente_no_esta_caducada() {
+        let sol = SolicitudSincPublica {
+            nombre: "Peer".into(),
+            ip: "10.0.0.1".into(),
+            tiene_b2: true,
+            ts_recibida: ahora_unix().saturating_sub(60), // hace 1 minuto
+        };
+        let edad = ahora_unix().saturating_sub(sol.ts_recibida);
+        assert!(edad < 48 * 3600, "solicitud de 1min no debe estar caducada");
+    }
+
+    // Fase 3: b2_pendiente con ts=0 nunca expira (caso arranque sin timestamp)
+    #[test]
+    fn b2_pendiente_con_ts_cero_no_expira() {
+        let disp = disp_con_b2_pendiente(0);
+        assert!(!b2_pendiente_expirado(&disp), "ts=0 no debe expirar");
+    }
 }

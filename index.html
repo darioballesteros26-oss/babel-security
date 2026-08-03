@@ -701,6 +701,27 @@
               style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;">✕</button>
           </div>
           <div class="email-config-body">
+
+            <!-- BLOQUE GMAIL OAUTH -->
+            <div id="bloque-gmail-oauth" class="input-grupo" style="border:1px solid #c8a96e33;border-radius:6px;padding:12px;margin-bottom:4px;">
+              <label class="input-label" style="color:var(--dorado);">GMAIL CON OAUTH 2.0 (recomendado)</label>
+              <div id="oauth-estado-conectado" class="hidden" style="margin:8px 0;">
+                <span id="oauth-email-label" style="font-size:0.78rem;color:#8fc98f;">Conectado como: <strong id="oauth-email-valor"></strong></span>
+              </div>
+              <div id="oauth-estado-desconectado" style="margin:8px 0;">
+                <p class="email-config-hint" style="margin:0 0 8px 0;">Inicia sesión con tu cuenta Google para usar Gmail de forma segura, sin necesidad de contraseña de aplicación.</p>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" id="btn-conectar-gmail" data-action="iniciar-oauth-gmail" class="btn-oro"
+                  style="font-size:0.75rem;padding:8px 14px;">CONECTAR CON GMAIL</button>
+                <button type="button" id="btn-desconectar-gmail" data-action="revocar-oauth-gmail" class="hidden"
+                  style="font-size:0.73rem;padding:8px 12px;background:transparent;border:1px solid #666;color:#888;border-radius:4px;cursor:pointer;">Desconectar</button>
+              </div>
+              <div id="oauth-progreso" class="hidden" style="margin-top:8px;font-size:0.75rem;color:var(--dorado);">Esperando autorización en el navegador…</div>
+            </div>
+
+            <div style="text-align:center;color:var(--texto-secundario);font-size:0.7rem;margin:8px 0;letter-spacing:.05em;">— O BIEN, CONFIGURAR MANUALMENTE —</div>
+
             <div class="input-grupo">
               <label class="input-label">Dirección de correo</label>
               <input type="text" id="smtp-usuario" placeholder="tu@email.com" class="input-vip"

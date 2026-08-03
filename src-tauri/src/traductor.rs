@@ -150,6 +150,21 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::seguridad;
 use lettre::{Message, Transport};
+
+/// Autenticador XOAUTH2 para el crate `imap`.
+/// Devuelve los bytes crudos del string XOAUTH2; el crate los codifica en base64 antes de enviar.
+pub struct XOAuth2ImapAuth {
+    pub email: String,
+    pub access_token: String,
+}
+
+impl imap::Authenticator for XOAuth2ImapAuth {
+    type Response = Vec<u8>;
+    fn process(&self, _challenge: &[u8]) -> Vec<u8> {
+        format!("user={}\x01auth=Bearer {}\x01\x01", self.email, self.access_token).into_bytes()
+    }
+}
+
 pub fn enviar_archivo_descifrado(
     ruta: &str,
     destinatario: &str,
@@ -159,12 +174,15 @@ pub fn enviar_archivo_descifrado(
     cco: &str,
     smtp_servidor: &str,
     smtp_usuario: &str,
-    smtp_password: &str,
+    smtp_password: &str, // contraseña de app, o access token cuando usar_oauth = true
     subclave_hex: &str,
+    usar_oauth: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validar_campo_imap(smtp_servidor, "smtp_servidor")?;
     validar_campo_imap(smtp_usuario, "smtp_usuario")?;
-    validar_campo_imap(smtp_password, "smtp_password")?;
+    if !usar_oauth {
+        validar_campo_imap(smtp_password, "smtp_password")?;
+    }
     // Descifrar el archivo
     let bytes_cifrados = fs::read(ruta)?;
     let contenido = seguridad::descifrar_documento(bytes_cifrados, subclave_hex)
@@ -277,10 +295,18 @@ pub fn enviar_archivo_descifrado(
         smtp_password.to_string(),
     );
 
-    let mailer = lettre::SmtpTransport::relay(smtp_servidor)?
-        .credentials(creds)
-        .timeout(Some(std::time::Duration::from_secs(30)))
-        .build();
+    let mailer = if usar_oauth {
+        lettre::SmtpTransport::relay(smtp_servidor)?
+            .credentials(creds)
+            .authentication(vec![lettre::transport::smtp::authentication::Mechanism::Xoauth2])
+            .timeout(Some(std::time::Duration::from_secs(30)))
+            .build()
+    } else {
+        lettre::SmtpTransport::relay(smtp_servidor)?
+            .credentials(creds)
+            .timeout(Some(std::time::Duration::from_secs(30)))
+            .build()
+    };
 
     mailer.send(&email)?;
     Ok(())
@@ -296,6 +322,9 @@ pub struct CredencialesEmail {
     pub remitentes_autorizados: Vec<String>,
     #[serde(default)]
     pub firma: String,
+    /// true = autenticación Gmail OAuth 2.0 (XOAUTH2); false = contraseña de aplicación
+    #[serde(default)]
+    pub usar_oauth: bool,
 }
 
 // ============================================================
@@ -2180,12 +2209,19 @@ fn obtener_emails_interno(
     imap_dominio: &str,
     usuario: &str,
     password: &str,
+    usar_oauth: bool,
 ) -> Result<Vec<EmailResumen>, String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
 
-    let mut sesion = cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
 
     sesion.select("INBOX").map_err(|e| e.to_string())?;
 
@@ -2291,15 +2327,18 @@ pub fn obtener_emails(
     imap_dominio: &str,
     usuario: &str,
     password: &str,
+    usar_oauth: bool,
 ) -> Result<Vec<EmailResumen>, Box<dyn std::error::Error>> {
     validar_campo_imap(imap_dominio, "imap_dominio")?;
     validar_campo_imap(usuario, "usuario")?;
-    validar_campo_imap(password, "password")?;
+    if !usar_oauth {
+        validar_campo_imap(password, "password")?;
+    }
     let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<EmailResumen>, String>>();
     let dom = Zeroizing::new(imap_dominio.to_string());
     let usr = Zeroizing::new(usuario.to_string());
     let pwd = Zeroizing::new(password.to_string());
-    std::thread::spawn(move || { let _ = tx.send(obtener_emails_interno(dom.as_str(), usr.as_str(), pwd.as_str())); });
+    std::thread::spawn(move || { let _ = tx.send(obtener_emails_interno(dom.as_str(), usr.as_str(), pwd.as_str(), usar_oauth)); });
     rx.recv_timeout(std::time::Duration::from_secs(30))
         .map_err(|_| "Timeout de conexión IMAP (30s)".to_string())?
         .map_err(|e| e.into())
@@ -2353,12 +2392,19 @@ fn obtener_email_completo_interno(
     usuario: &str,
     password: &str,
     id: u32,
+    usar_oauth: bool,
 ) -> Result<EmailCompletoRust, String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
 
-    let mut sesion = cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
 
     sesion.select("INBOX").map_err(|e| e.to_string())?;
 
@@ -2413,10 +2459,13 @@ pub fn obtener_email_completo(
     usuario: &str,
     password: &str,
     id: u32,
+    usar_oauth: bool,
 ) -> Result<EmailCompletoRust, Box<dyn std::error::Error>> {
     validar_campo_imap(imap_dominio, "imap_dominio")?;
     validar_campo_imap(usuario, "usuario")?;
-    validar_campo_imap(password, "password")?;
+    if !usar_oauth {
+        validar_campo_imap(password, "password")?;
+    }
 
     let dom = Zeroizing::new(imap_dominio.to_string());
     let usr = Zeroizing::new(usuario.to_string());
@@ -2424,7 +2473,7 @@ pub fn obtener_email_completo(
 
     let (tx, rx) = std::sync::mpsc::channel::<Result<EmailCompletoRust, String>>();
     std::thread::spawn(move || {
-        let _ = tx.send(obtener_email_completo_interno(dom.as_str(), usr.as_str(), pwd.as_str(), id));
+        let _ = tx.send(obtener_email_completo_interno(dom.as_str(), usr.as_str(), pwd.as_str(), id, usar_oauth));
     });
 
     rx.recv_timeout(std::time::Duration::from_secs(30))
@@ -2441,14 +2490,20 @@ fn eliminar_email_interno(
     usuario: &str,
     password: &str,
     uid: u32,
+    usar_oauth: bool,
 ) -> Result<(), String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
 
-    let mut sesion = cliente
-        .login(usuario, password)
-        .map_err(|_| "Error de autenticación IMAP.".to_string())?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password)
+            .map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
 
     sesion.select("INBOX").map_err(|e| e.to_string())?;
 
@@ -2469,10 +2524,13 @@ pub fn eliminar_email(
     usuario: &str,
     password: &str,
     uid: u32,
+    usar_oauth: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validar_campo_imap(imap_dominio, "imap_dominio")?;
     validar_campo_imap(usuario, "usuario")?;
-    validar_campo_imap(password, "password")?;
+    if !usar_oauth {
+        validar_campo_imap(password, "password")?;
+    }
 
     let dom = Zeroizing::new(imap_dominio.to_string());
     let usr = Zeroizing::new(usuario.to_string());
@@ -2485,6 +2543,7 @@ pub fn eliminar_email(
             usr.as_str(),
             pwd.as_str(),
             uid,
+            usar_oauth,
         ));
     });
 
@@ -2498,13 +2557,19 @@ fn marcar_no_leido_interno(
     usuario: &str,
     password: &str,
     uid: u32,
+    usar_oauth: bool,
 ) -> Result<(), String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
-    let mut sesion = cliente
-        .login(usuario, password)
-        .map_err(|_| "Error de autenticación IMAP.".to_string())?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password)
+            .map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
     sesion.select("INBOX").map_err(|e| e.to_string())?;
     sesion
         .uid_store(uid.to_string(), "-FLAGS (\\Seen)")
@@ -2518,16 +2583,19 @@ pub fn marcar_no_leido(
     usuario: &str,
     password: &str,
     uid: u32,
+    usar_oauth: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validar_campo_imap(imap_dominio, "imap_dominio")?;
     validar_campo_imap(usuario, "usuario")?;
-    validar_campo_imap(password, "password")?;
+    if !usar_oauth {
+        validar_campo_imap(password, "password")?;
+    }
     let dom = Zeroizing::new(imap_dominio.to_string());
     let usr = Zeroizing::new(usuario.to_string());
     let pwd = Zeroizing::new(password.to_string());
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     std::thread::spawn(move || {
-        let _ = tx.send(marcar_no_leido_interno(dom.as_str(), usr.as_str(), pwd.as_str(), uid));
+        let _ = tx.send(marcar_no_leido_interno(dom.as_str(), usr.as_str(), pwd.as_str(), uid, usar_oauth));
     });
     rx.recv_timeout(std::time::Duration::from_secs(30))
         .map_err(|_| "Timeout IMAP (30s)".to_string())?
@@ -2724,6 +2792,89 @@ pub fn traducir_inteligente(
     match traducir_via_servidor(texto, par) {
         Ok(traduccion) => (traduccion, 0),
         Err(_) => motor_atomico(texto, dict, subclave_hex),
+    }
+}
+
+// ── Tests email / OAuth (sin red) ───────────────────────────────────────────
+#[cfg(test)]
+mod tests_email {
+    use super::*;
+
+    // RFC 7628 §3.1: el string XOAUTH2 debe tener la forma exacta que Gmail espera.
+    #[test]
+    fn xoauth2_format_correcto() {
+        use imap::Authenticator;
+        let auth = XOAuth2ImapAuth {
+            email: "user@example.com".to_string(),
+            access_token: "ya29.token".to_string(),
+        };
+        let response = auth.process(b"");
+        let s = String::from_utf8(response).expect("debe ser UTF-8 válido");
+        assert_eq!(s, "user=user@example.com\x01auth=Bearer ya29.token\x01\x01");
+    }
+
+    // El token vacío también produce un string XOAUTH2 con estructura correcta
+    #[test]
+    fn xoauth2_format_con_token_vacio() {
+        use imap::Authenticator;
+        let auth = XOAuth2ImapAuth {
+            email: "a@b.com".to_string(),
+            access_token: String::new(),
+        };
+        let s = String::from_utf8(auth.process(b"")).unwrap();
+        assert!(s.starts_with("user=a@b.com\x01auth=Bearer "));
+        assert!(s.ends_with("\x01\x01"));
+    }
+
+    // Backward-compat: JSON de credenciales antiguo (sin usar_oauth) carga con false
+    #[test]
+    fn credenciales_sin_usar_oauth_default_es_false() {
+        let json = r#"{
+            "smtp_servidor": "smtp.gmail.com",
+            "imap_dominio": "imap.gmail.com",
+            "usuario": "u@gmail.com",
+            "password": "pass",
+            "remitentes_autorizados": [],
+            "firma": ""
+        }"#;
+        let creds: CredencialesEmail = serde_json::from_str(json).expect("debe parsear");
+        assert!(!creds.usar_oauth, "usar_oauth debe ser false por defecto");
+    }
+
+    // CredencialesEmail con usar_oauth=true hace round-trip por serde_json
+    #[test]
+    fn credenciales_usar_oauth_serde_roundtrip() {
+        let orig = CredencialesEmail {
+            smtp_servidor: "smtp.gmail.com".into(),
+            imap_dominio: "imap.gmail.com".into(),
+            usuario: "u@gmail.com".into(),
+            password: String::new(),
+            remitentes_autorizados: vec![],
+            firma: String::new(),
+            usar_oauth: true,
+        };
+        let json = serde_json::to_string(&orig).unwrap();
+        let restaurado: CredencialesEmail = serde_json::from_str(&json).unwrap();
+        assert!(restaurado.usar_oauth);
+        assert_eq!(restaurado.usuario, "u@gmail.com");
+        assert!(restaurado.password.is_empty());
+    }
+
+    // validar_campo_imap acepta tokens OAuth reales (sin caracteres de control)
+    #[test]
+    fn tokens_oauth_pasan_validacion_imap() {
+        // Los access tokens de Google son base64url: A-Z a-z 0-9 . _ - /
+        let token_real = "ya29.A0ARrdaM_base64url-token.with.dots/and-dashes";
+        assert!(validar_campo_imap(token_real, "access_token").is_ok(),
+            "un access token OAuth real debe pasar validar_campo_imap");
+    }
+
+    // validar_campo_imap rechaza valores con caracteres de control (inyección IMAP)
+    #[test]
+    fn validacion_rechaza_caracteres_de_control() {
+        let malicioso = "pass\r\nA UID FETCH 1:* (FLAGS)\r\n";
+        assert!(validar_campo_imap(malicioso, "test").is_err(),
+            "debe rechazar caracteres de control que podrían inyectarse en IMAP");
     }
 }
 

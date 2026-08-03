@@ -269,4 +269,51 @@ mod tests {
         let res = imagen_a_pdf(b"esto no es una imagen");
         assert!(res.is_err(), "debe fallar con datos inválidos");
     }
+
+    fn bmp_rgb(lado: u32) -> Vec<u8> {
+        let img: image::RgbImage = ImageBuffer::from_fn(lado, lado, |x, y| {
+            Rgb([((x * 3 + y * 7) % 256) as u8, ((x + y * 2) % 256) as u8, 64u8])
+        });
+        let mut buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Bmp).unwrap();
+        buf
+    }
+
+    fn tiff_rgb(lado: u32) -> Vec<u8> {
+        let img: image::RgbImage = ImageBuffer::from_fn(lado, lado, |x, y| {
+            Rgb([((x + y) % 256) as u8, ((x * 2 + y) % 256) as u8, 128u8])
+        });
+        let mut buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Tiff).unwrap();
+        buf
+    }
+
+    #[test]
+    fn bmp_produce_pdf_valido() {
+        let pdf = imagen_a_pdf(&bmp_rgb(300)).expect("debe convertir BMP");
+        assert_eq!(n_paginas(&pdf), 1);
+        assert!(!pdf.is_empty());
+    }
+
+    #[test]
+    fn tiff_produce_pdf_valido() {
+        let pdf = imagen_a_pdf(&tiff_rgb(300)).expect("debe convertir TIFF");
+        assert_eq!(n_paginas(&pdf), 1);
+        assert!(!pdf.is_empty());
+    }
+
+    #[test]
+    fn lista_vacia_da_error() {
+        let res = imagenes_a_pdf_unico(&[]);
+        assert!(res.is_err(), "lista vacía debe devolver error");
+    }
+
+    #[test]
+    fn una_imagen_y_varias_producen_pdf_coherente() {
+        let img = jpeg_rgb(200);
+        let solo = imagen_a_pdf(&img).unwrap();
+        let multi = imagenes_a_pdf_unico(&[img]).unwrap();
+        assert_eq!(n_paginas(&solo), 1);
+        assert_eq!(n_paginas(&multi), 1);
+    }
 }

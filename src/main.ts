@@ -540,6 +540,8 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "abrir-componer-email": abrirComponerEmail(); break;
     case "toggle-config-smtp": toggleConfigSmtp(); break;
     case "guardar-smtp": guardarConfigSmtp(); break;
+    case "iniciar-oauth-gmail": iniciarOAuthGmail(); break;
+    case "revocar-oauth-gmail": revocarOAuthGmail(); break;
     case "seleccionar-archivo-email": seleccionarArchivoEmail(); break;
     case "enviar-email": enviarEmail(); break;
     case "enviar-email-seleccion": {
@@ -589,6 +591,24 @@ window.addEventListener("DOMContentLoaded", async () => {
   listen<string[]>("amenaza-detectada", (evento) => {
     const amenazas = evento.payload ?? [];
     if (amenazas.length > 0) mostrarAlertaAmenaza(amenazas);
+  }).catch(() => {});
+
+  // Evento Rust: resultado del flujo OAuth Gmail
+  listen<{ ok: boolean; email?: string; error?: string }>("oauth_gmail_resultado", (ev) => {
+    document.getElementById("oauth-progreso")?.classList.add("hidden");
+    if (ev.payload.ok && ev.payload.email) {
+      actualizarUIGmailOAuth(ev.payload.email);
+      _smtpConfigurado = true;
+      mostrarToast(`Gmail conectado: ${ev.payload.email}`, false);
+      cargarBandejaEmail();
+    } else {
+      mostrarToast(`Error OAuth: ${ev.payload.error ?? "desconocido"}`, true);
+    }
+  }).catch(() => {});
+
+  // Comprobar si ya hay OAuth Gmail guardado al iniciar sesión
+  invoke<string | null>("estado_oauth_gmail_tauri").then((email) => {
+    if (email) actualizarUIGmailOAuth(email);
   }).catch(() => {});
 
   activarEntradaSeguraEnPasswords();
@@ -3658,6 +3678,58 @@ function manejarSeleccionArchivoEmail(event: Event): void {
   archivoEmailFile = archivo;
   const el = document.getElementById("comp-archivo-nombre");
   if (el) el.textContent = "📎 " + archivo.name;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GMAIL OAUTH
+// ──────────────────────────────────────────────────────────────────────────────
+
+function actualizarUIGmailOAuth(email: string): void {
+  const conectado = document.getElementById("oauth-estado-conectado");
+  const desconectado = document.getElementById("oauth-estado-desconectado");
+  const emailValor = document.getElementById("oauth-email-valor");
+  const btnConectar = document.getElementById("btn-conectar-gmail");
+  const btnDesconectar = document.getElementById("btn-desconectar-gmail");
+  if (emailValor) emailValor.textContent = email;
+  conectado?.classList.remove("hidden");
+  desconectado?.classList.add("hidden");
+  btnConectar?.classList.add("hidden");
+  btnDesconectar?.classList.remove("hidden");
+}
+
+function resetUIGmailOAuth(): void {
+  const conectado = document.getElementById("oauth-estado-conectado");
+  const desconectado = document.getElementById("oauth-estado-desconectado");
+  const btnConectar = document.getElementById("btn-conectar-gmail");
+  const btnDesconectar = document.getElementById("btn-desconectar-gmail");
+  conectado?.classList.add("hidden");
+  desconectado?.classList.remove("hidden");
+  btnConectar?.classList.remove("hidden");
+  btnDesconectar?.classList.add("hidden");
+}
+
+async function iniciarOAuthGmail(): Promise<void> {
+  const progreso = document.getElementById("oauth-progreso");
+  progreso?.classList.remove("hidden");
+  try {
+    const url = await invoke<string>("iniciar_oauth_gmail_tauri");
+    // Abrir el browser con la URL de autorización
+    await openPath(url);
+  } catch (e) {
+    progreso?.classList.add("hidden");
+    mostrarToast("Error iniciando OAuth: " + String(e), true);
+  }
+}
+
+async function revocarOAuthGmail(): Promise<void> {
+  try {
+    await invoke("revocar_oauth_gmail_tauri");
+    resetUIGmailOAuth();
+    _smtpConfigurado = false;
+    mostrarToast("Gmail desconectado", false);
+  } catch (e) {
+    mostrarToast("Error al desconectar: " + String(e), true);
+  }
 }
 
 // Muestra u oculta el panel de configuración de correo
