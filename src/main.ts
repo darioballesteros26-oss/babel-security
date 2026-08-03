@@ -542,6 +542,8 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "guardar-smtp": guardarConfigSmtp(); break;
     case "iniciar-oauth-gmail": iniciarOAuthGmail(); break;
     case "revocar-oauth-gmail": revocarOAuthGmail(); break;
+    case "conectar-gmail-desde-modal": cerrarModalConfigurarEmail(); iniciarOAuthGmail(); break;
+    case "cerrar-modal-configurar-email": cerrarModalConfigurarEmail(); break;
     case "seleccionar-archivo-email": seleccionarArchivoEmail(); break;
     case "enviar-email": enviarEmail(); break;
     case "enviar-email-seleccion": {
@@ -599,6 +601,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (ev.payload.ok && ev.payload.email) {
       actualizarUIGmailOAuth(ev.payload.email);
       _smtpConfigurado = true;
+      cerrarModalConfigurarEmail();
       mostrarToast(`Gmail conectado: ${ev.payload.email}`, false);
       cargarBandejaEmail();
     } else {
@@ -1150,6 +1153,9 @@ let buzonActivoGuardados: string = "todos";
 let terminoBusquedaArchivos = "";
 let terminoBusquedaBuzones = "";
 let _smtpConfigurado: boolean = false;
+// true = el usuario cerró el modal sin conectar en esta sesión; no vuelve a aparecer
+// hasta que reinicie la app. Se resetea a false al arrancar (variable en RAM, sin localStorage).
+let _modalEmailVistoEnSesion: boolean = false;
 // Tipo que refleja el struct Rust MetadatosArchivo
 interface MetadatosArchivo {
   nombre: string;
@@ -3026,7 +3032,7 @@ function cambiarModoP2P(modo: string): void {
     panelEmail?.classList.remove("hidden");
     if (subtitulo) subtitulo.textContent = "EMAIL · CIFRADO LOCAL";
     if (!_smtpConfigurado) {
-      setTimeout(() => toggleConfigSmtp(), 300);
+      setTimeout(() => mostrarModalConfigurarEmail(), 300);
     } else {
       cargarBandejaEmail();
       iniciarRecargaAutomatica();
@@ -3681,6 +3687,22 @@ function manejarSeleccionArchivoEmail(event: Event): void {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// MODAL CONFIGURAR CORREO
+// ──────────────────────────────────────────────────────────────────────────────
+
+function mostrarModalConfigurarEmail(): void {
+  // No mostrar si ya se cerró en esta sesión o si ya hay cuenta conectada
+  if (_modalEmailVistoEnSesion || _smtpConfigurado) return;
+  document.getElementById("modal-configurar-email")?.classList.remove("hidden");
+}
+
+function cerrarModalConfigurarEmail(): void {
+  // Suprimir para el resto de la sesión (no persiste entre reinicios)
+  _modalEmailVistoEnSesion = true;
+  document.getElementById("modal-configurar-email")?.classList.add("hidden");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // GMAIL OAUTH
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -4241,6 +4263,11 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     traducidosGuardados: "TRADUCIDOS Y GUARDADOS", buzones: "BUZONES", archivosTitulo: "ARCHIVOS",
     noArchivos: "No hay archivos guardados", arrastra: "Arrastra documentos aquí para cifrarlos",
     buzonesTord: "BUZONES", finder: "◫ FINDER",
+    modalEmailTitulo: "CONFIGURAR CORREO",
+    modalEmailDesc: "Para leer y enviar correos desde Babel, conecta tu cuenta de Gmail.",
+    modalEmailBtnConectar: "CONECTAR CON GMAIL",
+    modalEmailAviso: "Tu correo se conecta de forma segura a través de Google. Babel nunca ve ni almacena tu contraseña. Autoriza solo desde dispositivos en los que confíes.",
+    modalEmailBtnPosponer: "Ahora no",
   },
   en: {
     traducir: "TRANSLATE", archivos: "FILES", p2p: "P2P", ajustes: "⚙ SETTINGS", cerrarSesion: "SIGN OUT",
@@ -4255,6 +4282,11 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     traducidosGuardados: "TRANSLATED & SAVED", buzones: "FOLDERS", archivosTitulo: "FILES",
     noArchivos: "No saved files", arrastra: "Drag documents here to encrypt them",
     buzonesTord: "FOLDERS", finder: "◫ FINDER",
+    modalEmailTitulo: "SET UP EMAIL",
+    modalEmailDesc: "To read and send emails from Babel, connect your Gmail account.",
+    modalEmailBtnConectar: "CONNECT WITH GMAIL",
+    modalEmailAviso: "Your email connects securely through Google. Babel never sees or stores your password. Only authorize this on devices you trust.",
+    modalEmailBtnPosponer: "Not now",
   },
   fr: {
     traducir: "TRADUIRE", archivos: "FICHIERS", p2p: "P2P", ajustes: "⚙ PARAMÈTRES", cerrarSesion: "DÉCONNEXION",
@@ -4269,6 +4301,11 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     traducidosGuardados: "TRADUITS ET SAUVEGARDÉS", buzones: "DOSSIERS", archivosTitulo: "FICHIERS",
     noArchivos: "Aucun fichier sauvegardé", arrastra: "Faites glisser des documents ici pour les chiffrer",
     buzonesTord: "DOSSIERS", finder: "◫ FINDER",
+    modalEmailTitulo: "CONFIGURER LE COURRIER",
+    modalEmailDesc: "Pour lire et envoyer des courriels depuis Babel, connectez votre compte Gmail.",
+    modalEmailBtnConectar: "CONNECTER AVEC GMAIL",
+    modalEmailAviso: "Votre courrier se connecte de manière sécurisée via Google. Babel ne voit ni ne stocke jamais votre mot de passe. N'autorisez ceci que depuis des appareils de confiance.",
+    modalEmailBtnPosponer: "Pas maintenant",
   },
   ar: {
     traducir: "ترجمة", archivos: "ملفات", p2p: "P2P", ajustes: "⚙ إعدادات", cerrarSesion: "تسجيل الخروج",
@@ -4283,6 +4320,11 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     traducidosGuardados: "مترجم ومحفوظ", buzones: "المجلدات", archivosTitulo: "الملفات",
     noArchivos: "لا توجد ملفات محفوظة", arrastra: "اسحب المستندات هنا لتشفيرها",
     buzonesTord: "المجلدات", finder: "◫ FINDER",
+    modalEmailTitulo: "إعداد البريد الإلكتروني",
+    modalEmailDesc: "لقراءة رسائلك وإرسالها من بابل، اربط حساب Gmail الخاص بك.",
+    modalEmailBtnConectar: "ربط حساب Gmail",
+    modalEmailAviso: "يتصل بريدك بشكل آمن عبر Google. لا يرى بابل ولا يخزن كلمة مرورك. لا تصرح إلا على الأجهزة التي تثق بها.",
+    modalEmailBtnPosponer: "ليس الآن",
   },
 };
 
@@ -4307,6 +4349,11 @@ function cambiarIdiomaUI(idioma: string): void {
     "ui-traducidos-guardados": t.traducidosGuardados, "ui-buzones": t.buzones,
     "ui-finder": t.finder, "ui-archivos-titulo": t.archivosTitulo,
     "ui-no-archivos": t.noArchivos, "ui-arrastra": t.arrastra,
+    "modal-email-titulo": t.modalEmailTitulo,
+    "modal-email-desc": t.modalEmailDesc,
+    "modal-email-btn-conectar": t.modalEmailBtnConectar,
+    "modal-email-aviso": t.modalEmailAviso,
+    "modal-email-btn-posponer": t.modalEmailBtnPosponer,
   };
   for (const [id, texto] of Object.entries(mapa)) {
     const el = document.getElementById(id);
@@ -4914,3 +4961,61 @@ function bindOnclicks(root: Element) {
   const selector = INLINE_EVENT_MAP.map(([a]) => `[${a}]`).join(",");
   root.querySelectorAll<HTMLElement>(selector).forEach(bindOnclickEl);
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TESTS MODAL CONFIGURAR CORREO
+// Ejecutar desde la consola del browser: window.__babelTest.modalEmail()
+// ──────────────────────────────────────────────────────────────────────────────
+(window as any).__babelTest = {
+  modalEmail(): void {
+    let ok = 0;
+    let fail = 0;
+    const assert = (cond: boolean, msg: string) => {
+      if (cond) { console.log(`  ✓ ${msg}`); ok++; }
+      else       { console.error(`  ✗ ${msg}`); fail++; }
+    };
+
+    console.group("Tests: modal configurar correo");
+
+    // T1: sin cuenta y sin haber cerrado → modal visible
+    _smtpConfigurado = false;
+    _modalEmailVistoEnSesion = false;
+    mostrarModalConfigurarEmail();
+    assert(
+      !document.getElementById("modal-configurar-email")?.classList.contains("hidden"),
+      "T1: aparece cuando no hay cuenta conectada"
+    );
+
+    // T2: cerrarlo lo oculta y activa bandera de sesión
+    cerrarModalConfigurarEmail();
+    assert(
+      document.getElementById("modal-configurar-email")?.classList.contains("hidden") ?? false,
+      "T2: se oculta al cerrarlo"
+    );
+    assert(_modalEmailVistoEnSesion as boolean, "T2: bandera de sesión queda activada");
+
+    // T3: después de cerrarlo en la sesión no reaparece
+    mostrarModalConfigurarEmail();
+    assert(
+      document.getElementById("modal-configurar-email")?.classList.contains("hidden") === true,
+      "T3: no reaparece si ya fue cerrado en la sesión"
+    );
+
+    // T4: con cuenta conectada nunca aparece (aunque se resetee la bandera)
+    _smtpConfigurado = true;
+    _modalEmailVistoEnSesion = false;
+    mostrarModalConfigurarEmail();
+    assert(
+      document.getElementById("modal-configurar-email")?.classList.contains("hidden") === true,
+      "T4: no aparece si ya hay cuenta conectada"
+    );
+
+    // Restaurar estado real
+    _smtpConfigurado = false;
+    _modalEmailVistoEnSesion = false;
+    document.getElementById("modal-configurar-email")?.classList.add("hidden");
+
+    console.groupEnd();
+    console.log(`Resultado: ${ok}/${ok + fail} tests pasaron`);
+  },
+};

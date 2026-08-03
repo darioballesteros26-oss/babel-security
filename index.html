@@ -1442,6 +1442,47 @@
     </div>
 
     <!-- ============================================================ -->
+    <!-- MODAL CONFIGURAR CORREO — aparece al entrar en email sin   -->
+    <!-- cuenta conectada (se suprime el resto de la sesión si se   -->
+    <!-- cierra sin conectar; desaparece para siempre al conectar). -->
+    <!-- ============================================================ -->
+    <div id="modal-configurar-email" class="hidden" style="
+      position:fixed;inset:0;z-index:1060;background:rgba(0,0,0,0.92);
+      display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:400px;background:var(--fondo-panel,#0d0d0d);
+        border:1px solid var(--dorado);border-radius:4px;overflow:hidden;">
+        <div style="padding:28px 24px;text-align:center;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+            letter-spacing:3px;color:var(--texto-secundario);margin-bottom:18px;opacity:0.6;">
+            <span id="modal-email-titulo">CONFIGURAR CORREO</span>
+          </div>
+          <p id="modal-email-desc" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.72rem;color:var(--texto-secundario);line-height:1.6;
+            margin:0 0 22px 0;letter-spacing:0.03em;">
+            Para leer y enviar correos desde Babel, conecta tu cuenta de Gmail.
+          </p>
+          <button type="button" data-action="conectar-gmail-desde-modal"
+            class="btn-oro" style="width:100%;padding:13px 0;font-size:0.68rem;
+            letter-spacing:2.5px;margin-bottom:14px;">
+            <span id="modal-email-btn-conectar">CONECTAR CON GMAIL</span>
+          </button>
+          <p id="modal-email-aviso" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.58rem;color:var(--texto-secundario);line-height:1.65;
+            opacity:0.55;margin:0 0 20px 0;letter-spacing:0.02em;
+            border-top:1px solid rgba(200,169,110,0.15);padding-top:14px;">
+            Tu correo se conecta de forma segura a través de Google. Babel nunca ve ni almacena tu contraseña. Autoriza solo desde dispositivos en los que confíes.
+          </p>
+          <button type="button" data-action="cerrar-modal-configurar-email"
+            style="background:transparent;border:none;color:var(--texto-secundario);
+            font-family:'Times New Roman',Times,serif;font-size:0.6rem;
+            letter-spacing:1.5px;cursor:pointer;opacity:0.55;padding:4px 12px;">
+            <span id="modal-email-btn-posponer">Ahora no</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
     <!-- MODAL CONVERTIR IMÁGENES → PDF (elegir modo)               -->
     <!-- ============================================================ -->
     <div id="modal-img-a-pdf" class="hidden" style="
