@@ -724,9 +724,9 @@ function renderizarRegistro(eventos: EventoDiario[], ipsHistorial: string[]): vo
   const listaEl = document.getElementById("registro-lista")!;
   const resumenEl = document.getElementById("registro-resumen")!;
 
-  const filtrados = _registroFiltroTipos.size === 0
+  const filtrados = (_registroFiltroTipos.size === 0
     ? eventos
-    : eventos.filter(e => _registroFiltroTipos.has(e.tipo));
+    : eventos.filter(e => _registroFiltroTipos.has(e.tipo))).slice().reverse();
 
   const logins = eventos.filter(e => e.tipo === "login").length;
   const archivos = eventos.filter(e =>
@@ -3301,6 +3301,7 @@ async function verArchivo(ruta: string): Promise<void> {
     modalNombre.textContent = escapeHTML(nombre);
     renderizarEnContenedor(texto, modalContenido);
     modal.classList.remove("hidden");
+    invoke("registrar_evento_diario", { tipo: "ver_archivo", detalle: nombre.replace(/\.babel$/, "").replace(/^\d+_/, "") }).catch(() => {});
   } catch (error) {
     mostrarToast("Error abriendo archivo: " + String(error), true);
   }
