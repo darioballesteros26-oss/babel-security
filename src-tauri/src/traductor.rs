@@ -2137,6 +2137,7 @@ pub struct EmailResumen {
     pub fecha: String,
     pub tiene_adjunto: bool,
     pub leido: bool,
+    pub destacado: bool,
     pub snippet: String,
 }
 
@@ -2181,18 +2182,43 @@ fn extraer_snippet(datos: &[u8]) -> String {
     {
         return String::new();
     }
-    // Tomar hasta 300 chars y colapsar espacios
-    cuerpo
-        .chars()
-        .take(300)
-        .filter(|c| !c.is_control() || *c == ' ')
-        .collect::<String>()
+    // Eliminar tags HTML si el contenido es HTML
+    let sin_tags: String = {
+        let mut out = String::new();
+        let mut en_tag = false;
+        for ch in cuerpo.chars().take(600) {
+            match ch {
+                '<' => en_tag = true,
+                '>' => en_tag = false,
+                _ if !en_tag => out.push(ch),
+                _ => {}
+            }
+        }
+        out
+    };
+    // Colapsar espacios y recortar
+    sin_tags
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .chars()
         .take(130)
         .collect()
+}
+
+/// Decodifica palabras codificadas RFC 2047 (=?charset?Q/B?...?=) en asuntos y nombres de remitente.
+/// Usa mailparse para delegar la decodificación correctamente.
+fn decodificar_rfc2047(texto: &str) -> String {
+    let decodificado = if texto.contains("=?") {
+        let cabecera = format!("Subject: {}\r\n", texto);
+        mailparse::parse_header(cabecera.as_bytes())
+            .map(|(h, _)| h.get_value())
+            .unwrap_or_else(|_| texto.to_string())
+    } else {
+        texto.to_string()
+    };
+    // Desescapar comillas IMAP: \" → "  y  \\ → \
+    decodificado.replace("\\\"", "\"").replace("\\\\", "\\")
 }
 
 /// Devuelve true si la estructura BODYSTRUCTURE indica adjuntos.
@@ -2205,11 +2231,40 @@ fn body_tiene_adjunto_str(bs_debug: &str) -> bool {
         || s.contains("attachment\"")
 }
 
+/// Resuelve el nombre real de carpeta IMAP para cada vista.
+/// Usa RFC 6154 (\Trash, \Archive, \All) con fallback a nombres comunes.
+fn resolver_carpeta_imap(
+    sesion: &mut imap::Session<impl std::io::Read + std::io::Write>,
+    imap_dominio: &str,
+    vista: &str,
+) -> String {
+    match vista {
+        "archivados" => {
+            if imap_dominio.contains("gmail") { return "[Gmail]/All Mail".to_string(); }
+            sesion.list(Some(""), Some("*")).ok()
+                .and_then(|ns| ns.iter()
+                    .find(|n| n.attributes().iter().any(|a| format!("{a:?}") == "Archive"))
+                    .map(|n| n.name().to_string()))
+                .unwrap_or_else(|| "Archive".to_string())
+        }
+        "papelera" => {
+            if imap_dominio.contains("gmail") { return "[Gmail]/Trash".to_string(); }
+            sesion.list(Some(""), Some("*")).ok()
+                .and_then(|ns| ns.iter()
+                    .find(|n| n.attributes().iter().any(|a| format!("{a:?}") == "Trash"))
+                    .map(|n| n.name().to_string()))
+                .unwrap_or_else(|| "Trash".to_string())
+        }
+        _ => "INBOX".to_string(),
+    }
+}
+
 fn obtener_emails_interno(
     imap_dominio: &str,
     usuario: &str,
     password: &str,
     usar_oauth: bool,
+    vista: &str,
 ) -> Result<Vec<EmailResumen>, String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
@@ -2223,7 +2278,8 @@ fn obtener_emails_interno(
         cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?
     };
 
-    sesion.select("INBOX").map_err(|e| e.to_string())?;
+    let carpeta = resolver_carpeta_imap(&mut sesion, imap_dominio, vista);
+    sesion.select(&carpeta).map_err(|e| format!("Error abriendo {}: {}", carpeta, e))?;
 
     // UIDs permanentes — no cambian al borrar emails (a diferencia de seq numbers)
     let todos: Vec<u32> = sesion.uid_search("ALL").map_err(|e| e.to_string())?.into_iter().collect();
@@ -2231,7 +2287,7 @@ fn obtener_emails_interno(
     let mut ids: Vec<u32> = todos;
     ids.sort_unstable();
     ids.reverse();
-    ids.truncate(20);
+    ids.truncate(50);
     if ids.is_empty() {
         let _ = sesion.logout();
         return Ok(vec![]);
@@ -2243,12 +2299,18 @@ fn obtener_emails_interno(
         .collect::<Vec<_>>()
         .join(",");
 
-    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS BODYSTRUCTURE RFC822<0.700>)").map_err(|e| e.to_string())?;
+    // BODY.PEEK[]<0.700>: RFC 3501 estándar — obtiene los primeros 700 bytes sin marcar \Seen.
+    // RFC822.PEEK no existe en el estándar; BODY.PEEK[] es el alias correcto de RFC822 con PEEK.
+    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS BODYSTRUCTURE BODY.PEEK[]<0.700>)").map_err(|e| e.to_string())?;
 
     let mut emails: Vec<EmailResumen> = Vec::new();
 
     for msg in fetch.iter() {
-        let id = msg.uid.unwrap_or(msg.message);
+        // uid_fetch siempre debería devolver UID; si falta, skip (sequence number no es fiable)
+        let id = match msg.uid {
+            Some(uid) => uid,
+            None => continue,
+        };
 
         let envelope = match msg.envelope() {
             Some(e) => e,
@@ -2274,7 +2336,7 @@ fn obtener_emails_interno(
                 let name = addr
                     .name
                     .as_ref()
-                    .map(|n| std::str::from_utf8(n).unwrap_or("").to_string())
+                    .map(|n| decodificar_rfc2047(std::str::from_utf8(n).unwrap_or("")))
                     .unwrap_or_default();
                 if name.is_empty() {
                     format!("{}@{}", mailbox, host)
@@ -2284,13 +2346,13 @@ fn obtener_emails_interno(
             })
             .unwrap_or_else(|| "Desconocido".to_string());
 
-        // Asunto
+        // Asunto — decodificar RFC 2047 (emojis, tildes, etc.)
         let asunto = envelope
             .subject
             .as_ref()
             .and_then(|s| std::str::from_utf8(s).ok())
-            .unwrap_or("Sin asunto")
-            .to_string();
+            .map(decodificar_rfc2047)
+            .unwrap_or_else(|| "Sin asunto".to_string());
 
         // Fecha
         let fecha = envelope
@@ -2304,7 +2366,8 @@ fn obtener_emails_interno(
             .map(|bs| body_tiene_adjunto_str(&format!("{bs:?}")))
             .unwrap_or(false);
 
-        let leido = msg.flags().iter().any(|f| format!("{f:?}").contains("Seen"));
+        let leido = msg.flags().iter().any(|f| matches!(f, imap::types::Flag::Seen));
+        let destacado = msg.flags().iter().any(|f| matches!(f, imap::types::Flag::Flagged));
         let snippet = msg.body().map(extraer_snippet).unwrap_or_default();
 
         emails.push(EmailResumen {
@@ -2314,6 +2377,7 @@ fn obtener_emails_interno(
             fecha,
             tiene_adjunto,
             leido,
+            destacado,
             snippet,
         });
     }
@@ -2328,6 +2392,7 @@ pub fn obtener_emails(
     usuario: &str,
     password: &str,
     usar_oauth: bool,
+    vista: &str,
 ) -> Result<Vec<EmailResumen>, Box<dyn std::error::Error>> {
     validar_campo_imap(imap_dominio, "imap_dominio")?;
     validar_campo_imap(usuario, "usuario")?;
@@ -2338,7 +2403,8 @@ pub fn obtener_emails(
     let dom = Zeroizing::new(imap_dominio.to_string());
     let usr = Zeroizing::new(usuario.to_string());
     let pwd = Zeroizing::new(password.to_string());
-    std::thread::spawn(move || { let _ = tx.send(obtener_emails_interno(dom.as_str(), usr.as_str(), pwd.as_str(), usar_oauth)); });
+    let vista_owned = vista.to_string();
+    std::thread::spawn(move || { let _ = tx.send(obtener_emails_interno(dom.as_str(), usr.as_str(), pwd.as_str(), usar_oauth, &vista_owned)); });
     rx.recv_timeout(std::time::Duration::from_secs(30))
         .map_err(|_| "Timeout de conexión IMAP (30s)".to_string())?
         .map_err(|e| e.into())
@@ -2348,7 +2414,12 @@ pub fn obtener_emails(
 // EMAIL - OBTENER EMAIL COMPLETO POR ID
 // ============================================================
 
-fn extraer_mime_rec(parte: &mailparse::ParsedMail, cuerpo: &mut String, adjuntos: &mut Vec<String>) {
+fn extraer_mime_rec(
+    parte: &mailparse::ParsedMail,
+    html: &mut Option<String>,
+    plano: &mut Option<String>,
+    adjuntos: &mut Vec<String>,
+) {
     let ct = parte.headers.get_first_header("Content-Type")
         .map(|h| h.get_value().to_lowercase())
         .unwrap_or_default();
@@ -2357,7 +2428,7 @@ fn extraer_mime_rec(parte: &mailparse::ParsedMail, cuerpo: &mut String, adjuntos
         .unwrap_or_default();
     if !parte.subparts.is_empty() {
         for sub in &parte.subparts {
-            extraer_mime_rec(sub, cuerpo, adjuntos);
+            extraer_mime_rec(sub, html, plano, adjuntos);
         }
     } else if cd.contains("attachment") {
         let nombre_raw = cd.split(';')
@@ -2371,10 +2442,10 @@ fn extraer_mime_rec(parte: &mailparse::ParsedMail, cuerpo: &mut String, adjuntos
             .unwrap_or("adjunto")
             .to_string();
         adjuntos.push(nombre);
-    } else if ct.contains("text/plain") && cuerpo.is_empty() {
-        *cuerpo = parte.get_body().unwrap_or_default();
-    } else if ct.contains("text/html") && cuerpo.is_empty() {
-        *cuerpo = parte.get_body().unwrap_or_default();
+    } else if ct.contains("text/html") && html.is_none() {
+        *html = Some(parte.get_body().unwrap_or_default());
+    } else if ct.contains("text/plain") && plano.is_none() {
+        *plano = Some(parte.get_body().unwrap_or_default());
     }
 }
 
@@ -2436,11 +2507,13 @@ fn obtener_email_completo_interno(
         .map(|h| h.get_value())
         .unwrap_or_default();
 
-    // Cuerpo de texto — búsqueda recursiva para soportar MIME anidado
-    // (ej: multipart/mixed → multipart/alternative → text/plain + text/html)
-    let mut cuerpo = String::new();
+    // Extraer cuerpo MIME: HTML tiene prioridad sobre texto plano
+    // (multipart/alternative siempre incluye ambos; queremos el HTML)
+    let mut html: Option<String> = None;
+    let mut plano: Option<String> = None;
     let mut adjuntos: Vec<String> = Vec::new();
-    extraer_mime_rec(&email_parseado, &mut cuerpo, &mut adjuntos);
+    extraer_mime_rec(&email_parseado, &mut html, &mut plano, &mut adjuntos);
+    let cuerpo = html.or(plano).unwrap_or_default();
 
     let _ = sesion.logout();
 
@@ -2511,8 +2584,9 @@ fn eliminar_email_interno(
         .uid_store(uid.to_string(), "+FLAGS (\\Deleted)")
         .map_err(|e| format!("Error marcando email: {}", e))?;
 
+    // uid_expunge (UIDPLUS, RFC 4315): solo purga este UID, no todos los \Deleted del buzón
     sesion
-        .expunge()
+        .uid_expunge(uid.to_string())
         .map_err(|e| format!("Error purgando email: {}", e))?;
 
     let _ = sesion.logout();
@@ -2600,6 +2674,209 @@ pub fn marcar_no_leido(
     rx.recv_timeout(std::time::Duration::from_secs(30))
         .map_err(|_| "Timeout IMAP (30s)".to_string())?
         .map_err(|e| e.into())
+}
+
+// ============================================================
+// EMAIL - ARCHIVAR (mover fuera de INBOX)
+// ============================================================
+
+fn archivar_email_interno(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+    usar_oauth: bool,
+) -> Result<(), String> {
+    let cliente = imap::ClientBuilder::new(imap_dominio, 993)
+        .connect()
+        .map_err(|e| format!("Error conexión IMAP: {}", e))?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password)
+            .map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
+
+    // Determinar carpeta de archivo: Gmail fijo; otros servidores via RFC 6154 \Archive,
+    // con fallback a "Archive" si el servidor no anuncia el atributo especial.
+    let destino: String = if imap_dominio.contains("gmail") {
+        "[Gmail]/All Mail".to_string()
+    } else {
+        sesion.list(Some(""), Some("*"))
+            .ok()
+            .and_then(|nombres| {
+                nombres.iter()
+                    .find(|n| n.attributes().iter().any(|a| format!("{a:?}") == "Archive"))
+                    .map(|n| n.name().to_string())
+            })
+            .unwrap_or_else(|| "Archive".to_string())
+    };
+
+    sesion.select("INBOX").map_err(|e| e.to_string())?;
+    // Intentar MOVE (RFC 6851). Si falla (servidor no soporta), hacer COPY + DELETE + uid_expunge.
+    if sesion.uid_mv(uid.to_string(), &destino).is_err() {
+        sesion.uid_copy(uid.to_string(), &destino)
+            .map_err(|e| format!("Error copiando a {}: {}", destino, e))?;
+        sesion.uid_store(uid.to_string(), "+FLAGS.SILENT (\\Deleted)")
+            .map_err(|e| format!("Error marcando eliminado: {}", e))?;
+        // uid_expunge (UIDPLUS, RFC 4315): solo purga este UID, no todos los \Deleted del buzón
+        sesion.uid_expunge(uid.to_string()).map_err(|e| format!("Error purgando: {}", e))?;
+    }
+    let _ = sesion.logout();
+    Ok(())
+}
+
+pub fn archivar_email(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+    usar_oauth: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    if !usar_oauth { validar_campo_imap(password, "password")?; }
+    let dom = Zeroizing::new(imap_dominio.to_string());
+    let usr = Zeroizing::new(usuario.to_string());
+    let pwd = Zeroizing::new(password.to_string());
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(archivar_email_interno(dom.as_str(), usr.as_str(), pwd.as_str(), uid, usar_oauth));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .map_err(|_| "Timeout IMAP (30s)".to_string())?
+        .map_err(|e| e.into())
+}
+
+// ============================================================
+// EMAIL - MARCAR/DESMARCAR DESTACADO (\Flagged)
+// ============================================================
+
+fn marcar_destacado_interno(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+    destacar: bool,
+    usar_oauth: bool,
+) -> Result<(), String> {
+    let cliente = imap::ClientBuilder::new(imap_dominio, 993)
+        .connect()
+        .map_err(|e| format!("Error conexión IMAP: {}", e))?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password)
+            .map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
+    sesion.select("INBOX").map_err(|e| e.to_string())?;
+    let op = if destacar { "+FLAGS.SILENT (\\Flagged)" } else { "-FLAGS.SILENT (\\Flagged)" };
+    sesion.uid_store(uid.to_string(), op)
+        .map_err(|e| format!("Error cambiando flag: {}", e))?;
+    let _ = sesion.logout();
+    Ok(())
+}
+
+pub fn marcar_destacado(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+    destacar: bool,
+    usar_oauth: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    if !usar_oauth { validar_campo_imap(password, "password")?; }
+    let dom = Zeroizing::new(imap_dominio.to_string());
+    let usr = Zeroizing::new(usuario.to_string());
+    let pwd = Zeroizing::new(password.to_string());
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(marcar_destacado_interno(dom.as_str(), usr.as_str(), pwd.as_str(), uid, destacar, usar_oauth));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .map_err(|_| "Timeout IMAP (30s)".to_string())?
+        .map_err(|e| e.into())
+}
+
+// ============================================================
+// EMAIL - ENVIAR SOLO TEXTO (sin adjunto)
+// ============================================================
+
+pub fn enviar_solo_texto(
+    destinatario: &str,
+    asunto: &str,
+    cuerpo: &str,
+    cc: &str,
+    cco: &str,
+    smtp_servidor: &str,
+    smtp_usuario: &str,
+    smtp_password: &str,
+    usar_oauth: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validar_campo_imap(smtp_servidor, "smtp_servidor")?;
+    validar_campo_imap(smtp_usuario, "smtp_usuario")?;
+    if !usar_oauth { validar_campo_imap(smtp_password, "smtp_password")?; }
+
+    let cuerpo_escapado = cuerpo
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\n', "<br>");
+    let cuerpo_html = format!(
+        "<html><body style='font-family:Arial,sans-serif;color:#222;'>\
+        <p>{}</p>\
+        <hr style='border:1px solid #eee;margin:20px 0;'>\
+        <p style='font-size:12px;color:#888;'>Enviado con Babel Security.</p>\
+        </body></html>",
+        cuerpo_escapado
+    );
+
+    let mut builder = Message::builder()
+        .from(smtp_usuario.parse()?)
+        .to(destinatario.parse()?);
+
+    for addr in cc.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        validar_campo_imap(addr, "cc")?;
+        builder = builder.cc(addr.parse::<lettre::message::Mailbox>()?);
+    }
+    for addr in cco.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        validar_campo_imap(addr, "cco")?;
+        builder = builder.bcc(addr.parse::<lettre::message::Mailbox>()?);
+    }
+
+    let email = builder
+        .subject(if asunto.is_empty() { "Mensaje de Babel Security" } else { asunto })
+        .singlepart(
+            lettre::message::SinglePart::builder()
+                .header(lettre::message::header::ContentType::parse("text/html; charset=utf-8")?)
+                .body(cuerpo_html),
+        )?;
+
+    let creds = lettre::transport::smtp::authentication::Credentials::new(
+        smtp_usuario.to_string(),
+        smtp_password.to_string(),
+    );
+    let mailer = if usar_oauth {
+        lettre::SmtpTransport::relay(smtp_servidor)?
+            .credentials(creds)
+            .authentication(vec![lettre::transport::smtp::authentication::Mechanism::Xoauth2])
+            .timeout(Some(std::time::Duration::from_secs(30)))
+            .build()
+    } else {
+        lettre::SmtpTransport::relay(smtp_servidor)?
+            .credentials(creds)
+            .timeout(Some(std::time::Duration::from_secs(30)))
+            .build()
+    };
+    mailer.send(&email)?;
+    Ok(())
 }
 
 // ============================================================

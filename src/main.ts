@@ -2,7 +2,7 @@ import "./styles.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import DOMPurify from "dompurify";
 
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
@@ -10,10 +10,10 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
     node.setAttribute("rel", "noopener noreferrer");
     node.setAttribute("target", "_blank");
   }
-  // Imágenes embebidas del backend: permitir solo data: URIs, bloquear URLs externas
   if (node.tagName === "IMG") {
     const src = node.getAttribute("src") ?? "";
-    if (src.startsWith("data:image/")) {
+    // Permitir data: URIs y URLs HTTPS (imágenes reales de emails); bloquear el resto
+    if (src.startsWith("data:image/") || src.startsWith("https://")) {
       node.setAttribute("src", src);
     } else {
       node.removeAttribute("src");
@@ -21,7 +21,7 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
-type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos" | "nombre" | "ajustes";
+type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos" | "nombre" | "ajustes" | "registro";
 // VARIABLES DE SESIÓN — nunca van a window, se zeroizan al cerrar
 // ============================================================
 // M3: NO retenemos la llave maestra ni la contraseña en JS. Las strings de JS son
@@ -124,6 +124,9 @@ function mostrarPantalla(nombre: Pantalla): void {
   if (nombre === "ajustes") {
     cargarListaEmparejados().catch(() => {});
   }
+  if (nombre === "registro") {
+    cargarRegistroDia().catch(() => {});
+  }
 }
 
 function mostrarMensaje(id: string, texto: string, esError: boolean): void {
@@ -185,7 +188,7 @@ function activarEntradaSeguraEnPasswords(): void {
 let _vigilanciaCapturaId: number | null = null;
 
 const PANTALLAS_SENSIBLES: Pantalla[] =
-  ["principal", "traduccion", "archivos-guardados", "comunicacion", "frase", "ajustes"];
+  ["principal", "traduccion", "archivos-guardados", "comunicacion", "frase", "ajustes", "registro"];
 
 function pantallaEsSensible(nombre: Pantalla): boolean {
   return PANTALLAS_SENSIBLES.includes(nombre);
@@ -430,6 +433,16 @@ function borrarChat(): void {
 
 // DELEGATED CLICK HANDLER — reemplaza todos los onclick="..." del HTML
 document.addEventListener("click", (e: MouseEvent) => {
+  // Cerrar dropdown de filtro email si el click es fuera del menú
+  const dropdown = document.getElementById("email-menu-dropdown");
+  if (dropdown && !dropdown.classList.contains("hidden")) {
+    const wrap = dropdown.closest(".email-menu-wrap");
+    if (wrap && !wrap.contains(e.target as Node)) {
+      dropdown.classList.add("hidden");
+      document.querySelector(".email-menu-trigger")?.classList.remove("abierto");
+    }
+  }
+
   const el = (e.target as Element).closest<HTMLElement>("[data-action]");
   if (!el) return;
   const action = el.dataset.action!;
@@ -450,6 +463,11 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "intentar-recuperacion": intentarRecuperacion(); break;
     case "aceptar-terminos": aceptarTerminos(); break;
     case "ver-terminos": mostrarModalTerminos(); break;
+    case "olvidar-sesion-guardada":
+      invoke("olvidar_sesion_tauri")
+        .then(() => mostrarToast("Sesión olvidada. La próxima vez deberás introducir la contraseña.", false))
+        .catch((e: unknown) => mostrarToast("Error: " + String(e), true));
+      break;
     // UI
     case "toggle-sidebar": toggleSidebar(); break;
     case "toggle-contrasena": toggleContraseña(el.dataset.campo!); break;
@@ -537,6 +555,33 @@ document.addEventListener("click", (e: MouseEvent) => {
       if (el.dataset.id) desemparejarDispositivo(el.dataset.id); break;
     // Email
     case "sincronizar-email": sincronizarEmail(); break;
+    case "toggle-email-menu": {
+      const trigger = el as HTMLElement;
+      const dropdown = document.getElementById("email-menu-dropdown");
+      const abierto = !dropdown?.classList.contains("hidden");
+      dropdown?.classList.toggle("hidden", abierto);
+      trigger.closest(".email-menu-trigger")?.classList.toggle("abierto", !abierto);
+      break;
+    }
+    case "filtro-email": {
+      const vista = (el as HTMLElement).dataset.vista ?? "todos";
+      const label: Record<string, string> = {
+        todos: "TODOS", noleidos: "NO LEÍDOS", destacados: "DESTACADOS", archivados: "ARCHIVADOS"
+      };
+      document.getElementById("email-vista-label")!.textContent = label[vista] ?? "TODOS";
+      document.querySelectorAll(".email-menu-item").forEach(b => b.classList.remove("activo"));
+      (el as HTMLElement).classList.add("activo");
+      document.getElementById("email-menu-dropdown")?.classList.add("hidden");
+      document.querySelector(".email-menu-trigger")?.classList.remove("abierto");
+      _emailVista = vista;
+      cerrarVisorEmail();
+      if (vista === "archivados" || _emailsCache.length === 0) {
+        cargarBandejaEmail();
+      } else {
+        renderizarListaEmail(filtrarEmailsVista(_emailsCache, vista));
+      }
+      break;
+    }
     case "abrir-componer-email": abrirComponerEmail(); break;
     case "toggle-config-smtp": toggleConfigSmtp(); break;
     case "guardar-smtp": guardarConfigSmtp(); break;
@@ -555,15 +600,347 @@ document.addEventListener("click", (e: MouseEvent) => {
       break;
     }
     case "responder-email": responderEmail(); break;
+    case "reenviar-email": reenviarEmail(); break;
     case "marcar-no-leido": marcarEmailNoLeido(); break;
+    case "archivar-email-actual": archivarEmailActual(); break;
+    case "toggle-destacado-visor": toggleDestacadoActual(); break;
+    case "limpiar-adjunto-email": limpiarAdjuntoEmail(); break;
     case "copiar-cuerpo-email": copiarCuerpoEmail(); break;
     case "cambiar-zoom-email": cambiarZoomEmail(Number(el.dataset.delta!)); break;
     case "eliminar-email-actual": eliminarEmailActual(); break;
     case "cerrar-visor-email": cerrarVisorEmail(); break;
     case "cerrar-compositor": cerrarCompositor(); break;
     case "insertar-plantilla": insertarPlantillaEmail(el.dataset.texto!); break;
+    // Registro diario
+    case "ir-a-registro": void irARegistro(); break;
+    case "registro-dia-anterior":
+      _registroFechaOffset -= 1;
+      cargarRegistroDia().catch(() => {});
+      break;
+    case "registro-dia-siguiente":
+      if (_registroFechaOffset < 0) { _registroFechaOffset += 1; cargarRegistroDia().catch(() => {}); }
+      break;
+    case "abrir-filtro-registro": abrirFiltroRegistro(); break;
+    case "limpiar-filtro-registro": limpiarFiltroRegistro(); break;
+    case "aplicar-filtro-registro": aplicarFiltroRegistro(); break;
+    case "confirmar-registro-primera-vez": void confirmarRegistroPrimeraVez(); break;
+    case "cerrar-registro-popup":
+      document.getElementById("modal-registro-popup")?.classList.add("hidden");
+      break;
+    case "informar-evento-registro": informarEventoRegistro(el); break;
+    case "abrir-ajustes-registro": void abrirAjustesRegistro(); break;
+    case "cerrar-ajustes-registro":
+      document.getElementById("modal-ajustes-registro")?.classList.add("hidden");
+      break;
+    case "guardar-ajustes-registro": void guardarAjustesRegistro(); break;
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// REGISTRO DIARIO
+// ══════════════════════════════════════════════════════════════════════════════
+
+interface EventoDiario {
+  tipo: string;
+  timestamp: string;
+  ip: string;
+  detalle: string;
+}
+
+interface PreferenciasRegistro {
+  hora: number;
+  minuto: number;
+  segundo: number;
+  primera_vez: boolean;
+}
+
+let _registroFechaOffset = 0;
+let _registroFiltroTipos: Set<string> = new Set();
+let _timerRegistroDiario: ReturnType<typeof setTimeout> | null = null;
+
+function fechaConOffset(offset: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+function labelFecha(offset: number): string {
+  if (offset === 0) return "HOY";
+  if (offset === -1) return "AYER";
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function tipoLabelRegistro(tipo: string): string {
+  const labels: Record<string, string> = {
+    login: "Acceso",
+    ver_archivo: "Archivo visto",
+    mover_archivo: "Archivo movido",
+    traducir: "Traducción",
+    descargar: "Descarga",
+    importar: "Importación",
+    cerrar_sesion: "Sesión cerrada",
+  };
+  return labels[tipo] ?? tipo;
+}
+
+async function irARegistro(): Promise<void> {
+  document.getElementById("modal-registro-popup")?.classList.add("hidden");
+  _registroFechaOffset = 0;
+  mostrarPantalla("registro");
+}
+
+async function cargarRegistroDia(): Promise<void> {
+  const fecha = fechaConOffset(_registroFechaOffset);
+  document.getElementById("registro-fecha-label")!.textContent = labelFecha(_registroFechaOffset);
+  const btnSig = document.getElementById("btn-registro-siguiente") as HTMLButtonElement | null;
+  if (btnSig) {
+    btnSig.disabled = _registroFechaOffset >= 0;
+    btnSig.style.opacity = _registroFechaOffset >= 0 ? "0.2" : "0.8";
+    btnSig.style.cursor = _registroFechaOffset >= 0 ? "default" : "pointer";
+  }
+
+  try {
+    const [eventos, ips] = await Promise.all([
+      invoke<EventoDiario[]>("obtener_eventos_dia", { fecha }),
+      invoke<string[]>("obtener_ips_historial"),
+    ]);
+    renderizarRegistro(eventos, ips);
+  } catch {
+    document.getElementById("registro-lista")!.innerHTML =
+      `<p style="color:var(--texto-secundario);text-align:center;padding:20px;font-size:0.7rem;letter-spacing:1px;">Sin eventos registrados.</p>`;
+    document.getElementById("registro-resumen")!.innerHTML = "";
+  }
+}
+
+function renderizarRegistro(eventos: EventoDiario[], ipsHistorial: string[]): void {
+  const listaEl = document.getElementById("registro-lista")!;
+  const resumenEl = document.getElementById("registro-resumen")!;
+
+  const filtrados = _registroFiltroTipos.size === 0
+    ? eventos
+    : eventos.filter(e => _registroFiltroTipos.has(e.tipo));
+
+  const logins = eventos.filter(e => e.tipo === "login").length;
+  const archivos = eventos.filter(e =>
+    ["ver_archivo", "traducir", "descargar", "importar"].includes(e.tipo)
+  ).length;
+  const sospechosos = eventos.filter(e =>
+    e.tipo === "login" && e.ip !== "IP no disponible" && !ipsHistorial.includes(e.ip)
+  ).length;
+
+  resumenEl.innerHTML = `
+    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+      <span class="registro-stat">${logins} <small>acceso${logins !== 1 ? "s" : ""}</small></span>
+      <span class="registro-stat">${archivos} <small>archivo${archivos !== 1 ? "s" : ""}</small></span>
+      <span class="registro-stat">${eventos.length} <small>total</small></span>
+      ${sospechosos > 0 ? `<span class="registro-stat-alerta">⚠ ${sospechosos} IP${sospechosos !== 1 ? "s" : ""} nueva${sospechosos !== 1 ? "s" : ""}</span>` : ""}
+    </div>
+  `;
+
+  if (filtrados.length === 0) {
+    listaEl.innerHTML = `<p style="color:var(--texto-secundario);text-align:center;padding:20px;font-size:0.7rem;letter-spacing:1px;">SIN EVENTOS${_registroFiltroTipos.size > 0 ? " CON ESTE FILTRO" : ""}</p>`;
+    return;
+  }
+
+  listaEl.innerHTML = filtrados.map((ev) => {
+    const esSospechoso = ev.tipo === "login" && ev.ip !== "IP no disponible" && !ipsHistorial.includes(ev.ip);
+    const hora = ev.timestamp.split("T")[1] ?? "";
+    return `
+      <div class="registro-evento${esSospechoso ? " registro-sospechoso" : ""}">
+        <div class="registro-evento-fila">
+          <span class="registro-evento-tipo">${tipoLabelRegistro(ev.tipo)}</span>
+          <span class="registro-evento-hora">${escapeHTML(hora)}</span>
+        </div>
+        <div class="registro-evento-fila" style="margin-top:2px;">
+          <span class="registro-evento-ip">${escapeHTML(ev.ip)}</span>
+          ${ev.detalle ? `<span class="registro-evento-nombre">${escapeHTML(ev.detalle)}</span>` : ""}
+          ${esSospechoso ? `<span class="registro-badge-alerta">IP NUEVA</span>` : ""}
+        </div>
+        <button type="button" class="registro-btn-informar"
+          data-action="informar-evento-registro"
+          data-tipo="${escapeHTML(ev.tipo)}"
+          data-ts="${escapeHTML(ev.timestamp)}"
+          data-ip="${escapeHTML(ev.ip)}"
+          data-detalle="${escapeHTML(ev.detalle)}">
+          INFORMAR A BABEL
+        </button>
+      </div>
+    `;
+  }).join("");
+}
+
+function informarEventoRegistro(el: HTMLElement): void {
+  const tipo = el.dataset.tipo ?? "";
+  const ts = el.dataset.ts ?? "";
+  const ip = el.dataset.ip ?? "";
+  const detalle = el.dataset.detalle ?? "";
+
+  const asunto = encodeURIComponent(`[Babel] Actividad sospechosa — ${ts}`);
+  const lineas = [
+    "Hola equipo de Babel Security,",
+    "",
+    "He detectado una actividad que me parece sospechosa en mi cuenta de Babel.",
+    "",
+    "Detalles del evento:",
+    `- Tipo: ${tipoLabelRegistro(tipo)}`,
+    `- Fecha y hora: ${ts}`,
+    `- IP registrada: ${ip}`,
+    ...(detalle ? [`- Archivo: ${detalle}`] : []),
+    "",
+    "Por favor, ¿podéis revisarlo?",
+    "",
+    "Gracias.",
+  ];
+  const cuerpo = encodeURIComponent(lineas.join("\n"));
+  openUrl(`mailto:securitybabel@gmail.com?subject=${asunto}&body=${cuerpo}`).catch(() => {});
+}
+
+function abrirFiltroRegistro(): void {
+  // Restore checkbox state from current filter
+  document.querySelectorAll<HTMLInputElement>(".filtro-tipo").forEach(cb => {
+    cb.checked = _registroFiltroTipos.has(cb.value);
+  });
+  document.getElementById("modal-filtro-registro")?.classList.remove("hidden");
+}
+
+function limpiarFiltroRegistro(): void {
+  _registroFiltroTipos.clear();
+  document.querySelectorAll<HTMLInputElement>(".filtro-tipo").forEach(cb => { cb.checked = false; });
+  document.getElementById("modal-filtro-registro")?.classList.add("hidden");
+  cargarRegistroDia().catch(() => {});
+}
+
+function aplicarFiltroRegistro(): void {
+  _registroFiltroTipos.clear();
+  document.querySelectorAll<HTMLInputElement>(".filtro-tipo:checked").forEach(cb => {
+    _registroFiltroTipos.add(cb.value);
+  });
+  document.getElementById("modal-filtro-registro")?.classList.add("hidden");
+  cargarRegistroDia().catch(() => {});
+}
+
+function programarPopupRegistroDiario(hora: number, minuto: number, segundo: number): void {
+  if (_timerRegistroDiario) {
+    clearTimeout(_timerRegistroDiario);
+    _timerRegistroDiario = null;
+  }
+  const ahora = new Date();
+  const objetivo = new Date();
+  objetivo.setHours(hora, minuto, segundo, 0);
+  let ms = objetivo.getTime() - ahora.getTime();
+  if (ms <= 0) ms += 24 * 60 * 60 * 1000;
+  _timerRegistroDiario = setTimeout(() => {
+    mostrarPopupResumenDiario().catch(() => {});
+    programarPopupRegistroDiario(hora, minuto, segundo);
+  }, ms);
+}
+
+async function mostrarPopupResumenDiario(): Promise<void> {
+  const fecha = fechaConOffset(0);
+  try {
+    const [eventos, ips] = await Promise.all([
+      invoke<EventoDiario[]>("obtener_eventos_dia", { fecha }),
+      invoke<string[]>("obtener_ips_historial"),
+    ]);
+
+    const logins = eventos.filter(e => e.tipo === "login").length;
+    const archivos = eventos.filter(e =>
+      ["ver_archivo", "traducir", "descargar", "importar"].includes(e.tipo)
+    ).length;
+    const sospechosos = eventos.filter(e =>
+      e.tipo === "login" && e.ip !== "IP no disponible" && !ips.includes(e.ip)
+    );
+
+    const popup = document.getElementById("registro-popup-contenido");
+    if (popup) {
+      popup.innerHTML = `
+        <p style="font-size:0.72rem;color:var(--texto-secundario);margin:0 0 12px;letter-spacing:1px;">
+          ${logins} acceso${logins !== 1 ? "s" : ""} · ${archivos} archivo${archivos !== 1 ? "s" : ""} tocado${archivos !== 1 ? "s" : ""}
+        </p>
+        ${sospechosos.length > 0 ? `
+          <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);border-radius:3px;padding:12px;margin-bottom:4px;">
+            <strong style="font-size:0.7rem;color:#ef4444;letter-spacing:1px;">
+              ⚠ ${sospechosos.length} acceso${sospechosos.length > 1 ? "s" : ""} desde IP nueva
+            </strong>
+            ${sospechosos.map(e => `
+              <div style="font-size:0.65rem;opacity:0.8;margin-top:4px;font-family:monospace;">
+                ${escapeHTML(e.timestamp.split("T")[1] ?? "")} — ${escapeHTML(e.ip)}
+              </div>`).join("")}
+          </div>
+        ` : `<p style="font-size:0.72rem;color:#22c55e;letter-spacing:1px;margin:0;">✓ Sin actividad sospechosa</p>`}
+      `;
+    }
+    document.getElementById("modal-registro-popup")?.classList.remove("hidden");
+  } catch {
+    // Silent — no interrumpir al usuario si el popup falla
+  }
+}
+
+async function iniciarRegistroDiario(): Promise<void> {
+  invoke("registrar_evento_diario", { tipo: "login", detalle: "" }).catch(() => {});
+  try {
+    const prefs = await invoke<PreferenciasRegistro>("obtener_preferencias_registro");
+    if (prefs.primera_vez) {
+      const horaEl = document.getElementById("rp-hora") as HTMLInputElement | null;
+      const minEl = document.getElementById("rp-minuto") as HTMLInputElement | null;
+      const secEl = document.getElementById("rp-segundo") as HTMLInputElement | null;
+      if (horaEl) horaEl.value = String(prefs.hora).padStart(2, "0");
+      if (minEl) minEl.value = String(prefs.minuto).padStart(2, "0");
+      if (secEl) secEl.value = String(prefs.segundo).padStart(2, "0");
+      document.getElementById("modal-registro-primera-vez")?.classList.remove("hidden");
+    } else {
+      programarPopupRegistroDiario(prefs.hora, prefs.minuto, prefs.segundo);
+    }
+  } catch {
+    // Silent
+  }
+}
+
+async function confirmarRegistroPrimeraVez(): Promise<void> {
+  const hora = Math.min(23, Math.max(0, parseInt((document.getElementById("rp-hora") as HTMLInputElement)?.value ?? "10", 10) || 0));
+  const minuto = Math.min(59, Math.max(0, parseInt((document.getElementById("rp-minuto") as HTMLInputElement)?.value ?? "0", 10) || 0));
+  const segundo = Math.min(59, Math.max(0, parseInt((document.getElementById("rp-segundo") as HTMLInputElement)?.value ?? "0", 10) || 0));
+  try {
+    await invoke("guardar_preferencias_registro", { hora, minuto, segundo });
+    await invoke("marcar_primera_vez_registro");
+    document.getElementById("modal-registro-primera-vez")?.classList.add("hidden");
+    programarPopupRegistroDiario(hora, minuto, segundo);
+    mostrarToast("Registro diario activado ✓", false);
+  } catch (e) {
+    mostrarToast("Error guardando preferencias: " + String(e), true);
+  }
+}
+
+async function abrirAjustesRegistro(): Promise<void> {
+  try {
+    const prefs = await invoke<PreferenciasRegistro>("obtener_preferencias_registro");
+    const horaEl = document.getElementById("ra-hora") as HTMLInputElement | null;
+    const minEl = document.getElementById("ra-minuto") as HTMLInputElement | null;
+    const secEl = document.getElementById("ra-segundo") as HTMLInputElement | null;
+    if (horaEl) horaEl.value = String(prefs.hora).padStart(2, "0");
+    if (minEl) minEl.value = String(prefs.minuto).padStart(2, "0");
+    if (secEl) secEl.value = String(prefs.segundo).padStart(2, "0");
+  } catch {
+    // defaults stay
+  }
+  document.getElementById("modal-ajustes-registro")?.classList.remove("hidden");
+}
+
+async function guardarAjustesRegistro(): Promise<void> {
+  const hora = Math.min(23, Math.max(0, parseInt((document.getElementById("ra-hora") as HTMLInputElement)?.value ?? "10", 10) || 0));
+  const minuto = Math.min(59, Math.max(0, parseInt((document.getElementById("ra-minuto") as HTMLInputElement)?.value ?? "0", 10) || 0));
+  const segundo = Math.min(59, Math.max(0, parseInt((document.getElementById("ra-segundo") as HTMLInputElement)?.value ?? "0", 10) || 0));
+  try {
+    await invoke("guardar_preferencias_registro", { hora, minuto, segundo });
+    document.getElementById("modal-ajustes-registro")?.classList.add("hidden");
+    programarPopupRegistroDiario(hora, minuto, segundo);
+    mostrarToast(`Notificación configurada a las ${String(hora).padStart(2,"0")}:${String(minuto).padStart(2,"0")}:${String(segundo).padStart(2,"0")} ✓`, false);
+  } catch (e) {
+    mostrarToast("Error guardando: " + String(e), true);
+  }
+}
 
 window.addEventListener("DOMContentLoaded", async () => {
   invoke("borrar_html_frase").catch(() => {});
@@ -598,11 +975,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Evento Rust: resultado del flujo OAuth Gmail
   listen<{ ok: boolean; email?: string; error?: string }>("oauth_gmail_resultado", (ev) => {
     document.getElementById("oauth-progreso")?.classList.add("hidden");
-    if (ev.payload.ok && ev.payload.email) {
-      actualizarUIGmailOAuth(ev.payload.email);
+    if (ev.payload.ok) {
+      const emailMostrado = ev.payload.email || "Gmail";
+      actualizarUIGmailOAuth(emailMostrado);
       _smtpConfigurado = true;
+      _oauthGmailConectado = true;
       cerrarModalConfigurarEmail();
-      mostrarToast(`Gmail conectado: ${ev.payload.email}`, false);
+      mostrarToast(`Gmail conectado: ${emailMostrado}`, false);
       cargarBandejaEmail();
     } else {
       mostrarToast(`Error OAuth: ${ev.payload.error ?? "desconocido"}`, true);
@@ -611,7 +990,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Comprobar si ya hay OAuth Gmail guardado al iniciar sesión
   invoke<string | null>("estado_oauth_gmail_tauri").then((email) => {
-    if (email) actualizarUIGmailOAuth(email);
+    if (email) { actualizarUIGmailOAuth(email); _oauthGmailConectado = true; }
   }).catch(() => {});
 
   activarEntradaSeguraEnPasswords();
@@ -742,7 +1121,38 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   const bunkerExiste = await invoke<boolean>("comprobar_estado_bunker");
-  mostrarPantalla(bunkerExiste ? "login" : "decision");
+  if (!bunkerExiste) { mostrarPantalla("decision"); return; }
+
+  // Intentar autologin con credenciales guardadas en el keychain del sistema.
+  // Saltar si el usuario hizo logout manual en esta misma sesión de la app.
+  const logoutManual = sessionStorage.getItem("babel-logout-manual");
+  sessionStorage.removeItem("babel-logout-manual");
+  if (!logoutManual) try {
+    const ok = await invoke<boolean>("autologin_tauri");
+    if (ok) {
+      _sesionActiva = true;
+      const nombreGuardado = localStorage.getItem("babel-nombre-display");
+      _sesionUsuario = nombreGuardado ?? "";
+      const bienvenida = document.getElementById("bienvenida-usuario");
+      if (bienvenida) bienvenida.textContent = _sesionUsuario ? `Bienvenido, ${_sesionUsuario}` : "Bienvenido";
+      activarTimerInactividad();
+      iniciarRegistroDiario().catch(() => {});
+      invoke("procesar_entrada_finder").catch(() => {});
+      invoke<boolean>("tiene_config_email").then(ok2 => {
+        _smtpConfigurado = ok2;
+        if (ok2) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
+      }).catch(() => {});
+      invoke<string | null>("estado_oauth_gmail_tauri").then((email) => {
+        if (email) { actualizarUIGmailOAuth(email); _oauthGmailConectado = true; }
+      }).catch(() => {});
+      mostrarPantalla(nombreGuardado === null ? "nombre" : "principal");
+      if (nombreGuardado !== null) cargarAjustesTraduccion().catch(() => {});
+      return;
+    }
+  } catch { /* keychain vacío o error — mostrar login normal */ }
+
+  mostrarPantalla("login");
+
 });
 
 // CREAR BÚNKER
@@ -803,12 +1213,16 @@ async function intentarAcceso(): Promise<void> {
       if (bienvenida) bienvenida.textContent = nombre ? `Bienvenido, ${nombre}` : "Bienvenido";
 
       activarTimerInactividad();
+      iniciarRegistroDiario().catch(() => {});
       // FINDER — drenar la cola de "Guardar con Babel" acumulada mientras no había sesión.
       invoke("procesar_entrada_finder").catch(() => {});
       invoke<boolean>("tiene_config_email").then(ok => {
         _smtpConfigurado = ok;
         if (ok) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
       }).catch(() => { });
+      invoke<string | null>("estado_oauth_gmail_tauri").then((email) => {
+        if (email) { actualizarUIGmailOAuth(email); _oauthGmailConectado = true; }
+      }).catch(() => {});
 
       if (nombreGuardado === null) {
         mostrarPantalla("nombre");
@@ -1042,6 +1456,7 @@ async function cambiarCategoriaDiccionario(categoria: string): Promise<void> {
 // SIDEBAR — SELECTOR DE IDIOMA DE TRADUCCIÓN — Sincroniza el selector del sidebar con el del header
 
 async function cerrarSesion(): Promise<void> {
+  invoke("registrar_evento_diario", { tipo: "cerrar_sesion", detalle: "" }).catch(() => {});
   limpiarCamposSensibles();
   borrarChat();
   _sesionActiva = false;
@@ -1052,6 +1467,8 @@ async function cerrarSesion(): Promise<void> {
   detenerPollSolicitudSinc();
   try { await invoke("cerrar_sesion_rust"); } catch { /* continúa cerrando aunque falle */ }
   limpiarCamposSensibles();
+  // Marcar que fue un logout manual — el autologin debe saltar en este reload
+  sessionStorage.setItem("babel-logout-manual", "1");
   localStorage.removeItem("babel-nombre-display");
   localStorage.removeItem("babel-buzon-activo");
   localStorage.removeItem("babel-buzon-activo-g");
@@ -1153,6 +1570,9 @@ let buzonActivoGuardados: string = "todos";
 let terminoBusquedaArchivos = "";
 let terminoBusquedaBuzones = "";
 let _smtpConfigurado: boolean = false;
+// true cuando hay tokens OAuth de Gmail guardados y activos para esta sesión.
+// Distinto de _smtpConfigurado: puede haber config SMTP manual sin OAuth.
+let _oauthGmailConectado: boolean = false;
 // true = el usuario cerró el modal sin conectar en esta sesión; no vuelve a aparecer
 // hasta que reinicie la app. Se resetea a false al arrancar (variable en RAM, sin localStorage).
 let _modalEmailVistoEnSesion: boolean = false;
@@ -1701,6 +2121,7 @@ async function verArchivoGuardado(): Promise<void> {
     modalNombre.textContent = nombre;
     renderizarEnContenedor(texto, modalContenido);
     modal.classList.remove("hidden");
+    invoke("registrar_evento_diario", { tipo: "ver_archivo", detalle: nombre.replace(/\.babel$/, "").replace(/^\d+_/, "") }).catch(() => {});
   } catch (e) {
     mostrarToast("Error abriendo archivo: " + e, true);
   }
@@ -2391,6 +2812,7 @@ async function guardarArchivoDesdeFile(
       mostrarToast(`✓ ${nombre} guardado y cifrado`, false);
       await cargarArchivosGuardados();
     }
+    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombre }).catch(() => {});
     return true;
   } catch (error) {
     if (recargar) mostrarToast(`Error guardando: ${error}`, true);
@@ -2524,6 +2946,8 @@ async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent): Promi
           await invoke(cmd, { ruta, buzonDestino: id });
           await cargarArchivosGuardados();
           mostrarToast(`Movido a ${label}`, false);
+          const nombreMov = ruta.split("/").pop()?.replace(/\.babel$/, "").replace(/^\d+_/, "") ?? ruta;
+          invoke("registrar_evento_diario", { tipo: "mover_archivo", detalle: `${nombreMov} → ${label}` }).catch(() => {});
         } catch (error) { mostrarToast("Error: " + String(error), true); }
       };
       popup.appendChild(item);
@@ -2590,6 +3014,8 @@ async function exportarArchivo(ruta: string): Promise<void> {
   try {
     await invoke<string>("exportar_archivo", { ruta });
     mostrarToast("✓ Exportado correctamente", false);
+    const nombre = ruta.split("/").pop()?.replace(/\.babel$/, "").replace(/^\d+_/, "") ?? ruta;
+    invoke("registrar_evento_diario", { tipo: "descargar", detalle: nombre }).catch(() => {});
   } catch (error) {
     const msg = String(error);
     if (msg.includes("cancelada") || msg.includes("cancelado")) return;
@@ -2740,7 +3166,7 @@ async function eliminarSeleccionados(): Promise<void> {
 // CIERRE AUTOMÁTICO POR INACTIVIDAD
 let timerInactividad: ReturnType<typeof setTimeout> | null = null;
 let timerAvisoLock: ReturnType<typeof setTimeout> | null = null;
-let _tiempoLockMs: number = 60 * 60 * 1000; // default 60 min hasta que carguen los ajustes
+let _tiempoLockMs: number = 30 * 60 * 1000; // default 30 min
 
 function resetearTimerInactividad(): void {
   if (timerInactividad) clearTimeout(timerInactividad);
@@ -2752,6 +3178,12 @@ function resetearTimerInactividad(): void {
       mostrarToast("La sesión se bloqueará en 2 minutos por inactividad", true);
     }, avisoMs);
   }
+}
+
+function pausarTimerInactividad(): void {
+  // Al salir de la ventana se pausa el contador — no se bloquea por usar otra app
+  if (timerInactividad) clearTimeout(timerInactividad);
+  if (timerAvisoLock) clearTimeout(timerAvisoLock);
 }
 
 async function bloquearPantalla(): Promise<void> {
@@ -2797,6 +3229,10 @@ async function desbloquearPantalla(): Promise<void> {
         _smtpConfigurado = ok2;
         if (ok2) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
       }).catch(() => {});
+      invoke<string | null>("estado_oauth_gmail_tauri").then((email) => {
+        if (email) { actualizarUIGmailOAuth(email); _oauthGmailConectado = true; }
+        else { _oauthGmailConectado = false; }
+      }).catch(() => {});
       cargarAjustesTraduccion().catch(() => {});
     } else {
       mostrarMensaje("bloqueo-msg", "CREDENCIALES INCORRECTAS", true);
@@ -2811,6 +3247,9 @@ function activarTimerInactividad(): void {
   ["mousemove", "keydown", "mousedown", "touchstart", "click"].forEach(evento => {
     document.addEventListener(evento, resetearTimerInactividad);
   });
+  // Pausar al salir de la ventana, reanudar al volver — no bloquear por usar otra app
+  window.addEventListener("blur", pausarTimerInactividad);
+  window.addEventListener("focus", resetearTimerInactividad);
   resetearTimerInactividad();
 }
 
@@ -2820,6 +3259,8 @@ function desactivarTimerInactividad(): void {
   ["mousemove", "keydown", "mousedown", "touchstart", "click"].forEach(evento => {
     document.removeEventListener(evento, resetearTimerInactividad);
   });
+  window.removeEventListener("blur", pausarTimerInactividad);
+  window.removeEventListener("focus", resetearTimerInactividad);
 }
 // VISOR INDIVIDUAL — modal simple
 
@@ -2835,6 +3276,7 @@ async function traducirArchivoGuardado(ruta: string): Promise<void> {
     const nombreTrad = rutaResultado.replace(/\\/g, "/").split("/").pop() ?? rutaResultado;
     añadirResultadoArchivo(nombreTrad, rutaResultado);
     scrollAlFinal();
+    invoke("registrar_evento_diario", { tipo: "traducir", detalle: nombreMostrado }).catch(() => {});
   } catch (error) {
     mostrarProcesando(false);
     añadirMensajeBabel("Error al traducir: " + String(error), "BABEL · error");
@@ -3031,9 +3473,9 @@ function cambiarModoP2P(modo: string): void {
     panelChat?.classList.add("hidden");
     panelEmail?.classList.remove("hidden");
     if (subtitulo) subtitulo.textContent = "EMAIL · CIFRADO LOCAL";
-    if (!_smtpConfigurado) {
-      setTimeout(() => mostrarModalConfigurarEmail(), 300);
-    } else {
+    // Mostrar modal OAuth si no hay cuenta conectada (la función decide sola si procede)
+    setTimeout(() => mostrarModalConfigurarEmail(), 300);
+    if (_smtpConfigurado) {
       cargarBandejaEmail();
       iniciarRecargaAutomatica();
     }
@@ -3459,16 +3901,113 @@ interface EmailResumen {
   fecha: string;
   tiene_adjunto: boolean;
   leido: boolean;
+  destacado: boolean;
   snippet: string;
 }
 
 // Email seleccionado actualmente
 const emailsVistos = new Set<number>();
 let emailVisorActualId: number | null = null;
+let _emailVisorRemitente: string = "";
+let _emailVista: string = "todos";
+let _emailsCache: EmailResumen[] = [];
+let _emailPaginaVis: number = 25;
 let _firmaEmail: string = "";
 let _cuerpoEmailOriginal: string = "";
 let _imapCargando = false;   // B1: evita sesiones IMAP concurrentes en lectura
 let _imapMutando = false;    // B1: evita sesiones IMAP concurrentes en mutación
+
+function filtrarEmailsVista(emails: EmailResumen[], vista: string): EmailResumen[] {
+  if (vista === "noleidos") return emails.filter(e => !e.leido && !emailsVistos.has(e.id));
+  if (vista === "destacados") return emails.filter(e => e.destacado);
+  return emails;
+}
+
+function renderizarListaEmail(emails: EmailResumen[], resetPagina = true): void {
+  const lista = document.getElementById("email-lista");
+  if (!lista) return;
+
+  if (emails.length === 0) {
+    lista.innerHTML = `
+      <div class="email-vacio">
+        <span style="font-size:2rem;opacity:0.13;">✉</span>
+        <p class="email-vacio-titulo">Sin correos</p>
+        <p class="email-vacio-sub">No hay correos en esta vista</p>
+      </div>`;
+    return;
+  }
+
+  if (resetPagina) _emailPaginaVis = 25;
+  const visibles = emails.slice(0, _emailPaginaVis);
+  const hayMas = emails.length > _emailPaginaVis;
+
+  let noLeidos = 0;
+  const html = visibles.map(email => {
+    const visto = emailsVistos.has(email.id) || email.leido;
+    if (!visto) noLeidos++;
+    const idStr = String(Number(email.id));
+    return `
+    <div class="email-item${visto ? "" : " no-leido"}${email.destacado ? " destacado" : ""}"
+         data-action="seleccionar-email" data-id="${idStr}">
+      <div class="email-item-cabecera">
+        <div class="email-item-remitente">${escapeHTML(formatearRemitente(email.remitente))}</div>
+        ${!visto ? '<span class="email-punto-nuevo"></span>' : ""}
+      </div>
+      <div class="email-item-asunto">${escapeHTML(email.asunto)}</div>
+      ${email.snippet ? `<div class="email-item-snippet">${escapeHTML(email.snippet)}</div>` : ""}
+      <div class="email-item-meta">
+        <span class="email-item-fecha">${formatearFechaEmail(email.fecha)}</span>
+        <span class="email-item-meta-iconos">
+          ${email.tiene_adjunto ? '<span title="Tiene adjunto">📎</span>' : ""}
+        </span>
+      </div>
+      <div class="email-item-acciones">
+        <button class="email-accion-mini${email.destacado ? " activo" : ""}" title="${email.destacado ? "Quitar estrella" : "Destacar"}"
+          data-action="lista-destacar" data-id="${idStr}" data-val="${email.destacado ? "0" : "1"}">
+          ${email.destacado ? "★" : "☆"}
+        </button>
+        <button class="email-accion-mini" title="Archivar" data-action="lista-archivar" data-id="${idStr}">▽</button>
+        <button class="email-accion-mini peligro" title="Eliminar" data-action="lista-eliminar" data-id="${idStr}">🗑</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  const btnMas = hayMas
+    ? `<button class="email-cargar-mas" data-action="email-cargar-mas" data-total="${emails.length}">
+         Cargar más (${emails.length - _emailPaginaVis} restantes)
+       </button>`
+    : "";
+
+  lista.innerHTML = html + btnMas;
+
+  lista.onclick = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const btn = target.closest("[data-action]") as HTMLElement | null;
+    if (!btn) return;
+    const action = btn.dataset.action;
+    if (action === "email-cargar-mas") {
+      _emailPaginaVis += 25;
+      renderizarListaEmail(filtrarEmailsVista(_emailsCache, _emailVista), false);
+      return;
+    }
+    const id = parseInt(btn.dataset.id ?? "", 10);
+    if (!Number.isFinite(id)) return;
+    if (action === "seleccionar-email") { seleccionarEmail(id); return; }
+    // Botones de acción en fila — stopPropagation para no abrir el email
+    e.stopPropagation();
+    if (action === "lista-archivar") { void accionListaEmail(id, "archivar"); return; }
+    if (action === "lista-eliminar") { void accionListaEmail(id, "eliminar"); return; }
+    if (action === "lista-destacar") {
+      const destacar = btn.dataset.val === "1";
+      void accionListaEmail(id, "destacado", destacar);
+      return;
+    }
+  };
+
+  const tituloSidebar = document.querySelector(".email-sidebar-titulo");
+  if (tituloSidebar) tituloSidebar.textContent = noLeidos > 0 ? `BANDEJA (${noLeidos})` : "BANDEJA";
+  actualizarBadgeEmail(noLeidos);
+}
 
 async function cargarBandejaEmail(): Promise<void> {
   if (_imapCargando) return;
@@ -3483,50 +4022,34 @@ async function cargarBandejaEmail(): Promise<void> {
   lista.innerHTML = `<div class="email-vacio"><p class="email-vacio-titulo">Cargando...</p></div>`;
 
   try {
-    const emails = await invoke<EmailResumen[]>("obtener_emails_tauri");
+    const vistaImap = _emailVista === "archivados" ? "archivados" : "todos";
+    const idsAnteriores = new Set(_emailsCache.map(e => e.id));
+    const fetched = await invoke<EmailResumen[]>("obtener_emails_tauri", { vista: vistaImap });
+    if (vistaImap === "todos") {
+      // Detectar correos nuevos (solo en cargas posteriores a la primera)
+      if (_emailsCache.length > 0) {
+        const nuevos = fetched.filter(e => !idsAnteriores.has(e.id) && !e.leido);
+        if (nuevos.length > 0) {
+          mostrarToast(`${nuevos.length} correo${nuevos.length > 1 ? "s" : ""} nuevo${nuevos.length > 1 ? "s" : ""}`, false);
+        }
+      }
+      _emailsCache = fetched;
+    }
+
+    const emails = _emailVista === "archivados" ? fetched : filtrarEmailsVista(fetched, _emailVista);
 
     if (emails.length === 0) {
       lista.innerHTML = `
         <div class="email-vacio">
           <span style="font-size:2rem;opacity:0.13;">✉</span>
-          <p class="email-vacio-titulo">Bandeja vacía</p>
-          <p class="email-vacio-sub">No hay correos en la bandeja</p>
+          <p class="email-vacio-titulo">Sin correos</p>
+          <p class="email-vacio-sub">No hay correos en esta vista</p>
         </div>`;
       return;
     }
 
-    let noLeidos = 0;
-    lista.innerHTML = emails.map(email => {
-      const visto = emailsVistos.has(email.id) || email.leido;
-      if (!visto) noLeidos++;
-      return `
-      <div class="email-item${visto ? "" : " no-leido"}" data-action="seleccionar-email" data-id="${Number(email.id)}">
-        <div class="email-item-cabecera">
-          <div class="email-item-remitente">${escapeHTML(email.remitente)}</div>
-          ${!visto ? '<span class="email-punto-nuevo"></span>' : ""}
-        </div>
-        <div class="email-item-asunto">${escapeHTML(email.asunto)}</div>
-        ${email.snippet ? `<div class="email-item-snippet">${escapeHTML(email.snippet)}</div>` : ""}
-        <div class="email-item-meta">
-          <span class="email-item-fecha">${formatearFechaEmail(email.fecha)}</span>
-          ${email.tiene_adjunto ? '<span class="email-item-adjunto-icono" title="Tiene adjunto">📎</span>' : ""}
-        </div>
-      </div>`;
-    }).join("");
-
-    // Event delegation — evita onclick inline con IDs sin sanitizar
-    lista.onclick = (e: MouseEvent) => {
-      const item = (e.target as HTMLElement).closest("[data-action='seleccionar-email']") as HTMLElement | null;
-      if (!item) return;
-      const id = parseInt(item.dataset.id ?? "", 10);
-      if (!Number.isFinite(id)) return;
-      seleccionarEmail(id);
-    };
-
-    // Actualizar contador en el título y badge en botón EMAIL
-    const tituloSidebar = document.querySelector(".email-sidebar-titulo");
-    if (tituloSidebar) tituloSidebar.textContent = noLeidos > 0 ? `BANDEJA (${noLeidos})` : "BANDEJA";
-    actualizarBadgeEmail(noLeidos);
+    renderizarListaEmail(emails);
+    return;
 
   } catch (error) {
     lista.innerHTML = `
@@ -3540,6 +4063,18 @@ async function cargarBandejaEmail(): Promise<void> {
 }
 
 // Convierte fecha RFC 2822 a formato legible: hora si es hoy, día/mes si es anterior
+function formatearRemitente(remitente: string): string {
+  // "Nombre <email@dominio>" → "Nombre"
+  const match = remitente.match(/^(.+?)\s*<[^>]+>$/);
+  if (match) {
+    return match[1].trim().replace(/^["']|["']$/g, "") || remitente;
+  }
+  // Solo dirección email → mostrar la parte antes del @
+  const atIdx = remitente.indexOf("@");
+  if (atIdx > 0) return remitente.slice(0, atIdx);
+  return remitente;
+}
+
 function formatearFechaEmail(fecha: string): string {
   if (!fecha) return "";
   try {
@@ -3563,12 +4098,31 @@ function renderizarCuerpoEmail(contenedor: HTMLElement, cuerpo: string): void {
   }
   const esHTML = /<(p|div|br|img|html|body|span|table)[^>]*>/i.test(cuerpo);
   if (esHTML) {
-    contenedor.innerHTML = DOMPurify.sanitize(cuerpo, {
-      ALLOWED_TAGS: ["p", "div", "br", "span", "b", "i", "u", "strong", "em", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "a", "img", "h1", "h2", "h3", "h4", "blockquote", "pre", "code"],
-      ALLOWED_ATTR: ["href", "alt", "title", "class", "width", "height"],
-      FORBID_ATTR: ["style", "src", "onerror", "onload"],
+    const limpio = DOMPurify.sanitize(cuerpo, {
+      ALLOWED_TAGS: ["p", "div", "br", "span", "b", "i", "u", "strong", "em", "ul", "ol", "li",
+                     "table", "thead", "tbody", "tr", "th", "td", "a", "img",
+                     "h1", "h2", "h3", "h4", "blockquote", "pre", "code", "font", "center", "hr"],
+      ALLOWED_ATTR: ["href", "alt", "title", "class", "width", "height", "style",
+                     "src", "align", "valign", "bgcolor", "color", "size", "border",
+                     "cellpadding", "cellspacing"],
+      FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover", "onfocus", "onblur"],
       ALLOW_DATA_ATTR: false,
       FORCE_BODY: true,
+    });
+    // Fondo blanco: los emails HTML asumen fondo blanco — sin esto el texto oscuro es invisible
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText = "background:#ffffff;color:#222222;padding:20px 24px;border-radius:6px;line-height:1.6;font-family:sans-serif;";
+    wrapper.innerHTML = limpio;
+    contenedor.appendChild(wrapper);
+    // Interceptar clicks en links para abrirlos en el navegador externo
+    wrapper.querySelectorAll("a[href]").forEach(el => {
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        const href = (el as HTMLAnchorElement).href;
+        if (href.startsWith("https://") || href.startsWith("http://")) {
+          openUrl(href).catch(() => {});
+        }
+      });
     });
   } else {
     // Texto plano: URLs como enlaces seguros, resto como textContent
@@ -3580,7 +4134,10 @@ function renderizarCuerpoEmail(contenedor: HTMLElement, cuerpo: string): void {
         a.textContent = parte;
         a.style.color = "var(--dorado)";
         a.rel = "noopener noreferrer";
-        a.target = "_blank";
+        a.addEventListener("click", (e) => {
+          e.preventDefault();
+          openUrl(parte).catch(() => {});
+        });
         contenedor.appendChild(a);
       } else {
         contenedor.appendChild(document.createTextNode(parte));
@@ -3618,6 +4175,12 @@ async function seleccionarEmail(id: number): Promise<void> {
     }>("obtener_email_completo_tauri", { id });
 
     emailVisorActualId = email.id;
+    _emailVisorRemitente = email.remitente;
+    // Sincronizar estado destacado con el ítem de la lista
+    const itemActual = document.querySelector(`.email-item[data-id="${email.id}"]`);
+    _emailVisorDestacado = itemActual?.classList.contains("destacado") ?? false;
+    const btnDest = document.getElementById("btn-destacar-visor");
+    if (btnDest) btnDest.textContent = _emailVisorDestacado ? "★ Destacado" : "☆ Destacar";
     if (asuntoEl) asuntoEl.textContent = email.asunto || "Sin asunto";
     if (metaEl) metaEl.textContent = `De: ${email.remitente} · ${formatearFechaEmail(email.fecha)}`;
     if (adjuntosEl) adjuntosEl.innerHTML = email.adjuntos.map(a => `<span class="email-adjunto-tag">📎 ${escapeHTML(a)}</span>`).join("");
@@ -3630,6 +4193,7 @@ async function seleccionarEmail(id: number): Promise<void> {
     lectorVacio?.classList.remove("hidden");
     visor?.classList.add("hidden");
     emailVisorActualId = null;
+    _emailVisorRemitente = "";
   }
 }
 
@@ -3648,6 +4212,14 @@ function abrirComponerEmail(): void {
   }
 }
 
+// Quita el adjunto seleccionado sin cerrar el compositor
+function limpiarAdjuntoEmail(): void {
+  archivoEmailRuta = "";
+  archivoEmailFile = null;
+  const el = document.getElementById("comp-archivo-nombre");
+  if (el) el.textContent = "📎 Adjuntar (opcional)";
+}
+
 // Cierra el compositor y limpia los campos y archivos adjuntos
 function cerrarCompositor(): void {
   document.getElementById("email-compositor")?.classList.add("hidden");
@@ -3655,7 +4227,7 @@ function cerrarCompositor(): void {
   archivoEmailRuta = "";
   archivoEmailFile = null;
   const g = (id: string) => document.getElementById(id);
-  const n = g("comp-archivo-nombre"); if (n) n.textContent = "📎 Adjuntar documento";
+  const n = g("comp-archivo-nombre"); if (n) n.textContent = "📎 Adjuntar (opcional)";
   const s = g("comp-estado"); if (s) s.textContent = "";
   for (const id of ["input-archivo-email","comp-destinatario","comp-asunto","comp-cc","comp-cco","comp-cuerpo"]) {
     const f = g(id) as HTMLInputElement | null; if (f) f.value = "";
@@ -3667,12 +4239,23 @@ function cerrarVisorEmail(): void {
   document.getElementById("email-visor")?.classList.add("hidden");
   document.getElementById("email-lector-vacio")?.classList.remove("hidden");
   emailVisorActualId = null;
+  _emailVisorRemitente = "";
   _cuerpoEmailOriginal = "";
 }
 
-// Abre el selector de archivo del sistema para adjuntar al email
-function seleccionarArchivoEmail(): void {
-  document.getElementById("input-archivo-email")?.click();
+// Abre el selector de archivo en la carpeta ~/Babel
+async function seleccionarArchivoEmail(): Promise<void> {
+  try {
+    const resultado = await invoke<[string, number[]] | null>("seleccionar_archivo_email_dialogo");
+    if (!resultado) return;
+    const [nombre, bytesArr] = resultado;
+    archivoEmailFile = new File([new Uint8Array(bytesArr)], nombre);
+    archivoEmailRuta = "";
+    const el = document.getElementById("comp-archivo-nombre");
+    if (el) el.textContent = "📎 " + nombre;
+  } catch (e) {
+    mostrarToast("Error abriendo selector: " + String(e), true);
+  }
 }
 
 // Actualiza el nombre del archivo adjunto en el compositor cuando el usuario selecciona uno
@@ -3691,8 +4274,8 @@ function manejarSeleccionArchivoEmail(event: Event): void {
 // ──────────────────────────────────────────────────────────────────────────────
 
 function mostrarModalConfigurarEmail(): void {
-  // No mostrar si ya se cerró en esta sesión o si ya hay cuenta conectada
-  if (_modalEmailVistoEnSesion || _smtpConfigurado) return;
+  // No mostrar si ya se cerró en esta sesión o si hay OAuth Gmail activo
+  if (_modalEmailVistoEnSesion || _oauthGmailConectado) return;
   document.getElementById("modal-configurar-email")?.classList.remove("hidden");
 }
 
@@ -3735,8 +4318,7 @@ async function iniciarOAuthGmail(): Promise<void> {
   progreso?.classList.remove("hidden");
   try {
     const url = await invoke<string>("iniciar_oauth_gmail_tauri");
-    // Abrir el browser con la URL de autorización
-    await openPath(url);
+    await openUrl(url);
   } catch (e) {
     progreso?.classList.add("hidden");
     mostrarToast("Error iniciando OAuth: " + String(e), true);
@@ -3748,6 +4330,8 @@ async function revocarOAuthGmail(): Promise<void> {
     await invoke("revocar_oauth_gmail_tauri");
     resetUIGmailOAuth();
     _smtpConfigurado = false;
+    _oauthGmailConectado = false;
+    _modalEmailVistoEnSesion = false;
     mostrarToast("Gmail desconectado", false);
   } catch (e) {
     mostrarToast("Error al desconectar: " + String(e), true);
@@ -3832,23 +4416,27 @@ async function enviarEmail(): Promise<void> {
     mostrarToast("Rellena destinatario y asunto", true);
     return;
   }
-  if (!archivoEmailFile && !archivoEmailRuta) {
-    mostrarToast("Selecciona un archivo para adjuntar", true);
-    return;
-  }
 
-  const confirmado = window.confirm(
-    "AVISO DE SEGURIDAD\n\n" +
-    "Vas a enviar este documento DESCIFRADO por email.\n" +
-    "El destinatario podrá leerlo sin necesitar Babel.\n\n" +
-    "¿Continuar?"
-  );
-  if (!confirmado) return;
+  const tieneAdjunto = !!(archivoEmailFile || archivoEmailRuta);
+
+  // Solo mostrar aviso de seguridad si se adjunta un documento de Babel (descifrado)
+  if (tieneAdjunto) {
+    const confirmado = window.confirm(
+      "AVISO DE SEGURIDAD\n\n" +
+      "Vas a enviar este documento DESCIFRADO por email.\n" +
+      "El destinatario podrá leerlo sin necesitar Babel.\n\n" +
+      "¿Continuar?"
+    );
+    if (!confirmado) return;
+  }
 
   if (estado) estado.textContent = "Enviando...";
 
   try {
-    if (archivoEmailFile) {
+    if (!tieneAdjunto) {
+      // Email de solo texto — sin adjunto
+      await invoke("enviar_solo_texto_tauri", { destinatario, asunto, cuerpo, cc, cco });
+    } else if (archivoEmailFile) {
       const bytes = Array.from(new Uint8Array(await archivoEmailFile.arrayBuffer()));
       await invoke("enviar_bytes_cifrados_tauri", {
         nombreArchivo: archivoEmailFile.name,
@@ -3870,8 +4458,9 @@ async function enviarEmail(): Promise<void> {
       });
     }
     if (estado) estado.textContent = "";
-    mostrarToast("✓ Enviado cifrado", false);
+    mostrarToast(tieneAdjunto ? "✓ Enviado cifrado" : "✓ Enviado", false);
     cerrarCompositor();
+    await cargarBandejaEmail();
   } catch (error) {
     if (estado) estado.textContent = "";
     mostrarToast("Error enviando: " + String(error), true);
@@ -3886,19 +4475,63 @@ async function sincronizarEmail(): Promise<void> {
   await cargarBandejaEmail();
 }
 
+function textoPlanoDeEmail(cuerpo: string): string {
+  // Extrae texto legible de HTML o devuelve el texto plano tal cual
+  if (!cuerpo.trim().startsWith("<")) return cuerpo;
+  const div = document.createElement("div");
+  div.innerHTML = cuerpo;
+  return div.innerText;
+}
+
+function bloquesCita(cuerpo: string): string {
+  return textoPlanoDeEmail(cuerpo)
+    .split("\n")
+    .map(l => `> ${l}`)
+    .join("\n");
+}
+
 function responderEmail(): void {
   const asuntoEl = document.getElementById("visor-asunto");
-  const metaEl = document.getElementById("visor-meta");
   const asunto = asuntoEl?.textContent ?? "";
+  const metaEl = document.getElementById("visor-meta");
   const meta = metaEl?.textContent ?? "";
-  const remitente = meta.replace(/^De: /, "").split(" · ")[0] ?? "";
 
   abrirComponerEmail();
 
   const destinatario = document.getElementById("comp-destinatario") as HTMLInputElement;
   const asuntoComp = document.getElementById("comp-asunto") as HTMLInputElement;
-  if (destinatario) destinatario.value = remitente;
+  const cuerpoComp = document.getElementById("comp-cuerpo") as HTMLTextAreaElement;
+
+  if (destinatario) destinatario.value = _emailVisorRemitente;
   if (asuntoComp && asunto) asuntoComp.value = asunto.startsWith("Re:") ? asunto : `Re: ${asunto}`;
+
+  if (cuerpoComp && _cuerpoEmailOriginal) {
+    const firma = _firmaEmail ? `\n\n—\n${_firmaEmail}` : "";
+    cuerpoComp.value = `${firma}\n\n${meta}\n${bloquesCita(_cuerpoEmailOriginal)}`;
+    cuerpoComp.setSelectionRange(0, 0);
+    cuerpoComp.scrollTop = 0;
+  }
+}
+
+function reenviarEmail(): void {
+  const asuntoEl = document.getElementById("visor-asunto");
+  const asunto = asuntoEl?.textContent ?? "";
+  const metaEl = document.getElementById("visor-meta");
+  const meta = metaEl?.textContent ?? "";
+
+  abrirComponerEmail();
+
+  const asuntoComp = document.getElementById("comp-asunto") as HTMLInputElement;
+  const cuerpoComp = document.getElementById("comp-cuerpo") as HTMLTextAreaElement;
+
+  if (asuntoComp && asunto) asuntoComp.value = asunto.startsWith("Fwd:") ? asunto : `Fwd: ${asunto}`;
+
+  if (cuerpoComp && _cuerpoEmailOriginal) {
+    const firma = _firmaEmail ? `\n\n—\n${_firmaEmail}` : "";
+    cuerpoComp.value = `${firma}\n\n---------- Mensaje reenviado ----------\n${meta}\n\n${textoPlanoDeEmail(_cuerpoEmailOriginal)}`;
+    cuerpoComp.setSelectionRange(0, 0);
+    cuerpoComp.scrollTop = 0;
+  }
 }
 
 let _zoomEmailRem: number = 0.92;
@@ -3952,6 +4585,37 @@ function insertarPlantillaEmail(texto: string): void {
   cuerpo.focus();
 }
 
+async function accionListaEmail(id: number, accion: "archivar" | "eliminar" | "destacado", destacar?: boolean): Promise<void> {
+  if (_imapMutando) return;
+  _imapMutando = true;
+  try {
+    if (accion === "archivar") {
+      await invoke("archivar_email_tauri", { id });
+      document.querySelector(`.email-item[data-id="${id}"]`)?.remove();
+      if (emailVisorActualId === id) cerrarVisorEmail();
+      mostrarToast("Archivado.", false);
+    } else if (accion === "eliminar") {
+      await invoke("eliminar_email_tauri", { id });
+      document.querySelector(`.email-item[data-id="${id}"]`)?.remove();
+      if (emailVisorActualId === id) cerrarVisorEmail();
+      mostrarToast("Eliminado.", false);
+    } else if (accion === "destacado") {
+      const val = destacar ?? true;
+      await invoke("marcar_destacado_tauri", { id, destacar: val });
+      const itemEl = document.querySelector(`.email-item[data-id="${id}"]`) as HTMLElement | null;
+      if (itemEl) {
+        itemEl.classList.toggle("destacado", val);
+        const btn = itemEl.querySelector("[data-action='lista-destacar']") as HTMLElement | null;
+        if (btn) { btn.dataset.val = val ? "0" : "1"; btn.textContent = val ? "★" : "☆"; btn.classList.toggle("activo", val); }
+      }
+    }
+  } catch (e) {
+    mostrarToast(`Error: ${e}`, true);
+  } finally {
+    _imapMutando = false;
+  }
+}
+
 async function eliminarEmailActual(): Promise<void> {
   if (emailVisorActualId === null || _imapMutando) return;
   _imapMutando = true;
@@ -3967,6 +4631,58 @@ async function eliminarEmailActual(): Promise<void> {
     _imapMutando = false;
   }
 }
+
+async function archivarEmailActual(): Promise<void> {
+  if (emailVisorActualId === null || _imapMutando) return;
+  _imapMutando = true;
+  const id = emailVisorActualId;
+  try {
+    await invoke("archivar_email_tauri", { id });
+    cerrarVisorEmail();
+    mostrarToast("Correo archivado.", false);
+    await cargarBandejaEmail();
+  } catch (e) {
+    mostrarToast(`Error archivando: ${e}`, true);
+  } finally {
+    _imapMutando = false;
+  }
+}
+
+let _emailVisorDestacado = false;
+
+async function toggleDestacadoActual(): Promise<void> {
+  if (emailVisorActualId === null || _imapMutando) return;
+  _imapMutando = true;
+  const id = emailVisorActualId;
+  const nuevoValor = !_emailVisorDestacado;
+  try {
+    await invoke("marcar_destacado_tauri", { id, destacar: nuevoValor });
+    _emailVisorDestacado = nuevoValor;
+    const btn = document.getElementById("btn-destacar-visor");
+    if (btn) btn.textContent = nuevoValor ? "★ Destacado" : "☆ Destacar";
+    mostrarToast(nuevoValor ? "⭐ Destacado" : "☆ Quitado de destacados", false);
+    // Actualizar lista sin recargar IMAP
+    const itemEl = document.querySelector(`.email-item[data-id="${id}"]`) as HTMLElement | null;
+    if (itemEl) {
+      itemEl.classList.toggle("destacado", nuevoValor);
+      const btnLista = itemEl.querySelector("[data-action='toggle-destacado-lista']") as HTMLElement | null;
+      if (btnLista) { btnLista.dataset.destacar = nuevoValor ? "0" : "1"; btnLista.textContent = nuevoValor ? "★" : "☆"; }
+      const iconos = itemEl.querySelector(".email-item-meta-iconos");
+      if (iconos) {
+        const estrella = iconos.querySelector("span[title='Destacado']");
+        if (nuevoValor && !estrella) { const s = document.createElement("span"); s.title = "Destacado"; s.textContent = "⭐"; iconos.appendChild(s); }
+        else if (!nuevoValor && estrella) estrella.remove();
+      }
+    }
+  } catch (e) {
+    mostrarToast(`Error: ${e}`, true);
+  } finally {
+    _imapMutando = false;
+  }
+}
+
+// Acciones rápidas desde los botones de la lista (sin abrir el email)
+
 
 async function cambiarIdiomaEmail(idioma: string): Promise<void> {
   const cuerpoEl = document.getElementById("email-visor-cuerpo");
@@ -4977,8 +5693,8 @@ function bindOnclicks(root: Element) {
 
     console.group("Tests: modal configurar correo");
 
-    // T1: sin cuenta y sin haber cerrado → modal visible
-    _smtpConfigurado = false;
+    // T1: sin OAuth y sin haber cerrado → modal visible
+    _oauthGmailConectado = false;
     _modalEmailVistoEnSesion = false;
     mostrarModalConfigurarEmail();
     assert(
@@ -5001,17 +5717,17 @@ function bindOnclicks(root: Element) {
       "T3: no reaparece si ya fue cerrado en la sesión"
     );
 
-    // T4: con cuenta conectada nunca aparece (aunque se resetee la bandera)
-    _smtpConfigurado = true;
+    // T4: con OAuth conectado nunca aparece (aunque se resetee la bandera)
+    _oauthGmailConectado = true;
     _modalEmailVistoEnSesion = false;
     mostrarModalConfigurarEmail();
     assert(
       document.getElementById("modal-configurar-email")?.classList.contains("hidden") === true,
-      "T4: no aparece si ya hay cuenta conectada"
+      "T4: no aparece si ya hay OAuth Gmail activo"
     );
 
     // Restaurar estado real
-    _smtpConfigurado = false;
+    _oauthGmailConectado = false;
     _modalEmailVistoEnSesion = false;
     document.getElementById("modal-configurar-email")?.classList.add("hidden");
 

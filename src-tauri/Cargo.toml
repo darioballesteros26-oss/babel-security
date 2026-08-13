@@ -58,6 +58,7 @@ image = "0.25"
 zstd = "0.13"
 libc  = "0.2"
 pbkdf2 = { version = "0.12", features = ["hmac"] }
+keyring = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

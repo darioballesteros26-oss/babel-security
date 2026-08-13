@@ -155,8 +155,10 @@
           <span class="panel-texto" id="pantalla-texto-p2p">Mensajes</span>
         </button>
       </div>
+      <button type="button" data-action="ir-a-registro" class="btn-link"
+        style="margin-top:20px;letter-spacing:2px;">◷ REGISTRO</button>
       <button type="button" data-action="mostrar-pantalla" data-pantalla="ajustes" class="btn-link"
-        style="margin-top:20px;letter-spacing:2px;" id="pantalla-texto-ajustes">⚙ AJUSTES</button>
+        style="margin-top:8px;letter-spacing:2px;" id="pantalla-texto-ajustes">⚙ AJUSTES</button>
       <button type="button" data-action="cerrar-sesion" class="btn-link" style="margin-top:8px"
         id="pantalla-texto-cerrar">CERRAR SESIÓN</button>
     </div>
@@ -565,7 +567,18 @@
         <!-- SIDEBAR: lista de correos -->
         <div class="email-sidebar">
           <div class="email-sidebar-header">
-            <span class="email-sidebar-titulo">BANDEJA</span>
+            <div class="email-menu-wrap">
+              <button type="button" class="email-menu-trigger" data-action="toggle-email-menu">
+                <span id="email-vista-label">TODOS</span>
+                <span class="email-menu-arrow">▾</span>
+              </button>
+              <div id="email-menu-dropdown" class="email-menu-dropdown hidden">
+                <button type="button" class="email-menu-item activo" data-action="filtro-email" data-vista="todos">Todos los correos</button>
+                <button type="button" class="email-menu-item" data-action="filtro-email" data-vista="noleidos">No leídos</button>
+                <button type="button" class="email-menu-item" data-action="filtro-email" data-vista="destacados">Destacados</button>
+                <button type="button" class="email-menu-item" data-action="filtro-email" data-vista="archivados">Archivados</button>
+              </div>
+            </div>
             <div style="display:flex;gap:6px;align-items:center;">
               <button type="button" data-action="sincronizar-email" class="email-btn-sync"
                 title="Actualizar bandeja">↻</button>
@@ -624,13 +637,14 @@
                   class="email-campo-input">
               </div>
               <div class="email-campo-fila" style="border-bottom:none;">
-                <span class="email-campo-label">Adjunto</span>
+                <span class="email-campo-label" style="color:var(--texto-secundario);">Adjunto</span>
                 <div id="comp-archivo-zona" data-action="seleccionar-archivo-email" class="email-adjunto-zona"
                   onmouseenter="this.classList.add('hover')" onmouseleave="this.classList.remove('hover')">
-                  <span id="comp-archivo-nombre">📎 Adjuntar documento</span>
+                  <span id="comp-archivo-nombre">📎 Adjuntar (opcional)</span>
                 </div>
-                <input type="file" id="input-archivo-email" style="display:none;"
-                  onchange="manejarSeleccionArchivoEmail(event)">
+                <button type="button" data-action="limpiar-adjunto-email" title="Quitar adjunto"
+                  style="background:transparent;border:none;color:var(--texto-secundario);
+                  cursor:pointer;padding:0 4px;font-size:1rem;line-height:1;">×</button>
               </div>
             </div>
             <div class="email-plantillas-wrap">
@@ -661,6 +675,7 @@
             <div class="email-visor-toolbar">
               <div class="email-visor-acciones">
                 <button type="button" data-action="responder-email" class="email-btn-accion">↩ Responder</button>
+                <button type="button" data-action="reenviar-email" class="email-btn-accion">↪ Reenviar</button>
                 <button type="button" data-action="marcar-no-leido" class="email-btn-accion"
                   title="Marcar como no leído">◎ No leído</button>
                 <button type="button" data-action="copiar-cuerpo-email" class="email-btn-accion"
@@ -669,8 +684,6 @@
                   title="Reducir texto">A−</button>
                 <button type="button" data-action="cambiar-zoom-email" data-delta="1" class="email-btn-accion"
                   title="Aumentar texto">A+</button>
-                <button type="button" data-action="eliminar-email-actual" class="email-btn-accion peligro">🗑
-                  Eliminar</button>
                 <select id="email-idioma" onchange="cambiarIdiomaEmail(this.value)" class="email-idioma-sel">
                   <option value="ninguno">Sin traducir</option>
                   <option value="es_en">ES → EN</option>
@@ -972,8 +985,21 @@
           <div style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
             Consulta la política de privacidad y los términos que rigen el uso de Babel Security.
           </div>
-          <button type="button" data-action="ver-terminos" class="btn-secundario-oro" style="width:100%;padding:12px 0;">
+          <button type="button" data-action="ver-terminos" class="btn-secundario-oro" style="padding:6px 16px;font-size:0.62rem;letter-spacing:1.5px;">
             VER TÉRMINOS DE USO
+          </button>
+        </div>
+
+        <div style="border-top:1px solid var(--borde);margin-top:20px;padding-top:20px;">
+          <div class="ajuste-label" style="opacity:0.7;">SESIÓN GUARDADA</div>
+          <div style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;
+            font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+            Babel recuerda tu sesión en el Keychain del sistema para que no tengas que introducir
+            la contraseña cada vez que abras la app. Puedes borrarla aquí.
+          </div>
+          <button type="button" data-action="olvidar-sesion-guardada" class="btn-secundario-oro"
+            style="width:100%;padding:12px 0;">
+            OLVIDAR SESIÓN GUARDADA
           </button>
         </div>
 
@@ -1868,6 +1894,202 @@
             color:#0d0d0d;padding:9px;cursor:pointer;font-weight:bold;
             font-size:0.65rem;letter-spacing:1.5px;border-radius:2px;
             font-family:'Times New Roman',Times,serif;">UNIR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- PANTALLA REGISTRO DIARIO                                      -->
+  <!-- ============================================================ -->
+  <div id="pantalla-registro" class="pantalla hidden">
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--borde);flex-shrink:0;">
+      <button type="button" data-action="volver-al-panel" class="btn-link" style="font-size:0.65rem;letter-spacing:2px;">← PANEL</button>
+      <span style="font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:4px;color:var(--dorado);">REGISTRO DIARIO</span>
+      <button type="button" data-action="abrir-filtro-registro" class="btn-link" style="font-size:0.65rem;letter-spacing:1px;" title="Filtrar tipos de evento">⚙ FILTRAR</button>
+    </div>
+
+    <!-- Navegación de días -->
+    <div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:12px 20px;flex-shrink:0;border-bottom:1px solid var(--borde);">
+      <button type="button" data-action="registro-dia-anterior" style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:4px 10px;opacity:0.8;" title="Día anterior">◀</button>
+      <span id="registro-fecha-label" style="font-family:'Times New Roman',Times,serif;font-size:0.8rem;letter-spacing:3px;color:var(--dorado);min-width:120px;text-align:center;">HOY</span>
+      <button type="button" data-action="registro-dia-siguiente" id="btn-registro-siguiente" style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:4px 10px;opacity:0.8;" title="Día siguiente">▶</button>
+    </div>
+
+    <!-- Resumen del día -->
+    <div id="registro-resumen" style="flex-shrink:0;padding:12px 20px;border-bottom:1px solid var(--borde);"></div>
+
+    <!-- Lista de eventos -->
+    <div id="registro-lista" style="flex:1;overflow-y:auto;padding:8px 0;"></div>
+
+    <!-- Ajustes de notificación (botón inferior) -->
+    <div style="flex-shrink:0;padding:12px 20px;border-top:1px solid var(--borde);text-align:center;">
+      <button type="button" data-action="abrir-ajustes-registro" class="btn-link" style="font-size:0.6rem;letter-spacing:2px;opacity:0.6;">⏰ AJUSTAR HORA DE NOTIFICACIÓN</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL: Primera vez — configurar registro                      -->
+  <!-- ============================================================ -->
+  <div id="modal-registro-primera-vez" class="hidden" style="
+    position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.88);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="background:#0d0d0d;border:1px solid var(--dorado);border-radius:4px;
+      width:100%;max-width:420px;padding:32px 28px;display:flex;flex-direction:column;gap:20px;">
+      <div style="font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:4px;color:var(--dorado);text-align:center;">
+        REGISTRO DE ACCESO DIARIO
+      </div>
+      <p style="font-size:0.72rem;color:var(--texto-secundario);line-height:1.7;letter-spacing:0.5px;margin:0;">
+        Babel puede registrar localmente todos los accesos a tu cuenta y las operaciones con documentos — archivos vistos, movidos, traducidos o descargados — junto con la IP del dispositivo y la hora exacta.
+      </p>
+      <p style="font-size:0.72rem;color:var(--texto-secundario);line-height:1.7;letter-spacing:0.5px;margin:0;">
+        Si detecta un acceso desde una dirección IP desconocida, te avisará para que puedas actuar: cambiar contraseña, contactarnos o denunciarlo si corresponde. El registro <strong style="color:var(--dorado);">no identifica a la persona</strong> — solo detecta la anomalía.
+      </p>
+      <p style="font-size:0.72rem;color:var(--texto-secundario);line-height:1.7;letter-spacing:0.5px;margin:0;">
+        Todo el registro está cifrado y almacenado exclusivamente en tu dispositivo. Elige la hora del resumen diario:
+      </p>
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">H</label>
+          <input type="number" id="rp-hora" min="0" max="23" value="10"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+        <span style="color:var(--dorado);font-size:1.4rem;margin-top:16px;">:</span>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">MIN</label>
+          <input type="number" id="rp-minuto" min="0" max="59" value="0"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+        <span style="color:var(--dorado);font-size:1.4rem;margin-top:16px;">:</span>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">SEG</label>
+          <input type="number" id="rp-segundo" min="0" max="59" value="0"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+      </div>
+      <p style="font-size:0.6rem;color:var(--texto-secundario);opacity:0.6;text-align:center;margin:0;letter-spacing:1px;">
+        Hora local del dispositivo · puedes cambiarlo más tarde
+      </p>
+      <button type="button" data-action="confirmar-registro-primera-vez"
+        style="background:var(--dorado);border:none;color:#0d0d0d;padding:12px;cursor:pointer;
+        font-size:0.68rem;letter-spacing:2px;font-weight:700;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+        ENTENDIDO — ACTIVAR REGISTRO
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL: Popup resumen diario                                   -->
+  <!-- ============================================================ -->
+  <div id="modal-registro-popup" class="hidden" style="
+    position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.88);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="background:#0d0d0d;border:1px solid var(--dorado);border-radius:4px;
+      width:100%;max-width:380px;padding:28px 24px;display:flex;flex-direction:column;gap:16px;">
+      <div style="font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:4px;color:var(--dorado);text-align:center;">
+        RESUMEN DE HOY
+      </div>
+      <div id="registro-popup-contenido"></div>
+      <div style="display:flex;gap:10px;margin-top:4px;">
+        <button type="button" data-action="cerrar-registro-popup"
+          style="flex:1;background:transparent;border:1px solid var(--borde);color:var(--texto-secundario);
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          CERRAR
+        </button>
+        <button type="button" data-action="ir-a-registro"
+          style="flex:2;background:var(--dorado);border:none;color:#0d0d0d;
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-weight:700;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          VER HISTORIAL
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL: Filtro de eventos                                      -->
+  <!-- ============================================================ -->
+  <div id="modal-filtro-registro" class="hidden" style="
+    position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.88);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="background:#0d0d0d;border:1px solid var(--dorado);border-radius:4px;
+      width:100%;max-width:340px;padding:24px;display:flex;flex-direction:column;gap:16px;">
+      <div style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;letter-spacing:4px;color:var(--dorado);text-align:center;">
+        FILTRAR EVENTOS
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="login"> Accesos / Inicios de sesión</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="ver_archivo"> Archivos vistos</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="mover_archivo"> Archivos movidos</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="traducir"> Traducciones</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="descargar"> Descargas / Exportaciones</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="importar"> Importaciones</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="cerrar_sesion"> Cierre de sesión</label>
+      </div>
+      <p style="font-size:0.6rem;color:var(--texto-secundario);opacity:0.6;margin:0;letter-spacing:1px;">
+        Sin selección = mostrar todos los tipos
+      </p>
+      <div style="display:flex;gap:10px;">
+        <button type="button" data-action="limpiar-filtro-registro"
+          style="flex:1;background:transparent;border:1px solid var(--borde);color:var(--texto-secundario);
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          TODOS
+        </button>
+        <button type="button" data-action="aplicar-filtro-registro"
+          style="flex:2;background:var(--dorado);border:none;color:#0d0d0d;
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-weight:700;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          APLICAR
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL: Ajustar hora de notificación (post primera vez)        -->
+  <!-- ============================================================ -->
+  <div id="modal-ajustes-registro" class="hidden" style="
+    position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.88);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="background:#0d0d0d;border:1px solid var(--dorado);border-radius:4px;
+      width:100%;max-width:320px;padding:28px 24px;display:flex;flex-direction:column;gap:20px;">
+      <div style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;letter-spacing:4px;color:var(--dorado);text-align:center;">
+        HORA DE NOTIFICACIÓN
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">H</label>
+          <input type="number" id="ra-hora" min="0" max="23" value="10"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+        <span style="color:var(--dorado);font-size:1.4rem;margin-top:16px;">:</span>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">MIN</label>
+          <input type="number" id="ra-minuto" min="0" max="59" value="0"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+        <span style="color:var(--dorado);font-size:1.4rem;margin-top:16px;">:</span>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">SEG</label>
+          <input type="number" id="ra-segundo" min="0" max="59" value="0"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button type="button" data-action="cerrar-ajustes-registro"
+          style="flex:1;background:transparent;border:1px solid var(--borde);color:var(--texto-secundario);
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          CANCELAR
+        </button>
+        <button type="button" data-action="guardar-ajustes-registro"
+          style="flex:2;background:var(--dorado);border:none;color:#0d0d0d;
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-weight:700;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          GUARDAR
+        </button>
       </div>
     </div>
   </div>

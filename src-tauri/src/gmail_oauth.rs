@@ -27,7 +27,8 @@ const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
 const OAUTH_FILE: &str = "oauth_gmail.babel";
 
-pub const SCOPE: &str = "https://mail.google.com/";
+// mail.google.com: acceso IMAP/SMTP. email: permite leer el email del usuario vía userinfo.
+pub const SCOPE: &str = "https://mail.google.com/ email";
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
 use base64::Engine;
@@ -67,13 +68,6 @@ fn generar_challenge(verifier: &str) -> String {
     B64URL.encode(Sha256::digest(verifier.as_bytes()))
 }
 
-fn puerto_libre() -> Result<u16, String> {
-    TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .map_err(|e| format!("No se pudo reservar puerto local: {}", e))
-}
-
 // Percent-encode para parámetros de URL (RFC 3986 §2.1).
 fn pct(s: &str) -> String {
     s.bytes()
@@ -94,12 +88,22 @@ pub struct FlujoPKCE {
     pub url_auth: String,
     pub verifier: Zeroizing<String>,
     pub puerto: u16,
+    // El listener se crea aquí y se mantiene vivo hasta capturar_codigo,
+    // evitando la race condition TOCTOU donde el OS reasigna el puerto
+    // entre puerto_libre() y el bind del hilo.
+    pub listener: TcpListener,
 }
 
 pub fn construir_flujo(client_id: &str) -> Result<FlujoPKCE, String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("No se pudo abrir servidor OAuth: {}", e))?;
+    let puerto = listener
+        .local_addr()
+        .map_err(|e| format!("No se pudo obtener puerto OAuth: {}", e))?
+        .port();
+
     let verifier = generar_verifier();
     let challenge = generar_challenge(&verifier);
-    let puerto = puerto_libre()?;
     let redirect = format!("http://127.0.0.1:{}/callback", puerto);
 
     let url_auth = format!(
@@ -112,27 +116,19 @@ pub fn construir_flujo(client_id: &str) -> Result<FlujoPKCE, String> {
         challenge,
     );
 
-    Ok(FlujoPKCE { url_auth, verifier, puerto })
+    Ok(FlujoPKCE { url_auth, verifier, puerto, listener })
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // FLUJO PKCE — PASO 2: escuchar callback en localhost
 // ──────────────────────────────────────────────────────────────────────────────
 
-pub fn capturar_codigo(puerto: u16) -> Result<String, String> {
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", puerto))
-        .map_err(|e| format!("No se pudo abrir puerto {}: {}", puerto, e))?;
-
-    let (mut stream, _) = listener
-        .accept()
-        .map_err(|e| format!("Error esperando callback OAuth: {}", e))?;
-
-    let mut buf = vec![0u8; 4096];
-    let n = stream
-        .read(&mut buf)
-        .map_err(|e| format!("Error leyendo petición: {}", e))?;
-
-    let html = concat!(
+// Escucha en el listener ya creado por construir_flujo.
+// Itera conexiones hasta encontrar el callback real con ?code= o ?error=,
+// descartando peticiones auxiliares del navegador (favicon, etc.).
+// Timeout de 10 minutos para no colgar el hilo si el usuario cierra el browser.
+pub fn capturar_codigo(listener: TcpListener) -> Result<String, String> {
+    let html_ok = concat!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n",
         "<!DOCTYPE html><html><head><meta charset=utf-8>",
         "<style>body{font-family:sans-serif;background:#0a0a0a;color:#c8a96e;",
@@ -144,24 +140,55 @@ pub fn capturar_codigo(puerto: u16) -> Result<String, String> {
         "<p style='color:#888'>Puedes cerrar esta pesta\u{f1}a y volver a Babel.</p>",
         "</div></body></html>",
     );
-    let _ = stream.write_all(html.as_bytes());
+    let html_ignore = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
-    let peticion = String::from_utf8_lossy(&buf[..n]);
-    let primera_linea = peticion.lines().next().unwrap_or("");
-    // "GET /callback?code=XXXX&scope=... HTTP/1.1"
-    let path = primera_linea.split_whitespace().nth(1).unwrap_or("");
-    let qs = path.split('?').nth(1).unwrap_or("");
+    // Iterar hasta recibir la petición de callback (máx 20 intentos para ignorar
+    // peticiones auxiliares del browser: favicon, prefetch, etc.)
+    for _ in 0..20 {
+        let (mut stream, _) = match listener.accept() {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
+                   || e.kind() == std::io::ErrorKind::TimedOut => {
+                return Err("Tiempo de espera agotado: el usuario no completó el flujo OAuth".to_string());
+            }
+            Err(e) => return Err(format!("Error esperando callback OAuth: {}", e)),
+        };
 
-    if let Some(par) = qs.split('&').find(|p| p.starts_with("code=")) {
-        return Ok(par[5..].to_string());
+        let mut buf = vec![0u8; 8192];
+        let n = match stream.read(&mut buf) {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        if n == 0 { continue; }
+
+        let peticion = String::from_utf8_lossy(&buf[..n]);
+        let primera_linea = peticion.lines().next().unwrap_or("");
+        // "GET /callback?code=XXXX&scope=... HTTP/1.1"
+        let path = primera_linea.split_whitespace().nth(1).unwrap_or("");
+
+        // Ignorar peticiones que no son el callback de OAuth
+        if !path.starts_with("/callback") {
+            let _ = stream.write_all(html_ignore.as_bytes());
+            continue;
+        }
+
+        let qs = path.split('?').nth(1).unwrap_or("");
+
+        if let Some(par) = qs.split('&').find(|p| p.starts_with("code=")) {
+            let _ = stream.write_all(html_ok.as_bytes());
+            return Ok(par[5..].to_string());
+        }
+
+        let error = qs
+            .split('&')
+            .find(|p| p.starts_with("error="))
+            .map(|p| p[6..].to_string())
+            .unwrap_or_else(|| "respuesta inesperada".to_string());
+        let _ = stream.write_all(html_ignore.as_bytes());
+        return Err(format!("Google denegó el acceso: {}", error));
     }
 
-    let error = qs
-        .split('&')
-        .find(|p| p.starts_with("error="))
-        .map(|p| p[6..].to_string())
-        .unwrap_or_else(|| "respuesta inesperada".to_string());
-    Err(format!("Google denegó el acceso: {}", error))
+    Err("No se recibió el callback OAuth tras varios intentos".to_string())
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -203,10 +230,17 @@ pub fn intercambiar_codigo(
         pct(&redirect),
     );
 
-    let resp = ureq::post(TOKEN_URL)
+    let resp = match ureq::post(TOKEN_URL)
         .set("Content-Type", "application/x-www-form-urlencoded")
         .send_string(&cuerpo)
-        .map_err(|e| format!("Error intercambiando código OAuth: {}", e))?;
+    {
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, r)) => {
+            let body = r.into_string().unwrap_or_default();
+            return Err(format!("Google rechazó el código OAuth: {}", body));
+        }
+        Err(e) => return Err(format!("Error de red en intercambio OAuth: {}", e)),
+    };
 
     let tokens: RespToken = resp
         .into_json()
@@ -228,6 +262,14 @@ pub fn intercambiar_codigo(
         .and_then(|r| r.into_json::<UserInfo>().ok())
         .and_then(|u| u.email)
         .unwrap_or_default();
+
+    if email.is_empty() {
+        return Err(
+            "No se pudo obtener el email de la cuenta Google. \
+             Comprueba la conexión y que el scope incluye 'email'."
+                .to_string(),
+        );
+    }
 
     Ok(TokensNuevos {
         refresh_token: Zeroizing::new(refresh),
@@ -338,15 +380,14 @@ pub fn tiene_oauth_guardado() -> bool {
     crate::babel_dir().join(OAUTH_FILE).exists()
 }
 
-pub fn revocar_oauth(client_id: &str, client_secret: &str, subclave_hex: &str) {
-    // Intentar revocar en Google (no fatal si falla)
+pub fn revocar_oauth(_client_id: &str, _client_secret: &str, subclave_hex: &str) {
+    // Revocar el refresh_token directamente (la API de Google acepta ambos;
+    // usar el refresh_token es más robusto porque funciona aunque el access_token
+    // haya expirado o no se pueda refrescar).
     if let Some(tokens) = cargar_tokens_oauth(subclave_hex) {
-        // Intentar obtener un access_token fresco para revocar
-        if let Ok(at) = refrescar(client_id, client_secret, &tokens.refresh_token) {
-            let _ = ureq::post(REVOKE_URL)
-                .set("Content-Type", "application/x-www-form-urlencoded")
-                .send_string(&format!("token={}", pct(&at.0)));
-        }
+        let _ = ureq::post(REVOKE_URL)
+            .set("Content-Type", "application/x-www-form-urlencoded")
+            .send_string(&format!("token={}", pct(&tokens.refresh_token)));
     }
     let _ = std::fs::remove_file(crate::babel_dir().join(OAUTH_FILE));
     invalidar_cache();
