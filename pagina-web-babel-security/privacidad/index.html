@@ -93,15 +93,30 @@
       <p class="text-slate-300 text-sm leading-relaxed" data-i18n="s2b_p">Babel Security opera bajo un principio de conocimiento cero absoluto. Ni el desarrollador ni ningún tercero puede acceder a tus documentos, claves de cifrado o datos personales en ningún momento. Todos los archivos se cifran con AES-256-GCM; las claves se derivan mediante Argon2id y HKDF-SHA256 y nunca abandonan tu dispositivo.</p>
     </div>
 
+    <!-- Google OAuth -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="sg1_h">4. Integración con Gmail (OAuth)</h2>
+      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg1_p1">Security Babel incluye una función opcional de integración con Gmail mediante OAuth 2.0. Esta integración permite leer y gestionar correos electrónicos directamente desde la app, sin que los datos salgan del dispositivo del usuario.</p>
+      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg1_p2">Al autorizar el acceso, Security Babel solicita únicamente el permiso necesario para leer y enviar correos. No se accede a ningún otro servicio ni dato de la cuenta de Google.</p>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="sg1_p3">No almacenamos correos en servidores externos. No compartimos, vendemos ni cedemos datos de Google a terceros. El token OAuth se guarda cifrado en el llavero seguro del sistema operativo y nunca abandona el dispositivo.</p>
+    </div>
+
+    <!-- Google Limited Use -->
+    <div class="doc-section">
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="sg2_h">5. Declaración de uso limitado (Google API Services)</h2>
+      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg2_p1">El uso que Security Babel hace de los datos obtenidos mediante la API de Google se atiene a la Política de Datos de Usuario de los Servicios de API de Google, incluyendo los requisitos de uso limitado (Limited Use).</p>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="sg2_p2">Los datos de Gmail se usan exclusivamente para mostrar y gestionar el correo del usuario dentro de la app. No se usan para publicidad, no se transfieren a terceros, y no se usan para ningún fin ajeno a la gestión de correo expresamente solicitada por el usuario.</p>
+    </div>
+
     <!-- 3 -->
     <div class="doc-section">
-      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="s3_h">4. Tus derechos</h2>
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="s3_h">6. Tus derechos</h2>
       <p class="text-slate-300 text-sm leading-relaxed" data-i18n="s3_p">Puedes solicitar en cualquier momento acceder a los datos que nos hayas enviado por el formulario, corregirlos o solicitar su eliminación, escribiendo a <a href="mailto:darioballesteros26@gmail.com" class="c-gold hover:text-yellow-300 transition-colors">darioballesteros26@gmail.com</a>.</p>
     </div>
 
     <!-- 4 -->
     <div class="doc-section">
-      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="s4_h">5. Jurisdicción</h2>
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="s4_h">7. Jurisdicción</h2>
       <p class="text-slate-300 text-sm leading-relaxed" data-i18n="s4_p">Esta política se rige por la legislación española y el Reglamento General de Protección de Datos (RGPD).</p>
     </div>
 
@@ -134,9 +149,16 @@ const T = {
     s2_p: "Security Babel, como aplicación de escritorio, no recopila ni transmite tus documentos ni su contenido a ningún servidor. Todo el procesamiento —cifrado, traducción, almacenamiento— ocurre localmente en tu dispositivo.",
     s2b_h: "3. Arquitectura zero-knowledge",
     s2b_p: "Babel Security opera bajo un principio de conocimiento cero absoluto. Ni el desarrollador ni ningún tercero puede acceder a tus documentos, claves de cifrado o datos personales en ningún momento. Todos los archivos se cifran con AES-256-GCM; las claves se derivan mediante Argon2id y HKDF-SHA256 y nunca abandonan tu dispositivo.",
-    s3_h: "4. Tus derechos",
+    sg1_h: "4. Integración con Gmail (OAuth)",
+    sg1_p1: "Security Babel incluye una función opcional de integración con Gmail mediante OAuth 2.0. Esta integración permite leer y gestionar correos electrónicos directamente desde la app, sin que los datos salgan del dispositivo del usuario.",
+    sg1_p2: "Al autorizar el acceso, Security Babel solicita únicamente el permiso necesario para leer y enviar correos. No se accede a ningún otro servicio ni dato de la cuenta de Google.",
+    sg1_p3: "No almacenamos correos en servidores externos. No compartimos, vendemos ni cedemos datos de Google a terceros. El token OAuth se guarda cifrado en el llavero seguro del sistema operativo y nunca abandona el dispositivo.",
+    sg2_h: "5. Declaración de uso limitado (Google API Services)",
+    sg2_p1: "El uso que Security Babel hace de los datos obtenidos mediante la API de Google se atiene a la Política de Datos de Usuario de los Servicios de API de Google, incluyendo los requisitos de uso limitado (Limited Use).",
+    sg2_p2: "Los datos de Gmail se usan exclusivamente para mostrar y gestionar el correo del usuario dentro de la app. No se usan para publicidad, no se transfieren a terceros, y no se usan para ningún fin ajeno a la gestión de correo expresamente solicitada por el usuario.",
+    s3_h: "6. Tus derechos",
     s3_p: "Puedes solicitar en cualquier momento acceder a los datos que nos hayas enviado por el formulario, corregirlos o solicitar su eliminación, escribiendo a darioballesteros26@gmail.com.",
-    s4_h: "5. Jurisdicción",
+    s4_h: "7. Jurisdicción",
     s4_p: "Esta política se rige por la legislación española y el Reglamento General de Protección de Datos (RGPD).",
     footer_copy: "© 2026 Security Babel. Todos los derechos reservados.",
     footer_privacy: "Política de Privacidad",
@@ -154,9 +176,16 @@ const T = {
     s2_p: "Security Babel, as a desktop application, does not collect or transmit your documents or their contents to any server. All processing — encryption, translation, storage — occurs locally on your device.",
     s2b_h: "3. Zero-knowledge architecture",
     s2b_p: "Babel Security operates on a principle of absolute zero knowledge. Neither the developer nor any third party can access your documents, encryption keys or personal data at any time. All files are encrypted with AES-256-GCM; keys are derived via Argon2id and HKDF-SHA256 and never leave your device.",
-    s3_h: "4. Your rights",
+    sg1_h: "4. Gmail Integration (OAuth)",
+    sg1_p1: "Security Babel includes an optional Gmail integration via OAuth 2.0. This allows you to read and manage emails directly within the app, without any data leaving your device.",
+    sg1_p2: "When you grant access, Security Babel requests only the permission needed to read and send emails. No other Google account data or services are accessed.",
+    sg1_p3: "We do not store emails on external servers. We do not share, sell or transfer Google data to third parties. The OAuth token is stored encrypted in your operating system's secure keychain and never leaves your device.",
+    sg2_h: "5. Limited Use Disclosure (Google API Services)",
+    sg2_p1: "Security Babel's use of data obtained through Google APIs complies with the Google API Services User Data Policy, including the Limited Use requirements.",
+    sg2_p2: "Gmail data is used solely to display and manage the user's email within the app. It is not used for advertising, not transferred to third parties, and not used for any purpose other than the email management function expressly requested by the user.",
+    s3_h: "6. Your rights",
     s3_p: "You may at any time request access to the data you have sent us via the form, correct it or request its deletion by writing to darioballesteros26@gmail.com.",
-    s4_h: "5. Jurisdiction",
+    s4_h: "7. Jurisdiction",
     s4_p: "This policy is governed by Spanish law and the General Data Protection Regulation (GDPR).",
     footer_copy: "© 2026 Security Babel. All rights reserved.",
     footer_privacy: "Privacy Policy",
@@ -174,9 +203,16 @@ const T = {
     s2_p: "Security Babel как настольное приложение не собирает и не передаёт ваши документы или их содержимое ни на какие серверы. Вся обработка — шифрование, перевод, хранение — происходит локально на вашем устройстве.",
     s2b_h: "3. Архитектура с нулевым разглашением",
     s2b_p: "Babel Security работает по принципу абсолютного нулевого разглашения. Ни разработчик, ни какие-либо третьи лица не могут получить доступ к вашим документам, ключам шифрования или личным данным в любое время. Все файлы шифруются с помощью AES-256-GCM; ключи формируются через Argon2id и HKDF-SHA256 и никогда не покидают ваше устройство.",
-    s3_h: "4. Ваши права",
+    sg1_h: "4. Интеграция с Gmail (OAuth)",
+    sg1_p1: "Security Babel включает опциональную интеграцию с Gmail через OAuth 2.0, позволяющую читать и управлять электронной почтой прямо в приложении без передачи данных за пределы устройства.",
+    sg1_p2: "При авторизации Security Babel запрашивает только разрешение на чтение и отправку писем. Доступ к другим данным или сервисам аккаунта Google не осуществляется.",
+    sg1_p3: "Мы не храним электронные письма на внешних серверах. Мы не передаём, не продаём и не уступаем данные Google третьим лицам. Токен OAuth хранится в зашифрованном виде в защищённом хранилище операционной системы и никогда не покидает устройство.",
+    sg2_h: "5. Декларация об ограниченном использовании (Google API Services)",
+    sg2_p1: "Использование Security Babel данных, полученных через API Google, соответствует Политике данных пользователей сервисов API Google, включая требования ограниченного использования (Limited Use).",
+    sg2_p2: "Данные Gmail используются исключительно для отображения и управления почтой пользователя внутри приложения. Они не используются для рекламы, не передаются третьим лицам и не применяются в целях, не связанных с почтовой функцией, запрошенной пользователем.",
+    s3_h: "6. Ваши права",
     s3_p: "Вы можете в любое время запросить доступ к данным, которые отправили нам через форму, исправить их или запросить их удаление, написав на darioballesteros26@gmail.com.",
-    s4_h: "5. Юрисдикция",
+    s4_h: "7. Юрисдикция",
     s4_p: "Настоящая политика регулируется законодательством Испании и Общим регламентом о защите данных (GDPR).",
     footer_copy: "© 2026 Security Babel. Все права защищены.",
     footer_privacy: "Политика конфиденциальности",
@@ -194,9 +230,16 @@ const T = {
     s2_p: "لا يقوم Security Babel بوصفه تطبيقاً لسطح المكتب بجمع وثائقك أو محتواها أو نقلها إلى أي خادم. تجري جميع عمليات المعالجة — التشفير والترجمة والتخزين — محلياً على جهازك.",
     s2b_h: "3. بنية المعرفة الصفرية",
     s2b_p: "يعمل Babel Security وفق مبدأ المعرفة الصفرية المطلقة. لا يستطيع المطوّر ولا أي طرف ثالث الوصول إلى وثائقك أو مفاتيح التشفير أو بياناتك الشخصية في أي وقت. تُشفَّر جميع الملفات باستخدام AES-256-GCM؛ وتُشتَقّ المفاتيح عبر Argon2id وHKDF-SHA256 ولا تغادر جهازك أبداً.",
-    s3_h: "4. حقوقك",
+    sg1_h: "4. تكامل Gmail (OAuth)",
+    sg1_p1: "يتضمن Security Babel وظيفة اختيارية للتكامل مع Gmail عبر OAuth 2.0، تتيح قراءة وإدارة البريد الإلكتروني مباشرةً داخل التطبيق دون أن تغادر البيانات الجهاز.",
+    sg1_p2: "عند منح الإذن، يطلب Security Babel فقط الصلاحية اللازمة لقراءة الرسائل وإرسالها. لا يتم الوصول إلى أي بيانات أو خدمات أخرى من حساب Google.",
+    sg1_p3: "لا نخزن الرسائل على خوادم خارجية. لا نشارك بيانات Google أو نبيعها أو ننقلها إلى أي طرف ثالث. يُخزَّن رمز OAuth مشفراً في خزنة النظام الآمنة ولا يغادر الجهاز أبداً.",
+    sg2_h: "5. إفصاح الاستخدام المحدود (خدمات Google API)",
+    sg2_p1: "يلتزم استخدام Security Babel للبيانات المُحصَّلة عبر واجهات برمجة تطبيقات Google بسياسة بيانات مستخدمي خدمات Google API، بما في ذلك متطلبات الاستخدام المحدود.",
+    sg2_p2: "تُستخدم بيانات Gmail حصراً لعرض بريد المستخدم وإدارته داخل التطبيق. لا تُستخدم للإعلانات، ولا تُنقل إلى أطراف ثالثة، ولا تُوظَّف لأي غرض بخلاف وظيفة البريد التي طلبها المستخدم صراحةً.",
+    s3_h: "6. حقوقك",
     s3_p: "يمكنك في أي وقت طلب الاطلاع على البيانات التي أرسلتها عبر النموذج أو تصحيحها أو طلب حذفها، بالكتابة إلى darioballesteros26@gmail.com.",
-    s4_h: "5. الاختصاص القضائي",
+    s4_h: "7. الاختصاص القضائي",
     s4_p: "تخضع هذه السياسة للقانون الإسباني واللائحة العامة لحماية البيانات (GDPR).",
     footer_copy: "© 2026 Security Babel. جميع الحقوق محفوظة.",
     footer_privacy: "سياسة الخصوصية",
