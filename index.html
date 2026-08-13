@@ -1901,29 +1901,29 @@
   <!-- ============================================================ -->
   <!-- PANTALLA REGISTRO DIARIO                                      -->
   <!-- ============================================================ -->
-  <div id="pantalla-registro" class="pantalla hidden">
+  <div id="pantalla-registro" class="pantalla pantalla-registro-panel hidden">
     <!-- Header -->
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--borde);flex-shrink:0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--borde);flex-shrink:0;width:100%;">
       <button type="button" data-action="volver-al-panel" class="btn-link" style="font-size:0.65rem;letter-spacing:2px;">← PANEL</button>
       <span style="font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:4px;color:var(--dorado);">REGISTRO DIARIO</span>
       <button type="button" data-action="abrir-filtro-registro" class="btn-link" style="font-size:0.65rem;letter-spacing:1px;" title="Filtrar tipos de evento">⚙ FILTRAR</button>
     </div>
 
     <!-- Navegación de días -->
-    <div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:12px 20px;flex-shrink:0;border-bottom:1px solid var(--borde);">
+    <div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:12px 20px;flex-shrink:0;border-bottom:1px solid var(--borde);width:100%;">
       <button type="button" data-action="registro-dia-anterior" style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:4px 10px;opacity:0.8;" title="Día anterior">◀</button>
       <span id="registro-fecha-label" style="font-family:'Times New Roman',Times,serif;font-size:0.8rem;letter-spacing:3px;color:var(--dorado);min-width:120px;text-align:center;">HOY</span>
       <button type="button" data-action="registro-dia-siguiente" id="btn-registro-siguiente" style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:4px 10px;opacity:0.8;" title="Día siguiente">▶</button>
     </div>
 
     <!-- Resumen del día -->
-    <div id="registro-resumen" style="flex-shrink:0;padding:12px 20px;border-bottom:1px solid var(--borde);"></div>
+    <div id="registro-resumen" style="flex-shrink:0;padding:12px 20px;border-bottom:1px solid var(--borde);width:100%;"></div>
 
     <!-- Lista de eventos -->
-    <div id="registro-lista" style="flex:1;overflow-y:auto;padding:8px 0;"></div>
+    <div id="registro-lista" style="flex:1;overflow-y:auto;padding:8px 0;width:100%;"></div>
 
     <!-- Ajustes de notificación (botón inferior) -->
-    <div style="flex-shrink:0;padding:12px 20px;border-top:1px solid var(--borde);text-align:center;">
+    <div style="flex-shrink:0;padding:12px 20px;border-top:1px solid var(--borde);text-align:center;width:100%;">
       <button type="button" data-action="abrir-ajustes-registro" class="btn-link" style="font-size:0.6rem;letter-spacing:2px;opacity:0.6;">⏰ AJUSTAR HORA DE NOTIFICACIÓN</button>
     </div>
   </div>
@@ -1977,6 +1977,11 @@
         style="background:var(--dorado);border:none;color:#0d0d0d;padding:12px;cursor:pointer;
         font-size:0.68rem;letter-spacing:2px;font-weight:700;font-family:'Times New Roman',Times,serif;border-radius:2px;">
         ENTENDIDO — ACTIVAR REGISTRO
+      </button>
+      <button type="button" data-action="cerrar-registro-primera-vez"
+        style="background:transparent;border:none;color:var(--texto-secundario);padding:8px;cursor:pointer;
+        font-size:0.6rem;letter-spacing:2px;text-align:center;">
+        Ahora no
       </button>
     </div>
   </div>

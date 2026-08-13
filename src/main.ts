@@ -624,6 +624,9 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "limpiar-filtro-registro": limpiarFiltroRegistro(); break;
     case "aplicar-filtro-registro": aplicarFiltroRegistro(); break;
     case "confirmar-registro-primera-vez": void confirmarRegistroPrimeraVez(); break;
+    case "cerrar-registro-primera-vez":
+      document.getElementById("modal-registro-primera-vez")?.classList.add("hidden");
+      break;
     case "cerrar-registro-popup":
       document.getElementById("modal-registro-popup")?.classList.add("hidden");
       break;
