@@ -95,17 +95,19 @@
 
     <!-- Google OAuth -->
     <div class="doc-section">
-      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="sg1_h">4. Integración con Gmail (OAuth)</h2>
-      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg1_p1">Security Babel incluye una función opcional de integración con Gmail mediante OAuth 2.0. Esta integración permite leer y gestionar correos electrónicos directamente desde la app, sin que los datos salgan del dispositivo del usuario.</p>
-      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg1_p2">Al autorizar el acceso, Security Babel solicita únicamente el permiso necesario para leer y enviar correos. No se accede a ningún otro servicio ni dato de la cuenta de Google.</p>
-      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="sg1_p3">No almacenamos correos en servidores externos. No compartimos, vendemos ni cedemos datos de Google a terceros. El token OAuth se guarda cifrado en el llavero seguro del sistema operativo y nunca abandona el dispositivo.</p>
+      <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="sg1_h">4. Uso de datos de Gmail</h2>
+      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg1_p1">La aplicación accede a la cuenta de Gmail del usuario únicamente cuando este activa voluntariamente la función de correo integrado, mediante autorización OAuth 2.0 explícita concedida por el propio usuario a través de los servidores de autenticación de Google. Sin dicha autorización, Babel no tiene acceso a ningún dato de la cuenta de Google.</p>
+      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg1_p2">El acceso se limita exclusivamente a permitir que el usuario lea, redacte, envíe, archive y organice sus propios correos desde dentro de la aplicación Babel. La integración funciona como una extensión del propio cliente de correo del usuario, no como un servicio que analiza o procesa esos datos de forma independiente o con fines propios.</p>
+      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg1_p3">Babel no utiliza el contenido de los correos del usuario para ningún otro propósito. La aplicación no analiza los correos del usuario, no los indexa en servidores externos, no los usa para entrenar modelos de inteligencia artificial y no los comparte con terceros bajo ningún concepto.</p>
+      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg1_p4">Todo el contenido de correo se procesa y almacena localmente en el dispositivo del usuario, cifrado con las mismas medidas de seguridad aplicadas al resto de documentos gestionados por Babel (AES-256-GCM). Ningún correo ni metadato asociado sale del dispositivo del usuario en ningún momento.</p>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="sg1_p5">El usuario puede revocar el acceso de Babel a su cuenta de Google en cualquier momento, tanto desde la propia aplicación Babel como desde la configuración de seguridad de su cuenta de Google en myaccount.google.com/permissions.</p>
     </div>
 
     <!-- Google Limited Use -->
     <div class="doc-section">
       <h2 class="c-gold text-xs font-bold tracking-widest uppercase mb-3" data-i18n="sg2_h">5. Declaración de uso limitado (Google API Services)</h2>
-      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg2_p1">El uso que Security Babel hace de los datos obtenidos mediante la API de Google se atiene a la Política de Datos de Usuario de los Servicios de API de Google, incluyendo los requisitos de uso limitado (Limited Use).</p>
-      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="sg2_p2">Los datos de Gmail se usan exclusivamente para mostrar y gestionar el correo del usuario dentro de la app. No se usan para publicidad, no se transfieren a terceros, y no se usan para ningún fin ajeno a la gestión de correo expresamente solicitada por el usuario.</p>
+      <p class="text-slate-300 text-sm leading-relaxed mb-3" data-i18n="sg2_p1">El uso que Babel hace de los datos obtenidos mediante los Servicios de API de Google se atiene estrictamente a la Política de Datos de Usuario de los Servicios de API de Google (<em>Google API Services User Data Policy</em>), incluyendo los requisitos de uso limitado (<em>Limited Use requirements</em>).</p>
+      <p class="text-slate-300 text-sm leading-relaxed" data-i18n="sg2_p2">En concreto: los datos obtenidos de Gmail se usan exclusivamente para proveer la función de correo electrónico integrado dentro de la aplicación Babel, a solicitud expresa del usuario. Babel no utiliza dichos datos para servir publicidad de ningún tipo. Babel no transfiere, vende ni cede los datos obtenidos de la API de Google a terceros. Babel no usa los datos de la API de Google para desarrollar, entrenar o mejorar modelos de inteligencia artificial, ni para ningún fin ajeno a la función de correo expresamente solicitada por el usuario.</p>
     </div>
 
     <!-- 3 -->
@@ -149,13 +151,15 @@ const T = {
     s2_p: "Security Babel, como aplicación de escritorio, no recopila ni transmite tus documentos ni su contenido a ningún servidor. Todo el procesamiento —cifrado, traducción, almacenamiento— ocurre localmente en tu dispositivo.",
     s2b_h: "3. Arquitectura zero-knowledge",
     s2b_p: "Babel Security opera bajo un principio de conocimiento cero absoluto. Ni el desarrollador ni ningún tercero puede acceder a tus documentos, claves de cifrado o datos personales en ningún momento. Todos los archivos se cifran con AES-256-GCM; las claves se derivan mediante Argon2id y HKDF-SHA256 y nunca abandonan tu dispositivo.",
-    sg1_h: "4. Integración con Gmail (OAuth)",
-    sg1_p1: "Security Babel incluye una función opcional de integración con Gmail mediante OAuth 2.0. Esta integración permite leer y gestionar correos electrónicos directamente desde la app, sin que los datos salgan del dispositivo del usuario.",
-    sg1_p2: "Al autorizar el acceso, Security Babel solicita únicamente el permiso necesario para leer y enviar correos. No se accede a ningún otro servicio ni dato de la cuenta de Google.",
-    sg1_p3: "No almacenamos correos en servidores externos. No compartimos, vendemos ni cedemos datos de Google a terceros. El token OAuth se guarda cifrado en el llavero seguro del sistema operativo y nunca abandona el dispositivo.",
+    sg1_h: "4. Uso de datos de Gmail",
+    sg1_p1: "La aplicación accede a la cuenta de Gmail del usuario únicamente cuando este activa voluntariamente la función de correo integrado, mediante autorización OAuth 2.0 explícita concedida por el propio usuario a través de los servidores de autenticación de Google. Sin dicha autorización, Babel no tiene acceso a ningún dato de la cuenta de Google.",
+    sg1_p2: "El acceso se limita exclusivamente a permitir que el usuario lea, redacte, envíe, archive y organice sus propios correos desde dentro de la aplicación Babel. La integración funciona como una extensión del propio cliente de correo del usuario, no como un servicio que analiza o procesa esos datos de forma independiente o con fines propios.",
+    sg1_p3: "Babel no utiliza el contenido de los correos del usuario para ningún otro propósito. La aplicación no analiza los correos del usuario, no los indexa en servidores externos, no los usa para entrenar modelos de inteligencia artificial y no los comparte con terceros bajo ningún concepto.",
+    sg1_p4: "Todo el contenido de correo se procesa y almacena localmente en el dispositivo del usuario, cifrado con las mismas medidas de seguridad aplicadas al resto de documentos gestionados por Babel (AES-256-GCM). Ningún correo ni metadato asociado sale del dispositivo del usuario en ningún momento.",
+    sg1_p5: "El usuario puede revocar el acceso de Babel a su cuenta de Google en cualquier momento, tanto desde la propia aplicación Babel como desde la configuración de seguridad de su cuenta de Google en myaccount.google.com/permissions.",
     sg2_h: "5. Declaración de uso limitado (Google API Services)",
-    sg2_p1: "El uso que Security Babel hace de los datos obtenidos mediante la API de Google se atiene a la Política de Datos de Usuario de los Servicios de API de Google, incluyendo los requisitos de uso limitado (Limited Use).",
-    sg2_p2: "Los datos de Gmail se usan exclusivamente para mostrar y gestionar el correo del usuario dentro de la app. No se usan para publicidad, no se transfieren a terceros, y no se usan para ningún fin ajeno a la gestión de correo expresamente solicitada por el usuario.",
+    sg2_p1: "El uso que Babel hace de los datos obtenidos mediante los Servicios de API de Google se atiene estrictamente a la Política de Datos de Usuario de los Servicios de API de Google (Google API Services User Data Policy), incluyendo los requisitos de uso limitado (Limited Use requirements).",
+    sg2_p2: "En concreto: los datos obtenidos de Gmail se usan exclusivamente para proveer la función de correo electrónico integrado dentro de la aplicación Babel, a solicitud expresa del usuario. Babel no utiliza dichos datos para servir publicidad de ningún tipo. Babel no transfiere, vende ni cede los datos obtenidos de la API de Google a terceros. Babel no usa los datos de la API de Google para desarrollar, entrenar o mejorar modelos de inteligencia artificial, ni para ningún fin ajeno a la función de correo expresamente solicitada por el usuario.",
     s3_h: "6. Tus derechos",
     s3_p: "Puedes solicitar en cualquier momento acceder a los datos que nos hayas enviado por el formulario, corregirlos o solicitar su eliminación, escribiendo a darioballesteros26@gmail.com.",
     s4_h: "7. Jurisdicción",
@@ -176,13 +180,15 @@ const T = {
     s2_p: "Security Babel, as a desktop application, does not collect or transmit your documents or their contents to any server. All processing — encryption, translation, storage — occurs locally on your device.",
     s2b_h: "3. Zero-knowledge architecture",
     s2b_p: "Babel Security operates on a principle of absolute zero knowledge. Neither the developer nor any third party can access your documents, encryption keys or personal data at any time. All files are encrypted with AES-256-GCM; keys are derived via Argon2id and HKDF-SHA256 and never leave your device.",
-    sg1_h: "4. Gmail Integration (OAuth)",
-    sg1_p1: "Security Babel includes an optional Gmail integration via OAuth 2.0. This allows you to read and manage emails directly within the app, without any data leaving your device.",
-    sg1_p2: "When you grant access, Security Babel requests only the permission needed to read and send emails. No other Google account data or services are accessed.",
-    sg1_p3: "We do not store emails on external servers. We do not share, sell or transfer Google data to third parties. The OAuth token is stored encrypted in your operating system's secure keychain and never leaves your device.",
+    sg1_h: "4. Use of Gmail data",
+    sg1_p1: "The application accesses the user's Gmail account only when the user voluntarily activates the integrated email feature, through explicit OAuth 2.0 authorisation granted by the user through Google's authentication servers. Without such authorisation, Babel has no access to any Google account data.",
+    sg1_p2: "Access is limited exclusively to enabling the user to read, compose, send, archive and organise their own emails from within the Babel application. The integration functions as an extension of the user's own email client, not as a service that independently analyses or processes that data for its own purposes.",
+    sg1_p3: "Babel does not use the content of the user's emails for any other purpose. The application does not analyse the user's emails, does not index them on external servers, does not use them to train artificial intelligence models, and does not share them with third parties under any circumstances.",
+    sg1_p4: "All email content is processed and stored locally on the user's device, encrypted with the same security measures applied to all other documents managed by Babel (AES-256-GCM). No email or associated metadata leaves the user's device at any time.",
+    sg1_p5: "The user may revoke Babel's access to their Google account at any time, either from within the Babel application itself or from their Google account security settings at myaccount.google.com/permissions.",
     sg2_h: "5. Limited Use Disclosure (Google API Services)",
-    sg2_p1: "Security Babel's use of data obtained through Google APIs complies with the Google API Services User Data Policy, including the Limited Use requirements.",
-    sg2_p2: "Gmail data is used solely to display and manage the user's email within the app. It is not used for advertising, not transferred to third parties, and not used for any purpose other than the email management function expressly requested by the user.",
+    sg2_p1: "Babel's use of data obtained through Google API Services strictly complies with the Google API Services User Data Policy, including the Limited Use requirements.",
+    sg2_p2: "Specifically: data obtained from Gmail is used exclusively to provide the integrated email feature within the Babel application, at the user's express request. Babel does not use that data to serve advertising of any kind. Babel does not transfer, sell or share data obtained from Google APIs to third parties. Babel does not use Google API data to develop, train or improve artificial intelligence models, nor for any purpose other than the email function expressly requested by the user.",
     s3_h: "6. Your rights",
     s3_p: "You may at any time request access to the data you have sent us via the form, correct it or request its deletion by writing to darioballesteros26@gmail.com.",
     s4_h: "7. Jurisdiction",
@@ -203,13 +209,15 @@ const T = {
     s2_p: "Security Babel как настольное приложение не собирает и не передаёт ваши документы или их содержимое ни на какие серверы. Вся обработка — шифрование, перевод, хранение — происходит локально на вашем устройстве.",
     s2b_h: "3. Архитектура с нулевым разглашением",
     s2b_p: "Babel Security работает по принципу абсолютного нулевого разглашения. Ни разработчик, ни какие-либо третьи лица не могут получить доступ к вашим документам, ключам шифрования или личным данным в любое время. Все файлы шифруются с помощью AES-256-GCM; ключи формируются через Argon2id и HKDF-SHA256 и никогда не покидают ваше устройство.",
-    sg1_h: "4. Интеграция с Gmail (OAuth)",
-    sg1_p1: "Security Babel включает опциональную интеграцию с Gmail через OAuth 2.0, позволяющую читать и управлять электронной почтой прямо в приложении без передачи данных за пределы устройства.",
-    sg1_p2: "При авторизации Security Babel запрашивает только разрешение на чтение и отправку писем. Доступ к другим данным или сервисам аккаунта Google не осуществляется.",
-    sg1_p3: "Мы не храним электронные письма на внешних серверах. Мы не передаём, не продаём и не уступаем данные Google третьим лицам. Токен OAuth хранится в зашифрованном виде в защищённом хранилище операционной системы и никогда не покидает устройство.",
+    sg1_h: "4. Использование данных Gmail",
+    sg1_p1: "Приложение получает доступ к аккаунту Gmail пользователя исключительно в случае, когда пользователь добровольно активирует функцию встроенной электронной почты путём явного предоставления авторизации OAuth 2.0 через серверы аутентификации Google. Без такого разрешения Babel не имеет доступа ни к каким данным аккаунта Google.",
+    sg1_p2: "Доступ ограничен исключительно предоставлением пользователю возможности читать, составлять, отправлять, архивировать и упорядочивать собственную почту непосредственно в приложении Babel. Интеграция функционирует как расширение почтового клиента самого пользователя, а не как сервис, самостоятельно анализирующий или обрабатывающий данные в собственных целях.",
+    sg1_p3: "Babel не использует содержимое электронных писем пользователя ни для каких иных целей. Приложение не анализирует письма пользователя, не индексирует их на внешних серверах, не использует для обучения моделей искусственного интеллекта и не передаёт третьим лицам ни при каких обстоятельствах.",
+    sg1_p4: "Всё содержимое электронной почты обрабатывается и хранится локально на устройстве пользователя в зашифрованном виде с применением тех же мер безопасности, что и для всех остальных документов, управляемых Babel (AES-256-GCM). Никакое письмо или связанные с ним метаданные не покидают устройство пользователя.",
+    sg1_p5: "Пользователь может отозвать доступ Babel к своему аккаунту Google в любое время как из самого приложения Babel, так и через настройки безопасности аккаунта Google на myaccount.google.com/permissions.",
     sg2_h: "5. Декларация об ограниченном использовании (Google API Services)",
-    sg2_p1: "Использование Security Babel данных, полученных через API Google, соответствует Политике данных пользователей сервисов API Google, включая требования ограниченного использования (Limited Use).",
-    sg2_p2: "Данные Gmail используются исключительно для отображения и управления почтой пользователя внутри приложения. Они не используются для рекламы, не передаются третьим лицам и не применяются в целях, не связанных с почтовой функцией, запрошенной пользователем.",
+    sg2_p1: "Использование Babel данных, полученных через сервисы API Google, строго соответствует Политике данных пользователей сервисов API Google (Google API Services User Data Policy), включая требования ограниченного использования (Limited Use requirements).",
+    sg2_p2: "В частности: данные Gmail используются исключительно для предоставления функции встроенной электронной почты в приложении Babel по явному запросу пользователя. Babel не использует эти данные для показа рекламы. Babel не передаёт, не продаёт и не уступает данные, полученные от API Google, третьим лицам. Babel не использует данные API Google для разработки, обучения или улучшения моделей искусственного интеллекта и не применяет их в каких-либо целях, выходящих за рамки почтовой функции, явно запрошенной пользователем.",
     s3_h: "6. Ваши права",
     s3_p: "Вы можете в любое время запросить доступ к данным, которые отправили нам через форму, исправить их или запросить их удаление, написав на darioballesteros26@gmail.com.",
     s4_h: "7. Юрисдикция",
@@ -230,13 +238,15 @@ const T = {
     s2_p: "لا يقوم Security Babel بوصفه تطبيقاً لسطح المكتب بجمع وثائقك أو محتواها أو نقلها إلى أي خادم. تجري جميع عمليات المعالجة — التشفير والترجمة والتخزين — محلياً على جهازك.",
     s2b_h: "3. بنية المعرفة الصفرية",
     s2b_p: "يعمل Babel Security وفق مبدأ المعرفة الصفرية المطلقة. لا يستطيع المطوّر ولا أي طرف ثالث الوصول إلى وثائقك أو مفاتيح التشفير أو بياناتك الشخصية في أي وقت. تُشفَّر جميع الملفات باستخدام AES-256-GCM؛ وتُشتَقّ المفاتيح عبر Argon2id وHKDF-SHA256 ولا تغادر جهازك أبداً.",
-    sg1_h: "4. تكامل Gmail (OAuth)",
-    sg1_p1: "يتضمن Security Babel وظيفة اختيارية للتكامل مع Gmail عبر OAuth 2.0، تتيح قراءة وإدارة البريد الإلكتروني مباشرةً داخل التطبيق دون أن تغادر البيانات الجهاز.",
-    sg1_p2: "عند منح الإذن، يطلب Security Babel فقط الصلاحية اللازمة لقراءة الرسائل وإرسالها. لا يتم الوصول إلى أي بيانات أو خدمات أخرى من حساب Google.",
-    sg1_p3: "لا نخزن الرسائل على خوادم خارجية. لا نشارك بيانات Google أو نبيعها أو ننقلها إلى أي طرف ثالث. يُخزَّن رمز OAuth مشفراً في خزنة النظام الآمنة ولا يغادر الجهاز أبداً.",
+    sg1_h: "4. استخدام بيانات Gmail",
+    sg1_p1: "لا يصل التطبيق إلى حساب Gmail الخاص بالمستخدم إلا عندما يُفعِّل المستخدم طوعاً وظيفة البريد الإلكتروني المدمجة، عبر تفويض OAuth 2.0 صريح يمنحه المستخدم بنفسه من خلال خوادم مصادقة Google. دون هذا التفويض، لا يملك Babel أي وصول إلى بيانات حساب Google.",
+    sg1_p2: "يقتصر الوصول حصراً على تمكين المستخدم من قراءة رسائله الإلكترونية وإنشائها وإرسالها وأرشفتها وتنظيمها من داخل تطبيق Babel. يعمل التكامل بوصفه امتداداً لبريد المستخدم الإلكتروني الخاص، لا كخدمة تحلّل هذه البيانات أو تعالجها بصورة مستقلة أو لأغراض خاصة بها.",
+    sg1_p3: "لا يستخدم Babel محتوى رسائل المستخدم الإلكترونية لأي غرض آخر. لا يقوم التطبيق بتحليل الرسائل، ولا يفهرسها على خوادم خارجية، ولا يستخدمها في تدريب نماذج الذكاء الاصطناعي، ولا يشاركها مع أطراف ثالثة تحت أي ظرف.",
+    sg1_p4: "تتم معالجة جميع محتويات البريد الإلكتروني وتخزينها محلياً على جهاز المستخدم في صورة مشفرة بنفس إجراءات الأمان المطبقة على سائر الوثائق التي يديرها Babel (AES-256-GCM). لا تغادر أي رسالة أو بيانات وصفية مرتبطة بها جهازَ المستخدم في أي وقت.",
+    sg1_p5: "يستطيع المستخدم إلغاء تفويض Babel للوصول إلى حساب Google الخاص به في أي وقت، سواء من داخل تطبيق Babel مباشرةً أو من خلال إعدادات أمان حساب Google على myaccount.google.com/permissions.",
     sg2_h: "5. إفصاح الاستخدام المحدود (خدمات Google API)",
-    sg2_p1: "يلتزم استخدام Security Babel للبيانات المُحصَّلة عبر واجهات برمجة تطبيقات Google بسياسة بيانات مستخدمي خدمات Google API، بما في ذلك متطلبات الاستخدام المحدود.",
-    sg2_p2: "تُستخدم بيانات Gmail حصراً لعرض بريد المستخدم وإدارته داخل التطبيق. لا تُستخدم للإعلانات، ولا تُنقل إلى أطراف ثالثة، ولا تُوظَّف لأي غرض بخلاف وظيفة البريد التي طلبها المستخدم صراحةً.",
+    sg2_p1: "يلتزم Babel في استخدامه للبيانات المُحصَّلة عبر خدمات Google API التزاماً صارماً بسياسة بيانات مستخدمي خدمات Google API (Google API Services User Data Policy)، بما في ذلك متطلبات الاستخدام المحدود (Limited Use requirements).",
+    sg2_p2: "تحديداً: تُستخدم بيانات Gmail حصراً لتقديم وظيفة البريد الإلكتروني المدمجة داخل تطبيق Babel، بناءً على طلب صريح من المستخدم. لا يستخدم Babel هذه البيانات لعرض إعلانات من أي نوع. لا يُحوِّل Babel بيانات Google API ولا يبيعها ولا يتنازل عنها لأطراف ثالثة. لا يستخدم Babel بيانات Google API في تطوير أو تدريب أو تحسين نماذج الذكاء الاصطناعي، ولا في أي غرض يتجاوز وظيفة البريد التي طلبها المستخدم صراحةً.",
     s3_h: "6. حقوقك",
     s3_p: "يمكنك في أي وقت طلب الاطلاع على البيانات التي أرسلتها عبر النموذج أو تصحيحها أو طلب حذفها، بالكتابة إلى darioballesteros26@gmail.com.",
     s4_h: "7. الاختصاص القضائي",
