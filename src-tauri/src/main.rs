@@ -634,31 +634,85 @@ fn verificar_login(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AUTOLOGIN — Keychain del sistema (macOS Keychain / Windows Credential Manager)
+// AUTOLOGIN — Fichero cifrado con clave derivada del hardware de la máquina.
+// Evita el diálogo de contraseña del sistema que genera el keyring del SO
+// cuando la app se firma con firma ad-hoc (identidad cambia en cada build).
 // ──────────────────────────────────────────────────────────────────────────────
 
-const KEYCHAIN_SERVICE: &str = "babel-security";
-const KEYCHAIN_CUENTA: &str = "babel-autologin";
+fn autologin_babel_path() -> Option<std::path::PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join("Babel").join("autologin.babel"))
+}
+
+/// Deriva una clave AES-256 a partir del UUID hardware del Mac (o del hostname
+/// como fallback). No requiere interacción del usuario.
+fn autologin_machine_key() -> [u8; 32] {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+
+    // UUID hardware del Mac vía ioreg (único por máquina, no cambia con builds)
+    let uuid = std::process::Command::new("ioreg")
+        .args(["-d2", "-c", "IOPlatformExpertDevice"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).to_string();
+            s.lines()
+                .find(|l| l.contains("IOPlatformUUID"))
+                .and_then(|l| l.split('"').nth(3))
+                .map(|u| u.to_string())
+        })
+        .unwrap_or_else(|| {
+            hostname::get()
+                .map(|h| h.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "babel-autologin-fallback".to_string())
+        });
+
+    let hk = Hkdf::<Sha256>::new(Some(b"babel-autologin-salt-v1"), uuid.as_bytes());
+    let mut key = [0u8; 32];
+    hk.expand(b"autologin-aes-key", &mut key).unwrap();
+    key
+}
 
 fn guardar_credenciales_keychain(maestra: &str, pass_usuario: &str) {
-    // JSON evita ambigüedades si cualquiera de las contraseñas contiene el separador
+    use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, OsRng, rand_core::RngCore}};
+
+    let Some(path) = autologin_babel_path() else { return };
     let payload = serde_json::json!([maestra, pass_usuario]).to_string();
-    if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_CUENTA) {
-        let _ = entry.set_password(&payload);
-    }
+    let key = autologin_machine_key();
+    let cipher = Aes256Gcm::new((&key).into());
+    let mut nonce_bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+    let Ok(ct) = cipher.encrypt(nonce, payload.as_bytes()) else { return };
+    // Formato: 12 bytes nonce | ciphertext
+    let mut blob = Vec::with_capacity(12 + ct.len());
+    blob.extend_from_slice(&nonce_bytes);
+    blob.extend_from_slice(&ct);
+    // 0o600: solo el dueño puede leer; contiene contraseñas cifradas
+    let _ = escribir_privado(&path, &blob);
 }
 
 fn cargar_credenciales_keychain() -> Option<(Zeroizing<String>, Zeroizing<String>)> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_CUENTA).ok()?;
-    let payload = Zeroizing::new(entry.get_password().ok()?);
-    let partes: Vec<String> = serde_json::from_str(&payload).ok()?;
+    use aes_gcm::{Aes256Gcm, KeyInit, aead::Aead};
+
+    let path = autologin_babel_path()?;
+    let blob = std::fs::read(&path).ok()?;
+    if blob.len() < 13 { return None; }
+    let key = autologin_machine_key();
+    let cipher = Aes256Gcm::new((&key).into());
+    let nonce = aes_gcm::Nonce::from_slice(&blob[..12]);
+    let plain = Zeroizing::new(cipher.decrypt(nonce, &blob[12..]).ok()?);
+    let partes: Vec<String> = serde_json::from_slice(&plain).ok()?;
     if partes.len() < 2 { return None; }
-    Some((Zeroizing::new(partes[0].clone()), Zeroizing::new(partes[1].clone())))
+    let resultado = Some((Zeroizing::new(partes[0].clone()), Zeroizing::new(partes[1].clone())));
+    drop(partes); // partes contiene contraseñas en claro; liberar antes de retornar
+    resultado
 }
 
 fn borrar_credenciales_keychain() {
-    if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_CUENTA) {
-        let _ = entry.delete_password();
+    if let Some(path) = autologin_babel_path() {
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -5292,17 +5346,25 @@ fn main() {
 
             Ok(())
         })
-        .on_window_event(|_window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                // Nunca dejar el SO colgado en modo de entrada segura al cerrar Babel:
-                // dejaría el teclado del usuario en modo protegido para el resto del sistema.
-                seguridad::desactivar_entrada_segura_os();
-                if let Ok(mut guard) = USB_CHILD.lock() {
-                    if let Some(mut c) = guard.take() {
-                        let _ = c.kill();
-                        let _ = c.wait();
+        .on_window_event(|window, event| {
+            match event {
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    // X button: salir del proceso completo (macOS por defecto solo cierra
+                    // la ventana pero deja el proceso vivo en el Dock).
+                    window.app_handle().exit(0);
+                }
+                tauri::WindowEvent::Destroyed => {
+                    // Nunca dejar el SO colgado en modo de entrada segura al cerrar Babel:
+                    // dejaría el teclado del usuario en modo protegido para el resto del sistema.
+                    seguridad::desactivar_entrada_segura_os();
+                    if let Ok(mut guard) = USB_CHILD.lock() {
+                        if let Some(mut c) = guard.take() {
+                            let _ = c.kill();
+                            let _ = c.wait();
+                        }
                     }
                 }
+                _ => {}
             }
         })
         .manage(SesionActiva::nueva())

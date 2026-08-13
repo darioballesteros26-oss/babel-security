@@ -761,7 +761,7 @@ function renderizarRegistro(eventos: EventoDiario[], ipsHistorial: string[]): vo
     return `
       <div class="registro-evento${esSospechoso ? " registro-sospechoso" : ""}">
         <div class="registro-evento-fila">
-          <span class="registro-evento-tipo">${tipoLabelRegistro(ev.tipo)}</span>
+          <span class="registro-evento-tipo">${escapeHTML(tipoLabelRegistro(ev.tipo))}</span>
           <span class="registro-evento-hora">${escapeHTML(hora)}</span>
         </div>
         <div class="registro-evento-fila" style="margin-top:2px;">
