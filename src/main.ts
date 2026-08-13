@@ -615,10 +615,11 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "ir-a-registro": void irARegistro(); break;
     case "registro-dia-anterior":
       _registroFechaOffset -= 1;
+      _registroFiltroIPs.clear();
       cargarRegistroDia().catch(() => {});
       break;
     case "registro-dia-siguiente":
-      if (_registroFechaOffset < 0) { _registroFechaOffset += 1; cargarRegistroDia().catch(() => {}); }
+      if (_registroFechaOffset < 0) { _registroFechaOffset += 1; _registroFiltroIPs.clear(); cargarRegistroDia().catch(() => {}); }
       break;
     case "abrir-filtro-registro": abrirFiltroRegistro(); break;
     case "limpiar-filtro-registro": limpiarFiltroRegistro(); break;
@@ -659,6 +660,8 @@ interface PreferenciasRegistro {
 
 let _registroFechaOffset = 0;
 let _registroFiltroTipos: Set<string> = new Set();
+let _registroFiltroIPs: Set<string> = new Set();
+let _registroEventosCache: EventoDiario[] = [];
 let _timerRegistroDiario: ReturnType<typeof setTimeout> | null = null;
 
 function fechaConOffset(offset: number): string {
@@ -712,6 +715,7 @@ async function cargarRegistroDia(): Promise<void> {
       invoke<EventoDiario[]>("obtener_eventos_dia", { fecha }),
       invoke<string[]>("obtener_ips_historial"),
     ]);
+    _registroEventosCache = eventos;
     renderizarRegistro(eventos, ips);
   } catch {
     document.getElementById("registro-lista")!.innerHTML =
@@ -724,9 +728,10 @@ function renderizarRegistro(eventos: EventoDiario[], ipsHistorial: string[]): vo
   const listaEl = document.getElementById("registro-lista")!;
   const resumenEl = document.getElementById("registro-resumen")!;
 
-  const filtrados = (_registroFiltroTipos.size === 0
-    ? eventos
-    : eventos.filter(e => _registroFiltroTipos.has(e.tipo))).slice().reverse();
+  const filtrados = eventos.filter(e =>
+    (_registroFiltroTipos.size === 0 || _registroFiltroTipos.has(e.tipo)) &&
+    (_registroFiltroIPs.size === 0 || _registroFiltroIPs.has(e.ip))
+  ).slice().reverse();
 
   const logins = eventos.filter(e => e.tipo === "login").length;
   const archivos = eventos.filter(e =>
@@ -804,24 +809,43 @@ function informarEventoRegistro(el: HTMLElement): void {
 }
 
 function abrirFiltroRegistro(): void {
-  // Restore checkbox state from current filter
   document.querySelectorAll<HTMLInputElement>(".filtro-tipo").forEach(cb => {
     cb.checked = _registroFiltroTipos.has(cb.value);
   });
+  // Poblar IPs únicas del día desde la caché
+  const ipsUnicas = [...new Set(_registroEventosCache.map(e => e.ip).filter(ip => ip && ip !== "IP no disponible"))];
+  const contenedor = document.getElementById("filtro-ips-contenedor");
+  if (contenedor) {
+    if (ipsUnicas.length === 0) {
+      contenedor.innerHTML = `<p style="font-size:0.6rem;color:var(--texto-secundario);opacity:0.5;letter-spacing:1px;">Sin IPs registradas hoy</p>`;
+    } else {
+      contenedor.innerHTML = ipsUnicas.map(ip => `
+        <label class="registro-filtro-label">
+          <input type="checkbox" class="filtro-ip" value="${escapeHTML(ip)}"${_registroFiltroIPs.has(ip) ? " checked" : ""}>
+          ${escapeHTML(ip)}
+        </label>`).join("");
+    }
+  }
   document.getElementById("modal-filtro-registro")?.classList.remove("hidden");
 }
 
 function limpiarFiltroRegistro(): void {
   _registroFiltroTipos.clear();
+  _registroFiltroIPs.clear();
   document.querySelectorAll<HTMLInputElement>(".filtro-tipo").forEach(cb => { cb.checked = false; });
+  document.querySelectorAll<HTMLInputElement>(".filtro-ip").forEach(cb => { cb.checked = false; });
   document.getElementById("modal-filtro-registro")?.classList.add("hidden");
   cargarRegistroDia().catch(() => {});
 }
 
 function aplicarFiltroRegistro(): void {
   _registroFiltroTipos.clear();
+  _registroFiltroIPs.clear();
   document.querySelectorAll<HTMLInputElement>(".filtro-tipo:checked").forEach(cb => {
     _registroFiltroTipos.add(cb.value);
+  });
+  document.querySelectorAll<HTMLInputElement>(".filtro-ip:checked").forEach(cb => {
+    _registroFiltroIPs.add(cb.value);
   });
   document.getElementById("modal-filtro-registro")?.classList.add("hidden");
   cargarRegistroDia().catch(() => {});

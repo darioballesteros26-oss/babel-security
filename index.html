@@ -2020,6 +2020,7 @@
       <div style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;letter-spacing:4px;color:var(--dorado);text-align:center;">
         FILTRAR EVENTOS
       </div>
+      <div style="font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);opacity:0.7;margin-bottom:2px;">POR TIPO</div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="login"> Accesos / Inicios de sesión</label>
         <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="ver_archivo"> Archivos vistos</label>
@@ -2029,8 +2030,11 @@
         <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="importar"> Importaciones</label>
         <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="cerrar_sesion"> Cierre de sesión</label>
       </div>
-      <p style="font-size:0.6rem;color:var(--texto-secundario);opacity:0.6;margin:0;letter-spacing:1px;">
-        Sin selección = mostrar todos los tipos
+      <div style="border-top:1px solid var(--borde);margin:4px 0;"></div>
+      <div style="font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);opacity:0.7;margin-bottom:2px;">POR ACCESO (IP)</div>
+      <div id="filtro-ips-contenedor" style="display:flex;flex-direction:column;gap:10px;"></div>
+      <p style="font-size:0.6rem;color:var(--texto-secundario);opacity:0.5;margin:0;letter-spacing:1px;">
+        Sin selección = mostrar todo
       </p>
       <div style="display:flex;gap:10px;">
         <button type="button" data-action="limpiar-filtro-registro"
