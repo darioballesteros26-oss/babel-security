@@ -664,7 +664,10 @@ let _timerRegistroDiario: ReturnType<typeof setTimeout> | null = null;
 function fechaConOffset(offset: number): string {
   const d = new Date();
   d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10).replace(/-/g, "");
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}${m}${day}`;
 }
 
 function labelFecha(offset: number): string {
@@ -1459,7 +1462,8 @@ async function cambiarCategoriaDiccionario(categoria: string): Promise<void> {
 // SIDEBAR — SELECTOR DE IDIOMA DE TRADUCCIÓN — Sincroniza el selector del sidebar con el del header
 
 async function cerrarSesion(): Promise<void> {
-  invoke("registrar_evento_diario", { tipo: "cerrar_sesion", detalle: "" }).catch(() => {});
+  // Registrar ANTES de cerrar sesión en Rust — si se hace después, la subclave ya no existe
+  await invoke("registrar_evento_diario", { tipo: "cerrar_sesion", detalle: "" }).catch(() => {});
   limpiarCamposSensibles();
   borrarChat();
   _sesionActiva = false;
