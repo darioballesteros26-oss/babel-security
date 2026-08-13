@@ -1093,6 +1093,32 @@ window.addEventListener("DOMContentLoaded", async () => {
     getCurrentWindow().setFocus().catch(() => {});
   }).catch(() => {});
 
+  // Actualización disponible → mostrar popup
+  listen<{ version: string; notas: string; fecha: string }>("actualizacion-disponible", (ev) => {
+    const { version, notas } = ev.payload;
+    const el = document.getElementById("modal-actualizacion");
+    const elVer = document.getElementById("upd-version");
+    const elNotas = document.getElementById("upd-notas");
+    if (!el || !elVer || !elNotas) return;
+    elVer.textContent = `Versión ${version}`;
+    elNotas.textContent = notas || "Nueva versión disponible.";
+    document.getElementById("upd-progreso")?.classList.add("hidden");
+    document.getElementById("upd-botones")?.removeAttribute("style");
+    el.classList.remove("hidden");
+  }).catch(() => {});
+
+  // Progreso de descarga/instalación
+  listen<{ estado: string }>("actualizacion-progreso", (ev) => {
+    const prog = document.getElementById("upd-progreso");
+    const texto = document.getElementById("upd-progreso-texto");
+    const botones = document.getElementById("upd-botones");
+    if (prog && texto && botones) {
+      prog.classList.remove("hidden");
+      botones.style.display = "none";
+      texto.textContent = ev.payload.estado === "instalando" ? "INSTALANDO..." : "DESCARGANDO...";
+    }
+  }).catch(() => {});
+
   // Ocultar sidebar en fullscreen nativo (botón verde macOS)
   getCurrentWindow().onResized(async () => {
     const fs = await getCurrentWindow().isFullscreen().catch(() => false);
@@ -5138,6 +5164,15 @@ function cargarAjustesGuardados(): void {
 (window as any).cambiarIdiomaUI = cambiarIdiomaUI;
 
 (window as any).enviarMensajeP2P = enviarMensajeP2P;
+
+async function instalarActualizacion(): Promise<void> {
+  try {
+    await invoke("instalar_actualizacion");
+  } catch (e) {
+    console.error("Error al instalar actualización:", e);
+  }
+}
+(window as any).instalarActualizacion = instalarActualizacion;
 (window as any).guardarNombreDisplay = guardarNombreDisplay;
 
 function guardarNombreDisplay(): void {

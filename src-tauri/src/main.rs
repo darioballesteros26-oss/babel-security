@@ -5099,6 +5099,68 @@ fn excluir_ventana_de_captura(_win: &tauri::WebviewWindow) {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn excluir_ventana_de_captura(_win: &tauri::WebviewWindow) {}
 
+// ── ACTUALIZACIONES AUTOMÁTICAS ──────────────────────────────────────────────
+
+/// Comprueba si hay una versión nueva en GitHub Releases.
+/// - Si la ventana tiene el foco → emite "actualizacion-disponible" al frontend (popup en-app).
+/// - Si la ventana no tiene foco → notificación nativa del sistema macOS.
+async fn verificar_actualizacion(app: tauri::AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = match app.updater_builder().build() {
+        Ok(u) => u,
+        Err(e) => { log::warn!("[Updater] no disponible: {e}"); return; }
+    };
+    let update = match updater.check().await {
+        Ok(Some(u)) => u,
+        Ok(None) => return, // ya tenemos la última versión
+        Err(e) => { log::warn!("[Updater] error al comprobar: {e}"); return; }
+    };
+
+    let info = serde_json::json!({
+        "version": update.version,
+        "notas":   update.body.clone().unwrap_or_default(),
+        "fecha":   update.date.map(|d| d.to_string()).unwrap_or_default(),
+    });
+
+    let ventana_activa = app
+        .get_webview_window("main")
+        .map(|w| w.is_focused().unwrap_or(false))
+        .unwrap_or(false);
+
+    if ventana_activa {
+        let _ = app.emit("actualizacion-disponible", &info);
+    } else {
+        // Notificación nativa macOS cuando Babel está en segundo plano
+        let version  = update.version.clone();
+        let _ = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(format!(
+                "display notification \"Babel {} está disponible. Ábrela para actualizar.\" with title \"Security Babel — Actualización\"",
+                version
+            ))
+            .output();
+    }
+}
+
+/// Descarga e instala la actualización disponible. La app se reinicia sola al terminar.
+#[tauri::command]
+async fn instalar_actualizacion(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
+    let update  = updater.check().await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "No hay actualización disponible.".to_string())?;
+
+    let _ = app.emit("actualizacion-progreso", serde_json::json!({"estado": "descargando"}));
+
+    update.download_and_install(
+        |_chunk, _total| {},
+        || { let _ = app.emit("actualizacion-progreso", serde_json::json!({"estado": "instalando"})); },
+    ).await.map_err(|e| e.to_string())?;
+
+    app.restart();
+}
+
 // PUNTO DE ENTRADA — Arranca Tauri, registra todos los comandos — y gestiona el estado global de sesión (SesionActiva).
 
 fn main() {
@@ -5133,6 +5195,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Barrer ~/Babel/tmp/ al arranque para limpiar residuos de sesiones anteriores
             // que no cerraron limpiamente (SIGKILL, corte de luz). BorrarAlSalir no ejecuta
@@ -5344,6 +5407,20 @@ fn main() {
                 }
             });
 
+            // ── Verificador de actualizaciones periódico ──────────────────────────
+            // Comprueba cada 15 minutos si hay una nueva versión en GitHub Releases.
+            // Si la ventana está en foco → emite evento al frontend (popup interno).
+            // Si la ventana NO está en foco → notificación nativa del sistema.
+            let handle_upd = app.handle().clone();
+            tokio::spawn(async move {
+                // Primera comprobación: 2 min después del arranque (dar tiempo al sistema)
+                tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
+                loop {
+                    verificar_actualizacion(handle_upd.clone()).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(15 * 60)).await;
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -5464,6 +5541,7 @@ fn main() {
             seleccionar_archivo_email_dialogo,
             autologin_tauri,
             olvidar_sesion_tauri,
+            instalar_actualizacion,
             iniciar_oauth_gmail_tauri,
             estado_oauth_gmail_tauri,
             revocar_oauth_gmail_tauri,
