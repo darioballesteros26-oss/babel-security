@@ -637,6 +637,11 @@ document.addEventListener("click", (e: MouseEvent) => {
       document.getElementById("modal-ajustes-registro")?.classList.add("hidden");
       break;
     case "guardar-ajustes-registro": void guardarAjustesRegistro(); break;
+    // Modal de actualización automática
+    case "instalar-actualizacion": void instalarActualizacion(); break;
+    case "cerrar-modal-actualizacion":
+      document.getElementById("modal-actualizacion")?.classList.add("hidden");
+      break;
   }
 });
 
@@ -2609,17 +2614,18 @@ async function confirmarUnion(): Promise<void> {
       buzonId: buzonActivoGuardados,
       borrarOriginales,
     });
-    _unionEnCurso = false;
-    document.getElementById("modal-union-pdfs")?.classList.add("hidden");
-    _bloquesUnion = [];
-    mostrarToast("✓ PDFs unidos y guardados", false);
-    await cargarArchivosGuardados();
   } catch (e) {
     _unionEnCurso = false;
     if (btn) btn.disabled = false;
     document.getElementById("union-progreso")?.classList.add("hidden");
     mostrarToast("Error al unir: " + String(e), true);
+    return;
   }
+  _unionEnCurso = false;
+  document.getElementById("modal-union-pdfs")?.classList.add("hidden");
+  _bloquesUnion = [];
+  mostrarToast("✓ PDFs unidos y guardados", false);
+  cargarArchivosGuardados().catch(() => {});
 }
 
 

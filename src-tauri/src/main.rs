@@ -5412,7 +5412,7 @@ fn main() {
             // Si la ventana está en foco → emite evento al frontend (popup interno).
             // Si la ventana NO está en foco → notificación nativa del sistema.
             let handle_upd = app.handle().clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 // Primera comprobación: 2 min después del arranque (dar tiempo al sistema)
                 tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
                 loop {

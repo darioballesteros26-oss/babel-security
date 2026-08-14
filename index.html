@@ -2142,13 +2142,13 @@
 
     <!-- Botones -->
     <div id="upd-botones" style="display:flex;gap:10px;">
-      <button id="upd-btn-ahora" onclick="instalarActualizacion()" style="
+      <button id="upd-btn-ahora" data-action="instalar-actualizacion" style="
         flex:1;background:linear-gradient(135deg,var(--dorado),#A8860C);
         border:none;color:#0B0F19;padding:12px;border-radius:8px;
         font-size:0.65rem;letter-spacing:2px;font-weight:700;cursor:pointer;">
         ACTUALIZAR AHORA
       </button>
-      <button onclick="document.getElementById('modal-actualizacion').classList.add('hidden')" style="
+      <button id="upd-btn-tarde" data-action="cerrar-modal-actualizacion" style="
         background:transparent;border:1px solid rgba(255,255,255,0.1);
         color:#64748B;padding:12px 16px;border-radius:8px;
         font-size:0.65rem;letter-spacing:2px;cursor:pointer;">

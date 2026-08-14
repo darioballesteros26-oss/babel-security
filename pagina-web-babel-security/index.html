@@ -384,7 +384,7 @@
         </div>
 
         <!-- CTA download (glassmorphism) -->
-        <a href="https://github.com/darioballesteros26-oss/babel-security/releases/latest" target="_blank" rel="noopener noreferrer" class="hidden sm:inline-flex items-center gap-2 glass px-4 py-2 rounded-xl text-sm font-semibold c-gold hover:text-white hover:bg-yellow-500/10 border border-gold transition-all duration-200" data-i18n="nav_download">
+        <a id="nav-dl-desktop" data-dl-nav href="https://github.com/darioballesteros26-oss/babel-security/releases/latest" target="_blank" rel="noopener noreferrer" class="hidden sm:inline-flex items-center gap-2 glass px-4 py-2 rounded-xl text-sm font-semibold c-gold hover:text-white hover:bg-yellow-500/10 border border-gold transition-all duration-200" data-i18n="nav_download">
           Descargar App
         </a>
 
@@ -403,7 +403,7 @@
     <a href="#seguridad"     class="mobile-link block py-2.5 text-slate-300 hover:text-white text-sm font-medium transition-colors" data-i18n="nav_security">Seguridad GDPR</a>
     <a href="#precios"       class="mobile-link block py-2.5 text-slate-300 hover:text-white text-sm font-medium transition-colors" data-i18n="nav_pricing">Precios</a>
     <a href="#contacto"      class="mobile-link block py-2.5 text-slate-300 hover:text-white text-sm font-medium transition-colors" data-i18n="nav_contact">Contacto</a>
-    <a href="https://github.com/darioballesteros26-oss/babel-security/releases/latest" target="_blank" rel="noopener noreferrer" class="mobile-link block py-2.5 c-gold text-sm font-semibold transition-colors" data-i18n="nav_download">Descargar App</a>
+    <a id="nav-dl-mobile" data-dl-nav href="https://github.com/darioballesteros26-oss/babel-security/releases/latest" target="_blank" rel="noopener noreferrer" class="mobile-link block py-2.5 c-gold text-sm font-semibold transition-colors" data-i18n="nav_download">Descargar App</a>
   </div>
 </nav>
 
@@ -441,7 +441,7 @@
 
       <!-- CTA -->
       <div class="reveal r4 flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-        <a href="https://github.com/darioballesteros26-oss/babel-security/releases/latest" target="_blank" rel="noopener noreferrer" class="btn-emerald inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl text-white font-semibold text-base shadow-lg">
+        <a id="hero-dl-btn" data-dl-nav href="https://github.com/darioballesteros26-oss/babel-security/releases/latest" target="_blank" rel="noopener noreferrer" class="btn-emerald inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl text-white font-semibold text-base shadow-lg">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           <span data-i18n="hero_cta">Comenzar en Local</span>
         </a>
@@ -1281,6 +1281,94 @@
 
 
 <!-- ═══════════════════════════════════════════════════════════
+     PRUEBA GRATUITA — 14 días CTA
+═══════════════════════════════════════════════════════════ -->
+<section id="prueba-gratis" class="py-24 lg:py-36 relative overflow-hidden">
+
+  <!-- Halo dorado de fondo -->
+  <div class="absolute inset-0 pointer-events-none" aria-hidden="true">
+    <div class="absolute inset-0" style="background: radial-gradient(ellipse 70% 60% at 50% 50%, rgba(212,175,55,0.09) 0%, transparent 70%);"></div>
+    <div class="absolute inset-0 opacity-20" style="background-image: linear-gradient(rgba(212,175,55,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(212,175,55,0.04) 1px, transparent 1px); background-size: 48px 48px;"></div>
+  </div>
+
+  <div class="relative max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+
+    <!-- Badge -->
+    <div class="sr inline-flex items-center gap-2 glass px-4 py-1.5 rounded-full text-xs c-gold font-semibold uppercase tracking-widest mb-8">
+      <span class="badge-dot w-1.5 h-1.5 rounded-full" style="background:#D4AF37"></span>
+      <span data-i18n="trial_badge">Prueba gratuita</span>
+    </div>
+
+    <!-- Título principal -->
+    <h2 class="sr text-4xl sm:text-5xl lg:text-6xl font-black text-white leading-tight mb-6">
+      <span data-i18n="trial_title">14 días totalmente gratis.</span><br/>
+      <span class="c-gold" data-i18n="trial_title_gold">Sin tarjeta de crédito.</span>
+    </h2>
+
+    <!-- Subtítulo -->
+    <p class="sr text-slate-400 text-lg sm:text-xl leading-relaxed max-w-2xl mx-auto mb-12" data-i18n="trial_subtitle">
+      Descarga Security Babel y pruébalo sin compromiso. Al día 15, decides si quieres continuar.
+    </p>
+
+    <!-- 3 mini-pills -->
+    <div class="sr flex flex-wrap justify-center gap-4 mb-12">
+      <div class="flex items-center gap-2 glass px-5 py-2.5 rounded-xl">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+        <span class="text-white text-sm font-bold" data-i18n="trial_day">14 días</span>
+      </div>
+      <div class="flex items-center gap-2 glass px-5 py-2.5 rounded-xl">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2" aria-hidden="true"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+        <span class="text-white text-sm font-bold" data-i18n="trial_free">Sin tarjeta</span>
+      </div>
+      <div class="flex items-center gap-2 glass px-5 py-2.5 rounded-xl">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span class="text-white text-sm font-bold" data-i18n="trial_local">100% local</span>
+      </div>
+    </div>
+
+    <!-- Botones de descarga (se rellenan dinámicamente con la última Release) -->
+    <div class="sr flex flex-col items-center gap-4">
+
+      <!-- Estado: comprobando versión -->
+      <div id="dl-loading" class="flex items-center gap-2 text-slate-500 text-sm">
+        <svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        <span data-i18n="dl_checking">Comprobando última versión…</span>
+      </div>
+
+      <!-- Botones activos (ocultos hasta que la API responda) -->
+      <div id="dl-buttons" style="display:none;flex-direction:column;align-items:center;gap:12px;">
+        <!-- macOS -->
+        <a id="dl-mac" href="#" target="_blank" rel="noopener noreferrer"
+          class="inline-flex items-center gap-3 px-10 py-4 rounded-2xl text-base font-bold transition-all"
+          style="background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;text-decoration:none;">
+          <svg width="20" height="20" viewBox="0 0 814 1000" fill="currentColor" aria-hidden="true">
+            <path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76.5 0-103.7 40.8-165.9 40.8s-105-42.3-168.3-117.2c-55.4-66.5-100.3-161.3-100.3-251 0-149.7 97.7-228.7 193.6-228.7 64.9 0 107.6 42.3 157.6 42.3 47.8 0 98.3-44.5 165.6-44.5zM649.8 64.4c28.8-34.5 49.3-82.8 49.3-131.1 0-6.4-.5-12.9-1.6-18.1-46.3 1.6-101.3 30.9-134.9 69.3-26.3 30.3-51.8 79.6-51.8 128.5 0 7 1.1 14 1.6 16.2 3.2.5 8.4 1.1 13.6 1.1 41.3 0 90.6-28.3 123.8-65.9z"/>
+          </svg>
+          <span class="dl-label" data-i18n="dl_mac">Descargar para macOS</span>
+        </a>
+        <!-- Windows (visible solo si hay asset .msi/.exe) -->
+        <a id="dl-win" href="#" target="_blank" rel="noopener noreferrer" style="display:none;"
+          class="inline-flex items-center gap-3 px-10 py-4 rounded-2xl text-base font-bold transition-all"
+          style="background:rgba(212,175,55,0.08);border:1.5px solid rgba(212,175,55,0.35);color:rgba(212,175,55,0.9);text-decoration:none;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+          <span class="dl-label" data-i18n="dl_win">Descargar para Windows</span>
+        </a>
+        <p id="dl-note" class="text-slate-500 text-sm"></p>
+      </div>
+
+      <!-- Estado: error -->
+      <div id="dl-error" style="display:none;" class="flex flex-col items-center gap-3 text-center">
+        <p class="dl-err-text text-slate-400 text-sm"></p>
+        <a class="dl-err-link c-gold text-sm underline" href="https://github.com/darioballesteros26-oss/babel-security/releases/latest" target="_blank" rel="noopener noreferrer" data-i18n="dl_err_link">Ver releases en GitHub →</a>
+      </div>
+
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
      FOOTER
 ═══════════════════════════════════════════════════════════ -->
 <footer style="background: #0B0F19; border-top: 1px solid rgba(255,255,255,0.05);">
@@ -1429,7 +1517,7 @@ const translations = {
     faq_q4: "¿Qué pasa si necesito ayuda o algo no funciona?",
     faq_a4: "Puedes escribirme a través del formulario de contacto de esta página. Respondo en un plazo de 24-48 horas según disponibilidad. El soporte es directo — sin tickets, sin bots, sin intermediarios.",
     faq_q5: "¿Puedo probar Security Babel antes de contratarlo?",
-    faq_a5: "Por el momento no hay un periodo de prueba automático. Si quieres valorarlo antes de decidir, escríbeme a través del formulario y lo acordamos.",
+    faq_a5: "Sí — próximamente podrás descargarlo y probarlo 14 días totalmente gratis, sin tarjeta de crédito. Al día 15 decides si quieres continuar. Por ahora escríbeme a través del formulario si quieres acceso anticipado.",
     /* comparativa */
     cmp_title: "Security Babel vs. la nube tradicional",
     cmp_subtitle: "La diferencia es estructural, no cosmética.",
@@ -1501,6 +1589,21 @@ const translations = {
     terms_s9_p: "Estos términos pueden actualizarse. Se notificará cualquier cambio significativo a los usuarios activos.",
     terms_s10_h: "10. Jurisdicción",
     terms_s10_p: "Estos términos se rigen por la legislación española. Cualquier disputa se someterá a los tribunales competentes de Marbella, España.",
+    /* prueba gratuita */
+    trial_badge:       "Prueba gratuita",
+    trial_title:       "14 días totalmente gratis.",
+    trial_title_gold:  "Sin tarjeta de crédito.",
+    trial_subtitle:    "Descarga Security Babel y pruébalo sin compromiso. Al día 15, decides si quieres continuar.",
+    trial_cta:         "Próximamente",
+    trial_note:        "macOS · Apple Silicon · Próximamente disponible",
+    trial_day:         "14 días",
+    trial_free:        "Sin tarjeta",
+    trial_local:       "100% local",
+    dl_checking:       "Comprobando última versión…",
+    dl_mac:            "Descargar para macOS",
+    dl_win:            "Descargar para Windows",
+    dl_err_link:       "Ver releases en GitHub →",
+    dl_err_msg:        "No se pudo cargar el enlace de descarga. Inténtalo desde GitHub.",
   },
 
   /* ── ENGLISH ── */
@@ -1609,7 +1712,7 @@ const translations = {
     faq_q4: "What if I need help or something isn't working?",
     faq_a4: "You can write to me via the contact form on this page. I respond within 24-48 hours depending on availability. Support is direct — no tickets, no bots, no middlemen.",
     faq_q5: "Can I try Security Babel before subscribing?",
-    faq_a5: "There is no automatic trial period at the moment. If you'd like to evaluate it before deciding, get in touch via the contact form and we'll work something out.",
+    faq_a5: "Yes — a 14-day free trial is coming soon, no credit card required. On day 15 you decide whether to continue. For now, write to me via the contact form if you'd like early access.",
     cmp_title: "Security Babel vs. traditional cloud", cmp_subtitle: "The difference is structural, not cosmetic.",
     cmp_col_feature: "Feature", cmp_col_cloud: "Traditional cloud", cmp_col_babel: "Security Babel",
     cmp_r1: "Your data passes through external servers",
@@ -1676,6 +1779,21 @@ const translations = {
     terms_s9_p: "These terms may be updated. Any significant changes will be communicated to active users.",
     terms_s10_h: "10. Jurisdiction",
     terms_s10_p: "These terms are governed by Spanish law. Any dispute shall be submitted to the competent courts of Marbella, Spain.",
+    /* free trial */
+    trial_badge:       "Free trial",
+    trial_title:       "14 days completely free.",
+    trial_title_gold:  "No credit card required.",
+    trial_subtitle:    "Download Security Babel and try it with no commitment. On day 15, you decide if you want to continue.",
+    trial_cta:         "Coming soon",
+    trial_note:        "macOS · Apple Silicon · Coming soon",
+    trial_day:         "14 days",
+    trial_free:        "No card needed",
+    trial_local:       "100% local",
+    dl_checking:       "Checking latest version…",
+    dl_mac:            "Download for macOS",
+    dl_win:            "Download for Windows",
+    dl_err_link:       "View releases on GitHub →",
+    dl_err_msg:        "Download link unavailable. Try from the GitHub releases page.",
   },
 
   /* ── РУССКИЙ ── */
@@ -1784,7 +1902,7 @@ const translations = {
     faq_q4: "Что делать, если мне нужна помощь или что-то не работает?",
     faq_a4: "Вы можете написать мне через форму обратной связи на этой странице. Отвечаю в течение 24-48 часов при наличии возможности. Поддержка прямая — без тикетов, без ботов, без посредников.",
     faq_q5: "Могу ли я попробовать Security Babel перед подпиской?",
-    faq_a5: "На данный момент автоматического пробного периода нет. Если вы хотите оценить продукт перед принятием решения, напишите мне через форму и договоримся.",
+    faq_a5: "Да — скоро появится бесплатный пробный период на 14 дней без банковской карты. На 15-й день вы решаете, хотите ли продолжить. Пока что напишите мне через форму обратной связи, если хотите ранний доступ.",
     cmp_title: "Security Babel против облачных сервисов", cmp_subtitle: "Разница структурная, а не косметическая.",
     cmp_col_feature: "Характеристика", cmp_col_cloud: "Традиционное облако", cmp_col_babel: "Security Babel",
     cmp_r1: "Ваши данные проходят через внешние серверы",
@@ -1851,6 +1969,21 @@ const translations = {
     terms_s9_p: "Настоящие условия могут обновляться. О любых существенных изменениях активные пользователи будут уведомлены.",
     terms_s10_h: "10. Юрисдикция",
     terms_s10_p: "Настоящие условия регулируются законодательством Испании. Любые споры передаются на рассмотрение в компетентные суды города Марбельи, Испания.",
+    /* пробный период */
+    trial_badge:       "Бесплатный пробный период",
+    trial_title:       "14 дней совершенно бесплатно.",
+    trial_title_gold:  "Без банковской карты.",
+    trial_subtitle:    "Скачайте Security Babel и попробуйте без обязательств. На 15-й день решите, хотите ли продолжить.",
+    trial_cta:         "Скоро",
+    trial_note:        "macOS · Apple Silicon · Скоро доступно",
+    trial_day:         "14 дней",
+    trial_free:        "Без карты",
+    trial_local:       "100% локально",
+    dl_checking:       "Проверяем последнюю версию…",
+    dl_mac:            "Скачать для macOS",
+    dl_win:            "Скачать для Windows",
+    dl_err_link:       "Посмотреть релизы на GitHub →",
+    dl_err_msg:        "Не удалось загрузить ссылку. Попробуйте с GitHub.",
   },
 
   /* ── العربية (RTL) ── */
@@ -1959,7 +2092,7 @@ const translations = {
     faq_q4: "ماذا أفعل إذا احتجت مساعدة أو لم يعمل شيء ما؟",
     faq_a4: "يمكنك مراسلتي عبر نموذج التواصل في هذه الصفحة. أرد خلال 24-48 ساعة حسب التوفر. الدعم مباشر — بدون تذاكر، بدون بوتات، بدون وسطاء.",
     faq_q5: "هل يمكنني تجربة Security Babel قبل الاشتراك؟",
-    faq_a5: "لا توجد فترة تجريبية تلقائية في الوقت الحالي. إذا أردت تقييم التطبيق قبل اتخاذ قرارك، راسلني عبر النموذج وسنرتب شيئاً.",
+    faq_a5: "نعم — قريبًا ستتوفر فترة تجريبية مجانية مدتها ١٤ يومًا بدون بطاقة ائتمان. في اليوم الخامس عشر تقرر ما إذا كنت تريد الاستمرار. في الوقت الحالي راسلني عبر النموذج إذا أردت وصولًا مبكرًا.",
     cmp_title: "Security Babel مقابل السحابة التقليدية", cmp_subtitle: "الفرق هيكلي، وليس مجرد مظهر.",
     cmp_col_feature: "الميزة", cmp_col_cloud: "السحابة التقليدية", cmp_col_babel: "Security Babel",
     cmp_r1: "بياناتك تمر عبر خوادم خارجية",
@@ -2026,6 +2159,21 @@ const translations = {
     terms_s9_p: "قد تُحدَّث هذه الشروط. سيتم إبلاغ المستخدمين النشطين بأي تغييرات جوهرية.",
     terms_s10_h: "10. الاختصاص القضائي",
     terms_s10_p: "تخضع هذه الشروط للقانون الإسباني. تُحال أي نزاعات إلى المحاكم المختصة في ماربيا، إسبانيا.",
+    /* فترة تجريبية */
+    trial_badge:       "تجربة مجانية",
+    trial_title:       "١٤ يومًا مجانًا تمامًا.",
+    trial_title_gold:  "بدون بطاقة ائتمان.",
+    trial_subtitle:    "حمّل Security Babel وجرّبه بدون التزام. في اليوم الخامس عشر، أنت تقرر إذا كنت تريد الاستمرار.",
+    trial_cta:         "قريبًا",
+    trial_note:        "macOS · Apple Silicon · قريبًا",
+    trial_day:         "١٤ يومًا",
+    trial_free:        "بدون بطاقة",
+    trial_local:       "١٠٠٪ محلي",
+    dl_checking:       "جارٍ التحقق من آخر إصدار…",
+    dl_mac:            "تنزيل لـ macOS",
+    dl_win:            "تنزيل لـ Windows",
+    dl_err_link:       "عرض الإصدارات على GitHub →",
+    dl_err_msg:        "تعذّر تحميل الرابط. حاول من صفحة GitHub.",
   },
 };
 
@@ -2311,6 +2459,90 @@ document.addEventListener('keydown', e => {
   const detected   = supported.includes(browserLang) ? browserLang : 'es';
 
   setLanguage(saved || detected);
+
+  // ── DESCARGAS DINÁMICAS — consulta GitHub Releases API ──────────────────
+  // Se ejecuta DESPUÉS de setLanguage para que currentLang esté definido.
+  (function initDescargas() {
+    var REPO  = 'darioballesteros26-oss/babel-security';
+    var API   = 'https://api.github.com/repos/' + REPO + '/releases/latest';
+    var PAGE  = 'https://github.com/' + REPO + '/releases/latest';
+
+    // Textos por idioma (usados en el HTML generado dinámicamente)
+    var ERR_MSG = {
+      es: 'No se pudo cargar el enlace de descarga. Inténtalo desde GitHub.',
+      en: 'Download link unavailable. Try from the GitHub releases page.',
+      ru: 'Не удалось загрузить ссылку. Попробуйте с GitHub.',
+      ar: 'تعذّر تحميل الرابط. حاول من صفحة GitHub.',
+    };
+
+    function getErrMsg() { return ERR_MSG[currentLang] || ERR_MSG.es; }
+
+    function showError() {
+      var loading = document.getElementById('dl-loading');
+      var errDiv  = document.getElementById('dl-error');
+      if (loading) loading.style.display = 'none';
+      if (errDiv) {
+        errDiv.querySelector('.dl-err-text').textContent = getErrMsg();
+        errDiv.style.display = 'flex';
+      }
+      // Los nav-links permanecen apuntando a la página de releases (fallback seguro)
+    }
+
+    fetch(API, { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        var assets  = Array.isArray(data.assets) ? data.assets : [];
+        var dmg     = assets.find(function(a) { return /\.dmg$/i.test(a.name); });
+        var winPkg  = assets.find(function(a) { return /\.(msi|exe)$/i.test(a.name); });
+        var macUrl  = dmg    ? dmg.browser_download_url    : null;
+        var winUrl  = winPkg ? winPkg.browser_download_url : null;
+        var anyUrl  = macUrl || data.html_url || PAGE;
+        var ver     = data.tag_name || '';
+
+        // 1. Actualizar links de nav y hero CTA
+        document.querySelectorAll('[data-dl-nav]').forEach(function(el) { el.href = anyUrl; });
+
+        // 2. Sección "prueba gratuita"
+        var loading = document.getElementById('dl-loading');
+        var btnWrap = document.getElementById('dl-buttons');
+        var macBtn  = document.getElementById('dl-mac');
+        var winBtn  = document.getElementById('dl-win');
+        var noteEl  = document.getElementById('dl-note');
+
+        if (loading) loading.style.display = 'none';
+        if (btnWrap) btnWrap.style.display = 'flex';
+
+        // macOS: siempre visible (enlace directo si hay DMG, o página de releases)
+        if (macBtn) macBtn.href = macUrl || PAGE;
+
+        // Windows: solo si hay asset específico
+        if (winBtn && winUrl) {
+          winBtn.href = winUrl;
+          winBtn.style.display = 'inline-flex';
+        }
+
+        // Nota de versión
+        if (noteEl) {
+          var parts = [];
+          if (dmg)    parts.push('macOS · Apple Silicon');
+          if (winPkg) parts.push('Windows');
+          if (ver)    parts.push(ver);
+          noteEl.textContent = parts.join(' · ');
+        }
+
+        // Re-aplicar i18n sobre los elementos de texto del bloque recién activado
+        // (setLanguage ya corrió, pero btnWrap estaba oculto y los textos son data-i18n)
+        var t = translations[currentLang] || {};
+        btnWrap && btnWrap.querySelectorAll('[data-i18n]').forEach(function(el) {
+          var k = el.getAttribute('data-i18n');
+          if (t[k] !== undefined) el.textContent = t[k];
+        });
+      })
+      .catch(showError);
+  })();
 })();
 </script>
 
