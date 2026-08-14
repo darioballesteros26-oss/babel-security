@@ -524,6 +524,122 @@
 
 
 <!-- ═══════════════════════════════════════════════════════════
+     PRUEBA GRATUITA — 14 días CTA
+═══════════════════════════════════════════════════════════ -->
+<section id="prueba-gratis" class="py-24 lg:py-36 relative overflow-hidden">
+
+  <div class="absolute inset-0 pointer-events-none" aria-hidden="true">
+    <div class="absolute inset-0" style="background: radial-gradient(ellipse 70% 60% at 50% 50%, rgba(212,175,55,0.09) 0%, transparent 70%);"></div>
+    <div class="absolute inset-0 opacity-20" style="background-image: linear-gradient(rgba(212,175,55,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(212,175,55,0.04) 1px, transparent 1px); background-size: 48px 48px;"></div>
+  </div>
+
+  <div class="relative max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+
+    <div class="sr inline-flex items-center gap-2 glass px-4 py-1.5 rounded-full text-xs c-gold font-semibold uppercase tracking-widest mb-8">
+      <span class="w-1.5 h-1.5 rounded-full" style="background:#D4AF37"></span>
+      <span data-i18n="trial_badge">Prueba gratuita</span>
+    </div>
+
+    <h2 class="sr text-4xl sm:text-5xl lg:text-6xl font-black text-white leading-tight mb-6">
+      <span data-i18n="trial_title">14 días totalmente gratis.</span><br/>
+      <span class="c-gold" data-i18n="trial_title_gold">Sin tarjeta de crédito.</span>
+    </h2>
+
+    <p class="sr text-slate-400 text-lg sm:text-xl leading-relaxed max-w-2xl mx-auto mb-12" data-i18n="trial_subtitle">
+      Descarga Security Babel y pruébalo sin compromiso. Al día 15, decides si quieres continuar.
+    </p>
+
+    <div class="sr flex flex-wrap justify-center gap-4 mb-12">
+      <div class="flex items-center gap-2 glass px-5 py-2.5 rounded-xl">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+        <span class="text-white text-sm font-bold" data-i18n="trial_day">14 días</span>
+      </div>
+      <div class="flex items-center gap-2 glass px-5 py-2.5 rounded-xl">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2" aria-hidden="true"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+        <span class="text-white text-sm font-bold" data-i18n="trial_free">Sin tarjeta</span>
+      </div>
+      <div class="flex items-center gap-2 glass px-5 py-2.5 rounded-xl">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span class="text-white text-sm font-bold" data-i18n="trial_local">100% local</span>
+      </div>
+    </div>
+
+    <!-- Botones de descarga (dinámicos vía GitHub Releases API) -->
+    <div class="sr flex flex-col items-center gap-4">
+
+      <div id="dl-loading" class="flex items-center gap-2 text-slate-500 text-sm">
+        <svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        <span data-i18n="dl_checking">Comprobando última versión…</span>
+      </div>
+
+      <div id="dl-buttons" style="display:none;flex-direction:column;align-items:center;gap:12px;">
+        <a id="dl-mac" href="#" target="_blank" rel="noopener noreferrer"
+          class="inline-flex items-center gap-3 px-10 py-4 rounded-2xl text-base font-bold transition-all"
+          style="background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;text-decoration:none;">
+          <svg width="20" height="20" viewBox="0 0 814 1000" fill="currentColor" aria-hidden="true">
+            <path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76.5 0-103.7 40.8-165.9 40.8s-105-42.3-168.3-117.2c-55.4-66.5-100.3-161.3-100.3-251 0-149.7 97.7-228.7 193.6-228.7 64.9 0 107.6 42.3 157.6 42.3 47.8 0 98.3-44.5 165.6-44.5zM649.8 64.4c28.8-34.5 49.3-82.8 49.3-131.1 0-6.4-.5-12.9-1.6-18.1-46.3 1.6-101.3 30.9-134.9 69.3-26.3 30.3-51.8 79.6-51.8 128.5 0 7 1.1 14 1.6 16.2 3.2.5 8.4 1.1 13.6 1.1 41.3 0 90.6-28.3 123.8-65.9z"/>
+          </svg>
+          <span class="dl-label" data-i18n="dl_mac">Descargar para macOS</span>
+        </a>
+        <a id="dl-win" href="#" target="_blank" rel="noopener noreferrer" style="display:none;"
+          class="inline-flex items-center gap-3 px-10 py-4 rounded-2xl text-base font-bold transition-all"
+          style="background:rgba(212,175,55,0.08);border:1.5px solid rgba(212,175,55,0.35);color:rgba(212,175,55,0.9);text-decoration:none;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+          <span class="dl-label" data-i18n="dl_win">Descargar para Windows</span>
+        </a>
+        <p class="text-slate-500 text-xs mt-1" data-i18n="dl_trial_note">Incluye 14 días de acceso completo. Sin tarjeta.</p>
+        <p id="dl-note" class="text-slate-500 text-sm"></p>
+      </div>
+
+      <div id="dl-error" style="display:none;" class="flex flex-col items-center gap-3 text-center">
+        <p class="dl-err-text text-slate-400 text-sm"></p>
+        <a class="dl-err-link c-gold text-sm underline" href="https://github.com/darioballesteros26-oss/babel-security/releases/latest" target="_blank" rel="noopener noreferrer" data-i18n="dl_err_link">Ver releases en GitHub →</a>
+      </div>
+
+    </div>
+
+    <!-- Comparativa Prueba vs Pro -->
+    <div class="sr mt-16 max-w-2xl mx-auto w-full">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid rgba(212,175,55,0.2);border-radius:16px;overflow:hidden;">
+        <div style="padding:28px 24px;border-right:1px solid rgba(212,175,55,0.15);">
+          <div style="font-size:0.6rem;letter-spacing:2px;color:#D4AF37;margin-bottom:6px;" data-i18n="cmp_trial_label">PRUEBA GRATUITA</div>
+          <div style="font-size:1.5rem;font-weight:900;color:#f1f5f9;margin-bottom:4px;" data-i18n="cmp_trial_price">0 €</div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:20px;" data-i18n="cmp_trial_duration">14 días · sin tarjeta</div>
+          <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px;font-size:0.7rem;color:#94a3b8;">
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat1">Cifrado AES-256-GCM</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat2">Traducción IA local</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat3">Email cifrado</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat4">Chat P2P cifrado</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat5">Actualizaciones automáticas</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg><span style="color:#475569;" data-i18n="cmp_feat6_no">Acceso tras 14 días</span></li>
+          </ul>
+        </div>
+        <div style="padding:28px 24px;background:rgba(212,175,55,0.04);position:relative;">
+          <div style="position:absolute;top:12px;right:12px;font-size:0.5rem;letter-spacing:1.5px;padding:3px 8px;background:rgba(212,175,55,0.15);color:#D4AF37;border-radius:999px;" data-i18n="cmp_pro_rec">RECOMENDADO</div>
+          <div style="font-size:0.6rem;letter-spacing:2px;color:#D4AF37;margin-bottom:6px;" data-i18n="cmp_pro_label">PRO</div>
+          <div style="font-size:1.5rem;font-weight:900;color:#f1f5f9;margin-bottom:4px;" data-i18n="cmp_pro_price">Próximamente</div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:20px;" data-i18n="cmp_pro_duration">acceso ilimitado</div>
+          <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px;font-size:0.7rem;color:#94a3b8;">
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat1">Cifrado AES-256-GCM</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat2">Traducción IA local</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat3">Email cifrado</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat4">Chat P2P cifrado</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat5">Actualizaciones automáticas</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat6_yes">Acceso ilimitado</span></li>
+          </ul>
+        </div>
+      </div>
+      <p class="text-slate-500 text-xs text-center mt-5">
+        <span data-i18n="cmp_contact_note">¿Interesado en la versión Pro?</span>
+        <a href="#contacto" style="color:#D4AF37;text-decoration:underline;margin-left:4px;" data-i18n="cmp_contact_link">Escríbenos</a>
+      </p>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
      CÓMO FUNCIONA
 ═══════════════════════════════════════════════════════════ -->
 <section id="como-funciona" class="py-24 lg:py-32 relative">
@@ -1275,122 +1391,6 @@
     </div>
 
     <p class="text-slate-500 text-sm" data-i18n="sales_response_time">Te respondemos en menos de 48 horas.</p>
-
-  </div>
-</section>
-
-
-<!-- ═══════════════════════════════════════════════════════════
-     PRUEBA GRATUITA — 14 días CTA
-═══════════════════════════════════════════════════════════ -->
-<section id="prueba-gratis" class="py-24 lg:py-36 relative overflow-hidden">
-
-  <div class="absolute inset-0 pointer-events-none" aria-hidden="true">
-    <div class="absolute inset-0" style="background: radial-gradient(ellipse 70% 60% at 50% 50%, rgba(212,175,55,0.09) 0%, transparent 70%);"></div>
-    <div class="absolute inset-0 opacity-20" style="background-image: linear-gradient(rgba(212,175,55,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(212,175,55,0.04) 1px, transparent 1px); background-size: 48px 48px;"></div>
-  </div>
-
-  <div class="relative max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-
-    <div class="sr inline-flex items-center gap-2 glass px-4 py-1.5 rounded-full text-xs c-gold font-semibold uppercase tracking-widest mb-8">
-      <span class="w-1.5 h-1.5 rounded-full" style="background:#D4AF37"></span>
-      <span data-i18n="trial_badge">Prueba gratuita</span>
-    </div>
-
-    <h2 class="sr text-4xl sm:text-5xl lg:text-6xl font-black text-white leading-tight mb-6">
-      <span data-i18n="trial_title">14 días totalmente gratis.</span><br/>
-      <span class="c-gold" data-i18n="trial_title_gold">Sin tarjeta de crédito.</span>
-    </h2>
-
-    <p class="sr text-slate-400 text-lg sm:text-xl leading-relaxed max-w-2xl mx-auto mb-12" data-i18n="trial_subtitle">
-      Descarga Security Babel y pruébalo sin compromiso. Al día 15, decides si quieres continuar.
-    </p>
-
-    <div class="sr flex flex-wrap justify-center gap-4 mb-12">
-      <div class="flex items-center gap-2 glass px-5 py-2.5 rounded-xl">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
-        <span class="text-white text-sm font-bold" data-i18n="trial_day">14 días</span>
-      </div>
-      <div class="flex items-center gap-2 glass px-5 py-2.5 rounded-xl">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2" aria-hidden="true"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-        <span class="text-white text-sm font-bold" data-i18n="trial_free">Sin tarjeta</span>
-      </div>
-      <div class="flex items-center gap-2 glass px-5 py-2.5 rounded-xl">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <span class="text-white text-sm font-bold" data-i18n="trial_local">100% local</span>
-      </div>
-    </div>
-
-    <!-- Botones de descarga (dinámicos vía GitHub Releases API) -->
-    <div class="sr flex flex-col items-center gap-4">
-
-      <div id="dl-loading" class="flex items-center gap-2 text-slate-500 text-sm">
-        <svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-        <span data-i18n="dl_checking">Comprobando última versión…</span>
-      </div>
-
-      <div id="dl-buttons" style="display:none;flex-direction:column;align-items:center;gap:12px;">
-        <a id="dl-mac" href="#" target="_blank" rel="noopener noreferrer"
-          class="inline-flex items-center gap-3 px-10 py-4 rounded-2xl text-base font-bold transition-all"
-          style="background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;text-decoration:none;">
-          <svg width="20" height="20" viewBox="0 0 814 1000" fill="currentColor" aria-hidden="true">
-            <path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76.5 0-103.7 40.8-165.9 40.8s-105-42.3-168.3-117.2c-55.4-66.5-100.3-161.3-100.3-251 0-149.7 97.7-228.7 193.6-228.7 64.9 0 107.6 42.3 157.6 42.3 47.8 0 98.3-44.5 165.6-44.5zM649.8 64.4c28.8-34.5 49.3-82.8 49.3-131.1 0-6.4-.5-12.9-1.6-18.1-46.3 1.6-101.3 30.9-134.9 69.3-26.3 30.3-51.8 79.6-51.8 128.5 0 7 1.1 14 1.6 16.2 3.2.5 8.4 1.1 13.6 1.1 41.3 0 90.6-28.3 123.8-65.9z"/>
-          </svg>
-          <span class="dl-label" data-i18n="dl_mac">Descargar para macOS</span>
-        </a>
-        <a id="dl-win" href="#" target="_blank" rel="noopener noreferrer" style="display:none;"
-          class="inline-flex items-center gap-3 px-10 py-4 rounded-2xl text-base font-bold transition-all"
-          style="background:rgba(212,175,55,0.08);border:1.5px solid rgba(212,175,55,0.35);color:rgba(212,175,55,0.9);text-decoration:none;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
-          <span class="dl-label" data-i18n="dl_win">Descargar para Windows</span>
-        </a>
-        <p class="text-slate-500 text-xs mt-1" data-i18n="dl_trial_note">Incluye 14 días de acceso completo. Sin tarjeta.</p>
-        <p id="dl-note" class="text-slate-500 text-sm"></p>
-      </div>
-
-      <div id="dl-error" style="display:none;" class="flex flex-col items-center gap-3 text-center">
-        <p class="dl-err-text text-slate-400 text-sm"></p>
-        <a class="dl-err-link c-gold text-sm underline" href="https://github.com/darioballesteros26-oss/babel-security/releases/latest" target="_blank" rel="noopener noreferrer" data-i18n="dl_err_link">Ver releases en GitHub →</a>
-      </div>
-
-    </div>
-
-    <!-- Comparativa Prueba vs Pro -->
-    <div class="sr mt-16 max-w-2xl mx-auto w-full">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid rgba(212,175,55,0.2);border-radius:16px;overflow:hidden;">
-        <div style="padding:28px 24px;border-right:1px solid rgba(212,175,55,0.15);">
-          <div style="font-size:0.6rem;letter-spacing:2px;color:#D4AF37;margin-bottom:6px;" data-i18n="cmp_trial_label">PRUEBA GRATUITA</div>
-          <div style="font-size:1.5rem;font-weight:900;color:#f1f5f9;margin-bottom:4px;" data-i18n="cmp_trial_price">0 €</div>
-          <div style="font-size:0.72rem;color:#64748b;margin-bottom:20px;" data-i18n="cmp_trial_duration">14 días · sin tarjeta</div>
-          <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px;font-size:0.7rem;color:#94a3b8;">
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat1">Cifrado AES-256-GCM</span></li>
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat2">Traducción IA local</span></li>
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat3">Email cifrado</span></li>
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat4">Chat P2P cifrado</span></li>
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat5">Actualizaciones automáticas</span></li>
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg><span style="color:#475569;" data-i18n="cmp_feat6_no">Acceso tras 14 días</span></li>
-          </ul>
-        </div>
-        <div style="padding:28px 24px;background:rgba(212,175,55,0.04);position:relative;">
-          <div style="position:absolute;top:12px;right:12px;font-size:0.5rem;letter-spacing:1.5px;padding:3px 8px;background:rgba(212,175,55,0.15);color:#D4AF37;border-radius:999px;" data-i18n="cmp_pro_rec">RECOMENDADO</div>
-          <div style="font-size:0.6rem;letter-spacing:2px;color:#D4AF37;margin-bottom:6px;" data-i18n="cmp_pro_label">PRO</div>
-          <div style="font-size:1.5rem;font-weight:900;color:#f1f5f9;margin-bottom:4px;" data-i18n="cmp_pro_price">Próximamente</div>
-          <div style="font-size:0.72rem;color:#64748b;margin-bottom:20px;" data-i18n="cmp_pro_duration">acceso ilimitado</div>
-          <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px;font-size:0.7rem;color:#94a3b8;">
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat1">Cifrado AES-256-GCM</span></li>
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat2">Traducción IA local</span></li>
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat3">Email cifrado</span></li>
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat4">Chat P2P cifrado</span></li>
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat5">Actualizaciones automáticas</span></li>
-            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat6_yes">Acceso ilimitado</span></li>
-          </ul>
-        </div>
-      </div>
-      <p class="text-slate-500 text-xs text-center mt-5">
-        <span data-i18n="cmp_contact_note">¿Interesado en la versión Pro?</span>
-        <a href="#contacto" style="color:#D4AF37;text-decoration:underline;margin-left:4px;" data-i18n="cmp_contact_link">Escríbenos</a>
-      </p>
-    </div>
 
   </div>
 </section>
