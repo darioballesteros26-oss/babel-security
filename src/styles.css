@@ -364,6 +364,12 @@ body {
   padding: 0;
   justify-content: space-between;
   overflow: hidden;
+  position: relative;
+}
+
+@keyframes parpadeo {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
 }
 
 /* ── Cabecera ── */
@@ -466,6 +472,10 @@ body {
   letter-spacing: 0.5px;
   line-height: 1.6;
   font-weight: 400;
+  /* La burbuja crece con el contenido; rompemos palabras/URLs muy
+     largas para que una traducción larga nunca desborde el ancho. */
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .chat-burbuja.usuario .burbuja-texto {
@@ -936,7 +946,8 @@ body {
    PANTALLA ARCHIVOS
    ============================================================ */
 
-.pantalla-archivos {
+.pantalla-archivos,
+.pantalla-registro-panel {
   height: 100vh;
   max-height: 100vh;
   width: 100%;
@@ -1539,6 +1550,66 @@ body {
 
 .email-btn-sync:hover { border-color: var(--dorado); color: var(--dorado); }
 
+.email-menu-wrap {
+  position: relative;
+}
+
+.email-menu-trigger {
+  background: transparent;
+  border: none;
+  color: var(--dorado);
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.email-menu-arrow {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  transition: transform 0.2s;
+}
+
+.email-menu-trigger.abierto .email-menu-arrow { transform: rotate(180deg); }
+
+.email-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: var(--fondo-panel, #111);
+  border: 1px solid var(--borde-dorado);
+  border-radius: 4px;
+  min-width: 170px;
+  z-index: 200;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+
+.email-menu-item {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(197,160,89,0.08);
+  color: var(--texto-secundario);
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.7rem;
+  letter-spacing: 1.5px;
+  text-align: left;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.email-menu-item:last-child { border-bottom: none; }
+.email-menu-item:hover { background: rgba(197,160,89,0.08); color: var(--dorado); }
+.email-menu-item.activo { color: var(--dorado); }
+
 .email-buscar-wrap {
   padding: 6px 12px 8px;
   border-bottom: 1px solid rgba(197, 160, 89, 0.1);
@@ -1616,7 +1687,32 @@ body {
   opacity: 0.6;
 }
 
-.email-item-adjunto-icono { font-size: 0.72rem; opacity: 0.65; }
+.email-item-meta-iconos { display: flex; gap: 4px; align-items: center; font-size: 0.72rem; opacity: 0.65; }
+
+/* Botones de acción rápida en cada ítem — visibles solo en hover */
+.email-item-acciones {
+  display: none;
+  gap: 2px;
+  margin-top: 6px;
+}
+.email-item:hover .email-item-acciones { display: flex; }
+
+.email-accion-mini {
+  background: transparent;
+  border: 1px solid var(--borde);
+  color: var(--texto-secundario);
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.12s;
+  line-height: 1.4;
+}
+.email-accion-mini:hover { border-color: var(--dorado); color: var(--dorado); }
+.email-accion-mini.peligro:hover { border-color: #c0392b; color: #c0392b; }
+
+/* Email destacado: sutil borde izquierdo dorado */
+.email-item.destacado { border-left: 2px solid var(--dorado); padding-left: 16px; }
 
 .email-item-snippet {
   font-family: 'Times New Roman', Times, serif;
@@ -1683,6 +1779,24 @@ body {
 }
 
 .email-vacio-cta:hover { background: rgba(197, 160, 89, 0.1); }
+
+.email-cargar-mas {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 8px 12px 12px;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid rgba(197,160,89,0.25);
+  border-radius: 6px;
+  color: var(--dorado);
+  font-size: 0.7rem;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.15s, background 0.15s;
+}
+.email-cargar-mas:hover { opacity: 1; background: rgba(197,160,89,0.07); }
 
 .email-btn-config {
   background: transparent;
@@ -2148,6 +2262,51 @@ body {
 #modal-terminos div::-webkit-scrollbar-thumb { background: var(--dorado-oscuro); border-radius: 2px; }
 
 /* ============================================================
+   VISORES DE TEXTO TRADUCIDO — scrollbar SIEMPRE visible
+   ------------------------------------------------------------
+   Los cuadros de comparación original/traducción y el visor
+   simple ya recortan el layout con overflow-y:auto, pero en
+   macOS el scrollbar overlay se autooculta: cuando la traducción
+   es más larga que el original (típico EN→ES) el texto se corta
+   sin ningún indicador. Al declarar ::-webkit-scrollbar forzamos
+   el scrollbar clásico, siempre presente, para que el overflow
+   nunca sea un corte silencioso.
+   ============================================================ */
+#par-contenido-1,
+#par-contenido-2,
+#modal-visor-contenido,
+.email-visor-cuerpo {
+  scrollbar-width: thin;
+  scrollbar-color: var(--dorado-oscuro) rgba(201, 168, 76, 0.06);
+}
+
+#par-contenido-1::-webkit-scrollbar,
+#par-contenido-2::-webkit-scrollbar,
+#modal-visor-contenido::-webkit-scrollbar,
+.email-visor-cuerpo::-webkit-scrollbar { width: 8px; }
+
+#par-contenido-1::-webkit-scrollbar-track,
+#par-contenido-2::-webkit-scrollbar-track,
+#modal-visor-contenido::-webkit-scrollbar-track,
+.email-visor-cuerpo::-webkit-scrollbar-track {
+  background: rgba(201, 168, 76, 0.06);
+  border-radius: 4px;
+}
+
+#par-contenido-1::-webkit-scrollbar-thumb,
+#par-contenido-2::-webkit-scrollbar-thumb,
+#modal-visor-contenido::-webkit-scrollbar-thumb,
+.email-visor-cuerpo::-webkit-scrollbar-thumb {
+  background: var(--dorado-oscuro);
+  border-radius: 4px;
+}
+
+#par-contenido-1::-webkit-scrollbar-thumb:hover,
+#par-contenido-2::-webkit-scrollbar-thumb:hover,
+#modal-visor-contenido::-webkit-scrollbar-thumb:hover,
+.email-visor-cuerpo::-webkit-scrollbar-thumb:hover { background: var(--dorado); }
+
+/* ============================================================
    TEMAS — Ajustes
    ============================================================ */
 [data-tema="negro"] {
@@ -2300,4 +2459,138 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+}
+
+/* ── REGISTRO DIARIO ─────────────────────────────────────────────────────── */
+
+#pantalla-registro {
+  height: 100vh;
+  max-height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  justify-content: flex-start;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.registro-stat {
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.85rem;
+  color: var(--dorado);
+  letter-spacing: 1px;
+}
+.registro-stat small {
+  font-size: 0.58rem;
+  color: var(--texto-secundario);
+  letter-spacing: 1px;
+  margin-left: 2px;
+}
+
+.registro-stat-alerta {
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.72rem;
+  color: #ef4444;
+  letter-spacing: 1px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 2px;
+  padding: 2px 8px;
+}
+
+.registro-evento {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--borde);
+  transition: background 0.15s;
+}
+.registro-evento:hover {
+  background: rgba(197, 160, 89, 0.04);
+}
+.registro-sospechoso {
+  border-left: 3px solid #ef4444;
+  padding-left: 17px;
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.registro-evento-fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.registro-evento-tipo {
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.7rem;
+  letter-spacing: 1.5px;
+  color: var(--dorado);
+}
+.registro-evento-hora {
+  font-family: monospace;
+  font-size: 0.68rem;
+  color: var(--texto-secundario);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.registro-evento-ip {
+  font-family: monospace;
+  font-size: 0.62rem;
+  color: var(--texto-secundario);
+  opacity: 0.6;
+}
+.registro-evento-nombre {
+  font-size: 0.62rem;
+  color: var(--texto-secundario);
+  opacity: 0.7;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.registro-badge-alerta {
+  font-size: 0.55rem;
+  letter-spacing: 1px;
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.registro-btn-informar {
+  display: none;
+  margin-top: 8px;
+  background: transparent;
+  border: 1px solid rgba(197, 160, 89, 0.35);
+  color: var(--dorado);
+  font-size: 0.58rem;
+  letter-spacing: 1.5px;
+  font-family: 'Times New Roman', Times, serif;
+  padding: 5px 12px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.registro-evento:hover .registro-btn-informar {
+  display: inline-block;
+}
+.registro-btn-informar:hover {
+  background: rgba(197, 160, 89, 0.08);
+  border-color: var(--dorado);
+}
+
+.registro-filtro-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.68rem;
+  color: var(--texto-secundario);
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.registro-filtro-label input[type="checkbox"] {
+  accent-color: var(--dorado);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
 }

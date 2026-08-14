@@ -27,10 +27,12 @@
       <h2 class="subtitulo-babel" id="ui-bienvenido-sistema">BIENVENIDO AL SISTEMA</h2>
       <p class="descripcion">¿Es tu primera vez o ya tienes un búnker?</p>
       <div class="login-box">
-        <button type="button" data-action="mostrar-pantalla" data-pantalla="login" class="btn-oro" id="ui-acceder-bunker">ACCEDER A BÚNKER
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="login" class="btn-oro"
+          id="ui-acceder-bunker">ACCEDER A BÚNKER
           EXISTENTE</button>
         <div class="separador">— O —</div>
-        <button type="button" data-action="mostrar-pantalla" data-pantalla="configuracion" class="btn-secundario-oro">CREAR NUEVO
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="configuracion"
+          class="btn-secundario-oro">CREAR NUEVO
           BÚNKER</button>
       </div>
     </div>
@@ -107,10 +109,10 @@
         <div class="input-grupo">
           <label class="input-label">CONTRASEÑA DE USUARIO</label>
           <div class="input-con-ojo">
-            <input type="password" id="login-pass-usuario"
-              placeholder="••••••••" class="input-vip"
+            <input type="password" id="login-pass-usuario" placeholder="••••••••" class="input-vip"
               onkeydown="if(event.key==='Enter')intentarAcceso()">
-            <button type="button" class="btn-ojo" data-action="toggle-contrasena" data-campo="login-pass-usuario" title="Ver">
+            <button type="button" class="btn-ojo" data-action="toggle-contrasena" data-campo="login-pass-usuario"
+              title="Ver">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
                 stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -120,7 +122,8 @@
           </div>
         </div>
         <button type="button" data-action="intentar-acceso" class="btn-oro">DESBLOQUEAR BÚNKER</button>
-        <button type="button" data-action="mostrar-pantalla" data-pantalla="decision" class="btn-link">← VOLVER ATRÁS</button>
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="decision" class="btn-link">← VOLVER
+          ATRÁS</button>
         <!-- Enlace recuperación — discreto -->
         <button type="button" data-action="ir-a-recuperacion" class="btn-link"
           style="font-size:0.6rem;opacity:0.4;margin-top:4px;letter-spacing:1px;">
@@ -136,6 +139,14 @@
       <div id="nllb-badge" title="Estado NLLB"
         style="position:absolute;top:16px;right:16px;width:8px;height:8px;border-radius:50%;background:#f59e0b;opacity:0.7;transition:background 0.5s,opacity 0.5s;">
       </div>
+
+      <!-- Banner prueba gratuita — visible solo en modo trial -->
+      <div id="banner-prueba" style="display:none;width:100%;box-sizing:border-box;padding:8px 16px;background:rgba(212,175,55,0.12);border-bottom:1px solid rgba(212,175,55,0.3);text-align:center;font-size:0.62rem;letter-spacing:1.5px;color:var(--dorado);">
+        PRUEBA GRATUITA — <strong id="banner-dias-texto">14 días</strong> restantes
+        <a id="banner-activar-link" href="https://securitybabel.netlify.app#prueba-gratis" target="_blank" rel="noopener noreferrer"
+          style="color:var(--dorado);margin-left:12px;text-decoration:underline;cursor:pointer;">ACTIVAR LICENCIA →</a>
+      </div>
+
       <div class="logo-babel small">BABEL</div>
       <p class="descripcion" id="bienvenida-usuario">Bienvenido</p>
       <div class="panel-botones">
@@ -149,22 +160,69 @@
         </button>
         <button type="button" data-action="mostrar-pantalla" data-pantalla="comunicacion" class="btn-panel">
           <span class="panel-icono">⇄</span>
-          <span class="panel-texto" id="pantalla-texto-p2p">P2P</span>
+          <span class="panel-texto" id="pantalla-texto-p2p">Mensajes</span>
         </button>
       </div>
+      <button type="button" data-action="ir-a-registro" class="btn-link"
+        style="margin-top:20px;letter-spacing:2px;">◷ REGISTRO</button>
       <button type="button" data-action="mostrar-pantalla" data-pantalla="ajustes" class="btn-link"
-        style="margin-top:20px;letter-spacing:2px;" id="pantalla-texto-ajustes">⚙ AJUSTES</button>
+        style="margin-top:8px;letter-spacing:2px;" id="pantalla-texto-ajustes">⚙ AJUSTES</button>
       <button type="button" data-action="cerrar-sesion" class="btn-link" style="margin-top:8px"
         id="pantalla-texto-cerrar">CERRAR SESIÓN</button>
-      <!-- Ver frase desde dentro de la app -->
-      <button type="button" data-action="ver-frase-app" class="btn-link"
-        style="margin-top:6px;font-size:0.6rem;opacity:0.35;letter-spacing:1px;">
-        VER FRASE DE RECUPERACIÓN
-      </button>
+
+      <!-- Overlay prueba expirada — cubre toda la pantalla principal -->
+      <div id="overlay-trial-expirado" style="display:none;position:absolute;inset:0;background:rgba(9,9,11,0.97);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:32px;text-align:center;">
+        <div style="font-family:'Times New Roman',Times,serif;font-size:1.1rem;letter-spacing:3px;color:var(--dorado);">BABEL</div>
+        <div style="font-size:0.72rem;letter-spacing:2px;color:#f1f5f9;margin-top:4px;">TU PRUEBA GRATUITA HA TERMINADO</div>
+        <div style="font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);max-width:280px;line-height:1.7;">
+          Activa tu licencia para seguir usando Babel Security.<br>Tus datos están a salvo — puedes exportarlos en cualquier momento.
+        </div>
+        <a href="https://securitybabel.netlify.app#prueba-gratis" target="_blank" rel="noopener noreferrer"
+          style="display:inline-block;margin-top:8px;padding:14px 32px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;text-decoration:none;font-weight:bold;">
+          OBTENER LICENCIA
+        </a>
+        <button type="button" data-action="exportar-datos-trial"
+          style="padding:10px 24px;border:1px solid rgba(197,160,89,0.4);background:transparent;color:var(--texto-secundario);font-family:'Times New Roman',Times,serif;font-size:0.6rem;letter-spacing:2px;cursor:pointer;margin-top:4px;">
+          EXPORTAR MIS DATOS
+        </button>
+      </div>
+    </div>
+
+    <!-- Modal aviso 3 días restantes -->
+    <div id="modal-trial-aviso" class="hidden" style="position:fixed;inset:0;background:rgba(9,9,11,0.85);z-index:300;display:flex;align-items:center;justify-content:center;">
+      <div style="background:#111115;border:1px solid rgba(212,175,55,0.35);padding:36px 32px;max-width:340px;width:90%;text-align:center;">
+        <div style="font-size:0.65rem;letter-spacing:2.5px;color:var(--dorado);margin-bottom:16px;">PRUEBA GRATUITA</div>
+        <div style="font-size:0.72rem;letter-spacing:1px;color:#f1f5f9;margin-bottom:10px;" id="modal-trial-aviso-titulo">Tu prueba termina pronto</div>
+        <div style="font-size:0.58rem;letter-spacing:0.5px;color:var(--texto-secundario);line-height:1.7;margin-bottom:24px;" id="modal-trial-aviso-cuerpo">
+          Te quedan pocos días. Activa tu licencia para no perder el acceso.
+        </div>
+        <a href="https://securitybabel.netlify.app#prueba-gratis" target="_blank" rel="noopener noreferrer"
+          style="display:block;margin-bottom:10px;padding:12px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;font-size:0.62rem;letter-spacing:2px;text-decoration:none;font-weight:bold;">
+          ACTIVAR AHORA
+        </a>
+        <button type="button" data-action="cerrar-modal-trial-aviso"
+          style="padding:10px;width:100%;border:1px solid rgba(197,160,89,0.3);background:transparent;color:var(--texto-secundario);font-size:0.58rem;letter-spacing:1.5px;cursor:pointer;font-family:'Times New Roman',Times,serif;">
+          CONTINUAR CON LA PRUEBA
+        </button>
+      </div>
     </div>
 
     <!-- PANTALLA 6 — TRADUCCIÓN CHAT -->
     <div id="pantalla-traduccion" class="pantalla pantalla-chat hidden">
+
+      <!-- Overlay visible mientras el sidecar Python arranca (~30-90s en arranque en frío) -->
+      <div id="servidor-cargando-overlay" class="hidden"
+        style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(9,9,11,0.93);z-index:50;gap:14px;pointer-events:all;">
+        <div
+          style="font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:3px;color:var(--dorado);">
+          CARGANDO TRADUCTOR</div>
+        <div
+          style="font-size:0.58rem;letter-spacing:1.5px;color:var(--texto-secundario);opacity:0.55;text-align:center;max-width:260px;">
+          El motor de IA está iniciando.<br>Listo en ~30-90 segundos.</div>
+        <div id="servidor-cargando-dot"
+          style="width:6px;height:6px;border-radius:50%;background:var(--dorado);opacity:0.7;animation:parpadeo 1.2s ease-in-out infinite;">
+        </div>
+      </div>
 
       <div class="chat-header">
         <div class="chat-header-izquierda">
@@ -202,15 +260,14 @@
           </div>
           <button type="button" id="btn-ver-sel" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
-            data-action="ver-comparacion"
-            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+            data-action="ver-comparacion" onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">◫ VER ARCHIVO</button>
           <button type="button" id="btn-eliminar-sel" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
-            data-action="eliminar-seleccionados"
-            onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
+            data-action="eliminar-seleccionados" onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
             onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
-          <button type="button" data-action="borrar-chat" class="btn-borrar-chat" id="ui-borrar-chat">BORRAR CHAT</button>
+          <button type="button" data-action="borrar-chat" class="btn-borrar-chat" id="ui-borrar-chat">BORRAR
+            CHAT</button>
         </div>
       </div>
 
@@ -293,20 +350,23 @@
                 <div id="procesando-barra" class="procesando-barra" style="width:0%"></div>
               </div>
             </div>
-            <button id="btn-cancelar-traduccion" type="button" title="Cancelar traducción" style="background:none;border:1px solid var(--borde);color:var(--texto-secundario);border-radius:4px;padding:2px 8px;font-size:0.65rem;letter-spacing:1px;cursor:pointer;flex-shrink:0;opacity:0.7;">✕ CANCELAR</button>
+            <button id="btn-cancelar-traduccion" type="button" title="Cancelar traducción"
+              style="background:none;border:1px solid var(--borde);color:var(--texto-secundario);border-radius:4px;padding:2px 8px;font-size:0.65rem;letter-spacing:1px;cursor:pointer;flex-shrink:0;opacity:0.7;">✕
+              CANCELAR</button>
           </div>
         </div>
       </div>
 
       <div style="padding:0 16px 2px;display:flex;justify-content:space-between;align-items:center;min-height:16px;">
-        <span id="contador-palabras" style="font-family:'Times New Roman',Times,serif;font-size:0.55rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.4;"></span>
+        <span id="contador-palabras"
+          style="font-family:'Times New Roman',Times,serif;font-size:0.55rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.4;"></span>
       </div>
       <div id="chat-input-barra" class="chat-input-barra">
         <button type="button" data-action="seleccionar-archivo" class="btn-mas" title="Subir documento">+</button>
         <input type="file" id="input-archivo" accept=".pdf,.docx,.txt" style="display:none"
           onchange="manejarSeleccion(event)">
-        <textarea id="chat-input" class="chat-input" placeholder="Escribe un término o frase..."
-          autocomplete="off" rows="1"></textarea>
+        <textarea id="chat-input" class="chat-input" placeholder="Escribe un término o frase..." autocomplete="off"
+          rows="1"></textarea>
         <button type="button" id="btn-limpiar-input" data-action="limpiar-input" title="Limpiar texto"
           style="display:none;background:transparent;border:none;color:var(--texto-secundario);font-size:1.1rem;cursor:pointer;padding:0 4px;opacity:0.5;flex-shrink:0;"
           onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='0.5'">×</button>
@@ -319,7 +379,8 @@
     <!-- PANTALLA — ARCHIVOS GUARDADOS SIN TRADUCIR -->
     <div id="pantalla-archivos-guardados" class="pantalla pantalla-archivos hidden">
       <div class="archivos-header">
-        <button type="button" data-action="mostrar-pantalla" data-pantalla="principal" class="btn-link" id="ui-volver-archivos">←
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="principal" class="btn-link"
+          id="ui-volver-archivos">←
           VOLVER</button>
         <div class="chat-header-centro">
           <span class="chat-titulo">BABEL</span>
@@ -334,18 +395,26 @@
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">⇪ COMPARTIR</button>
+          <button type="button" id="btn-unir-pdfs-g" data-action="abrir-union-pdfs" class="hidden"
+            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+            onmouseleave="this.style.background='transparent'">⊕ UNIR PDFs</button>
+          <button type="button" id="btn-convertir-img-pdf-g" data-action="convertir-imagenes-pdf" class="hidden"
+            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+            onmouseleave="this.style.background='transparent'">⊞ CONVERTIR A PDF</button>
           <button type="button" id="btn-eliminar-sel-g" data-action="eliminar-sel-guardados" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
             onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
-<button type="button" data-action="abrir-carpeta-guardados" class="btn-secundario-oro"
+          <button type="button" data-action="abrir-carpeta-guardados" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;opacity:0.7;"
             title="Abrir carpeta Guardados en Finder" id="ui-finder">◫ FINDER</button>
           <button type="button" data-action="exportar-todo" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
             title="Exportar todos los archivos a Descargas" id="ui-exportar-todo">↓ EXPORTAR TODO</button>
-          <button type="button" data-action="enviar-email-seleccion" id="btn-mail-sel-g" class="btn-secundario-oro hidden"
-            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
+          <button type="button" data-action="enviar-email-seleccion" id="btn-mail-sel-g"
+            class="btn-secundario-oro hidden" style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
             title="Enviar archivo por email">✉ ENVIAR POR MAIL</button>
           <button type="button" data-action="abrir-importar-guardado" id="ui-importar" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;">+ IMPORTAR</button>
@@ -355,7 +424,7 @@
       <div class="archivos-layout">
         <div class="buzones-panel">
           <div class="buzones-header">
-            <span class="buzones-titulo" id="ui-buzones">BUZONES</span>
+            <span class="buzones-titulo" id="ui-buzones">Carpetas</span>
             <button type="button" data-action="mostrar-input-buzon-guardado" class="btn-buzon-nuevo"
               title="Nuevo buzón">+</button>
           </div>
@@ -385,10 +454,10 @@
           <div class="archivos-buscar-wrap">
             <span class="archivos-buscar-icono">⌕</span>
             <input type="text" id="buscar-archivos-g" class="archivos-buscar-input"
-              placeholder="Buscar archivos y carpetas..."
-              autocomplete="off" spellcheck="false">
+              placeholder="Buscar archivos y carpetas..." autocomplete="off" spellcheck="false">
             <button type="button" id="buscar-archivos-limpiar" class="archivos-buscar-limpiar hidden">✕</button>
-            <button type="button" id="ir-a-todos-btn" class="archivos-buscar-limpiar" title="Ver todos los archivos">⊞</button>
+            <button type="button" id="ir-a-todos-btn" class="archivos-buscar-limpiar"
+              title="Ver todos los archivos">⊞</button>
           </div>
           <div id="lista-guardados" class="archivos-lista">
             <div class="archivos-vacio">
@@ -399,14 +468,14 @@
         </div>
       </div>
     </div>
-    <!-- PANTALLA 8 — P2P -->
+    <!-- PANTALLA 8 — Mensajes -->
     <div id="pantalla-comunicacion" class="pantalla pantalla-p2p hidden">
 
       <div class="archivos-header">
         <button type="button" data-action="volver-de-p2p" class="btn-link">← PANEL</button>
         <div class="chat-header-centro">
           <span class="chat-titulo">BABEL</span>
-          <span id="p2p-subtitulo" class="chat-subtitulo">RED P2P · CIFRADO LOCAL</span>
+          <span id="p2p-subtitulo" class="chat-subtitulo">RED Mensajeria · CIFRADO LOCAL</span>
         </div>
         <div style="width:120px"></div>
       </div>
@@ -489,7 +558,8 @@
         <!-- FASE 2: CARGANDO -->
         <div id="p2p-fase-carga"
           style="display:none;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:20px;">
-          <div style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;letter-spacing:4px;color:var(--dorado);">
+          <div
+            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;letter-spacing:4px;color:var(--dorado);">
             INTERCONECTANDO</div>
           <div style="display:flex;gap:6px;align-items:center;">
             <span
@@ -541,15 +611,28 @@
         <!-- SIDEBAR: lista de correos -->
         <div class="email-sidebar">
           <div class="email-sidebar-header">
-            <span class="email-sidebar-titulo">BANDEJA</span>
+            <div class="email-menu-wrap">
+              <button type="button" class="email-menu-trigger" data-action="toggle-email-menu">
+                <span id="email-vista-label">TODOS</span>
+                <span class="email-menu-arrow">▾</span>
+              </button>
+              <div id="email-menu-dropdown" class="email-menu-dropdown hidden">
+                <button type="button" class="email-menu-item activo" data-action="filtro-email" data-vista="todos">Todos los correos</button>
+                <button type="button" class="email-menu-item" data-action="filtro-email" data-vista="noleidos">No leídos</button>
+                <button type="button" class="email-menu-item" data-action="filtro-email" data-vista="destacados">Destacados</button>
+                <button type="button" class="email-menu-item" data-action="filtro-email" data-vista="archivados">Archivados</button>
+              </div>
+            </div>
             <div style="display:flex;gap:6px;align-items:center;">
-              <button type="button" data-action="sincronizar-email" class="email-btn-sync" title="Actualizar bandeja">↻</button>
-              <button type="button" data-action="abrir-componer-email" class="email-btn-nuevo" title="Nuevo correo">＋</button>
+              <button type="button" data-action="sincronizar-email" class="email-btn-sync"
+                title="Actualizar bandeja">↻</button>
+              <button type="button" data-action="abrir-componer-email" class="email-btn-nuevo"
+                title="Nuevo correo">＋</button>
             </div>
           </div>
           <div class="email-buscar-wrap">
-            <input type="text" id="email-buscar" class="email-buscar-input"
-              placeholder="BUSCAR CORREO..." oninput="filtrarEmails(this.value)">
+            <input type="text" id="email-buscar" class="email-buscar-input" placeholder="BUSCAR CORREO..."
+              oninput="filtrarEmails(this.value)">
           </div>
           <div id="email-lista" class="email-lista">
             <div class="email-vacio">
@@ -590,8 +673,7 @@
               </div>
               <div class="email-campo-fila">
                 <span class="email-campo-label">CCO</span>
-                <input type="text" id="comp-cco" placeholder="copia.oculta@dominio.com"
-                  class="email-campo-input">
+                <input type="text" id="comp-cco" placeholder="copia.oculta@dominio.com" class="email-campo-input">
               </div>
               <div class="email-campo-fila">
                 <span class="email-campo-label">Asunto</span>
@@ -599,20 +681,29 @@
                   class="email-campo-input">
               </div>
               <div class="email-campo-fila" style="border-bottom:none;">
-                <span class="email-campo-label">Adjunto</span>
+                <span class="email-campo-label" style="color:var(--texto-secundario);">Adjunto</span>
                 <div id="comp-archivo-zona" data-action="seleccionar-archivo-email" class="email-adjunto-zona"
                   onmouseenter="this.classList.add('hover')" onmouseleave="this.classList.remove('hover')">
-                  <span id="comp-archivo-nombre">📎 Adjuntar documento</span>
+                  <span id="comp-archivo-nombre">📎 Adjuntar (opcional)</span>
                 </div>
-                <input type="file" id="input-archivo-email" style="display:none;"
-                  onchange="manejarSeleccionArchivoEmail(event)">
+                <button type="button" data-action="limpiar-adjunto-email" title="Quitar adjunto"
+                  style="background:transparent;border:none;color:var(--texto-secundario);
+                  cursor:pointer;padding:0 4px;font-size:1rem;line-height:1;">×</button>
               </div>
             </div>
             <div class="email-plantillas-wrap">
-              <button type="button" data-action="insertar-plantilla" data-texto="Recibido, gracias por su mensaje. Le responderemos a la mayor brevedad posible." class="email-plantilla-btn">Recibido</button>
-              <button type="button" data-action="insertar-plantilla" data-texto="Su consulta está pendiente de revisión. Le contactaremos en breve con una respuesta." class="email-plantilla-btn">Pendiente revisión</button>
-              <button type="button" data-action="insertar-plantilla" data-texto="Confirmamos la recepción de la documentación. Procederemos con los trámites pertinentes." class="email-plantilla-btn">Confirmado</button>
-              <button type="button" data-action="insertar-plantilla" data-texto="Queda registrado en nuestro expediente. Cualquier consulta, no dude en contactarnos." class="email-plantilla-btn">Registrado</button>
+              <button type="button" data-action="insertar-plantilla"
+                data-texto="Recibido, gracias por su mensaje. Le responderemos a la mayor brevedad posible."
+                class="email-plantilla-btn">Recibido</button>
+              <button type="button" data-action="insertar-plantilla"
+                data-texto="Su consulta está pendiente de revisión. Le contactaremos en breve con una respuesta."
+                class="email-plantilla-btn">Pendiente revisión</button>
+              <button type="button" data-action="insertar-plantilla"
+                data-texto="Confirmamos la recepción de la documentación. Procederemos con los trámites pertinentes."
+                class="email-plantilla-btn">Confirmado</button>
+              <button type="button" data-action="insertar-plantilla"
+                data-texto="Queda registrado en nuestro expediente. Cualquier consulta, no dude en contactarnos."
+                class="email-plantilla-btn">Registrado</button>
             </div>
             <textarea id="comp-cuerpo" placeholder="Escribe tu mensaje aquí..."
               class="email-compositor-cuerpo"></textarea>
@@ -628,11 +719,15 @@
             <div class="email-visor-toolbar">
               <div class="email-visor-acciones">
                 <button type="button" data-action="responder-email" class="email-btn-accion">↩ Responder</button>
-                <button type="button" data-action="marcar-no-leido" class="email-btn-accion" title="Marcar como no leído">◎ No leído</button>
-                <button type="button" data-action="copiar-cuerpo-email" class="email-btn-accion" title="Copiar texto del correo">⊕ Copiar</button>
-                <button type="button" data-action="cambiar-zoom-email" data-delta="-1" class="email-btn-accion" title="Reducir texto">A−</button>
-                <button type="button" data-action="cambiar-zoom-email" data-delta="1" class="email-btn-accion" title="Aumentar texto">A+</button>
-                <button type="button" data-action="eliminar-email-actual" class="email-btn-accion peligro">🗑 Eliminar</button>
+                <button type="button" data-action="reenviar-email" class="email-btn-accion">↪ Reenviar</button>
+                <button type="button" data-action="marcar-no-leido" class="email-btn-accion"
+                  title="Marcar como no leído">◎ No leído</button>
+                <button type="button" data-action="copiar-cuerpo-email" class="email-btn-accion"
+                  title="Copiar texto del correo">⊕ Copiar</button>
+                <button type="button" data-action="cambiar-zoom-email" data-delta="-1" class="email-btn-accion"
+                  title="Reducir texto">A−</button>
+                <button type="button" data-action="cambiar-zoom-email" data-delta="1" class="email-btn-accion"
+                  title="Aumentar texto">A+</button>
                 <select id="email-idioma" onchange="cambiarIdiomaEmail(this.value)" class="email-idioma-sel">
                   <option value="ninguno">Sin traducir</option>
                   <option value="es_en">ES → EN</option>
@@ -663,6 +758,27 @@
               style="background:transparent;border:none;color:var(--texto-secundario);cursor:pointer;">✕</button>
           </div>
           <div class="email-config-body">
+
+            <!-- BLOQUE GMAIL OAUTH -->
+            <div id="bloque-gmail-oauth" class="input-grupo" style="border:1px solid #c8a96e33;border-radius:6px;padding:12px;margin-bottom:4px;">
+              <label class="input-label" style="color:var(--dorado);">GMAIL CON OAUTH 2.0 (recomendado)</label>
+              <div id="oauth-estado-conectado" class="hidden" style="margin:8px 0;">
+                <span id="oauth-email-label" style="font-size:0.78rem;color:#8fc98f;">Conectado como: <strong id="oauth-email-valor"></strong></span>
+              </div>
+              <div id="oauth-estado-desconectado" style="margin:8px 0;">
+                <p class="email-config-hint" style="margin:0 0 8px 0;">Inicia sesión con tu cuenta Google para usar Gmail de forma segura, sin necesidad de contraseña de aplicación.</p>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" id="btn-conectar-gmail" data-action="iniciar-oauth-gmail" class="btn-oro"
+                  style="font-size:0.75rem;padding:8px 14px;">CONECTAR CON GMAIL</button>
+                <button type="button" id="btn-desconectar-gmail" data-action="revocar-oauth-gmail" class="hidden"
+                  style="font-size:0.73rem;padding:8px 12px;background:transparent;border:1px solid #666;color:#888;border-radius:4px;cursor:pointer;">Desconectar</button>
+              </div>
+              <div id="oauth-progreso" class="hidden" style="margin-top:8px;font-size:0.75rem;color:var(--dorado);">Esperando autorización en el navegador…</div>
+            </div>
+
+            <div style="text-align:center;color:var(--texto-secundario);font-size:0.7rem;margin:8px 0;letter-spacing:.05em;">— O BIEN, CONFIGURAR MANUALMENTE —</div>
+
             <div class="input-grupo">
               <label class="input-label">Dirección de correo</label>
               <input type="text" id="smtp-usuario" placeholder="tu@email.com" class="input-vip"
@@ -681,10 +797,12 @@
                   </svg>
                 </button>
               </div>
-              <p class="email-config-hint">No es tu contraseña habitual. Genera una contraseña de aplicación en la configuración de seguridad de tu cuenta de correo.</p>
+              <p class="email-config-hint">No es tu contraseña habitual. Genera una contraseña de aplicación en la
+                configuración de seguridad de tu cuenta de correo.</p>
             </div>
             <div class="input-grupo">
-              <label class="input-label">Remitentes autorizados <span class="email-config-opcional">(opcional)</span></label>
+              <label class="input-label">Remitentes autorizados <span
+                  class="email-config-opcional">(opcional)</span></label>
               <input type="text" id="smtp-remitentes" placeholder="abogado@bufete.com, notaria@dom.com"
                 class="input-vip" style="font-size:0.75rem;">
               <p class="email-config-hint">Solo recibirás documentos de estas direcciones. Separa con comas.</p>
@@ -692,7 +810,8 @@
             <div class="input-grupo">
               <label class="input-label">Firma</label>
               <textarea id="smtp-firma" placeholder="Atentamente,&#10;Tu Nombre · Abogado · Col. nº 1234"
-                class="input-vip" style="font-size:0.75rem;resize:vertical;min-height:60px;font-family:'Times New Roman',Times,serif;"></textarea>
+                class="input-vip"
+                style="font-size:0.75rem;resize:vertical;min-height:60px;font-family:'Times New Roman',Times,serif;"></textarea>
               <p class="email-config-hint">Se añade automáticamente al final de cada correo.</p>
             </div>
             <div class="email-servidores-avanzado">
@@ -719,524 +838,830 @@
       </div>
     </div>
 
-  <!-- ============================================================ -->
-  <!-- PANTALLA 9 — FRASE BIP39 (aparece justo tras crear el búnker) -->
-  <!-- ============================================================ -->
-  <div id="pantalla-frase" class="pantalla hidden">
-    <div class="logo-babel small">BABEL</div>
-    <h2 class="subtitulo-babel" id="ui-frase-recuperacion">FRASE DE RECUPERACIÓN</h2>
-    <div class="login-box" style="max-width:560px; text-align:center;">
-      <div class="advertencia-bunker" style="margin-bottom:20px;">
-        ⚠ Guarda estas 12 palabras en orden exacto y en papel. Son la única forma de recuperar tu búnker.
-      </div>
-      <div id="frase-grid" class="frase-bip39-grid"></div>
-      <button type="button" data-action="cerrar-frase" class="btn-oro" style="margin-top:24px;width:100%;">
-        HE GUARDADO MI FRASE → IR AL LOGIN
-      </button>
-      <button data-action="imprimir-frase" class="btn-oro"
-        style="margin-top:12px;width:100%;background:transparent;border:1px solid var(--dorado);color:var(--dorado);">
-        🖨️ IMPRIMIR EN PDF
-      </button>
-      <p id="frase-msg" class="msg-error hidden"></p>
-    </div>
-  </div>
-  <!-- ============================================================ -->
-  <!-- PANTALLA 10 — RECUPERAR CON FRASE BIP39                     -->
-  <!-- ============================================================ -->
-  <div id="pantalla-recuperacion" class="pantalla hidden">
-    <div class="logo-babel small">BABEL</div>
-    <h2 class="subtitulo-babel" id="ui-recuperar-bunker">RECUPERAR BÚNKER</h2>
-    <div class="login-box" style="max-width:520px;">
-      <p class="descripcion" style="font-size:0.75rem;margin-bottom:20px;opacity:0.7;text-align:center;">
-        Introduce tus 12 palabras en el mismo orden en que las guardaste.
-      </p>
-      <div class="recovery-input-grid">
-        <div class="recovery-input-item"><span class="recovery-numero">1</span><input type="text" id="rec-palabra-1"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">2</span><input type="text" id="rec-palabra-2"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">3</span><input type="text" id="rec-palabra-3"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">4</span><input type="text" id="rec-palabra-4"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">5</span><input type="text" id="rec-palabra-5"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">6</span><input type="text" id="rec-palabra-6"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">7</span><input type="text" id="rec-palabra-7"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">8</span><input type="text" id="rec-palabra-8"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">9</span><input type="text" id="rec-palabra-9"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">10</span><input type="text" id="rec-palabra-10"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">11</span><input type="text" id="rec-palabra-11"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-        <div class="recovery-input-item"><span class="recovery-numero">12</span><input type="text" id="rec-palabra-12"
-            class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
-      </div>
-      <button type="button" data-action="intentar-recuperacion" class="btn-oro" style="margin-top:20px;width:100%;">
-        VERIFICAR FRASE
-      </button>
-      <button type="button" data-action="mostrar-pantalla" data-pantalla="login" class="btn-link">
-        ← VOLVER AL LOGIN
-      </button>
-      <p id="recovery-msg" class="msg-error hidden"></p>
-    </div>
-  </div>
-
-
-
-
-
-  <!-- PANTALLA AJUSTES -->
-  <div id="pantalla-ajustes" class="pantalla hidden"
-    style="position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--fondo);z-index:100;padding:40px 20px;">
-    <div class="logo-babel small" style="text-align:center;width:100%;">BABEL</div>
-    <h2 class="subtitulo-babel" style="text-align:center;width:100%;" id="ui-ajustes-titulo">AJUSTES</h2>
-    <div style="width:100%;max-width:560px;display:flex;flex-direction:column;gap:0;">
-
-      <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-        <div class="ajuste-label" id="ui-tema">TEMA</div>
-        <div style="display:flex;gap:8px;margin-top:12px;">
-          <button type="button" id="tema-negro" data-action="cambiar-tema" data-tema="negro"
-            style="flex:1;padding:16px 4px;border:1px solid #c5a059;background:#09090b;color:#c5a059;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
-            NEGRO / DORADO
-          </button>
-          <button type="button" id="tema-blanco2" data-action="cambiar-tema" data-tema="blanco-dorado"
-            style="flex:1;padding:16px 4px;border:1px solid #b8972e;background:#ffffff;color:#b8972e;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
-            BLANCO / DORADO
-          </button>
-          <button type="button" id="tema-crema" data-action="cambiar-tema" data-tema="crema"
-            style="flex:1;padding:16px 4px;border:1px solid #ffffff;background:#1a1a1a;color:#ffffff;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
-            NEGRO / BLANCO
-          </button>
-          <button type="button" id="tema-blanco-negro" data-action="cambiar-tema" data-tema="blanco-negro"
-            style="flex:1;padding:16px 4px;border:1px solid #1a1a1a;background:#ffffff;color:#1a1a1a;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
-            BLANCO / NEGRO
-          </button>
+    <!-- ============================================================ -->
+    <!-- PANTALLA 9 — FRASE BIP39 (aparece justo tras crear el búnker) -->
+    <!-- ============================================================ -->
+    <div id="pantalla-frase" class="pantalla hidden">
+      <div class="logo-babel small">BABEL</div>
+      <h2 class="subtitulo-babel" id="ui-frase-recuperacion">FRASE DE RECUPERACIÓN</h2>
+      <div class="login-box" style="max-width:560px; text-align:center;">
+        <div class="advertencia-bunker" style="margin-bottom:20px;">
+          ⚠ Guarda estas 12 palabras en orden exacto y en papel. Son la única forma de recuperar tu búnker.
         </div>
-      </div>
-
-      <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-        <div class="ajuste-label" id="ui-idioma-interfaz">IDIOMA DE LA INTERFAZ</div>
-        <select id="selector-idioma-ui" class="input-vip" style="margin-top:12px;width:100%;"
-          onchange="cambiarIdiomaUI(this.value)">
-          <option value="es">Español</option>
-          <option value="en">English</option>
-          <option value="fr">Français</option>
-          <option value="ar">العربية</option>
-        </select>
-      </div>
-
-      <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-        <div class="ajuste-label">IDIOMA DE TRADUCCIÓN</div>
-        <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
-          <select id="ajuste-idioma-origen" class="input-vip" style="flex:1;"
-            onchange="cambiarIdiomaDesdeAjustes()">
-            <option value="es">Español</option>
-            <option value="en">English</option>
-            <option value="fr">Français</option>
-            <option value="ar">Árabe</option>
-            <option value="de">Deutsch</option>
-            <option value="ru">Русский</option>
-            <option value="zh">中文</option>
-          </select>
-          <span style="color:var(--dorado);font-size:1rem;opacity:0.8;">→</span>
-          <select id="ajuste-idioma-destino" class="input-vip" style="flex:1;"
-            onchange="cambiarIdiomaDesdeAjustes()">
-            <option value="en">English</option>
-            <option value="es">Español</option>
-            <option value="fr">Français</option>
-            <option value="ar">Árabe</option>
-            <option value="de">Deutsch</option>
-            <option value="ru">Русский</option>
-            <option value="zh">中文</option>
-          </select>
-        </div>
-      </div>
-
-      <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-        <div class="ajuste-label" id="ui-timeout-label">BLOQUEO AUTOMÁTICO POR INACTIVIDAD</div>
-        <select id="selector-timeout" class="input-vip" style="margin-top:12px;width:100%;"
-          onchange="guardarTimeoutSesion(this.value)">
-          <option value="2">2 minutos</option>
-          <option value="5">5 minutos</option>
-          <option value="10">10 minutos</option>
-          <option value="15">15 minutos</option>
-          <option value="20">20 minutos</option>
-          <option value="30">30 minutos</option>
-          <option value="45">45 minutos</option>
-          <option value="60" selected>60 minutos (recomendado)</option>
-          <option value="90">90 minutos</option>
-          <option value="120">120 minutos</option>
-        </select>
-        <div style="margin-top:8px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
-          Sin actividad durante este tiempo → pantalla de acceso
-        </div>
-      </div>
-
-      <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-        <div class="ajuste-label">CLAVE DE RECUPERACIÓN BIP39</div>
-        <div style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
-          12 palabras que permiten recuperar el acceso si olvidas la contraseña. No hagas capturas.
-        </div>
-        <button type="button" data-action="ver-frase-app" class="btn-vip" style="width:100%;padding:12px 0;">
-          VER FRASE DE RECUPERACIÓN
+        <div id="frase-grid" class="frase-bip39-grid"></div>
+        <button type="button" data-action="cerrar-frase" class="btn-oro" style="margin-top:24px;width:100%;">
+          HE GUARDADO MI FRASE → IR AL LOGIN
         </button>
+        <button data-action="imprimir-frase" class="btn-oro"
+          style="margin-top:12px;width:100%;background:transparent;border:1px solid var(--dorado);color:var(--dorado);">
+          🖨️ IMPRIMIR EN PDF
+        </button>
+        <p id="frase-msg" class="msg-error hidden"></p>
       </div>
-
-      <button type="button" data-action="mostrar-pantalla" data-pantalla="principal" class="btn-link"
-        style="margin-top:28px;text-align:center;" id="ui-volver-panel">← VOLVER AL PANEL</button>
     </div>
-  </div>
+    <!-- ============================================================ -->
+    <!-- PANTALLA 10 — RECUPERAR CON FRASE BIP39                     -->
+    <!-- ============================================================ -->
+    <div id="pantalla-recuperacion" class="pantalla hidden">
+      <div class="logo-babel small">BABEL</div>
+      <h2 class="subtitulo-babel" id="ui-recuperar-bunker">RECUPERAR BÚNKER</h2>
+      <div class="login-box" style="max-width:520px;">
+        <p class="descripcion" style="font-size:0.75rem;margin-bottom:20px;opacity:0.7;text-align:center;">
+          Introduce tus 12 palabras en el mismo orden en que las guardaste.
+        </p>
+        <div class="recovery-input-grid">
+          <div class="recovery-input-item"><span class="recovery-numero">1</span><input type="text" id="rec-palabra-1"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">2</span><input type="text" id="rec-palabra-2"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">3</span><input type="text" id="rec-palabra-3"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">4</span><input type="text" id="rec-palabra-4"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">5</span><input type="text" id="rec-palabra-5"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">6</span><input type="text" id="rec-palabra-6"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">7</span><input type="text" id="rec-palabra-7"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">8</span><input type="text" id="rec-palabra-8"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">9</span><input type="text" id="rec-palabra-9"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">10</span><input type="text" id="rec-palabra-10"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">11</span><input type="text" id="rec-palabra-11"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+          <div class="recovery-input-item"><span class="recovery-numero">12</span><input type="text" id="rec-palabra-12"
+              class="input-recovery" placeholder="palabra" autocomplete="off" spellcheck="false"></div>
+        </div>
+        <button type="button" data-action="intentar-recuperacion" class="btn-oro" style="margin-top:20px;width:100%;">
+          VERIFICAR FRASE
+        </button>
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="login" class="btn-link">
+          ← VOLVER AL LOGIN
+        </button>
+        <p id="recovery-msg" class="msg-error hidden"></p>
+      </div>
+    </div>
 
-  <!-- ============================================================ -->
-  <!-- MODAL VISOR SIMPLE                                           -->
-  <!-- ============================================================ -->
-  <div id="modal-visor" class="hidden" style="
+
+
+
+
+    <!-- PANTALLA AJUSTES -->
+    <div id="pantalla-ajustes" class="pantalla hidden"
+      style="position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--fondo);z-index:100;padding:40px 20px;">
+      <div class="logo-babel small" style="text-align:center;width:100%;">BABEL</div>
+      <h2 class="subtitulo-babel" style="text-align:center;width:100%;" id="ui-ajustes-titulo">AJUSTES</h2>
+      <div style="width:100%;max-width:560px;display:flex;flex-direction:column;gap:0;">
+
+        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+          <div class="ajuste-label" id="ui-tema">TEMA</div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button type="button" id="tema-negro" data-action="cambiar-tema" data-tema="negro"
+              style="flex:1;padding:16px 4px;border:1px solid #c5a059;background:#09090b;color:#c5a059;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
+              NEGRO / DORADO
+            </button>
+            <button type="button" id="tema-blanco2" data-action="cambiar-tema" data-tema="blanco-dorado"
+              style="flex:1;padding:16px 4px;border:1px solid #b8972e;background:#ffffff;color:#b8972e;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
+              BLANCO / DORADO
+            </button>
+            <button type="button" id="tema-crema" data-action="cambiar-tema" data-tema="crema"
+              style="flex:1;padding:16px 4px;border:1px solid #ffffff;background:#1a1a1a;color:#ffffff;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
+              NEGRO / BLANCO
+            </button>
+            <button type="button" id="tema-blanco-negro" data-action="cambiar-tema" data-tema="blanco-negro"
+              style="flex:1;padding:16px 4px;border:1px solid #1a1a1a;background:#ffffff;color:#1a1a1a;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
+              BLANCO / NEGRO
+            </button>
+          </div>
+        </div>
+
+        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+          <div class="ajuste-label" id="ui-idioma-interfaz">IDIOMA DE LA INTERFAZ</div>
+          <select id="selector-idioma-ui" class="input-vip" style="margin-top:12px;width:100%;"
+            onchange="cambiarIdiomaUI(this.value)">
+            <option value="es">Español</option>
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+            <option value="ar">العربية</option>
+          </select>
+        </div>
+
+        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+          <div class="ajuste-label">IDIOMA DE TRADUCCIÓN</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
+            <select id="ajuste-idioma-origen" class="input-vip" style="flex:1;" onchange="cambiarIdiomaDesdeAjustes()">
+              <option value="es">Español</option>
+              <option value="en">English</option>
+              <option value="fr">Français</option>
+              <option value="ar">Árabe</option>
+              <option value="de">Deutsch</option>
+              <option value="ru">Русский</option>
+              <option value="zh">中文</option>
+            </select>
+            <span style="color:var(--dorado);font-size:1rem;opacity:0.8;">→</span>
+            <select id="ajuste-idioma-destino" class="input-vip" style="flex:1;" onchange="cambiarIdiomaDesdeAjustes()">
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="ar">Árabe</option>
+              <option value="de">Deutsch</option>
+              <option value="ru">Русский</option>
+              <option value="zh">中文</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+          <div class="ajuste-label" id="ui-timeout-label">BLOQUEO AUTOMÁTICO POR INACTIVIDAD</div>
+          <select id="selector-timeout" class="input-vip" style="margin-top:12px;width:100%;"
+            onchange="guardarTimeoutSesion(this.value)">
+            <option value="2">2 minutos</option>
+            <option value="5">5 minutos</option>
+            <option value="10">10 minutos</option>
+            <option value="15">15 minutos</option>
+            <option value="20">20 minutos</option>
+            <option value="30">30 minutos</option>
+            <option value="45">45 minutos</option>
+            <option value="60" selected>60 minutos (recomendado)</option>
+            <option value="90">90 minutos</option>
+            <option value="120">120 minutos</option>
+          </select>
+          <div
+            style="margin-top:8px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+            Sin actividad durante este tiempo → pantalla de acceso
+          </div>
+        </div>
+
+        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+          <div class="ajuste-label">CLAVE DE RECUPERACIÓN BIP39</div>
+          <div
+            style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+            12 palabras que permiten recuperar el acceso si olvidas la contraseña. No hagas capturas.
+          </div>
+          <button type="button" data-action="ver-frase-app" class="btn-vip" style="width:100%;padding:12px 0;">
+            VER FRASE DE RECUPERACIÓN
+          </button>
+        </div>
+
+        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+          <div class="ajuste-label">DISPOSITIVOS EMPAREJADOS</div>
+          <div style="margin-top:8px;margin-bottom:12px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+            Máximo 3 dispositivos. La clave compartida se genera al emparejar y no cambia.
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+            <span style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.75;">SINCRONIZACIÓN ACTIVA</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-sinc" checked onchange="toggleSincronizacion(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div id="sinc-lista-emparejados" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;"></div>
+          <button type="button" data-action="abrir-sinc-dispositivos" class="btn-secundario-oro" style="width:100%;padding:12px 0;">
+            SINCRONIZAR DISPOSITIVOS
+          </button>
+        </div>
+
+        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
+          <div class="ajuste-label">TÉRMINOS DE USO</div>
+          <div style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+            Consulta la política de privacidad y los términos que rigen el uso de Babel Security.
+          </div>
+          <button type="button" data-action="ver-terminos" class="btn-secundario-oro" style="padding:6px 16px;font-size:0.62rem;letter-spacing:1.5px;">
+            VER TÉRMINOS DE USO
+          </button>
+        </div>
+
+        <div style="border-top:1px solid var(--borde);margin-top:20px;padding-top:20px;">
+          <div class="ajuste-label" style="opacity:0.7;">SESIÓN GUARDADA</div>
+          <div style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;
+            font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+            Babel recuerda tu sesión en el Keychain del sistema para que no tengas que introducir
+            la contraseña cada vez que abras la app. Puedes borrarla aquí.
+          </div>
+          <button type="button" data-action="olvidar-sesion-guardada" class="btn-secundario-oro"
+            style="width:100%;padding:12px 0;">
+            OLVIDAR SESIÓN GUARDADA
+          </button>
+        </div>
+
+        <button type="button" data-action="mostrar-pantalla" data-pantalla="principal" class="btn-link"
+          style="margin-top:28px;text-align:center;" id="ui-volver-panel">← VOLVER AL PANEL</button>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MODAL VISOR SIMPLE                                           -->
+    <!-- ============================================================ -->
+    <div id="modal-visor" class="hidden" style="
     position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.85);
     display:flex;align-items:center;justify-content:center;padding:24px;">
-    <div style="background:var(--fondo-panel,#0d0d0d);border:1px solid var(--dorado,#c9a84c);
+      <div style="background:var(--fondo-panel,#0d0d0d);border:1px solid var(--dorado,#c9a84c);
       border-radius:4px;width:100%;max-width:720px;max-height:80vh;
       display:flex;flex-direction:column;overflow:hidden;">
-      <div style="display:flex;align-items:center;justify-content:space-between;
+        <div style="display:flex;align-items:center;justify-content:space-between;
         padding:16px 24px;border-bottom:1px solid rgba(201,168,76,0.2);">
-        <span id="modal-visor-nombre" style="font-family:'Times New Roman', Times, serif,serif;
+          <span id="modal-visor-nombre" style="font-family:'Times New Roman', Times, serif,serif;
           color:var(--dorado,#c9a84c);font-size:0.85rem;letter-spacing:0.15em;"></span>
-        <button type="button" data-action="cerrar-visor" style="background:transparent;border:none;
+          <button type="button" data-action="cerrar-visor" style="background:transparent;border:none;
           color:var(--dorado,#c9a84c);font-size:1.2rem;cursor:pointer;opacity:0.7;padding:0 4px;">✕</button>
-      </div>
-      <div id="modal-visor-contenido" style="padding:32px 40px;overflow-y:auto;
+        </div>
+        <div id="modal-visor-contenido" style="padding:32px 40px;overflow-y:auto;
   max-height:calc(80vh - 60px);font-family:'Times New Roman', Times, serif,serif;
   font-size:1.05rem;color:var(--texto-principal,#e8e0d0);line-height:1.9;
   word-break:break-word;letter-spacing:0.02em;"></div>
+      </div>
     </div>
-  </div>
-  <!-- ============================================================ -->
-  <!-- MODAL VISOR PARALELO                                         -->
-  <!-- ============================================================ -->
-  <div id="modal-paralelo" class="hidden" style="
+    <!-- ============================================================ -->
+    <!-- MODAL VISOR PARALELO                                         -->
+    <!-- ============================================================ -->
+    <div id="modal-paralelo" class="hidden" style="
     position:fixed;inset:0;z-index:1001;background:rgba(0,0,0,0.9);
     display:flex;align-items:center;justify-content:center;padding:24px;">
-    <div style="width:95vw;height:95vh;background:var(--fondo-panel,#0d0d0d);border:1px solid
+      <div style="width:95vw;height:95vh;background:var(--fondo-panel,#0d0d0d);border:1px solid
       var(--dorado,#c9a84c);border-radius:4px;display:flex;flex-direction:column;overflow:hidden;">
-      <div style="display:flex;align-items:center;justify-content:space-between;
+        <div style="display:flex;align-items:center;justify-content:space-between;
         padding:14px 24px;border-bottom:1px solid rgba(201,168,76,0.2);flex-shrink:0;">
-        <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
+          <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
           letter-spacing:3px;color:var(--dorado);">VISOR DE ARCHIVOS</span>
-        <button type="button" data-action="cerrar-visor-paralelo" style="background:transparent;border:none;
+          <button type="button" data-action="cerrar-visor-paralelo" style="background:transparent;border:none;
           color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
-      </div>
-      <div style="display:flex;flex:1;overflow:hidden;min-height:0;">
-        <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
-          <div id="par-titulo-1" style="padding:10px 24px;flex-shrink:0;
-            border-bottom:1px solid rgba(201,168,76,0.15);font-family:'Times New Roman', Times, serif,serif;
-            font-size:0.8rem;color:var(--dorado);letter-spacing:0.12em;">—</div>
-          <div id="par-contenido-1" style="padding:clamp(16px,2.5vw,40px) clamp(20px,3vw,52px);overflow-y:auto;flex:1;
-            font-family:'Times New Roman', Times, serif,serif;font-size:clamp(0.95rem,1.4vw,1.5rem);
-            color:var(--texto-principal,#e8e0d0);line-height:1.9;
-            white-space:pre-wrap;word-break:break-word;"></div>
         </div>
-        <div id="par-divisor" style="display:none;width:1px;flex-shrink:0;background:rgba(201,168,76,0.2);"></div>
-        <div id="par-panel-2" style="display:none;flex:1;flex-direction:column;min-width:0;">
-          <div id="par-titulo-2" style="padding:10px 24px;flex-shrink:0;
+        <div style="display:flex;flex:1;overflow:hidden;min-height:0;">
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+            <div id="par-titulo-1" style="padding:10px 24px;flex-shrink:0;
             border-bottom:1px solid rgba(201,168,76,0.15);font-family:'Times New Roman', Times, serif,serif;
             font-size:0.8rem;color:var(--dorado);letter-spacing:0.12em;">—</div>
-          <div id="par-contenido-2" style="padding:clamp(16px,2.5vw,40px) clamp(20px,3vw,52px);overflow-y:auto;flex:1;
+            <div id="par-contenido-1" style="padding:clamp(16px,2.5vw,40px) clamp(20px,3vw,52px);overflow-y:auto;flex:1;
             font-family:'Times New Roman', Times, serif,serif;font-size:clamp(0.95rem,1.4vw,1.5rem);
             color:var(--texto-principal,#e8e0d0);line-height:1.9;
             white-space:pre-wrap;word-break:break-word;"></div>
+          </div>
+          <div id="par-divisor" style="display:none;width:1px;flex-shrink:0;background:rgba(201,168,76,0.2);"></div>
+          <div id="par-panel-2" style="display:none;flex:1;flex-direction:column;min-width:0;">
+            <div id="par-titulo-2" style="padding:10px 24px;flex-shrink:0;
+            border-bottom:1px solid rgba(201,168,76,0.15);font-family:'Times New Roman', Times, serif,serif;
+            font-size:0.8rem;color:var(--dorado);letter-spacing:0.12em;">—</div>
+            <div id="par-contenido-2" style="padding:clamp(16px,2.5vw,40px) clamp(20px,3vw,52px);overflow-y:auto;flex:1;
+            font-family:'Times New Roman', Times, serif,serif;font-size:clamp(0.95rem,1.4vw,1.5rem);
+            color:var(--texto-principal,#e8e0d0);line-height:1.9;
+            white-space:pre-wrap;word-break:break-word;"></div>
+          </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- ============================================================ -->
-  <!-- MODAL VER FRASE — desde panel principal con sesión activa    -->
-  <!-- ============================================================ -->
-  <div id="modal-frase-app" class="hidden" style="
+    <!-- ============================================================ -->
+    <!-- MODAL VER FRASE — desde panel principal con sesión activa    -->
+    <!-- ============================================================ -->
+    <div id="modal-frase-app" class="hidden" style="
     position:fixed;inset:0;z-index:1002;background:rgba(0,0,0,0.92);
     display:flex;align-items:center;justify-content:center;padding:24px;">
-    <div style="width:100%;max-width:480px;background:var(--fondo-panel,#0d0d0d);
+      <div style="width:100%;max-width:480px;background:var(--fondo-panel,#0d0d0d);
       border:1px solid var(--dorado);border-radius:4px;
       display:flex;flex-direction:column;overflow:hidden;">
-      <div style="display:flex;align-items:center;justify-content:space-between;
+        <div style="display:flex;align-items:center;justify-content:space-between;
         padding:14px 24px;border-bottom:1px solid rgba(201,168,76,0.2);">
-        <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
+          <span style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
           letter-spacing:3px;color:var(--dorado);">FRASE DE RECUPERACIÓN</span>
-        <button type="button" data-action="cerrar-ver-frase" style="background:transparent;border:none;
+          <button type="button" data-action="cerrar-ver-frase" style="background:transparent;border:none;
           color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
-      </div>
-      <div style="padding:24px;">
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:1px;
+        </div>
+        <div style="padding:24px;">
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:1px;
           color:var(--texto-secundario);margin-bottom:16px;text-align:center;opacity:0.6;">
-          NO HAGAS CAPTURAS · GUÁRDALAS EN PAPEL
-        </p>
-        <div id="modal-frase-grid" class="frase-bip39-grid"></div>
+            NO HAGAS CAPTURAS · GUÁRDALAS EN PAPEL
+          </p>
+          <div id="modal-frase-grid" class="frase-bip39-grid"></div>
+        </div>
       </div>
     </div>
-  </div>
-  <!-- MODAL TÉRMINOS DE USO — primera vez -->
-  <div id="modal-terminos" class="hidden" style="
+    <!-- MODAL TÉRMINOS DE USO — primera vez -->
+    <div id="modal-terminos" class="hidden" style="
   position:fixed;inset:0;z-index:2000;
   background:rgba(0,0,0,0.95);
   display:flex;align-items:center;justify-content:center;
   padding:24px;">
-    <div style="
+      <div style="
     width:100%;max-width:480px;
     background:#0d0d0d;
     border:1px solid var(--dorado,#c5a059);
     border-radius:4px;
     overflow:hidden;">
 
-      <!-- Cabecera -->
-      <div style="padding:24px 28px 16px;border-bottom:1px solid rgba(197,160,89,0.15);">
-        <div class="logo-babel small" style="margin-bottom:8px;">BABEL</div>
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
+        <!-- Cabecera -->
+        <div style="padding:24px 28px 16px;border-bottom:1px solid rgba(197,160,89,0.15);">
+          <div class="logo-babel small" style="margin-bottom:8px;">BABEL</div>
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
         letter-spacing:3px;color:var(--texto-secundario,#a1a1aa);">
-          POLÍTICA DE PRIVACIDAD Y TÉRMINOS DE USO
-        </p>
-      </div>
+            POLÍTICA DE PRIVACIDAD Y TÉRMINOS DE USO
+          </p>
+        </div>
 
-      <!-- Texto con scroll para que el checkbox siempre sea visible -->
-      <div style="padding:20px 28px;overflow-y:auto;max-height:280px;
+        <!-- Texto con scroll para que el checkbox siempre sea visible -->
+        <div style="padding:20px 28px;overflow-y:auto;max-height:280px;
         scrollbar-width:thin;scrollbar-color:var(--dorado-oscuro) transparent;">
 
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.56rem;letter-spacing:2.5px;
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.56rem;letter-spacing:2.5px;
           color:var(--texto-secundario);opacity:0.45;text-align:center;margin-bottom:20px;">
-          VERSIÓN 2.0 · JUNIO 2026
-        </p>
+            VERSIÓN 3.0 · AGOSTO 2026
+          </p>
 
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
           color:var(--dorado);margin-bottom:6px;">1. QUIÉN SOMOS</p>
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
-          Babel Security es un software de cifrado y traducción de documentos desarrollado por
-          Darío Ballesteros. Contacto:
-          <span style="color:var(--dorado);opacity:0.8;">darioballesteros26@gmail.com</span>
-        </p>
+            Babel Security es un software de cifrado y traducción de documentos desarrollado por
+            Darío Ballesteros. Contacto:
+            <span style="color:var(--dorado);opacity:0.8;">darioballesteros26@gmail.com</span>
+          </p>
 
-        <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
           color:var(--dorado);margin-bottom:6px;">2. ARQUITECTURA ZERO-KNOWLEDGE</p>
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
-          Babel Security opera bajo un principio de conocimiento cero absoluto. Ni el desarrollador
-          ni ningún tercero puede acceder a tus documentos, claves de cifrado, o datos personales
-          en ningún momento.
-        </p>
+            Babel Security opera bajo un principio de conocimiento cero absoluto. Ni el desarrollador
+            ni ningún tercero puede acceder a tus documentos, claves de cifrado, o datos personales
+            en ningún momento.
+          </p>
 
-        <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
           color:var(--dorado);margin-bottom:6px;">3. DATOS QUE RECOPILAMOS</p>
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:8px;">
-          Datos que <span style="color:var(--dorado);letter-spacing:1px;">NO</span> recopilamos:
-          documentos, contraseñas, claves de cifrado, contenido de archivos, metadatos de documentos.
-        </p>
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+            Datos que <span style="color:var(--dorado);letter-spacing:1px;">NO</span> recopilamos:
+            documentos, contraseñas, claves de cifrado, contenido de archivos, metadatos de documentos.
+          </p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
-          Datos que <span style="color:var(--dorado);letter-spacing:1px;">SÍ</span> recopilamos:
-          número de serie del hardware para validación de licencia, versión del software instalada.
-        </p>
+            Datos que <span style="color:var(--dorado);letter-spacing:1px;">SÍ</span> recopilamos:
+            número de serie del hardware para validación de licencia, versión del software instalada.
+          </p>
 
-        <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
           color:var(--dorado);margin-bottom:6px;">4. CIFRADO Y SEGURIDAD</p>
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
-          Todos los archivos se cifran con AES-256-GCM. Las claves se derivan mediante Argon2id
-          y HKDF-SHA256. Ninguna clave abandona tu dispositivo en ningún momento.
-        </p>
+            Todos los archivos se cifran con AES-256-GCM. Las claves se derivan mediante Argon2id
+            y HKDF-SHA256. Ninguna clave abandona tu dispositivo en ningún momento.
+          </p>
 
-        <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
           color:var(--dorado);margin-bottom:6px;">5. LICENCIA DE USO</p>
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
-          El software se licencia por dispositivo mediante validación de hardware. La licencia es
-          personal e intransferible. Queda prohibida la ingeniería inversa, redistribución o uso
-          comercial sin autorización expresa.
-        </p>
+            El software se licencia por dispositivo mediante validación de hardware. La licencia es
+            personal e intransferible. Queda prohibida la ingeniería inversa, redistribución o uso
+            comercial sin autorización expresa.
+          </p>
 
-        <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
-          color:var(--dorado);margin-bottom:6px;">6. LIMITACIÓN DE RESPONSABILIDAD</p>
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">6. COPIAS DE SEGURIDAD</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
-          Babel Security no se responsabiliza de pérdida de datos por contraseña olvidada, daños
-          derivados del uso incorrecto, pérdida de la frase de recuperación BIP39, o
-          incompatibilidades con sistemas operativos de terceros.
-        </p>
+            El usuario es responsable de mantener sus propias copias de seguridad de los documentos
+            que gestiona con Babel. Babel no sustituye la necesidad de realizar backups externos
+            de la información del usuario.
+          </p>
 
-        <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
-          color:var(--dorado);margin-bottom:6px;">7. GDPR</p>
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">7. DISCONTINUIDAD DEL SERVICIO</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
-          Babel Security cumple con el RGPD. Al no recopilar datos personales procesables,
-          el usuario es el único responsable del tratamiento de los datos que almacena.
-        </p>
+            En caso de que Babel deje de prestar servicio o de mantenerse, el usuario tendrá derecho
+            a exportar la totalidad de sus datos antes del cese definitivo del servicio.
+          </p>
 
-        <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
-          color:var(--dorado);margin-bottom:6px;">8. TRADUCCIÓN OFFLINE</p>
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">8. LÍMITES DE RESPONSABILIDAD</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:10px;">
+            Babel implementa medidas de seguridad y realiza auditorías periódicas para minimizar
+            riesgos, pero no garantiza de forma absoluta que nunca pueda producirse una pérdida
+            de datos. La responsabilidad de Babel ante incidencias se limita según estos términos.
+          </p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
-          El motor de traducción opera 100% offline. Ningún texto es enviado a servidores externos.
-        </p>
+            Babel no se responsabiliza de pérdida de datos por contraseña olvidada, pérdida de la
+            frase BIP39, uso incorrecto del software, o incompatibilidades con sistemas de terceros.
+          </p>
 
-        <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
 
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
-          color:var(--dorado);margin-bottom:6px;">9. JURISDICCIÓN</p>
-        <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">9. GDPR</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
+            Babel Security cumple con el RGPD. El usuario es responsable del tratamiento de los
+            datos de sus clientes que almacena en Babel. Si se utilizan funciones que implican
+            terceros (p. ej. sincronización con almacenamiento externo), Babel actúa como
+            encargado del tratamiento dentro de los límites que establece el software, y
+            no como responsable último de los datos de los clientes del usuario.
+          </p>
+
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">10. TRADUCCIÓN OFFLINE</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
+            El motor de traducción opera 100% offline. Ningún texto es enviado a servidores externos.
+          </p>
+
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">11. TRANSPARENCIA DEL EQUIPO DE DESARROLLO</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
+            Babel informa de manera transparente que el desarrollo del producto está liderado por
+            un menor de edad, bajo la supervisión, gestión legal y societaria de un adulto responsable
+            designado formalmente en la estructura de la empresa.
+          </p>
+
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">12. DISPOSITIVO FÍSICO DEL PLAN PRO</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
+          color:var(--texto-secundario);line-height:1.7;margin-bottom:22px;">
+            El dispositivo físico de sincronización (pendrive/placa) entregado con el plan Pro pasa
+            a ser propiedad del usuario desde la entrega. En caso de pérdida, rotura o mal uso,
+            el coste de reposición corre a cargo del usuario, quien deberá contactar con Babel
+            para solicitar un reemplazo.
+          </p>
+
+          <div style="height:1px;background:rgba(197,160,89,0.1);margin-bottom:18px;"></div>
+
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.62rem;letter-spacing:2px;
+          color:var(--dorado);margin-bottom:6px;">13. JURISDICCIÓN</p>
+          <p style="font-family:'Times New Roman', Times, serif,serif;font-size:0.88rem;
           color:var(--texto-secundario);line-height:1.7;">
-          Esta política se rige por la legislación española. Cualquier disputa se someterá
-          a los tribunales de Marbella, España.
-        </p>
-      </div>
+            Esta política se rige por la legislación española. Cualquier disputa se someterá
+            a los tribunales de Marbella, España.
+          </p>
+        </div>
 
-      <!-- Checkbox y botón -->
-      <div style="padding:0 28px 24px;display:flex;flex-direction:column;gap:16px;">
-        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;
+        <!-- Checkbox y botón -->
+        <div style="padding:0 28px 24px;display:flex;flex-direction:column;gap:16px;">
+          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;
         font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.7rem;letter-spacing:1px;
         color:var(--texto-secundario,#a1a1aa);line-height:1.5;">
-          <input type="checkbox" id="terminos-checkbox" style="accent-color:var(--dorado);width:15px;height:15px;
+            <input type="checkbox" id="terminos-checkbox" style="accent-color:var(--dorado);width:15px;height:15px;
           cursor:pointer;flex-shrink:0;margin-top:2px;">
-          He leído y acepto los términos de uso y la política de privacidad de Babel Security.
-        </label>
-        <button type="button" data-action="aceptar-terminos" class="btn-oro" style="width:100%;">
-          ACEPTAR Y CONTINUAR
-        </button>
-        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;letter-spacing:1px;
+            He leído y acepto los términos de uso y la política de privacidad de Babel Security.
+          </label>
+          <button type="button" data-action="aceptar-terminos" class="btn-oro" style="width:100%;">
+            ACEPTAR Y CONTINUAR
+          </button>
+          <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;letter-spacing:1px;
         color:var(--texto-secundario);opacity:0.35;text-align:center;margin:0;">
-          DARÍO BALLESTEROS · MARBELLA · v2.0
-        </p>
+            DARÍO BALLESTEROS · MARBELLA · v2.0
+          </p>
+        </div>
+
       </div>
-
     </div>
-  </div>
 
-  <!-- MODAL RENOMBRAR BUZÓN -->
-  <div id="modal-renombrar" class="hidden" style="
+    <!-- MODAL RENOMBRAR BUZÓN -->
+    <div id="modal-renombrar" class="hidden" style="
     position:fixed;inset:0;z-index:2000;
     background:rgba(0,0,0,0.85);
     display:flex;align-items:center;justify-content:center;">
-    <div style="
+      <div style="
       background:#0d0d0d;
       border:1px solid var(--dorado,#c5a059);
       border-radius:4px;
       padding:24px;
       min-width:280px;">
-      <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
+        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
         letter-spacing:3px;color:var(--dorado);margin-bottom:12px;">
-        RENOMBRAR BUZÓN
-      </p>
-      <input id="input-renombrar-buzon" type="text" maxlength="64" style="width:100%;background:transparent;border:1px solid var(--borde);
+          RENOMBRAR BUZÓN
+        </p>
+        <input id="input-renombrar-buzon" type="text" maxlength="64" style="width:100%;background:transparent;border:1px solid var(--borde);
         color:var(--texto-principal);padding:8px;font-size:0.8rem;
         border-radius:2px;outline:none;box-sizing:border-box;
         font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;"
-        onkeydown="if(event.key==='Enter')confirmarRenombrar();else if(event.key==='Escape')cerrarModalRenombrar()" />
-      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
-        <button type="button" data-action="cerrar-modal-renombrar" style="background:transparent;border:1px solid var(--borde);
+          onkeydown="if(event.key==='Enter')confirmarRenombrar();else if(event.key==='Escape')cerrarModalRenombrar()" />
+        <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+          <button type="button" data-action="cerrar-modal-renombrar" style="background:transparent;border:1px solid var(--borde);
           color:var(--texto-secundario);padding:6px 14px;cursor:pointer;
           font-size:0.7rem;border-radius:2px;font-family:'Times New Roman', Times, serif,sans-serif;
           letter-spacing:1px;">CANCELAR</button>
-        <button type="button" data-action="confirmar-renombrar" style="background:var(--dorado);border:none;color:#000;
+          <button type="button" data-action="confirmar-renombrar" style="background:var(--dorado);border:none;color:#000;
           padding:6px 14px;cursor:pointer;font-size:0.7rem;font-weight:700;
           border-radius:2px;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;">
-          GUARDAR</button>
+            GUARDAR</button>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- MODAL SOLICITUD P2P -->
-  <div id="modal-solicitud-p2p" class="hidden" style="
+    <!-- MODAL SOLICITUD P2P -->
+    <div id="modal-solicitud-p2p" class="hidden" style="
     position:fixed;inset:0;z-index:3000;
     background:rgba(0,0,0,0.9);
     display:flex;align-items:center;justify-content:center;">
-    <div style="
+      <div style="
       background:#0d0d0d;
       border:1px solid var(--dorado,#c5a059);
       border-radius:4px;
       padding:28px;
       min-width:300px;
       text-align:center;">
-      <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
+        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;
         letter-spacing:3px;color:var(--dorado);margin-bottom:8px;">
-        SOLICITUD DE CONEXIÓN
-      </p>
-      <p id="solicitud-nombre" style="font-family:'Times New Roman', Times, serif,serif;
+          SOLICITUD DE CONEXIÓN
+        </p>
+        <p id="solicitud-nombre" style="font-family:'Times New Roman', Times, serif,serif;
         font-size:1.1rem;color:var(--texto-principal);margin-bottom:20px;">—</p>
-      <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;
+        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;
         letter-spacing:1px;color:var(--texto-secundario);margin-bottom:20px;">
-        quiere conectarse a tu Babel
-      </p>
-      <div style="display:flex;gap:12px;justify-content:center;">
-        <button type="button" data-action="rechazar-solicitud-p2p" style="background:transparent;border:1px solid rgba(255,80,80,0.4);
+          quiere conectarse a tu Babel
+        </p>
+        <div style="display:flex;gap:12px;justify-content:center;">
+          <button type="button" data-action="rechazar-solicitud-p2p" style="background:transparent;border:1px solid rgba(255,80,80,0.4);
           color:rgba(255,80,80,0.8);padding:8px 20px;cursor:pointer;
           font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.7rem;letter-spacing:2px;
           border-radius:2px;">RECHAZAR</button>
-        <button type="button" data-action="aceptar-solicitud-p2p" style="background:var(--dorado);border:none;color:#000;
+          <button type="button" data-action="aceptar-solicitud-p2p" style="background:var(--dorado);border:none;color:#000;
           padding:8px 20px;cursor:pointer;font-family:'Times New Roman', Times, serif,sans-serif;
           font-size:0.7rem;letter-spacing:2px;font-weight:700;border-radius:2px;">
-          ACEPTAR</button>
+            ACEPTAR</button>
+        </div>
       </div>
     </div>
-  </div>
-  <div id="modal-renombrar-archivo" class="hidden" style="
+    <!-- ============================================================ -->
+    <!-- MODAL SINCRONIZAR DISPOSITIVOS                               -->
+    <!-- ============================================================ -->
+    <div id="modal-sinc" class="hidden" style="
+      position:fixed;inset:0;z-index:1050;background:rgba(0,0,0,0.92);
+      display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:480px;background:var(--fondo-panel,#0d0d0d);
+        border:1px solid var(--dorado);border-radius:4px;display:flex;flex-direction:column;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;
+          padding:14px 24px;border-bottom:1px solid rgba(201,168,76,0.2);">
+          <span style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;
+            letter-spacing:3px;color:var(--dorado);">SINCRONIZAR DISPOSITIVOS</span>
+          <button type="button" data-action="cerrar-sinc" style="background:transparent;
+            border:none;color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
+        </div>
+        <!-- Fase 1: Descubrimiento -->
+        <div id="sinc-fase-busqueda" style="padding:24px;">
+          <div id="sinc-msg-buscando" style="text-align:center;color:var(--texto-secundario);
+            font-family:'Times New Roman',Times,serif;font-size:0.6rem;letter-spacing:2px;
+            margin-bottom:16px;opacity:0.7;">Buscando dispositivos Babel en la red local...</div>
+          <div id="sinc-lista-peers-modal" style="display:flex;flex-direction:column;gap:8px;min-height:48px;"></div>
+          <button type="button" data-action="refrescar-sinc" class="btn-secundario-oro"
+            style="margin-top:16px;width:100%;padding:10px;">
+            BUSCAR DE NUEVO
+          </button>
+        </div>
+        <!-- Fase 2: Esperando respuesta -->
+        <div id="sinc-fase-espera" style="padding:32px;text-align:center;display:none;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.6rem;
+            letter-spacing:2px;color:var(--texto-secundario);margin-bottom:12px;opacity:0.7;">
+            SOLICITANDO EMPAREJAMIENTO CON</div>
+          <div id="sinc-nombre-destino" style="font-family:'Times New Roman',Times,serif;
+            font-size:1.1rem;color:var(--dorado);margin-bottom:16px;letter-spacing:0.1em;"></div>
+          <div style="display:flex;justify-content:center;gap:6px;margin-bottom:16px;">
+            <span style="width:6px;height:6px;border-radius:50%;background:var(--dorado);
+              animation:p2p-pulso 1.2s infinite 0s;display:inline-block;"></span>
+            <span style="width:6px;height:6px;border-radius:50%;background:var(--dorado);
+              animation:p2p-pulso 1.2s infinite 0.4s;display:inline-block;"></span>
+            <span style="width:6px;height:6px;border-radius:50%;background:var(--dorado);
+              animation:p2p-pulso 1.2s infinite 0.8s;display:inline-block;"></span>
+          </div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+            letter-spacing:1px;color:var(--texto-secundario);opacity:0.5;">
+            Esperando confirmación en el otro dispositivo (30 s)
+          </div>
+        </div>
+        <!-- Fase 3: Resultado -->
+        <div id="sinc-fase-resultado" style="padding:32px;text-align:center;display:none;">
+          <div id="sinc-resultado-icono" style="font-size:2rem;margin-bottom:12px;"></div>
+          <div id="sinc-resultado-texto" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.75rem;letter-spacing:2px;color:var(--dorado);margin-bottom:6px;"></div>
+          <div id="sinc-resultado-sub" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;margin-bottom:20px;"></div>
+          <button type="button" data-action="cerrar-sinc" class="btn-vip" style="padding:10px 32px;">
+            CERRAR
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MODAL SOLICITUD ENTRANTE DE SINCRONIZACIÓN                   -->
+    <!-- ============================================================ -->
+    <div id="modal-solicitud-sinc" class="hidden" style="
+      position:fixed;inset:0;z-index:1060;background:rgba(0,0,0,0.92);
+      display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:400px;background:var(--fondo-panel,#0d0d0d);
+        border:1px solid var(--dorado);border-radius:4px;overflow:hidden;">
+        <div style="padding:28px 24px;text-align:center;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+            letter-spacing:3px;color:var(--texto-secundario);margin-bottom:16px;opacity:0.6;">
+            SOLICITUD DE SINCRONIZACIÓN
+          </div>
+          <div id="sinc-sol-nombre" style="font-family:'Times New Roman',Times,serif;
+            font-size:1.05rem;color:var(--dorado);margin-bottom:8px;letter-spacing:0.08em;"></div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.62rem;
+            letter-spacing:1px;color:var(--texto-secundario);margin-bottom:8px;opacity:0.7;">
+            quiere emparejarse contigo
+          </div>
+          <div id="sinc-sol-ip" style="font-family:'Times New Roman',Times,serif;font-size:0.55rem;
+            letter-spacing:1px;color:var(--texto-secundario);opacity:0.45;margin-bottom:12px;"></div>
+          <div id="sinc-sol-b2-aviso" style="display:none;font-family:'Times New Roman',Times,serif;
+            font-size:0.58rem;letter-spacing:1px;color:var(--dorado);opacity:0.85;
+            background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.25);
+            border-radius:3px;padding:8px 12px;margin-bottom:20px;text-align:left;">
+            Este dispositivo también recibirá acceso al buzón de sincronización en la nube.
+          </div>
+          <div style="display:flex;gap:12px;justify-content:center;">
+            <button type="button" data-action="rechazar-sinc"
+              style="flex:1;max-width:140px;padding:12px 0;background:transparent;
+              border:1px solid rgba(255,80,80,0.4);color:rgba(255,80,80,0.8);
+              font-family:'Times New Roman',Times,serif;font-size:0.6rem;letter-spacing:2px;cursor:pointer;">
+              RECHAZAR
+            </button>
+            <button type="button" data-action="aceptar-sinc"
+              style="flex:1;max-width:140px;padding:12px 0;background:var(--dorado);border:none;
+              color:#000;font-family:'Times New Roman',Times,serif;font-size:0.6rem;
+              letter-spacing:2px;cursor:pointer;font-weight:700;">
+              ACEPTAR
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MODAL CONFIGURAR CORREO — aparece al entrar en email sin   -->
+    <!-- cuenta conectada (se suprime el resto de la sesión si se   -->
+    <!-- cierra sin conectar; desaparece para siempre al conectar). -->
+    <!-- ============================================================ -->
+    <div id="modal-configurar-email" class="hidden" style="
+      position:fixed;inset:0;z-index:1060;background:rgba(0,0,0,0.92);
+      display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:400px;background:var(--fondo-panel,#0d0d0d);
+        border:1px solid var(--dorado);border-radius:4px;overflow:hidden;">
+        <div style="padding:28px 24px;text-align:center;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+            letter-spacing:3px;color:var(--texto-secundario);margin-bottom:18px;opacity:0.6;">
+            <span id="modal-email-titulo">CONFIGURAR CORREO</span>
+          </div>
+          <p id="modal-email-desc" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.72rem;color:var(--texto-secundario);line-height:1.6;
+            margin:0 0 22px 0;letter-spacing:0.03em;">
+            Para leer y enviar correos desde Babel, conecta tu cuenta de Gmail.
+          </p>
+          <button type="button" data-action="conectar-gmail-desde-modal"
+            class="btn-oro" style="width:100%;padding:13px 0;font-size:0.68rem;
+            letter-spacing:2.5px;margin-bottom:14px;">
+            <span id="modal-email-btn-conectar">CONECTAR CON GMAIL</span>
+          </button>
+          <p id="modal-email-aviso" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.58rem;color:var(--texto-secundario);line-height:1.65;
+            opacity:0.55;margin:0 0 20px 0;letter-spacing:0.02em;
+            border-top:1px solid rgba(200,169,110,0.15);padding-top:14px;">
+            Tu correo se conecta de forma segura a través de Google. Babel nunca ve ni almacena tu contraseña. Autoriza solo desde dispositivos en los que confíes.
+          </p>
+          <button type="button" data-action="cerrar-modal-configurar-email"
+            style="background:transparent;border:none;color:var(--texto-secundario);
+            font-family:'Times New Roman',Times,serif;font-size:0.6rem;
+            letter-spacing:1.5px;cursor:pointer;opacity:0.55;padding:4px 12px;">
+            <span id="modal-email-btn-posponer">Ahora no</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MODAL CONVERTIR IMÁGENES → PDF (elegir modo)               -->
+    <!-- ============================================================ -->
+    <div id="modal-img-a-pdf" class="hidden" style="
+      position:fixed;inset:0;z-index:1100;background:rgba(0,0,0,0.88);
+      display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:400px;background:var(--fondo-panel,#0d0d0d);
+        border:1px solid var(--dorado);border-radius:4px;overflow:hidden;">
+        <div style="padding:28px 24px;text-align:center;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+            letter-spacing:3px;color:var(--texto-secundario);margin-bottom:18px;opacity:0.6;">
+            CONVERTIR IMÁGENES A PDF
+          </div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;
+            color:var(--texto-principal);margin-bottom:24px;letter-spacing:0.05em;line-height:1.6;">
+            ¿Cómo deseas convertir las imágenes seleccionadas?
+          </div>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <button type="button" data-action="confirmar-img-pdf-uno"
+              style="width:100%;padding:14px 0;background:var(--dorado);border:none;
+              color:#000;font-family:'Times New Roman',Times,serif;font-size:0.62rem;
+              letter-spacing:2px;cursor:pointer;font-weight:700;">
+              UN SOLO PDF (todas las imágenes en orden)
+            </button>
+            <button type="button" data-action="confirmar-img-pdf-varios"
+              style="width:100%;padding:14px 0;background:transparent;
+              border:1px solid var(--dorado);color:var(--dorado);
+              font-family:'Times New Roman',Times,serif;font-size:0.62rem;
+              letter-spacing:2px;cursor:pointer;">
+              UN PDF POR IMAGEN
+            </button>
+            <button type="button" data-action="cerrar-modal-img-pdf"
+              style="width:100%;padding:10px 0;background:transparent;border:none;
+              color:var(--texto-secundario);font-family:'Times New Roman',Times,serif;
+              font-size:0.58rem;letter-spacing:2px;cursor:pointer;opacity:0.5;">
+              CANCELAR
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-renombrar-archivo" class="hidden" style="
   position:fixed;inset:0;z-index:1100;background:rgba(0,0,0,0.7);
   display:flex;align-items:center;justify-content:center;">
-    <div style="background:var(--fondo-panel,#0d0d0d);border:1px solid var(--dorado);
+      <div style="background:var(--fondo-panel,#0d0d0d);border:1px solid var(--dorado);
     border-radius:4px;padding:28px 32px;width:100%;max-width:380px;">
-      <div style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;letter-spacing:3px;
+        <div style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.65rem;letter-spacing:3px;
       color:var(--dorado);margin-bottom:16px;">RENOMBRAR ARCHIVO</div>
-      <input id="input-renombrar-archivo" type="text" style="width:100%;background:transparent;
+        <input id="input-renombrar-archivo" type="text" style="width:100%;background:transparent;
       border:1px solid var(--borde);color:var(--texto-principal);
       font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.8rem;padding:10px 12px;
       letter-spacing:1px;box-sizing:border-box;margin-bottom:16px;"
-        onkeydown="if(event.key==='Enter')confirmarRenombrarArchivo();if(event.key==='Escape')cerrarModalRenombrarArchivo();">
-      <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button type="button" data-action="cerrar-modal-renombrar-archivo" style="background:transparent;
+          onkeydown="if(event.key==='Enter')confirmarRenombrarArchivo();if(event.key==='Escape')cerrarModalRenombrarArchivo();">
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button type="button" data-action="cerrar-modal-renombrar-archivo" style="background:transparent;
         border:1px solid var(--borde);color:var(--texto-secundario);font-family:'Times New Roman', Times, serif,sans-serif;
         font-size:0.6rem;letter-spacing:2px;padding:8px 16px;cursor:pointer;">CANCELAR</button>
-        <button type="button" data-action="confirmar-renombrar-archivo" style="background:var(--dorado);
+          <button type="button" data-action="confirmar-renombrar-archivo" style="background:var(--dorado);
         border:none;color:#000;font-family:'Times New Roman', Times, serif,sans-serif;
         font-size:0.6rem;letter-spacing:2px;padding:8px 16px;cursor:pointer;font-weight:700;">GUARDAR</button>
+        </div>
       </div>
     </div>
-  </div>
-  <!-- PANTALLA NOMBRE — Solo para personalización, aparece una vez -->
-  <div id="pantalla-nombre" class="pantalla hidden">
-    <div class="logo-babel small">BABEL</div>
-    <h2 class="subtitulo-babel">UN MOMENTO</h2>
-    <div class="login-box" style="max-width:400px;text-align:center;">
-      <p class="descripcion" style="margin-bottom:8px;">
-        ¿Cómo quieres que te llame Babel?
-      </p>
-      <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;letter-spacing:2px;
+    <!-- PANTALLA NOMBRE — Solo para personalización, aparece una vez -->
+    <div id="pantalla-nombre" class="pantalla hidden">
+      <div class="logo-babel small">BABEL</div>
+      <h2 class="subtitulo-babel">UN MOMENTO</h2>
+      <div class="login-box" style="max-width:400px;text-align:center;">
+        <p class="descripcion" style="margin-bottom:8px;">
+          ¿Cómo quieres que te llame Babel?
+        </p>
+        <p style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.58rem;letter-spacing:2px;
         color:var(--texto-secundario);opacity:0.5;margin-bottom:28px;">
-        SOLO PARA PERSONALIZACIÓN · NO AFECTA A TU SEGURIDAD
-      </p>
-      <div class="input-grupo" style="margin-bottom:20px;">
-        <input type="text" id="input-nombre-display" placeholder="Tu nombre"
-          class="input-vip" style="text-align:center;letter-spacing:2px;"
-          maxlength="32"
-          onkeydown="if(event.key==='Enter')guardarNombreDisplay()">
+          SOLO PARA PERSONALIZACIÓN · NO AFECTA A TU SEGURIDAD
+        </p>
+        <div class="input-grupo" style="margin-bottom:20px;">
+          <input type="text" id="input-nombre-display" placeholder="Tu nombre" class="input-vip"
+            style="text-align:center;letter-spacing:2px;" maxlength="32"
+            onkeydown="if(event.key==='Enter')guardarNombreDisplay()">
+        </div>
+        <button type="button" data-action="guardar-nombre-display" class="btn-oro" style="width:100%;">
+          CONTINUAR →
+        </button>
       </div>
-      <button type="button" data-action="guardar-nombre-display" class="btn-oro" style="width:100%;">
-        CONTINUAR →
-      </button>
+    </div>
+
+  <!-- ============================================================ -->
+  <!-- PANTALLA REGISTRO DIARIO                                      -->
+  <!-- ============================================================ -->
+  <div id="pantalla-registro" class="pantalla pantalla-registro-panel hidden">
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--borde);flex-shrink:0;width:100%;">
+      <button type="button" data-action="volver-al-panel" class="btn-link" style="font-size:0.65rem;letter-spacing:2px;">← PANEL</button>
+      <span style="font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:4px;color:var(--dorado);">REGISTRO DIARIO</span>
+      <button type="button" data-action="abrir-filtro-registro" class="btn-link" style="font-size:0.65rem;letter-spacing:1px;" title="Filtrar tipos de evento">⚙ FILTRAR</button>
+    </div>
+    <!-- Navegación de días -->
+    <div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:12px 20px;flex-shrink:0;border-bottom:1px solid var(--borde);width:100%;">
+      <button type="button" data-action="registro-dia-anterior" style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:4px 10px;opacity:0.8;" title="Día anterior">◀</button>
+      <span id="registro-fecha-label" style="font-family:'Times New Roman',Times,serif;font-size:0.8rem;letter-spacing:3px;color:var(--dorado);min-width:120px;text-align:center;">HOY</span>
+      <button type="button" data-action="registro-dia-siguiente" id="btn-registro-siguiente" style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:4px 10px;opacity:0.8;" title="Día siguiente">▶</button>
+    </div>
+    <!-- Resumen del día -->
+    <div id="registro-resumen" style="flex-shrink:0;padding:12px 20px;border-bottom:1px solid var(--borde);width:100%;"></div>
+    <!-- Lista de eventos -->
+    <div id="registro-lista" style="flex:1;overflow-y:auto;padding:8px 0;width:100%;"></div>
+    <!-- Ajustes de notificación (botón inferior) -->
+    <div style="flex-shrink:0;padding:12px 20px;border-top:1px solid var(--borde);text-align:center;width:100%;">
+      <button type="button" data-action="abrir-ajustes-registro" class="btn-link" style="font-size:0.6rem;letter-spacing:2px;opacity:0.6;">⏰ AJUSTAR HORA DE NOTIFICACIÓN</button>
     </div>
   </div>
 
@@ -1248,15 +1673,18 @@
   <div id="pantalla-bloqueo" class="hidden"
     style="position:fixed;inset:0;z-index:9999;background:var(--fondo,#0a0a0a);display:flex;align-items:center;justify-content:center;flex-direction:column;">
     <div class="logo-babel small" style="margin-bottom:12px;">BABEL</div>
-    <p style="letter-spacing:3px;font-size:0.7rem;color:var(--dorado);opacity:0.6;margin-bottom:28px;">SESIÓN BLOQUEADA</p>
+    <p style="letter-spacing:3px;font-size:0.7rem;color:var(--dorado);opacity:0.6;margin-bottom:28px;">SESIÓN BLOQUEADA
+    </p>
     <div class="login-box">
       <div class="input-grupo">
         <label class="input-label">LLAVE MAESTRA</label>
-        <input type="password" id="bloqueo-maestra" placeholder="••••••••••••" class="input-vip" autocomplete="current-password">
+        <input type="password" id="bloqueo-maestra" placeholder="••••••••••••" class="input-vip"
+          autocomplete="current-password">
       </div>
       <div class="input-grupo">
         <label class="input-label">CONTRASEÑA DE USUARIO</label>
-        <input type="password" id="bloqueo-pass" placeholder="••••••••" class="input-vip" autocomplete="current-password">
+        <input type="password" id="bloqueo-pass" placeholder="••••••••" class="input-vip"
+          autocomplete="current-password">
       </div>
       <button type="button" data-action="desbloquear-pantalla" class="btn-oro">DESBLOQUEAR</button>
       <button type="button" data-action="cerrar-sesion" class="btn-link"
@@ -1294,8 +1722,7 @@
       <label style="display:flex;align-items:center;gap:8px;
         font-size:0.72rem;color:var(--texto-secundario);
         cursor:pointer;margin-bottom:20px;">
-        <input type="checkbox" id="modal-confirmar-no-volver"
-          style="accent-color:var(--dorado);cursor:pointer;">
+        <input type="checkbox" id="modal-confirmar-no-volver" style="accent-color:var(--dorado);cursor:pointer;">
         No volver a preguntar
       </label>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -1328,13 +1755,11 @@
         COMPARTIR ARCHIVO</p>
 
       <!-- Picker nativo del sistema -->
-      <button type="button" data-action="mas-opciones-compartir"
-        style="width:100%;text-align:left;background:transparent;
+      <button type="button" data-action="mas-opciones-compartir" style="width:100%;text-align:left;background:transparent;
           border:1px solid var(--borde);color:var(--texto);padding:10px 14px;
           cursor:pointer;font-size:0.68rem;letter-spacing:1px;border-radius:2px;
           font-family:'Times New Roman',Times,serif;margin-bottom:16px;flex-shrink:0;
-          display:flex;align-items:center;gap:10px;"
-        onmouseenter="this.style.borderColor='var(--dorado)'"
+          display:flex;align-items:center;gap:10px;" onmouseenter="this.style.borderColor='var(--dorado)'"
         onmouseleave="this.style.borderColor='var(--borde)'">
         <span style="font-size:1.1rem;">⇧</span>
         <span>Compartir via sistema</span>
@@ -1347,9 +1772,7 @@
         margin-bottom:6px;flex-shrink:0;">
         <p style="font-size:0.6rem;letter-spacing:1.5px;color:var(--texto-secundario);
           margin:0;text-transform:uppercase;">Destinos personalizados</p>
-        <button type="button" id="btn-add-destino" data-action="mostrar-form-destino"
-          title="Añadir destino"
-          style="background:transparent;border:1px solid var(--borde);
+        <button type="button" id="btn-add-destino" data-action="mostrar-form-destino" title="Añadir destino" style="background:transparent;border:1px solid var(--borde);
             color:var(--dorado);width:22px;height:22px;border-radius:2px;
             cursor:pointer;font-size:0.85rem;line-height:1;padding:0;"
           onmouseenter="this.style.borderColor='var(--dorado)'"
@@ -1357,39 +1780,31 @@
       </div>
 
       <!-- Lista dinámica (la rellena JS) -->
-      <div id="lista-destinos-compartir"
-        style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:5px;
+      <div id="lista-destinos-compartir" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:5px;
           min-height:40px;"></div>
 
       <!-- Formulario añadir / editar (oculto por defecto) -->
       <div id="form-destino-compartir" class="hidden"
         style="display:flex;flex-direction:column;gap:8px;margin-top:6px;flex-shrink:0;">
-        <input type="text" id="input-destino-nombre" maxlength="64"
-          placeholder="Nombre (ej: WhatsApp)"
-          style="background:var(--fondo,#111);border:1px solid var(--borde,#333);color:var(--texto,#e8e0cc);
+        <input type="text" id="input-destino-nombre" maxlength="64" placeholder="Nombre (ej: WhatsApp)" style="background:var(--fondo,#111);border:1px solid var(--borde,#333);color:var(--texto,#e8e0cc);
             padding:8px 10px;font-size:0.68rem;border-radius:2px;
             font-family:'Times New Roman',Times,serif;letter-spacing:0.5px;">
-        <input type="url" id="input-destino-url" maxlength="512"
-          placeholder="URL (ej: https://web.whatsapp.com)"
-          style="background:var(--fondo,#111);border:1px solid var(--borde,#333);color:var(--texto,#e8e0cc);
+        <input type="url" id="input-destino-url" maxlength="512" placeholder="URL (ej: https://web.whatsapp.com)" style="background:var(--fondo,#111);border:1px solid var(--borde,#333);color:var(--texto,#e8e0cc);
             padding:8px 10px;font-size:0.68rem;border-radius:2px;
             font-family:'Times New Roman',Times,serif;letter-spacing:0.5px;">
         <div style="display:flex;gap:8px;">
-          <button type="button" data-action="cancelar-form-destino"
-            style="flex:1;background:transparent;border:1px solid var(--borde);
+          <button type="button" data-action="cancelar-form-destino" style="flex:1;background:transparent;border:1px solid var(--borde);
               color:var(--texto-secundario);padding:7px;cursor:pointer;
               font-size:0.62rem;letter-spacing:1px;border-radius:2px;
               font-family:'Times New Roman',Times,serif;">CANCELAR</button>
-          <button type="button" id="btn-guardar-destino" data-action="guardar-form-destino"
-            style="flex:1;background:transparent;border:1px solid var(--dorado);
+          <button type="button" id="btn-guardar-destino" data-action="guardar-form-destino" style="flex:1;background:transparent;border:1px solid var(--dorado);
               color:var(--dorado);padding:7px;cursor:pointer;
               font-size:0.62rem;letter-spacing:1px;border-radius:2px;
               font-family:'Times New Roman',Times,serif;">AÑADIR</button>
         </div>
       </div>
 
-      <button type="button" data-action="cerrar-menu-compartir"
-        style="width:100%;margin-top:14px;background:transparent;border:none;
+      <button type="button" data-action="cerrar-menu-compartir" style="width:100%;margin-top:14px;background:transparent;border:none;
           color:var(--texto-secundario);padding:6px;cursor:pointer;flex-shrink:0;
           font-size:0.65rem;letter-spacing:1px;font-family:'Times New Roman',Times,serif;">
         CANCELAR</button>
@@ -1411,7 +1826,8 @@
         <span style="font-size:1.2rem;flex-shrink:0;">⇧</span>
         <p style="font-size:0.65rem;color:var(--texto);line-height:1.6;margin:0;">
           <strong>Compartir via sistema</strong> abre AirDrop, Mail, Mensajes
-          y el resto de servicios nativos de macOS.</p>
+          y el resto de servicios nativos de macOS.
+        </p>
       </div>
 
       <div style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-start;">
@@ -1419,11 +1835,11 @@
         <p style="font-size:0.65rem;color:var(--texto);line-height:1.6;margin:0;">
           <strong>Destinos personalizados</strong> copian el archivo al portapapeles
           y abren la URL elegida (p.ej. WhatsApp Web). Solo tienes que
-          pegar con <strong>Cmd+V</strong> en el chat o subir desde ahí.</p>
+          pegar con <strong>Cmd+V</strong> en el chat o subir desde ahí.
+        </p>
       </div>
 
-      <button type="button" data-action="cerrar-onboarding-compartir"
-        style="width:100%;background:transparent;border:1px solid var(--dorado);
+      <button type="button" data-action="cerrar-onboarding-compartir" style="width:100%;background:transparent;border:1px solid var(--dorado);
           color:var(--dorado);padding:9px;cursor:pointer;font-size:0.68rem;
           letter-spacing:1.5px;border-radius:2px;
           font-family:'Times New Roman',Times,serif;">ENTENDIDO</button>
@@ -1441,20 +1857,19 @@
           letter-spacing:2px;color:var(--dorado);margin:0 0 16px;">COMPARTIR ARCHIVO CIFRADO</p>
         <p style="font-size:0.68rem;color:var(--texto-secundario);margin:0 0 12px;line-height:1.6;">
           El archivo se cifrará con una contraseña única por contacto. El receptor lo abre en cualquier navegador.</p>
-        <label style="font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);display:block;margin-bottom:6px;">NOMBRE DEL CONTACTO</label>
+        <label
+          style="font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);display:block;margin-bottom:6px;">NOMBRE
+          DEL CONTACTO</label>
         <input type="text" id="input-contacto-compartir" autocomplete="off" spellcheck="false"
-          placeholder="ej: María, Cliente ABC…"
-          style="width:100%;box-sizing:border-box;background:var(--fondo-input,#111);
+          placeholder="ej: María, Cliente ABC…" style="width:100%;box-sizing:border-box;background:var(--fondo-input,#111);
             border:1px solid var(--borde);color:var(--texto);padding:8px 10px;
             font-size:0.72rem;border-radius:2px;margin-bottom:20px;font-family:inherit;">
         <div style="display:flex;gap:8px;justify-content:flex-end;">
-          <button type="button" data-action="cerrar-modal-compartir"
-            style="background:transparent;border:1px solid var(--borde);
+          <button type="button" data-action="cerrar-modal-compartir" style="background:transparent;border:1px solid var(--borde);
               color:var(--texto-secundario);padding:6px 16px;cursor:pointer;
               font-size:0.7rem;border-radius:2px;font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
             CANCELAR</button>
-          <button type="button" data-action="confirmar-compartir"
-            style="background:var(--dorado);border:none;color:#000;
+          <button type="button" data-action="confirmar-compartir" style="background:var(--dorado);border:none;color:#000;
               padding:6px 16px;cursor:pointer;font-size:0.7rem;font-weight:700;
               border-radius:2px;font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
             GENERAR</button>
@@ -1463,16 +1878,13 @@
       <div id="modal-compartir-paso2" class="hidden">
         <p style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;
           letter-spacing:2px;color:var(--dorado);margin:0 0 12px;">ARCHIVO LISTO</p>
-        <div id="modal-compartir-nueva-pass" class="hidden"
-          style="background:rgba(197,160,89,0.08);border:1px solid rgba(197,160,89,0.3);
+        <div id="modal-compartir-nueva-pass" class="hidden" style="background:rgba(197,160,89,0.08);border:1px solid rgba(197,160,89,0.3);
             border-radius:3px;padding:12px 14px;margin-bottom:14px;">
           <p style="font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);margin:0 0 6px;">
             CONTRASEÑA NUEVA — ENVÍALA AHORA POR EL MISMO CANAL</p>
-          <p id="modal-compartir-pass-texto"
-            style="font-family:monospace;font-size:0.85rem;color:var(--dorado);
+          <p id="modal-compartir-pass-texto" style="font-family:monospace;font-size:0.85rem;color:var(--dorado);
               letter-spacing:1px;margin:0;word-break:break-all;"></p>
-          <button type="button" data-action="copiar-pass-compartir"
-            style="margin-top:8px;background:transparent;border:1px solid rgba(197,160,89,0.4);
+          <button type="button" data-action="copiar-pass-compartir" style="margin-top:8px;background:transparent;border:1px solid rgba(197,160,89,0.4);
               color:var(--dorado);padding:4px 10px;cursor:pointer;font-size:0.62rem;
               border-radius:2px;font-family:inherit;letter-spacing:1px;">
             COPIAR</button>
@@ -1480,25 +1892,316 @@
         <p id="modal-compartir-nombre-html"
           style="font-size:0.65rem;color:var(--texto-secundario);margin:0 0 16px;word-break:break-all;"></p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button type="button" data-action="compartir-nativo"
-            style="flex:1;background:var(--dorado);border:none;color:#000;
+          <button type="button" data-action="compartir-nativo" style="flex:1;background:var(--dorado);border:none;color:#000;
               padding:8px 12px;cursor:pointer;font-size:0.68rem;font-weight:700;
               border-radius:2px;font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
             ⇪ COMPARTIR…</button>
-          <button type="button" data-action="revelar-en-finder"
-            style="flex:1;background:transparent;border:1px solid var(--borde);
+          <button type="button" data-action="revelar-en-finder" style="flex:1;background:transparent;border:1px solid var(--borde);
               color:var(--texto-secundario);padding:8px 12px;cursor:pointer;
               font-size:0.68rem;border-radius:2px;font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
             ◫ REVELAR EN FINDER</button>
         </div>
-        <button type="button" data-action="cerrar-modal-compartir"
-          style="width:100%;margin-top:10px;background:transparent;border:none;
+        <button type="button" data-action="cerrar-modal-compartir" style="width:100%;margin-top:10px;background:transparent;border:none;
             color:var(--texto-secundario);padding:6px;cursor:pointer;
             font-size:0.65rem;letter-spacing:1px;font-family:'Times New Roman',Times,serif;">
           CERRAR</button>
       </div>
     </div>
   </div>
+
+  <!-- PANEL UNIR PDFs — reordenar por arrastre + nombre de salida -->
+  <div id="modal-union-pdfs" class="hidden" style="
+    position:fixed;inset:0;background:rgba(0,0,0,0.92);
+    display:flex;align-items:center;justify-content:center;z-index:3000;">
+    <div style="background:var(--fondo-panel,#0d0d0d);border:1px solid var(--borde,#333);
+      border-radius:4px;padding:24px;width:440px;max-width:92vw;
+      display:flex;flex-direction:column;max-height:82vh;">
+
+      <p style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;
+        letter-spacing:2px;color:var(--dorado);margin:0 0 6px;flex-shrink:0;">
+        UNIR PDFs</p>
+      <p style="font-size:0.62rem;color:var(--texto-secundario);margin:0 0 16px;
+        letter-spacing:0.5px;flex-shrink:0;">
+        Arrastra los bloques para ordenarlos. Todo el proceso es local y cifrado.</p>
+
+      <!-- Lista reordenable de PDFs (la rellena JS) -->
+      <div id="lista-union-pdfs" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:6px;
+          min-height:60px;margin-bottom:14px;"></div>
+
+      <label style="font-size:0.6rem;letter-spacing:1.5px;color:var(--texto-secundario);
+        text-transform:uppercase;margin-bottom:4px;flex-shrink:0;">Nombre del archivo</label>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:16px;flex-shrink:0;">
+        <input type="text" id="input-nombre-union" maxlength="80" placeholder="documento_unido" style="flex:1;background:transparent;border:1px solid var(--borde);color:var(--texto);
+            padding:8px 10px;font-size:0.7rem;border-radius:2px;
+            font-family:'Times New Roman',Times,serif;">
+        <span style="font-size:0.65rem;color:var(--texto-secundario);">.pdf</span>
+      </div>
+
+      <!-- Eliminar los PDFs originales tras unir (marcado por defecto) -->
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
+        font-size:0.63rem;color:var(--texto-secundario);margin-bottom:16px;flex-shrink:0;">
+        <input type="checkbox" id="chk-borrar-originales-union" checked
+          style="accent-color:var(--dorado);width:14px;height:14px;cursor:pointer;">
+        Eliminar los PDFs originales tras unir (no se repetirán)
+      </label>
+
+      <!-- Barra de progreso (oculta hasta empezar) -->
+      <div id="union-progreso" class="hidden" style="margin-bottom:14px;flex-shrink:0;">
+        <div style="font-size:0.62rem;color:var(--texto-secundario);margin-bottom:5px;" id="union-progreso-texto">
+          Uniendo…</div>
+        <div style="height:4px;background:var(--borde);border-radius:2px;overflow:hidden;">
+          <div id="union-progreso-barra" style="height:100%;width:0%;background:var(--dorado);transition:width 0.3s;">
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-shrink:0;">
+        <button type="button" data-action="cerrar-union-pdfs" style="flex:1;background:transparent;border:1px solid var(--borde);
+            color:var(--texto-secundario);padding:9px;cursor:pointer;
+            font-size:0.65rem;letter-spacing:1px;border-radius:2px;
+            font-family:'Times New Roman',Times,serif;">CANCELAR</button>
+        <button type="button" id="btn-confirmar-union" data-action="confirmar-union-pdfs" style="flex:2;background:var(--dorado);border:1px solid var(--dorado);
+            color:#0d0d0d;padding:9px;cursor:pointer;font-weight:bold;
+            font-size:0.65rem;letter-spacing:1.5px;border-radius:2px;
+            font-family:'Times New Roman',Times,serif;">UNIR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL: Primera vez — configurar registro                      -->
+  <!-- ============================================================ -->
+  <div id="modal-registro-primera-vez" class="hidden" style="
+    position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.88);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="background:#0d0d0d;border:1px solid var(--dorado);border-radius:4px;
+      width:100%;max-width:420px;padding:32px 28px;display:flex;flex-direction:column;gap:20px;">
+      <div style="font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:4px;color:var(--dorado);text-align:center;">
+        REGISTRO DE ACCESO DIARIO
+      </div>
+      <p style="font-size:0.72rem;color:var(--texto-secundario);line-height:1.7;letter-spacing:0.5px;margin:0;">
+        Babel puede registrar localmente todos los accesos a tu cuenta y las operaciones con documentos — archivos vistos, movidos, traducidos o descargados — junto con la IP del dispositivo y la hora exacta.
+      </p>
+      <p style="font-size:0.72rem;color:var(--texto-secundario);line-height:1.7;letter-spacing:0.5px;margin:0;">
+        Si detecta un acceso desde una dirección IP desconocida, te avisará para que puedas actuar: cambiar contraseña, contactarnos o denunciarlo si corresponde. El registro <strong style="color:var(--dorado);">no identifica a la persona</strong> — solo detecta la anomalía.
+      </p>
+      <p style="font-size:0.72rem;color:var(--texto-secundario);line-height:1.7;letter-spacing:0.5px;margin:0;">
+        Todo el registro está cifrado y almacenado exclusivamente en tu dispositivo. Elige la hora del resumen diario:
+      </p>
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">H</label>
+          <input type="number" id="rp-hora" min="0" max="23" value="10"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+        <span style="color:var(--dorado);font-size:1.4rem;margin-top:16px;">:</span>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">MIN</label>
+          <input type="number" id="rp-minuto" min="0" max="59" value="0"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+        <span style="color:var(--dorado);font-size:1.4rem;margin-top:16px;">:</span>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">SEG</label>
+          <input type="number" id="rp-segundo" min="0" max="59" value="0"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+      </div>
+      <p style="font-size:0.6rem;color:var(--texto-secundario);opacity:0.6;text-align:center;margin:0;letter-spacing:1px;">
+        Hora local del dispositivo · puedes cambiarlo más tarde
+      </p>
+      <button type="button" data-action="confirmar-registro-primera-vez"
+        style="background:var(--dorado);border:none;color:#0d0d0d;padding:12px;cursor:pointer;
+        font-size:0.68rem;letter-spacing:2px;font-weight:700;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+        ENTENDIDO — ACTIVAR REGISTRO
+      </button>
+      <button type="button" data-action="cerrar-registro-primera-vez"
+        style="background:transparent;border:none;color:var(--texto-secundario);padding:8px;cursor:pointer;
+        font-size:0.6rem;letter-spacing:2px;text-align:center;">
+        Ahora no
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL: Popup resumen diario                                   -->
+  <!-- ============================================================ -->
+  <div id="modal-registro-popup" class="hidden" style="
+    position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.88);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="background:#0d0d0d;border:1px solid var(--dorado);border-radius:4px;
+      width:100%;max-width:380px;padding:28px 24px;display:flex;flex-direction:column;gap:16px;">
+      <div style="font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:4px;color:var(--dorado);text-align:center;">
+        RESUMEN DE HOY
+      </div>
+      <div id="registro-popup-contenido"></div>
+      <div style="display:flex;gap:10px;margin-top:4px;">
+        <button type="button" data-action="cerrar-registro-popup"
+          style="flex:1;background:transparent;border:1px solid var(--borde);color:var(--texto-secundario);
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          CERRAR
+        </button>
+        <button type="button" data-action="ir-a-registro"
+          style="flex:2;background:var(--dorado);border:none;color:#0d0d0d;
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-weight:700;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          VER HISTORIAL
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL: Filtro de eventos                                      -->
+  <!-- ============================================================ -->
+  <div id="modal-filtro-registro" class="hidden" style="
+    position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.88);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="background:#0d0d0d;border:1px solid var(--dorado);border-radius:4px;
+      width:100%;max-width:340px;padding:24px;display:flex;flex-direction:column;gap:16px;">
+      <div style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;letter-spacing:4px;color:var(--dorado);text-align:center;">
+        FILTRAR EVENTOS
+      </div>
+      <div style="font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);opacity:0.7;margin-bottom:2px;">POR TIPO</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="login"> Accesos / Inicios de sesión</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="ver_archivo"> Archivos vistos</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="mover_archivo"> Archivos movidos</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="traducir"> Traducciones</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="descargar"> Descargas / Exportaciones</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="importar"> Importaciones</label>
+        <label class="registro-filtro-label"><input type="checkbox" class="filtro-tipo" value="cerrar_sesion"> Cierre de sesión</label>
+      </div>
+      <div style="border-top:1px solid var(--borde);margin:4px 0;"></div>
+      <div style="font-size:0.6rem;letter-spacing:2px;color:var(--texto-secundario);opacity:0.7;margin-bottom:2px;">POR ACCESO (IP)</div>
+      <div id="filtro-ips-contenedor" style="display:flex;flex-direction:column;gap:10px;"></div>
+      <p style="font-size:0.6rem;color:var(--texto-secundario);opacity:0.5;margin:0;letter-spacing:1px;">
+        Sin selección = mostrar todo
+      </p>
+      <div style="display:flex;gap:10px;">
+        <button type="button" data-action="limpiar-filtro-registro"
+          style="flex:1;background:transparent;border:1px solid var(--borde);color:var(--texto-secundario);
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          TODOS
+        </button>
+        <button type="button" data-action="aplicar-filtro-registro"
+          style="flex:2;background:var(--dorado);border:none;color:#0d0d0d;
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-weight:700;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          APLICAR
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL: Ajustar hora de notificación (post primera vez)        -->
+  <!-- ============================================================ -->
+  <div id="modal-ajustes-registro" class="hidden" style="
+    position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.88);
+    display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="background:#0d0d0d;border:1px solid var(--dorado);border-radius:4px;
+      width:100%;max-width:320px;padding:28px 24px;display:flex;flex-direction:column;gap:20px;">
+      <div style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;letter-spacing:4px;color:var(--dorado);text-align:center;">
+        HORA DE NOTIFICACIÓN
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">H</label>
+          <input type="number" id="ra-hora" min="0" max="23" value="10"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+        <span style="color:var(--dorado);font-size:1.4rem;margin-top:16px;">:</span>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">MIN</label>
+          <input type="number" id="ra-minuto" min="0" max="59" value="0"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+        <span style="color:var(--dorado);font-size:1.4rem;margin-top:16px;">:</span>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <label style="font-size:0.58rem;letter-spacing:2px;color:var(--texto-secundario);">SEG</label>
+          <input type="number" id="ra-segundo" min="0" max="59" value="0"
+            style="width:52px;text-align:center;background:#111;border:1px solid var(--borde-dorado);
+            color:var(--dorado);padding:8px 4px;font-size:1.1rem;font-family:monospace;border-radius:2px;">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button type="button" data-action="cerrar-ajustes-registro"
+          style="flex:1;background:transparent;border:1px solid var(--borde);color:var(--texto-secundario);
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          CANCELAR
+        </button>
+        <button type="button" data-action="guardar-ajustes-registro"
+          style="flex:2;background:var(--dorado);border:none;color:#0d0d0d;
+          padding:10px;cursor:pointer;font-size:0.65rem;letter-spacing:2px;font-weight:700;font-family:'Times New Roman',Times,serif;border-radius:2px;">
+          GUARDAR
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+<!-- ── MODAL ACTUALIZACIÓN ──────────────────────────────────────────────── -->
+<div id="modal-actualizacion" class="hidden" style="
+  position:fixed;inset:0;z-index:9000;
+  background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);
+  display:flex;align-items:center;justify-content:center;padding:20px;">
+  <div style="
+    background:#0F1525;border:1px solid rgba(212,175,55,0.35);
+    border-radius:16px;max-width:440px;width:100%;padding:32px;
+    box-shadow:0 0 60px rgba(212,175,55,0.12);">
+
+    <!-- Icono + título -->
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+      <div style="width:42px;height:42px;border-radius:10px;background:rgba(212,175,55,0.12);
+        border:1px solid rgba(212,175,55,0.25);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--dorado)" stroke-width="2">
+          <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+          <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+        </svg>
+      </div>
+      <div>
+        <div style="color:var(--dorado);font-size:0.6rem;letter-spacing:3px;font-weight:700;margin-bottom:3px;">ACTUALIZACIÓN DISPONIBLE</div>
+        <div id="upd-version" style="color:#F1F5F9;font-size:1rem;font-weight:700;">Nueva versión</div>
+      </div>
+    </div>
+
+    <!-- Notas del release -->
+    <div id="upd-notas" style="
+      background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);
+      border-radius:8px;padding:14px;margin-bottom:24px;
+      color:#94A3B8;font-size:0.75rem;line-height:1.65;
+      max-height:160px;overflow-y:auto;white-space:pre-wrap;"></div>
+
+    <!-- Barra de progreso (oculta hasta que empieza la descarga) -->
+    <div id="upd-progreso" class="hidden" style="margin-bottom:20px;">
+      <div style="color:#94A3B8;font-size:0.65rem;letter-spacing:2px;margin-bottom:8px;" id="upd-progreso-texto">DESCARGANDO...</div>
+      <div style="height:3px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden;">
+        <div style="height:100%;background:var(--dorado);width:100%;animation:shimmer 1.2s ease-in-out infinite;"></div>
+      </div>
+    </div>
+
+    <!-- Botones -->
+    <div id="upd-botones" style="display:flex;gap:10px;">
+      <button id="upd-btn-ahora" data-action="instalar-actualizacion" style="
+        flex:1;background:linear-gradient(135deg,var(--dorado),#A8860C);
+        border:none;color:#0B0F19;padding:12px;border-radius:8px;
+        font-size:0.65rem;letter-spacing:2px;font-weight:700;cursor:pointer;">
+        ACTUALIZAR AHORA
+      </button>
+      <button id="upd-btn-tarde" data-action="cerrar-modal-actualizacion" style="
+        background:transparent;border:1px solid rgba(255,255,255,0.1);
+        color:#64748B;padding:12px 16px;border-radius:8px;
+        font-size:0.65rem;letter-spacing:2px;cursor:pointer;">
+        MÁS TARDE
+      </button>
+    </div>
+
+  </div>
+</div>
 
 </body>
 

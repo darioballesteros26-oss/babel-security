@@ -142,7 +142,7 @@ pub const PUERTO_DESCUBRIMIENTO: u16 = 47823;
 pub const PUERTO_TRANSFERENCIA: u16 = 47824;
 pub const TAMAÑO_CABECERA: usize = 304;
 pub const MAX_NOMBRE: usize = 256;
-pub const MAX_TAMAÑO_ARCHIVO: u64 = 100 * 1024 * 1024; // 100MB
+pub const MAX_TAMAÑO_ARCHIVO: u64 = 150 * 1024 * 1024; // 150MB (igual que el límite de import)
 // V2: incluye timestamp Unix para invalidar replays > 60 s y fingerprint del cert.
 // V3: añade HMAC-SHA256 de 8 bytes (clave interna de app) — impide que escáneres genéricos
 //     procesen los anuncios como si fueran Babel. La autenticación real es mTLS.
@@ -209,23 +209,20 @@ impl GestorCertificados {
         let clave_der = Zeroizing::new(cert.serialize_private_key_der());
 
         fs::write(ruta_cert(), &cert_der).map_err(|e| format!("Error guardando cert: {}", e))?;
-        // Cifrar la clave privada con HKDF de la subclave del usuario
+        // Cifrar la clave privada con HKDF de la subclave del usuario.
+        // escribir_privado crea el archivo con 0600 de forma atómica: la clave nunca
+        // queda a 0644 (ni siquiera un instante) como sí ocurría con fs::write + chmod.
         if let Some(enc_key) = clave_privada_p2p_enc(subclave_hex) {
             match crate::seguridad::blindar_documento(&hex::encode(clave_der.as_slice()), &enc_key) {
                 Ok(cifrado) => {
-                    fs::write(ruta_clave(), cifrado).map_err(|e| format!("Error guardando clave cifrada: {}", e))?;
+                    crate::escribir_privado(ruta_clave(), cifrado).map_err(|e| format!("Error guardando clave cifrada: {}", e))?;
                 }
                 Err(_) => {
-                    fs::write(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
+                    crate::escribir_privado(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
                 }
             }
         } else {
-            fs::write(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600));
+            crate::escribir_privado(ruta_clave(), clave_der.as_slice()).map_err(|e| format!("Error guardando clave: {}", e))?;
         }
 
         log::info!("[OK] Certificado generado en {:?}", ruta_cert());
@@ -251,24 +248,18 @@ impl GestorCertificados {
                             .and_then(|h| hex::decode(h.trim()).map_err(|e| e.to_string()))
                         {
                             Ok(bytes) => {
-                                // Re-cifrar con clave nueva
+                                // Re-cifrar con clave nueva (escritura atómica 0600)
                                 if let Ok(cifrado) = crate::seguridad::blindar_documento(&hex::encode(&bytes), &enc_key) {
-                                    let _ = fs::write(ruta_clave(), cifrado);
-                                    #[cfg(unix)]
-                                    { use std::os::unix::fs::PermissionsExt;
-                                      let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600)); }
+                                    let _ = crate::escribir_privado(ruta_clave(), cifrado);
                                     log::warn!("[P2P] Clave privada migrada a v2 (HKDF de subclave).");
                                 }
                                 Zeroizing::new(bytes)
                             }
                             Err(_) => {
-                                // Texto plano (instalación muy antigua) — re-cifrar
+                                // Texto plano (instalación muy antigua) — re-cifrar (0600 atómico)
                                 let raw = Zeroizing::new(blob);
                                 if let Ok(cifrado) = crate::seguridad::blindar_documento(&hex::encode(&*raw), &enc_key) {
-                                    let _ = fs::write(ruta_clave(), cifrado);
-                                    #[cfg(unix)]
-                                    { use std::os::unix::fs::PermissionsExt;
-                                      let _ = fs::set_permissions(ruta_clave(), fs::Permissions::from_mode(0o600)); }
+                                    let _ = crate::escribir_privado(ruta_clave(), cifrado);
                                 }
                                 raw
                             }
@@ -804,19 +795,16 @@ impl rustls::server::danger::ClientCertVerifier for VerificadorClienteP2P {
         }
         let fp = fingerprint_cert(end_entity);
         let _guard = CERTS_AUTORIZADOS_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-        let mut autorizados = cargar_certs_autorizados();
+        let autorizados = cargar_certs_autorizados();
 
         if autorizados.contains(&fp) {
             // Fingerprint ya autorizado — aceptar sin re-guardar
             Ok(rustls::server::danger::ClientCertVerified::assertion())
-        } else if autorizados.is_empty() {
-            // TOFU bootstrap: primer peer ever — auto-aceptar
-            autorizados.insert(fp);
-            guardar_certs_autorizados(&autorizados);
-            log::warn!("[P2P] Primer peer registrado por TOFU (bootstrap).");
-            Ok(rustls::server::danger::ClientCertVerified::assertion())
         } else {
-            // Peer desconocido — añadir a pendientes para que el usuario lo apruebe
+            // Sin auto-aceptación de bootstrap: TODO peer nuevo (incluido el primero que
+            // conecta) queda pendiente de aprobación explícita del usuario. Antes, el primer
+            // dispositivo que conectaba en la LAN quedaba confiado en silencio y podía enviar
+            // archivos; ahora la confianza siempre la concede el usuario vía aprobar_peer_pendiente.
             let ip_red = PEER_IP_ACTUAL.with(|c| redactar_ip(&c.borrow()));
             if let Ok(mut pending) = PEERS_PENDIENTES.lock() {
                 if !pending.iter().any(|(f, _)| f == &fp) {

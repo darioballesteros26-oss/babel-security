@@ -20,6 +20,13 @@ jobs:
       - name: Instalar Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Descargar PDFium (macOS arm64)
+        run: |
+          mkdir -p src-tauri/binaries/pdfium
+          curl -sL https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7961/pdfium-mac-arm64.tgz -o /tmp/pdfium.tgz
+          tar xzf /tmp/pdfium.tgz -C /tmp lib/libpdfium.dylib
+          cp /tmp/lib/libpdfium.dylib src-tauri/binaries/pdfium/
+
       - name: Instalar dependencias npm
         run: npm ci
 
@@ -55,6 +62,14 @@ jobs:
           $conf = Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json
           $conf.bundle.PSObject.Properties.Remove('externalBin')
           $conf | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
+
+      - name: Descargar PDFium (Windows x64)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries/pdfium | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7961/pdfium-win-x64.tgz" -OutFile pdfium.tgz
+          tar xzf pdfium.tgz bin/pdfium.dll
+          Copy-Item bin/pdfium.dll src-tauri/binaries/pdfium/
 
       - name: Instalar dependencias npm
         run: npm ci

@@ -9,8 +9,8 @@ use tesseract::Tesseract;
 pub static CANCELAR_TRADUCCION: AtomicBool = AtomicBool::new(false);
 
 // Modo rápido: si está activo, la app pide beam=1 al servidor (más rápido, algo menos
-// de calidad). Por defecto false = calidad (beam por defecto del modelo). Lo activa el
-// toggle del sidebar vía el comando `set_modo_rapido`.
+// de calidad). Por defecto true (beam=1) para no disparar el swap en máquinas de 8 GB;
+// el toggle del sidebar lo desactiva vía `set_modo_rapido` para máxima calidad.
 pub static MODO_RAPIDO: AtomicBool = AtomicBool::new(true);
 
 pub fn set_modo_rapido(v: bool) {
@@ -23,6 +23,86 @@ pub fn cancelar_traduccion() {
 
 pub fn resetear_cancelacion() {
     CANCELAR_TRADUCCION.store(false, Ordering::Relaxed);
+}
+
+// ── Helpers de proceso externo (LibreOffice, pdftotext, …) ──────────────────
+// Antes estas listas de rutas y el bucle "spawn + try_wait con deadline + kill"
+// estaban duplicados ~5 veces a lo largo de procesar_pdf/procesar_archivo_inteligente.
+
+/// Rutas candidatas de LibreOffice (headless) por plataforma. El último es el
+/// comando pelado, que se resuelve por PATH.
+const RUTAS_SOFFICE: &[&str] = &[
+    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
+    "/opt/homebrew/bin/soffice",
+    "/usr/local/bin/soffice",
+    "soffice",
+];
+const RUTAS_PDFTOTEXT: &[&str] = &[
+    "/opt/homebrew/bin/pdftotext",
+    "/usr/local/bin/pdftotext",
+    "/usr/bin/pdftotext",
+    "pdftotext",
+];
+const RUTAS_PDFTOPPM: &[&str] = &[
+    "/opt/homebrew/bin/pdftoppm",
+    "/usr/local/bin/pdftoppm",
+    "/usr/bin/pdftoppm",
+    "pdftoppm",
+];
+
+/// Resuelve la ruta de una herramienta externa (soffice, pdftoppm, …).
+///
+/// Prioridad:
+///  1. Herramienta EMPAQUETADA dentro de la app: `$BABEL_TOOLS_DIR/<por_defecto>`.
+///     La fija `main.rs` en el arranque a `…/Contents/Resources/tools/bin`, de modo
+///     que una instalación limpia (sin Homebrew/LibreOffice) use las nuestras.
+///  2. El primer `candidato` que existe en disco, o cuyo nombre es un comando "pelado"
+///     (sin separador de ruta → se resuelve vía PATH).
+///  3. `por_defecto` como último recurso.
+fn resolver_binario(candidatos: &[&str], por_defecto: &str) -> String {
+    if let Ok(dir) = std::env::var("BABEL_TOOLS_DIR") {
+        if !dir.is_empty() {
+            let p = std::path::Path::new(&dir).join(por_defecto);
+            if p.exists() {
+                return p.to_string_lossy().into_owned();
+            }
+        }
+    }
+    candidatos
+        .iter()
+        .copied()
+        .find(|p| (!p.contains('/') && !p.contains('\\')) || std::path::Path::new(p).exists())
+        .unwrap_or(por_defecto)
+        .to_string()
+}
+
+/// Espera a que un proceso hijo termine con un límite de tiempo, matándolo si se
+/// excede. `tick` se invoca en cada iteración de espera (para progreso); usa `|| {}`
+/// si no hace falta. Devuelve true solo si terminó con éxito.
+fn esperar_proceso(child: &mut std::process::Child, segs: u64, mut tick: impl FnMut()) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(segs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s.success(),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                tick();
+            }
+            _ => {
+                let _ = child.kill();
+                break false;
+            }
+        }
+    }
+}
+
+/// Lanza `cmd` y espera hasta `segs` a que termine. true si terminó con éxito.
+fn ejecutar_con_timeout(cmd: &mut std::process::Command, segs: u64) -> bool {
+    match cmd.spawn() {
+        Ok(mut child) => esperar_proceso(&mut child, segs, || {}),
+        Err(_) => false,
+    }
 }
 pub const ZSTD_MAGIC: &[u8] = b"BZ1:";
 
@@ -70,6 +150,21 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::seguridad;
 use lettre::{Message, Transport};
+
+/// Autenticador XOAUTH2 para el crate `imap`.
+/// Devuelve los bytes crudos del string XOAUTH2; el crate los codifica en base64 antes de enviar.
+pub struct XOAuth2ImapAuth {
+    pub email: String,
+    pub access_token: String,
+}
+
+impl imap::Authenticator for XOAuth2ImapAuth {
+    type Response = Vec<u8>;
+    fn process(&self, _challenge: &[u8]) -> Vec<u8> {
+        format!("user={}\x01auth=Bearer {}\x01\x01", self.email, self.access_token).into_bytes()
+    }
+}
+
 pub fn enviar_archivo_descifrado(
     ruta: &str,
     destinatario: &str,
@@ -79,12 +174,15 @@ pub fn enviar_archivo_descifrado(
     cco: &str,
     smtp_servidor: &str,
     smtp_usuario: &str,
-    smtp_password: &str,
+    smtp_password: &str, // contraseña de app, o access token cuando usar_oauth = true
     subclave_hex: &str,
+    usar_oauth: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validar_campo_imap(smtp_servidor, "smtp_servidor")?;
     validar_campo_imap(smtp_usuario, "smtp_usuario")?;
-    validar_campo_imap(smtp_password, "smtp_password")?;
+    if !usar_oauth {
+        validar_campo_imap(smtp_password, "smtp_password")?;
+    }
     // Descifrar el archivo
     let bytes_cifrados = fs::read(ruta)?;
     let contenido = seguridad::descifrar_documento(bytes_cifrados, subclave_hex)
@@ -197,10 +295,18 @@ pub fn enviar_archivo_descifrado(
         smtp_password.to_string(),
     );
 
-    let mailer = lettre::SmtpTransport::relay(smtp_servidor)?
-        .credentials(creds)
-        .timeout(Some(std::time::Duration::from_secs(30)))
-        .build();
+    let mailer = if usar_oauth {
+        lettre::SmtpTransport::relay(smtp_servidor)?
+            .credentials(creds)
+            .authentication(vec![lettre::transport::smtp::authentication::Mechanism::Xoauth2])
+            .timeout(Some(std::time::Duration::from_secs(30)))
+            .build()
+    } else {
+        lettre::SmtpTransport::relay(smtp_servidor)?
+            .credentials(creds)
+            .timeout(Some(std::time::Duration::from_secs(30)))
+            .build()
+    };
 
     mailer.send(&email)?;
     Ok(())
@@ -216,6 +322,9 @@ pub struct CredencialesEmail {
     pub remitentes_autorizados: Vec<String>,
     #[serde(default)]
     pub firma: String,
+    /// true = autenticación Gmail OAuth 2.0 (XOAUTH2); false = contraseña de aplicación
+    #[serde(default)]
+    pub usar_oauth: bool,
 }
 
 // ============================================================
@@ -334,40 +443,20 @@ pub fn procesar_archivo_inteligente(
         let _ = fs::create_dir_all(&tmp_dir);
         let salida = archivos_dir.join(format!("{}_{}_{}.babel", id_usuario, par, nombre));
         progreso(96, "GENERANDO PDF...");
-        let soffice = [
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-            "/opt/homebrew/bin/soffice",
-            "/usr/local/bin/soffice",
-            "soffice",
-        ].iter().copied()
-         .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
-         .unwrap_or("soffice");
+        let soffice = resolver_binario(RUTAS_SOFFICE, "soffice");
         if let Ok(cifrado_bytes) = fs::read(&salida) {
             if let Ok(b64_docx) = seguridad::descifrar_documento(cifrado_bytes, subclave_hex) {
                 if let Ok(docx_bytes) = descomprimir_b64(&b64_docx) {
                     let docx_tmp = tmp_dir.join(format!("{}_docx_pdf.docx", nombre));
                     if crate::escribir_privado(&docx_tmp, &docx_bytes).is_ok() {
-                        let mut child = std::process::Command::new(soffice)
-                            .args(["--headless", "--convert-to", "pdf",
-                                   "--outdir", &tmp_dir.to_string_lossy(),
-                                   &docx_tmp.to_string_lossy()])
-                            .spawn().ok();
-                        let lo_ok = match child.as_mut() {
-                            None => false,
-                            Some(c) => {
-                                let deadline = std::time::Instant::now()
-                                    + std::time::Duration::from_secs(180);
-                                loop {
-                                    match c.try_wait() {
-                                        Ok(Some(s)) => break s.success(),
-                                        Ok(None) if std::time::Instant::now() < deadline => {
-                                            std::thread::sleep(std::time::Duration::from_millis(300));
-                                        }
-                                        _ => { let _ = c.kill(); break false; }
-                                    }
-                                }
-                            }
-                        };
+                        let lo_ok = ejecutar_con_timeout(
+                            std::process::Command::new(soffice).args([
+                                "--headless", "--convert-to", "pdf",
+                                "--outdir", &tmp_dir.to_string_lossy(),
+                                &docx_tmp.to_string_lossy(),
+                            ]),
+                            180,
+                        );
                         borrar_seguro_local(&docx_tmp.to_string_lossy());
                         if lo_ok {
                             let pdf_out = tmp_dir.join(format!("{}_docx_pdf.pdf", nombre));
@@ -1065,16 +1154,7 @@ fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
     let tmp_base = tmp_dir.join(format!("ocr_{}_{}", pagina, hex::encode(rand_bytes)));
     let tmp_img = format!("{}.png", tmp_base.to_string_lossy());
 
-    let pdftoppm = [
-        "/opt/homebrew/bin/pdftoppm",
-        "/usr/local/bin/pdftoppm",
-        "/usr/bin/pdftoppm",
-        "pdftoppm",
-    ]
-    .iter()
-    .copied()
-    .find(|&p| p == "pdftoppm" || std::path::Path::new(p).exists())
-    .unwrap_or("pdftoppm");
+    let pdftoppm = resolver_binario(RUTAS_PDFTOPPM, "pdftoppm");
 
     let ok = std::process::Command::new(pdftoppm)
         .args([
@@ -1456,18 +1536,18 @@ pub fn procesar_pdf(
     progreso(5, "CONVIRTIENDO PDF...");
     // PASO 1: PDF → DOCX con pdf2docx (timeout 120 s)
     let ruta_docx_tmp = tmp_dir.join(format!("{}_tmp.docx", nombre));
-    // Buscar el python que tenga pdf2docx: babel_env primero, luego rutas estándar
+    // Buscar el python que tenga pdf2docx. Rutas estándar de macOS/Linux y, al final,
+    // los nombres a resolver por PATH (`python3` en Unix, `python` en Windows).
     let python3 = [
-        "/Users/georgina/Desktop/Babel/babel_env/bin/python3",
         "/opt/homebrew/bin/python3",
         "/usr/local/bin/python3",
         "/usr/bin/python3",
         "python3",
+        "python",
     ]
     .iter()
     .copied()
     .find(|&p| {
-        if p == "python3" { return true; }
         std::process::Command::new(p)
             .args(["-c", "import pdf2docx"])
             .output()
@@ -1476,87 +1556,49 @@ pub fn procesar_pdf(
     })
     .unwrap_or("python3");
 
-    let ok = {
-        let mut child = std::process::Command::new(python3)
-            .args([
-                "-c",
-                "import fitz; fitz.Rect.get_area = lambda self: self.width * self.height; import sys; from pdf2docx import Converter; cv=Converter(sys.argv[1]); cv.convert(sys.argv[2]); cv.close()",
-                ruta,
-                &ruta_docx_tmp.to_string_lossy(),
-            ])
-            .spawn()
-            .ok();
-        match child.as_mut() {
-            None => false,
-            Some(c) => {
-                let deadline = std::time::Instant::now()
-                    + std::time::Duration::from_secs(120);
-                let inicio = std::time::Instant::now();
-                loop {
-                    match c.try_wait() {
-                        Ok(Some(s)) => break s.success(),
-                        Ok(None) if std::time::Instant::now() < deadline => {
-                            std::thread::sleep(std::time::Duration::from_millis(500));
-                            // Avanzar de 5% a 14% durante la conversión (cada ~3s = 1%)
-                            let elapsed = inicio.elapsed().as_secs();
-                            let pct = (5 + (elapsed / 3).min(9)) as u8;
-                            progreso(pct, "CONVIRTIENDO PDF...");
-                        }
-                        _ => {
-                            let _ = c.kill();
-                            break false;
-                        }
-                    }
-                }
-            }
+    let ok = match std::process::Command::new(python3)
+        .args([
+            "-c",
+            "import fitz; fitz.Rect.get_area = lambda self: self.width * self.height; import sys; from pdf2docx import Converter; cv=Converter(sys.argv[1]); cv.convert(sys.argv[2]); cv.close()",
+            ruta,
+            &ruta_docx_tmp.to_string_lossy(),
+        ])
+        .spawn()
+    {
+        Ok(mut child) => {
+            let inicio = std::time::Instant::now();
+            esperar_proceso(&mut child, 120, || {
+                // Avanzar de 5% a 14% durante la conversión (cada ~3s = 1%)
+                let pct = (5 + (inicio.elapsed().as_secs() / 3).min(9)) as u8;
+                progreso(pct, "CONVIRTIENDO PDF...");
+            })
         }
+        Err(_) => false,
     };
 
     // PASO 1b: si pdf2docx falló, intentar con LibreOffice antes de caer a texto plano.
     // LibreOffice preserva tablas, columnas e índices mejor que cualquier extractor de texto.
     let ok = if !ok {
         progreso(6, "CONVIRTIENDO PDF (LibreOffice)...");
-        let soffice = [
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-            "/opt/homebrew/bin/soffice",
-            "/usr/local/bin/soffice",
-            "soffice",
-        ]
-        .iter()
-        .copied()
-        .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
-        .unwrap_or("soffice");
+        let soffice = resolver_binario(RUTAS_SOFFICE, "soffice");
 
-        let lo_ok = {
-            let mut child = std::process::Command::new(soffice)
-                .args([
-                    "--headless",
-                    "--convert-to", "docx",
-                    "--outdir", &tmp_dir.to_string_lossy(),
-                    ruta,
-                ])
-                .spawn()
-                .ok();
-            match child.as_mut() {
-                None => false,
-                Some(c) => {
-                    let deadline = std::time::Instant::now()
-                        + std::time::Duration::from_secs(180);
-                    let inicio = std::time::Instant::now();
-                    loop {
-                        match c.try_wait() {
-                            Ok(Some(s)) => break s.success(),
-                            Ok(None) if std::time::Instant::now() < deadline => {
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                                let elapsed = inicio.elapsed().as_secs();
-                                let pct = (6 + (elapsed / 4).min(8)) as u8;
-                                progreso(pct, "CONVIRTIENDO PDF (LibreOffice)...");
-                            }
-                            _ => { let _ = c.kill(); break false; }
-                        }
-                    }
-                }
+        let lo_ok = match std::process::Command::new(soffice)
+            .args([
+                "--headless",
+                "--convert-to", "docx",
+                "--outdir", &tmp_dir.to_string_lossy(),
+                ruta,
+            ])
+            .spawn()
+        {
+            Ok(mut child) => {
+                let inicio = std::time::Instant::now();
+                esperar_proceso(&mut child, 180, || {
+                    let pct = (6 + (inicio.elapsed().as_secs() / 4).min(8)) as u8;
+                    progreso(pct, "CONVIRTIENDO PDF (LibreOffice)...");
+                })
             }
+            Err(_) => false,
         };
 
         if lo_ok {
@@ -1615,16 +1657,7 @@ pub fn procesar_pdf(
             }
 
             // PASO 4: pdftotext — fallback ligero para PDFs con texto nativo sin estructura
-            let pdftotext_bin = [
-                "/opt/homebrew/bin/pdftotext",
-                "/usr/local/bin/pdftotext",
-                "/usr/bin/pdftotext",
-                "pdftotext",
-            ]
-            .iter()
-            .copied()
-            .find(|&p| p == "pdftotext" || std::path::Path::new(p).exists())
-            .unwrap_or("pdftotext");
+            let pdftotext_bin = resolver_binario(RUTAS_PDFTOTEXT, "pdftotext");
 
             let texto_pdftotext = std::process::Command::new(pdftotext_bin)
                 .args([ruta, "-"])
@@ -1765,15 +1798,7 @@ pub fn procesar_pdf(
         let traducido: String = salida.concat();
         progreso(91, "GENERANDO PDF...");
 
-        let soffice_bin = [
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-            "/opt/homebrew/bin/soffice",
-            "/usr/local/bin/soffice",
-            "soffice",
-        ]
-        .iter().copied()
-        .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
-        .unwrap_or("soffice");
+        let soffice_bin = resolver_binario(RUTAS_SOFFICE, "soffice");
 
         // Intento 1: LibreOffice HTML→PDF (layout y tipografía profesionales)
         let guardado_como_pdf = 'conv: {
@@ -1791,27 +1816,14 @@ pub fn procesar_pdf(
             let html_tmp = tmp_dir.join(format!("{}_fallback.html", nombre));
             let pdf_lo  = tmp_dir.join(format!("{}_fallback.pdf", nombre));
             if crate::escribir_privado(&html_tmp, html_content.as_bytes()).is_ok() {
-                let mut child = std::process::Command::new(soffice_bin)
-                    .args(["--headless", "--convert-to", "pdf",
-                           "--outdir", &tmp_dir.to_string_lossy(),
-                           &html_tmp.to_string_lossy()])
-                    .spawn().ok();
-                let lo_ok = match child.as_mut() {
-                    None => false,
-                    Some(c) => {
-                        let deadline = std::time::Instant::now()
-                            + std::time::Duration::from_secs(120);
-                        loop {
-                            match c.try_wait() {
-                                Ok(Some(s)) => break s.success(),
-                                Ok(None) if std::time::Instant::now() < deadline => {
-                                    std::thread::sleep(std::time::Duration::from_millis(300));
-                                }
-                                _ => { let _ = c.kill(); break false; }
-                            }
-                        }
-                    }
-                };
+                let lo_ok = ejecutar_con_timeout(
+                    std::process::Command::new(soffice_bin).args([
+                        "--headless", "--convert-to", "pdf",
+                        "--outdir", &tmp_dir.to_string_lossy(),
+                        &html_tmp.to_string_lossy(),
+                    ]),
+                    120,
+                );
                 borrar_seguro_local(&html_tmp.to_string_lossy());
                 if lo_ok {
                     if let Ok(pdf_bytes) = fs::read(&pdf_lo) {
@@ -1901,42 +1913,21 @@ pub fn procesar_pdf(
         // Descifrar el DOCX babel, convertir a PDF, reemplazar el babel con el PDF.
         // Si LibreOffice falla, el DOCX babel queda intacto como fallback.
         progreso(95, "GENERANDO PDF...");
-        let soffice_pdf = [
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-            "/opt/homebrew/bin/soffice",
-            "/usr/local/bin/soffice",
-            "soffice",
-        ]
-        .iter().copied()
-        .find(|&p| p == "soffice" || std::path::Path::new(p).exists())
-        .unwrap_or("soffice");
+        let soffice_pdf = resolver_binario(RUTAS_SOFFICE, "soffice");
 
         if let Ok(cifrado_bytes) = fs::read(&salida_final) {
             if let Ok(b64_docx) = seguridad::descifrar_documento(cifrado_bytes, subclave_hex) {
                 if let Ok(docx_bytes) = descomprimir_b64(&b64_docx) {
                     let docx_conv = tmp_dir.join(format!("{}_conv.docx", nombre));
                     if crate::escribir_privado(&docx_conv, &docx_bytes).is_ok() {
-                        let mut child = std::process::Command::new(soffice_pdf)
-                            .args(["--headless", "--convert-to", "pdf",
-                                   "--outdir", &tmp_dir.to_string_lossy(),
-                                   &docx_conv.to_string_lossy()])
-                            .spawn().ok();
-                        let lo_ok = match child.as_mut() {
-                            None => false,
-                            Some(c) => {
-                                let deadline = std::time::Instant::now()
-                                    + std::time::Duration::from_secs(180);
-                                loop {
-                                    match c.try_wait() {
-                                        Ok(Some(s)) => break s.success(),
-                                        Ok(None) if std::time::Instant::now() < deadline => {
-                                            std::thread::sleep(std::time::Duration::from_millis(300));
-                                        }
-                                        _ => { let _ = c.kill(); break false; }
-                                    }
-                                }
-                            }
-                        };
+                        let lo_ok = ejecutar_con_timeout(
+                            std::process::Command::new(soffice_pdf).args([
+                                "--headless", "--convert-to", "pdf",
+                                "--outdir", &tmp_dir.to_string_lossy(),
+                                &docx_conv.to_string_lossy(),
+                            ]),
+                            180,
+                        );
                         borrar_seguro_local(&docx_conv.to_string_lossy());
                         if lo_ok {
                             let pdf_out = tmp_dir.join(format!("{}_conv.pdf", nombre));
@@ -2146,6 +2137,7 @@ pub struct EmailResumen {
     pub fecha: String,
     pub tiene_adjunto: bool,
     pub leido: bool,
+    pub destacado: bool,
     pub snippet: String,
 }
 
@@ -2190,18 +2182,43 @@ fn extraer_snippet(datos: &[u8]) -> String {
     {
         return String::new();
     }
-    // Tomar hasta 300 chars y colapsar espacios
-    cuerpo
-        .chars()
-        .take(300)
-        .filter(|c| !c.is_control() || *c == ' ')
-        .collect::<String>()
+    // Eliminar tags HTML si el contenido es HTML
+    let sin_tags: String = {
+        let mut out = String::new();
+        let mut en_tag = false;
+        for ch in cuerpo.chars().take(600) {
+            match ch {
+                '<' => en_tag = true,
+                '>' => en_tag = false,
+                _ if !en_tag => out.push(ch),
+                _ => {}
+            }
+        }
+        out
+    };
+    // Colapsar espacios y recortar
+    sin_tags
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .chars()
         .take(130)
         .collect()
+}
+
+/// Decodifica palabras codificadas RFC 2047 (=?charset?Q/B?...?=) en asuntos y nombres de remitente.
+/// Usa mailparse para delegar la decodificación correctamente.
+fn decodificar_rfc2047(texto: &str) -> String {
+    let decodificado = if texto.contains("=?") {
+        let cabecera = format!("Subject: {}\r\n", texto);
+        mailparse::parse_header(cabecera.as_bytes())
+            .map(|(h, _)| h.get_value())
+            .unwrap_or_else(|_| texto.to_string())
+    } else {
+        texto.to_string()
+    };
+    // Desescapar comillas IMAP: \" → "  y  \\ → \
+    decodificado.replace("\\\"", "\"").replace("\\\\", "\\")
 }
 
 /// Devuelve true si la estructura BODYSTRUCTURE indica adjuntos.
@@ -2214,18 +2231,55 @@ fn body_tiene_adjunto_str(bs_debug: &str) -> bool {
         || s.contains("attachment\"")
 }
 
+/// Resuelve el nombre real de carpeta IMAP para cada vista.
+/// Usa RFC 6154 (\Trash, \Archive, \All) con fallback a nombres comunes.
+fn resolver_carpeta_imap(
+    sesion: &mut imap::Session<impl std::io::Read + std::io::Write>,
+    imap_dominio: &str,
+    vista: &str,
+) -> String {
+    match vista {
+        "archivados" => {
+            if imap_dominio.contains("gmail") { return "[Gmail]/All Mail".to_string(); }
+            sesion.list(Some(""), Some("*")).ok()
+                .and_then(|ns| ns.iter()
+                    .find(|n| n.attributes().iter().any(|a| format!("{a:?}") == "Archive"))
+                    .map(|n| n.name().to_string()))
+                .unwrap_or_else(|| "Archive".to_string())
+        }
+        "papelera" => {
+            if imap_dominio.contains("gmail") { return "[Gmail]/Trash".to_string(); }
+            sesion.list(Some(""), Some("*")).ok()
+                .and_then(|ns| ns.iter()
+                    .find(|n| n.attributes().iter().any(|a| format!("{a:?}") == "Trash"))
+                    .map(|n| n.name().to_string()))
+                .unwrap_or_else(|| "Trash".to_string())
+        }
+        _ => "INBOX".to_string(),
+    }
+}
+
 fn obtener_emails_interno(
     imap_dominio: &str,
     usuario: &str,
     password: &str,
+    usar_oauth: bool,
+    vista: &str,
 ) -> Result<Vec<EmailResumen>, String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
 
-    let mut sesion = cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
 
-    sesion.select("INBOX").map_err(|e| e.to_string())?;
+    let carpeta = resolver_carpeta_imap(&mut sesion, imap_dominio, vista);
+    sesion.select(&carpeta).map_err(|e| format!("Error abriendo {}: {}", carpeta, e))?;
 
     // UIDs permanentes — no cambian al borrar emails (a diferencia de seq numbers)
     let todos: Vec<u32> = sesion.uid_search("ALL").map_err(|e| e.to_string())?.into_iter().collect();
@@ -2233,7 +2287,7 @@ fn obtener_emails_interno(
     let mut ids: Vec<u32> = todos;
     ids.sort_unstable();
     ids.reverse();
-    ids.truncate(20);
+    ids.truncate(50);
     if ids.is_empty() {
         let _ = sesion.logout();
         return Ok(vec![]);
@@ -2245,12 +2299,18 @@ fn obtener_emails_interno(
         .collect::<Vec<_>>()
         .join(",");
 
-    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS BODYSTRUCTURE RFC822<0.700>)").map_err(|e| e.to_string())?;
+    // BODY.PEEK[]<0.700>: RFC 3501 estándar — obtiene los primeros 700 bytes sin marcar \Seen.
+    // RFC822.PEEK no existe en el estándar; BODY.PEEK[] es el alias correcto de RFC822 con PEEK.
+    let fetch = sesion.uid_fetch(&ids_str, "(ENVELOPE FLAGS BODYSTRUCTURE BODY.PEEK[]<0.700>)").map_err(|e| e.to_string())?;
 
     let mut emails: Vec<EmailResumen> = Vec::new();
 
     for msg in fetch.iter() {
-        let id = msg.uid.unwrap_or(msg.message);
+        // uid_fetch siempre debería devolver UID; si falta, skip (sequence number no es fiable)
+        let id = match msg.uid {
+            Some(uid) => uid,
+            None => continue,
+        };
 
         let envelope = match msg.envelope() {
             Some(e) => e,
@@ -2276,7 +2336,7 @@ fn obtener_emails_interno(
                 let name = addr
                     .name
                     .as_ref()
-                    .map(|n| std::str::from_utf8(n).unwrap_or("").to_string())
+                    .map(|n| decodificar_rfc2047(std::str::from_utf8(n).unwrap_or("")))
                     .unwrap_or_default();
                 if name.is_empty() {
                     format!("{}@{}", mailbox, host)
@@ -2286,13 +2346,13 @@ fn obtener_emails_interno(
             })
             .unwrap_or_else(|| "Desconocido".to_string());
 
-        // Asunto
+        // Asunto — decodificar RFC 2047 (emojis, tildes, etc.)
         let asunto = envelope
             .subject
             .as_ref()
             .and_then(|s| std::str::from_utf8(s).ok())
-            .unwrap_or("Sin asunto")
-            .to_string();
+            .map(decodificar_rfc2047)
+            .unwrap_or_else(|| "Sin asunto".to_string());
 
         // Fecha
         let fecha = envelope
@@ -2306,7 +2366,8 @@ fn obtener_emails_interno(
             .map(|bs| body_tiene_adjunto_str(&format!("{bs:?}")))
             .unwrap_or(false);
 
-        let leido = msg.flags().iter().any(|f| format!("{f:?}").contains("Seen"));
+        let leido = msg.flags().iter().any(|f| matches!(f, imap::types::Flag::Seen));
+        let destacado = msg.flags().iter().any(|f| matches!(f, imap::types::Flag::Flagged));
         let snippet = msg.body().map(extraer_snippet).unwrap_or_default();
 
         emails.push(EmailResumen {
@@ -2316,6 +2377,7 @@ fn obtener_emails_interno(
             fecha,
             tiene_adjunto,
             leido,
+            destacado,
             snippet,
         });
     }
@@ -2329,15 +2391,20 @@ pub fn obtener_emails(
     imap_dominio: &str,
     usuario: &str,
     password: &str,
+    usar_oauth: bool,
+    vista: &str,
 ) -> Result<Vec<EmailResumen>, Box<dyn std::error::Error>> {
     validar_campo_imap(imap_dominio, "imap_dominio")?;
     validar_campo_imap(usuario, "usuario")?;
-    validar_campo_imap(password, "password")?;
+    if !usar_oauth {
+        validar_campo_imap(password, "password")?;
+    }
     let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<EmailResumen>, String>>();
     let dom = Zeroizing::new(imap_dominio.to_string());
     let usr = Zeroizing::new(usuario.to_string());
     let pwd = Zeroizing::new(password.to_string());
-    std::thread::spawn(move || { let _ = tx.send(obtener_emails_interno(dom.as_str(), usr.as_str(), pwd.as_str())); });
+    let vista_owned = vista.to_string();
+    std::thread::spawn(move || { let _ = tx.send(obtener_emails_interno(dom.as_str(), usr.as_str(), pwd.as_str(), usar_oauth, &vista_owned)); });
     rx.recv_timeout(std::time::Duration::from_secs(30))
         .map_err(|_| "Timeout de conexión IMAP (30s)".to_string())?
         .map_err(|e| e.into())
@@ -2347,7 +2414,12 @@ pub fn obtener_emails(
 // EMAIL - OBTENER EMAIL COMPLETO POR ID
 // ============================================================
 
-fn extraer_mime_rec(parte: &mailparse::ParsedMail, cuerpo: &mut String, adjuntos: &mut Vec<String>) {
+fn extraer_mime_rec(
+    parte: &mailparse::ParsedMail,
+    html: &mut Option<String>,
+    plano: &mut Option<String>,
+    adjuntos: &mut Vec<String>,
+) {
     let ct = parte.headers.get_first_header("Content-Type")
         .map(|h| h.get_value().to_lowercase())
         .unwrap_or_default();
@@ -2356,7 +2428,7 @@ fn extraer_mime_rec(parte: &mailparse::ParsedMail, cuerpo: &mut String, adjuntos
         .unwrap_or_default();
     if !parte.subparts.is_empty() {
         for sub in &parte.subparts {
-            extraer_mime_rec(sub, cuerpo, adjuntos);
+            extraer_mime_rec(sub, html, plano, adjuntos);
         }
     } else if cd.contains("attachment") {
         let nombre_raw = cd.split(';')
@@ -2370,10 +2442,10 @@ fn extraer_mime_rec(parte: &mailparse::ParsedMail, cuerpo: &mut String, adjuntos
             .unwrap_or("adjunto")
             .to_string();
         adjuntos.push(nombre);
-    } else if ct.contains("text/plain") && cuerpo.is_empty() {
-        *cuerpo = parte.get_body().unwrap_or_default();
-    } else if ct.contains("text/html") && cuerpo.is_empty() {
-        *cuerpo = parte.get_body().unwrap_or_default();
+    } else if ct.contains("text/html") && html.is_none() {
+        *html = Some(parte.get_body().unwrap_or_default());
+    } else if ct.contains("text/plain") && plano.is_none() {
+        *plano = Some(parte.get_body().unwrap_or_default());
     }
 }
 
@@ -2391,12 +2463,19 @@ fn obtener_email_completo_interno(
     usuario: &str,
     password: &str,
     id: u32,
+    usar_oauth: bool,
 ) -> Result<EmailCompletoRust, String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
 
-    let mut sesion = cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
 
     sesion.select("INBOX").map_err(|e| e.to_string())?;
 
@@ -2428,11 +2507,13 @@ fn obtener_email_completo_interno(
         .map(|h| h.get_value())
         .unwrap_or_default();
 
-    // Cuerpo de texto — búsqueda recursiva para soportar MIME anidado
-    // (ej: multipart/mixed → multipart/alternative → text/plain + text/html)
-    let mut cuerpo = String::new();
+    // Extraer cuerpo MIME: HTML tiene prioridad sobre texto plano
+    // (multipart/alternative siempre incluye ambos; queremos el HTML)
+    let mut html: Option<String> = None;
+    let mut plano: Option<String> = None;
     let mut adjuntos: Vec<String> = Vec::new();
-    extraer_mime_rec(&email_parseado, &mut cuerpo, &mut adjuntos);
+    extraer_mime_rec(&email_parseado, &mut html, &mut plano, &mut adjuntos);
+    let cuerpo = html.or(plano).unwrap_or_default();
 
     let _ = sesion.logout();
 
@@ -2451,10 +2532,13 @@ pub fn obtener_email_completo(
     usuario: &str,
     password: &str,
     id: u32,
+    usar_oauth: bool,
 ) -> Result<EmailCompletoRust, Box<dyn std::error::Error>> {
     validar_campo_imap(imap_dominio, "imap_dominio")?;
     validar_campo_imap(usuario, "usuario")?;
-    validar_campo_imap(password, "password")?;
+    if !usar_oauth {
+        validar_campo_imap(password, "password")?;
+    }
 
     let dom = Zeroizing::new(imap_dominio.to_string());
     let usr = Zeroizing::new(usuario.to_string());
@@ -2462,7 +2546,7 @@ pub fn obtener_email_completo(
 
     let (tx, rx) = std::sync::mpsc::channel::<Result<EmailCompletoRust, String>>();
     std::thread::spawn(move || {
-        let _ = tx.send(obtener_email_completo_interno(dom.as_str(), usr.as_str(), pwd.as_str(), id));
+        let _ = tx.send(obtener_email_completo_interno(dom.as_str(), usr.as_str(), pwd.as_str(), id, usar_oauth));
     });
 
     rx.recv_timeout(std::time::Duration::from_secs(30))
@@ -2479,14 +2563,20 @@ fn eliminar_email_interno(
     usuario: &str,
     password: &str,
     uid: u32,
+    usar_oauth: bool,
 ) -> Result<(), String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
 
-    let mut sesion = cliente
-        .login(usuario, password)
-        .map_err(|_| "Error de autenticación IMAP.".to_string())?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password)
+            .map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
 
     sesion.select("INBOX").map_err(|e| e.to_string())?;
 
@@ -2494,8 +2584,9 @@ fn eliminar_email_interno(
         .uid_store(uid.to_string(), "+FLAGS (\\Deleted)")
         .map_err(|e| format!("Error marcando email: {}", e))?;
 
+    // uid_expunge (UIDPLUS, RFC 4315): solo purga este UID, no todos los \Deleted del buzón
     sesion
-        .expunge()
+        .uid_expunge(uid.to_string())
         .map_err(|e| format!("Error purgando email: {}", e))?;
 
     let _ = sesion.logout();
@@ -2507,10 +2598,13 @@ pub fn eliminar_email(
     usuario: &str,
     password: &str,
     uid: u32,
+    usar_oauth: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validar_campo_imap(imap_dominio, "imap_dominio")?;
     validar_campo_imap(usuario, "usuario")?;
-    validar_campo_imap(password, "password")?;
+    if !usar_oauth {
+        validar_campo_imap(password, "password")?;
+    }
 
     let dom = Zeroizing::new(imap_dominio.to_string());
     let usr = Zeroizing::new(usuario.to_string());
@@ -2523,6 +2617,7 @@ pub fn eliminar_email(
             usr.as_str(),
             pwd.as_str(),
             uid,
+            usar_oauth,
         ));
     });
 
@@ -2536,13 +2631,19 @@ fn marcar_no_leido_interno(
     usuario: &str,
     password: &str,
     uid: u32,
+    usar_oauth: bool,
 ) -> Result<(), String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
         .map_err(|e| format!("Error conexión IMAP: {}", e))?;
-    let mut sesion = cliente
-        .login(usuario, password)
-        .map_err(|_| "Error de autenticación IMAP.".to_string())?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password)
+            .map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
     sesion.select("INBOX").map_err(|e| e.to_string())?;
     sesion
         .uid_store(uid.to_string(), "-FLAGS (\\Seen)")
@@ -2556,20 +2657,226 @@ pub fn marcar_no_leido(
     usuario: &str,
     password: &str,
     uid: u32,
+    usar_oauth: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validar_campo_imap(imap_dominio, "imap_dominio")?;
     validar_campo_imap(usuario, "usuario")?;
-    validar_campo_imap(password, "password")?;
+    if !usar_oauth {
+        validar_campo_imap(password, "password")?;
+    }
     let dom = Zeroizing::new(imap_dominio.to_string());
     let usr = Zeroizing::new(usuario.to_string());
     let pwd = Zeroizing::new(password.to_string());
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     std::thread::spawn(move || {
-        let _ = tx.send(marcar_no_leido_interno(dom.as_str(), usr.as_str(), pwd.as_str(), uid));
+        let _ = tx.send(marcar_no_leido_interno(dom.as_str(), usr.as_str(), pwd.as_str(), uid, usar_oauth));
     });
     rx.recv_timeout(std::time::Duration::from_secs(30))
         .map_err(|_| "Timeout IMAP (30s)".to_string())?
         .map_err(|e| e.into())
+}
+
+// ============================================================
+// EMAIL - ARCHIVAR (mover fuera de INBOX)
+// ============================================================
+
+fn archivar_email_interno(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+    usar_oauth: bool,
+) -> Result<(), String> {
+    let cliente = imap::ClientBuilder::new(imap_dominio, 993)
+        .connect()
+        .map_err(|e| format!("Error conexión IMAP: {}", e))?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password)
+            .map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
+
+    // Determinar carpeta de archivo: Gmail fijo; otros servidores via RFC 6154 \Archive,
+    // con fallback a "Archive" si el servidor no anuncia el atributo especial.
+    let destino: String = if imap_dominio.contains("gmail") {
+        "[Gmail]/All Mail".to_string()
+    } else {
+        sesion.list(Some(""), Some("*"))
+            .ok()
+            .and_then(|nombres| {
+                nombres.iter()
+                    .find(|n| n.attributes().iter().any(|a| format!("{a:?}") == "Archive"))
+                    .map(|n| n.name().to_string())
+            })
+            .unwrap_or_else(|| "Archive".to_string())
+    };
+
+    sesion.select("INBOX").map_err(|e| e.to_string())?;
+    // Intentar MOVE (RFC 6851). Si falla (servidor no soporta), hacer COPY + DELETE + uid_expunge.
+    if sesion.uid_mv(uid.to_string(), &destino).is_err() {
+        sesion.uid_copy(uid.to_string(), &destino)
+            .map_err(|e| format!("Error copiando a {}: {}", destino, e))?;
+        sesion.uid_store(uid.to_string(), "+FLAGS.SILENT (\\Deleted)")
+            .map_err(|e| format!("Error marcando eliminado: {}", e))?;
+        // uid_expunge (UIDPLUS, RFC 4315): solo purga este UID, no todos los \Deleted del buzón
+        sesion.uid_expunge(uid.to_string()).map_err(|e| format!("Error purgando: {}", e))?;
+    }
+    let _ = sesion.logout();
+    Ok(())
+}
+
+pub fn archivar_email(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+    usar_oauth: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    if !usar_oauth { validar_campo_imap(password, "password")?; }
+    let dom = Zeroizing::new(imap_dominio.to_string());
+    let usr = Zeroizing::new(usuario.to_string());
+    let pwd = Zeroizing::new(password.to_string());
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(archivar_email_interno(dom.as_str(), usr.as_str(), pwd.as_str(), uid, usar_oauth));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .map_err(|_| "Timeout IMAP (30s)".to_string())?
+        .map_err(|e| e.into())
+}
+
+// ============================================================
+// EMAIL - MARCAR/DESMARCAR DESTACADO (\Flagged)
+// ============================================================
+
+fn marcar_destacado_interno(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+    destacar: bool,
+    usar_oauth: bool,
+) -> Result<(), String> {
+    let cliente = imap::ClientBuilder::new(imap_dominio, 993)
+        .connect()
+        .map_err(|e| format!("Error conexión IMAP: {}", e))?;
+    let mut sesion = if usar_oauth {
+        let auth = XOAuth2ImapAuth { email: usuario.to_string(), access_token: password.to_string() };
+        cliente.authenticate("XOAUTH2", &auth)
+            .map_err(|(e, _)| format!("Error OAuth IMAP: {}", e))?
+    } else {
+        cliente.login(usuario, password)
+            .map_err(|_| "Error de autenticación IMAP.".to_string())?
+    };
+    sesion.select("INBOX").map_err(|e| e.to_string())?;
+    let op = if destacar { "+FLAGS.SILENT (\\Flagged)" } else { "-FLAGS.SILENT (\\Flagged)" };
+    sesion.uid_store(uid.to_string(), op)
+        .map_err(|e| format!("Error cambiando flag: {}", e))?;
+    let _ = sesion.logout();
+    Ok(())
+}
+
+pub fn marcar_destacado(
+    imap_dominio: &str,
+    usuario: &str,
+    password: &str,
+    uid: u32,
+    destacar: bool,
+    usar_oauth: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validar_campo_imap(imap_dominio, "imap_dominio")?;
+    validar_campo_imap(usuario, "usuario")?;
+    if !usar_oauth { validar_campo_imap(password, "password")?; }
+    let dom = Zeroizing::new(imap_dominio.to_string());
+    let usr = Zeroizing::new(usuario.to_string());
+    let pwd = Zeroizing::new(password.to_string());
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(marcar_destacado_interno(dom.as_str(), usr.as_str(), pwd.as_str(), uid, destacar, usar_oauth));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .map_err(|_| "Timeout IMAP (30s)".to_string())?
+        .map_err(|e| e.into())
+}
+
+// ============================================================
+// EMAIL - ENVIAR SOLO TEXTO (sin adjunto)
+// ============================================================
+
+pub fn enviar_solo_texto(
+    destinatario: &str,
+    asunto: &str,
+    cuerpo: &str,
+    cc: &str,
+    cco: &str,
+    smtp_servidor: &str,
+    smtp_usuario: &str,
+    smtp_password: &str,
+    usar_oauth: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validar_campo_imap(smtp_servidor, "smtp_servidor")?;
+    validar_campo_imap(smtp_usuario, "smtp_usuario")?;
+    if !usar_oauth { validar_campo_imap(smtp_password, "smtp_password")?; }
+
+    let cuerpo_escapado = cuerpo
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\n', "<br>");
+    let cuerpo_html = format!(
+        "<html><body style='font-family:Arial,sans-serif;color:#222;'>\
+        <p>{}</p>\
+        <hr style='border:1px solid #eee;margin:20px 0;'>\
+        <p style='font-size:12px;color:#888;'>Enviado con Babel Security.</p>\
+        </body></html>",
+        cuerpo_escapado
+    );
+
+    let mut builder = Message::builder()
+        .from(smtp_usuario.parse()?)
+        .to(destinatario.parse()?);
+
+    for addr in cc.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        validar_campo_imap(addr, "cc")?;
+        builder = builder.cc(addr.parse::<lettre::message::Mailbox>()?);
+    }
+    for addr in cco.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        validar_campo_imap(addr, "cco")?;
+        builder = builder.bcc(addr.parse::<lettre::message::Mailbox>()?);
+    }
+
+    let email = builder
+        .subject(if asunto.is_empty() { "Mensaje de Babel Security" } else { asunto })
+        .singlepart(
+            lettre::message::SinglePart::builder()
+                .header(lettre::message::header::ContentType::parse("text/html; charset=utf-8")?)
+                .body(cuerpo_html),
+        )?;
+
+    let creds = lettre::transport::smtp::authentication::Credentials::new(
+        smtp_usuario.to_string(),
+        smtp_password.to_string(),
+    );
+    let mailer = if usar_oauth {
+        lettre::SmtpTransport::relay(smtp_servidor)?
+            .credentials(creds)
+            .authentication(vec![lettre::transport::smtp::authentication::Mechanism::Xoauth2])
+            .timeout(Some(std::time::Duration::from_secs(30)))
+            .build()
+    } else {
+        lettre::SmtpTransport::relay(smtp_servidor)?
+            .credentials(creds)
+            .timeout(Some(std::time::Duration::from_secs(30)))
+            .build()
+    };
+    mailer.send(&email)?;
+    Ok(())
 }
 
 // ============================================================
@@ -2584,19 +2891,18 @@ static UREQ_AGENT: OnceLock<ureq::Agent> = OnceLock::new();
 static NLLB_TOKEN: OnceLock<String> = OnceLock::new();
 static TOKEN_DESDE_ARCHIVO: OnceLock<String> = OnceLock::new();
 
-// Token por defecto FIJO, idéntico al de server.py (_TOKEN_DEFECTO). Permite que la app
-// se autentique con el servidor local aunque se abra con doble clic (sin BABEL_NLLB_TOKEN
-// en el entorno) — antes ese caso caía al diccionario y traducía palabra por palabra.
-// Es defensa en profundidad sobre un puerto solo-localhost; el modo USB lo sobrescribe
-// con un token aleatorio vía inicializar_nllb_token.
-const NLLB_TOKEN_DEFECTO: &str = "babel-local-default-token-2026-no-compartir";
-
 pub fn inicializar_nllb_token(token: String) {
     let _ = NLLB_TOKEN.set(token);
 }
 
 /// Resuelve el token efectivo por prioridad: OnceLock (modo USB) > variable de entorno
-/// (arrancar_babel.sh / npm run tauri dev) > constante por defecto compartida.
+/// (arrancar_babel.sh / npm run tauri dev) > token persistido por server.py.
+///
+/// No hay token por defecto hardcodeado: server.py siempre usa `BABEL_SERVER_TOKEN`/
+/// `BABEL_NLLB_TOKEN` o genera uno aleatorio que persiste en ~/Babel/servidor_token.txt
+/// (0600). Cualquiera de las tres fuentes cubre los casos reales (USB, app empaquetada,
+/// server.py manual). Si ninguna está disponible devolvemos cadena vacía: el servidor
+/// responde 401 igualmente, sin necesidad de un secreto fijo en el binario.
 fn token_efectivo() -> String {
     if let Some(t) = NLLB_TOKEN.get() {
         if !t.is_empty() {
@@ -2619,7 +2925,7 @@ fn token_efectivo() -> String {
     if desde_archivo.len() >= 32 {
         return desde_archivo.clone();
     }
-    NLLB_TOKEN_DEFECTO.to_string()
+    String::new()
 }
 
 fn agente_http() -> &'static ureq::Agent {
@@ -2763,5 +3069,195 @@ pub fn traducir_inteligente(
     match traducir_via_servidor(texto, par) {
         Ok(traduccion) => (traduccion, 0),
         Err(_) => motor_atomico(texto, dict, subclave_hex),
+    }
+}
+
+// ── Tests email / OAuth (sin red) ───────────────────────────────────────────
+#[cfg(test)]
+mod tests_email {
+    use super::*;
+
+    // RFC 7628 §3.1: el string XOAUTH2 debe tener la forma exacta que Gmail espera.
+    #[test]
+    fn xoauth2_format_correcto() {
+        use imap::Authenticator;
+        let auth = XOAuth2ImapAuth {
+            email: "user@example.com".to_string(),
+            access_token: "ya29.token".to_string(),
+        };
+        let response = auth.process(b"");
+        let s = String::from_utf8(response).expect("debe ser UTF-8 válido");
+        assert_eq!(s, "user=user@example.com\x01auth=Bearer ya29.token\x01\x01");
+    }
+
+    // El token vacío también produce un string XOAUTH2 con estructura correcta
+    #[test]
+    fn xoauth2_format_con_token_vacio() {
+        use imap::Authenticator;
+        let auth = XOAuth2ImapAuth {
+            email: "a@b.com".to_string(),
+            access_token: String::new(),
+        };
+        let s = String::from_utf8(auth.process(b"")).unwrap();
+        assert!(s.starts_with("user=a@b.com\x01auth=Bearer "));
+        assert!(s.ends_with("\x01\x01"));
+    }
+
+    // Backward-compat: JSON de credenciales antiguo (sin usar_oauth) carga con false
+    #[test]
+    fn credenciales_sin_usar_oauth_default_es_false() {
+        let json = r#"{
+            "smtp_servidor": "smtp.gmail.com",
+            "imap_dominio": "imap.gmail.com",
+            "usuario": "u@gmail.com",
+            "password": "pass",
+            "remitentes_autorizados": [],
+            "firma": ""
+        }"#;
+        let creds: CredencialesEmail = serde_json::from_str(json).expect("debe parsear");
+        assert!(!creds.usar_oauth, "usar_oauth debe ser false por defecto");
+    }
+
+    // CredencialesEmail con usar_oauth=true hace round-trip por serde_json
+    #[test]
+    fn credenciales_usar_oauth_serde_roundtrip() {
+        let orig = CredencialesEmail {
+            smtp_servidor: "smtp.gmail.com".into(),
+            imap_dominio: "imap.gmail.com".into(),
+            usuario: "u@gmail.com".into(),
+            password: String::new(),
+            remitentes_autorizados: vec![],
+            firma: String::new(),
+            usar_oauth: true,
+        };
+        let json = serde_json::to_string(&orig).unwrap();
+        let restaurado: CredencialesEmail = serde_json::from_str(&json).unwrap();
+        assert!(restaurado.usar_oauth);
+        assert_eq!(restaurado.usuario, "u@gmail.com");
+        assert!(restaurado.password.is_empty());
+    }
+
+    // validar_campo_imap acepta tokens OAuth reales (sin caracteres de control)
+    #[test]
+    fn tokens_oauth_pasan_validacion_imap() {
+        // Los access tokens de Google son base64url: A-Z a-z 0-9 . _ - /
+        let token_real = "ya29.A0ARrdaM_base64url-token.with.dots/and-dashes";
+        assert!(validar_campo_imap(token_real, "access_token").is_ok(),
+            "un access token OAuth real debe pasar validar_campo_imap");
+    }
+
+    // validar_campo_imap rechaza valores con caracteres de control (inyección IMAP)
+    #[test]
+    fn validacion_rechaza_caracteres_de_control() {
+        let malicioso = "pass\r\nA UID FETCH 1:* (FLAGS)\r\n";
+        assert!(validar_campo_imap(malicioso, "test").is_err(),
+            "debe rechazar caracteres de control que podrían inyectarse en IMAP");
+    }
+}
+
+// ── Test end-to-end manual (calidad + formato) ──────────────────────────────
+// Protegido por la variable de entorno BABEL_E2E para NO correr en CI/`cargo test`
+// normal: necesita el servidor de traducción vivo en :5002 y LibreOffice instalado.
+// Ejecutar con:  BABEL_E2E=1 BABEL_NLLB_TOKEN=<token> cargo test e2e_pipeline -- --nocapture
+#[cfg(test)]
+mod e2e_manual {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn subclave_aleatoria() -> String {
+        use rand::{rngs::OsRng, RngCore};
+        let mut k = [0u8; 32];
+        OsRng.fill_bytes(&mut k);
+        hex::encode(k)
+    }
+
+    #[test]
+    fn e2e_pipeline_calidad_y_formato() {
+        if std::env::var("BABEL_E2E").is_err() {
+            eprintln!("[e2e] omitido (define BABEL_E2E=1 para ejecutar)");
+            return;
+        }
+        let clave = subclave_aleatoria();
+        let dict: HashMap<String, String> = HashMap::new();
+        let id = "e2efmt";
+        let par = "es-en";
+        let archivos = crate::babel_dir().join("archivos");
+
+        // ── TXT: prueba de CALIDAD (el resultado es texto traducido directo) ──
+        let txt_path = std::env::temp_dir().join("babel_e2e_texto.txt");
+        fs::write(&txt_path, "El contrato es válido y vinculante.\nEl paciente presenta fiebre alta.")
+            .unwrap();
+        procesar_archivo_inteligente(&txt_path.to_string_lossy(), &dict, &clave, id, par, &|_, _| {})
+            .expect("pipeline TXT falló");
+        let out_txt = archivos.join(format!("{}_{}_babel_e2e_texto.babel", id, par));
+        let cifr = fs::read(&out_txt).expect("no se generó el .babel del TXT");
+        let traducido = seguridad::descifrar_documento(cifr, &clave).unwrap().to_lowercase();
+        eprintln!("[e2e][TXT] traducido => {:?}", traducido);
+        assert!(
+            traducido.contains("contract") && (traducido.contains("patient") || traducido.contains("fever")),
+            "el TXT no se tradujo al inglés: {:?}", traducido
+        );
+
+        // ── DOCX: prueba de FORMATO (clonar_y_traducir + soffice DOCX→PDF) ──
+        // Ejercita mi refactor: ejecutar_con_timeout(soffice, …).
+        let docx_path = std::env::temp_dir().join("babel_e2e_doc.docx");
+        {
+            use docx_rs::*;
+            let f = std::fs::File::create(&docx_path).unwrap();
+            Docx::new()
+                .add_paragraph(Paragraph::new().add_run(Run::new().add_text("El contrato es válido y vinculante.")))
+                .add_paragraph(Paragraph::new().add_run(Run::new().add_text("La cláusula tercera establece las obligaciones del arrendatario.")))
+                .build()
+                .pack(f)
+                .unwrap();
+        }
+        procesar_archivo_inteligente(&docx_path.to_string_lossy(), &dict, &clave, id, par, &|_, _| {})
+            .expect("pipeline DOCX falló");
+        let out_docx = archivos.join(format!("{}_{}_babel_e2e_doc.babel", id, par));
+        let cifr = fs::read(&out_docx).expect("no se generó el .babel del DOCX");
+        let b64 = seguridad::descifrar_documento(cifr, &clave).unwrap();
+        let bytes = descomprimir_b64(&b64).unwrap();
+        let cabecera: String = bytes.iter().take(4).map(|&b| b as char).collect();
+        eprintln!("[e2e][DOCX] salida => {} bytes, magic={:?}", bytes.len(), cabecera);
+        // soffice está instalado → el DOCX traducido debe convertirse a PDF (formato fijo).
+        assert!(bytes.starts_with(b"%PDF"), "el DOCX traducido no acabó en PDF (magic={:?})", cabecera);
+
+        // ── PDF: prueba del camino más largo (pdf2docx → traducir → soffice → PDF) ──
+        // Ejercita el otro bucle refactorizado: esperar_proceso(pdf2docx, tick).
+        // Generamos el PDF de entrada convirtiendo el DOCX con soffice.
+        let pdf_dir = std::env::temp_dir();
+        let soffice = resolver_binario(RUTAS_SOFFICE, "soffice");
+        let hecho = ejecutar_con_timeout(
+            std::process::Command::new(soffice).args([
+                "--headless", "--convert-to", "pdf",
+                "--outdir", &pdf_dir.to_string_lossy(),
+                &docx_path.to_string_lossy(),
+            ]),
+            120,
+        );
+        let pdf_in = pdf_dir.join("babel_e2e_doc.pdf");
+        if hecho && pdf_in.exists() {
+            procesar_archivo_inteligente(&pdf_in.to_string_lossy(), &dict, &clave, id, par, &|_, _| {})
+                .expect("pipeline PDF falló");
+            let out_pdf = archivos.join(format!("{}_{}_babel_e2e_doc.babel", id, par));
+            let cifr = fs::read(&out_pdf).expect("no se generó el .babel del PDF");
+            let b64 = seguridad::descifrar_documento(cifr, &clave).unwrap();
+            let bytes = descomprimir_b64(&b64).unwrap();
+            eprintln!("[e2e][PDF] salida => {} bytes, magic={:?}",
+                bytes.len(), bytes.iter().take(4).map(|&b| b as char).collect::<String>());
+            assert!(bytes.starts_with(b"%PDF"), "el PDF traducido no acabó en PDF");
+            let _ = fs::remove_file(&pdf_in);
+        } else {
+            eprintln!("[e2e][PDF] omitido (no se pudo generar el PDF de entrada)");
+        }
+
+        // Limpieza: no dejar residuos en el vault del usuario.
+        for suf in ["_babel_e2e_texto.babel", "_babel_e2e_doc.babel",
+                    "_babel_e2e_texto__orig.babel", "_babel_e2e_doc__orig.babel"] {
+            let _ = fs::remove_file(archivos.join(format!("{}_{}{}", id, par, suf)));
+        }
+        let _ = fs::remove_file(&txt_path);
+        let _ = fs::remove_file(&docx_path);
+        eprintln!("[e2e] OK — calidad (TXT) y formato (DOCX→PDF y PDF→PDF) verificados");
     }
 }

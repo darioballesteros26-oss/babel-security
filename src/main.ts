@@ -2,7 +2,7 @@ import "./styles.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import DOMPurify from "dompurify";
 
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
@@ -10,10 +10,10 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
     node.setAttribute("rel", "noopener noreferrer");
     node.setAttribute("target", "_blank");
   }
-  // Imágenes embebidas del backend: permitir solo data: URIs, bloquear URLs externas
   if (node.tagName === "IMG") {
     const src = node.getAttribute("src") ?? "";
-    if (src.startsWith("data:image/")) {
+    // Permitir data: URIs y URLs HTTPS (imágenes reales de emails); bloquear el resto
+    if (src.startsWith("data:image/") || src.startsWith("https://")) {
       node.setAttribute("src", src);
     } else {
       node.removeAttribute("src");
@@ -21,7 +21,7 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
-type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos" | "nombre" | "ajustes";
+type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" | "traduccion" | "archivos-guardados" | "comunicacion" | "frase" | "recuperacion" | "terminos" | "nombre" | "ajustes" | "registro";
 // VARIABLES DE SESIÓN — nunca van a window, se zeroizan al cerrar
 // ============================================================
 // M3: NO retenemos la llave maestra ni la contraseña en JS. Las strings de JS son
@@ -113,6 +113,79 @@ function mostrarPantalla(nombre: Pantalla): void {
   document.querySelectorAll<HTMLElement>(".pantalla")
     .forEach(p => p.classList.add("hidden"));
   document.getElementById(`pantalla-${nombre}`)?.classList.remove("hidden");
+  if (pantallaEsSensible(nombre)) iniciarVigilanciaCaptura();
+  else detenerVigilanciaCaptura();
+  if (nombre === "login") escanearKeyloggerAlEntrar();
+  if (nombre === "principal" || nombre === "ajustes") {
+    // Arrancar servidor sinc al entrar (idempotente) para ser siempre descubrible
+    invoke<string>("iniciar_sinc_servidor").catch(() => {});
+    iniciarPollSolicitudSinc();
+  }
+  if (nombre === "ajustes") {
+    cargarListaEmparejados().catch(() => {});
+  }
+  if (nombre === "registro") {
+    cargarRegistroDia().catch(() => {});
+  }
+  if (nombre === "principal") {
+    comprobarEstadoPrueba().catch(() => {});
+  }
+}
+
+// ── SISTEMA DE PRUEBA GRATUITA ──────────────────────────────────────────────
+
+let _avisoTrialMostrado = false;
+
+interface EstadoPrueba {
+  en_prueba: boolean;
+  dias_restantes: number;
+  expirado: boolean;
+  advertencia: boolean;
+}
+
+async function comprobarEstadoPrueba(): Promise<void> {
+  let estado: EstadoPrueba;
+  try {
+    estado = await invoke<EstadoPrueba>("obtener_estado_prueba");
+  } catch {
+    return; // Si falla, no bloquear — beneficio de la duda
+  }
+
+  const banner = document.getElementById("banner-prueba");
+  const overlay = document.getElementById("overlay-trial-expirado");
+  const modalAviso = document.getElementById("modal-trial-aviso");
+
+  if (!estado.en_prueba) {
+    // Licencia activa: ocultar todo
+    if (banner) banner.style.display = "none";
+    if (overlay) overlay.style.display = "none";
+    return;
+  }
+
+  if (estado.expirado) {
+    if (banner) banner.style.display = "none";
+    if (overlay) overlay.style.display = "flex";
+    return;
+  }
+
+  // En prueba, no expirado
+  if (overlay) overlay.style.display = "none";
+
+  const dias = estado.dias_restantes;
+  const diasTexto = dias === 1 ? "1 día" : `${dias} días`;
+  const bannerDias = document.getElementById("banner-dias-texto");
+  if (bannerDias) bannerDias.textContent = diasTexto;
+  if (banner) banner.style.display = "block";
+
+  // Modal de aviso (solo una vez por sesión, con ≤3 días)
+  if (estado.advertencia && !_avisoTrialMostrado && modalAviso) {
+    _avisoTrialMostrado = true;
+    const titulo = document.getElementById("modal-trial-aviso-titulo");
+    const cuerpo = document.getElementById("modal-trial-aviso-cuerpo");
+    if (titulo) titulo.textContent = dias === 1 ? "Tu prueba termina mañana" : `Tu prueba termina en ${dias} días`;
+    if (cuerpo) cuerpo.textContent = `Activa tu licencia para no perder el acceso a Babel Security. Tus archivos siempre estarán disponibles para exportar.`;
+    modalAviso.classList.remove("hidden");
+  }
 }
 
 function mostrarMensaje(id: string, texto: string, esError: boolean): void {
@@ -133,6 +206,139 @@ function limpiarCampo(id: string): void {
 function limpiarCamposSensibles(): void {
   ["master-key", "master-key-confirm", "user-pass", "user-pass-confirm",
     "login-pass", "login-pass-usuario"].forEach(limpiarCampo);
+}
+
+// ENTRADA SEGURA (anti-keylogger) — activa el modo de entrada segura del SO
+// mientras el foco está en cualquier campo de contraseña, y lo desactiva al salir.
+// Se apoya en delegación (focusin/focusout) para cubrir campos que aparecen
+// dinámicamente. El comando Rust es idempotente: activar/desactivar de más es inocuo.
+function esCampoPassword(el: EventTarget | null): boolean {
+  return el instanceof HTMLInputElement && el.type === "password";
+}
+
+function activarEntradaSeguraEnPasswords(): void {
+  document.addEventListener("focusin", (e) => {
+    if (esCampoPassword(e.target)) invoke("activar_entrada_segura").catch(() => {});
+  });
+  document.addEventListener("focusout", (e) => {
+    if (esCampoPassword(e.target)) invoke("desactivar_entrada_segura").catch(() => {});
+  });
+  // Si el usuario cambia de app con el foco aún en la contraseña, liberamos el modo
+  // seguro para no dejar el teclado del sistema bloqueado; lo re-activamos al volver.
+  window.addEventListener("blur", () => {
+    invoke("desactivar_entrada_segura").catch(() => {});
+  });
+  window.addEventListener("focus", () => {
+    if (esCampoPassword(document.activeElement)) {
+      invoke("activar_entrada_segura").catch(() => {});
+    }
+  });
+  // Si al registrar los listeners ya hay un campo de contraseña con foco (p. ej. por
+  // autofocus), el focusin inicial ya ocurrió: lo cubrimos activando aquí.
+  if (esCampoPassword(document.activeElement)) {
+    invoke("activar_entrada_segura").catch(() => {});
+  }
+}
+
+// VIGILANCIA DE CAPTURA DE PANTALLA — mientras se muestra contenido sensible,
+// consulta a Rust cada 3 s si hay grabación/compartición/duplicación activa. Si la
+// hay, cubre la app con un overlay difuminado (oculta el contenido al capturador) y
+// avisa. El contenido reaparece solo al cesar la captura.
+let _vigilanciaCapturaId: number | null = null;
+
+const PANTALLAS_SENSIBLES: Pantalla[] =
+  ["principal", "traduccion", "archivos-guardados", "comunicacion", "frase", "ajustes", "registro"];
+
+function pantallaEsSensible(nombre: Pantalla): boolean {
+  return PANTALLAS_SENSIBLES.includes(nombre);
+}
+
+function mostrarOverlayCaptura(indicadores: string[]): void {
+  let ov = document.getElementById("captura-overlay");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "captura-overlay";
+    ov.style.cssText =
+      "position:fixed;inset:0;z-index:11000;backdrop-filter:blur(24px);" +
+      "-webkit-backdrop-filter:blur(24px);background:rgba(10,10,10,0.82);" +
+      "display:flex;align-items:center;justify-content:center;text-align:center;padding:32px;";
+    document.body.appendChild(ov);
+  }
+  const items = indicadores.map(i => `<li style="margin:4px 0;color:#ffd7a8;">${escapeHTML(i)}</li>`).join("");
+  ov.innerHTML = `
+    <div style="max-width:460px;">
+      <div style="font-size:2.6rem;margin-bottom:12px;">🛑</div>
+      <h2 style="color:#c9a227;letter-spacing:2px;font-size:1rem;margin-bottom:10px;">POSIBLE CAPTURA DE PANTALLA</h2>
+      <p style="color:#ccc;font-size:0.82rem;line-height:1.55;margin-bottom:14px;">
+        Babel ha ocultado el contenido sensible porque detectó actividad de grabación o compartición de pantalla:
+      </p>
+      <ul style="list-style:none;padding:0;font-size:0.8rem;margin:0 0 12px;">${items}</ul>
+      <p style="color:#888;font-size:0.72rem;">El contenido volverá a mostrarse automáticamente al detener la captura.</p>
+    </div>`;
+}
+
+function ocultarOverlayCaptura(): void {
+  document.getElementById("captura-overlay")?.remove();
+}
+
+// Aviso discreto (baja confianza): una app capaz de compartir está abierta pero no
+// necesariamente capturando. Chip en la esquina, sin bloquear el contenido.
+function mostrarChipCapturaBaja(avisos: string[]): void {
+  let chip = document.getElementById("captura-aviso-chip");
+  if (!chip) {
+    chip = document.createElement("div");
+    chip.id = "captura-aviso-chip";
+    chip.style.cssText =
+      "position:fixed;bottom:14px;right:14px;z-index:9500;max-width:260px;" +
+      "background:rgba(30,24,10,0.92);border:1px solid rgba(201,162,39,0.5);" +
+      "color:#e8c76b;border-radius:8px;padding:8px 12px;font-size:0.72rem;" +
+      "letter-spacing:0.5px;box-shadow:0 4px 16px rgba(0,0,0,0.5);";
+    document.body.appendChild(chip);
+  }
+  chip.textContent = "⚠ App de captura o videollamada abierta";
+  chip.title = avisos.join("\n");
+}
+
+function ocultarChipCapturaBaja(): void {
+  document.getElementById("captura-aviso-chip")?.remove();
+}
+
+interface EstadoCaptura { bloqueo: string[]; aviso: string[]; }
+
+async function comprobarCapturaUnaVez(): Promise<void> {
+  try {
+    const est = await invoke<EstadoCaptura>("hay_captura_de_pantalla");
+    // Alta confianza → ocultar el contenido con el overlay difuminado.
+    if (est.bloqueo.length > 0) mostrarOverlayCaptura(est.bloqueo);
+    else ocultarOverlayCaptura();
+    // Baja confianza → solo aviso discreto, sin bloquear.
+    if (est.aviso.length > 0) mostrarChipCapturaBaja(est.aviso);
+    else ocultarChipCapturaBaja();
+  } catch { /* silencioso — no bloquear la UI si el comando falla */ }
+}
+
+function iniciarVigilanciaCaptura(): void {
+  if (_vigilanciaCapturaId !== null) return;
+  void comprobarCapturaUnaVez();
+  _vigilanciaCapturaId = window.setInterval(() => void comprobarCapturaUnaVez(), 3000);
+}
+
+function detenerVigilanciaCaptura(): void {
+  if (_vigilanciaCapturaId !== null) {
+    clearInterval(_vigilanciaCapturaId);
+    _vigilanciaCapturaId = null;
+  }
+  ocultarOverlayCaptura();
+  ocultarChipCapturaBaja();
+}
+
+// Escaneo de keyloggers/RATs en el momento exacto en que se va a teclear la maestra
+// (login o desbloqueo), sin esperar al monitor periódico de 5 min. No bloquea la UI:
+// corre en segundo plano y, si hay amenazas, muestra la alerta persistente existente.
+function escanearKeyloggerAlEntrar(): void {
+  invoke<string[]>("escanear_keylogger_ahora")
+    .then(amenazas => { if (amenazas.length > 0) mostrarAlertaAmenaza(amenazas); })
+    .catch(() => { /* silencioso */ });
 }
 
 // CHAT — SISTEMA DE MENSAJES
@@ -286,6 +492,16 @@ function borrarChat(): void {
 
 // DELEGATED CLICK HANDLER — reemplaza todos los onclick="..." del HTML
 document.addEventListener("click", (e: MouseEvent) => {
+  // Cerrar dropdown de filtro email si el click es fuera del menú
+  const dropdown = document.getElementById("email-menu-dropdown");
+  if (dropdown && !dropdown.classList.contains("hidden")) {
+    const wrap = dropdown.closest(".email-menu-wrap");
+    if (wrap && !wrap.contains(e.target as Node)) {
+      dropdown.classList.add("hidden");
+      document.querySelector(".email-menu-trigger")?.classList.remove("abierto");
+    }
+  }
+
   const el = (e.target as Element).closest<HTMLElement>("[data-action]");
   if (!el) return;
   const action = el.dataset.action!;
@@ -305,6 +521,12 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "desbloquear-pantalla": desbloquearPantalla(); break;
     case "intentar-recuperacion": intentarRecuperacion(); break;
     case "aceptar-terminos": aceptarTerminos(); break;
+    case "ver-terminos": mostrarModalTerminos(); break;
+    case "olvidar-sesion-guardada":
+      invoke("olvidar_sesion_tauri")
+        .then(() => mostrarToast("Sesión olvidada. La próxima vez deberás introducir la contraseña.", false))
+        .catch((e: unknown) => mostrarToast("Error: " + String(e), true));
+      break;
     // UI
     case "toggle-sidebar": toggleSidebar(); break;
     case "toggle-contrasena": toggleContraseña(el.dataset.campo!); break;
@@ -325,6 +547,13 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "eliminar-seleccionados": eliminarSeleccionados(); break;
     // Archivos guardados
     case "ver-archivo-guardado": verArchivoGuardado(); break;
+    case "abrir-union-pdfs":             void abrirPanelUnion(); break;
+    case "cerrar-union-pdfs":            cerrarPanelUnion(); break;
+    case "confirmar-union-pdfs":         void confirmarUnion(); break;
+    case "convertir-imagenes-pdf":       abrirModalImgAPdf(); break;
+    case "confirmar-img-pdf-uno":        void convertirImagenesAPdf("uno"); break;
+    case "confirmar-img-pdf-varios":     void convertirImagenesAPdf("varios"); break;
+    case "cerrar-modal-img-pdf":         cerrarModalImgAPdf(); break;
     case "compartir-archivo-guardado":   mostrarMenuCompartir(); break;
     case "cerrar-menu-compartir":        cerrarMenuCompartir(); break;
     case "mas-opciones-compartir":       cerrarMenuCompartir(); compartirDirecto(); break;
@@ -339,7 +568,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "eliminar-sel-guardados": eliminarSeleccionadosGuardados(); break;
     case "abrir-carpeta-guardados": abrirCarpetaBabelGuardados(); break;
     case "exportar-todo": exportarTodo(); break;
-    case "abrir-importar-guardado": abrirImportarGuardado(); break;
+    case "abrir-importar-guardado": mostrarPopupImportar(el); break;
     case "mostrar-input-buzon-guardado": mostrarInputBuzonGuardado(); break;
     case "confirmar-buzon-guardado": confirmarBuzonGuardado(); break;
     case "cancelar-buzon-guardado": cancelarBuzonGuardado(); break;
@@ -371,11 +600,54 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "cambiar-modo-p2p": cambiarModoP2P(el.dataset.modo!); break;
     case "aceptar-solicitud-p2p": aceptarSolicitudP2P(); break;
     case "rechazar-solicitud-p2p": rechazarSolicitudP2P(); break;
+    // Sincronización de dispositivos
+    case "abrir-sinc-dispositivos": abrirSincronizacion(); break;
+    case "cerrar-sinc": cerrarSincronizacion(); break;
+    case "refrescar-sinc": buscarDispositivosSinc(); break;
+    case "aceptar-sinc": aceptarSinc(); break;
+    case "rechazar-sinc": rechazarSinc(); break;
+    case "probar-conexion-dispositivo":
+      if (el.dataset.id) probarConexionDispositivo(el.dataset.id, el as HTMLButtonElement); break;
+    case "aplicar-buzon-b2":
+      if (el.dataset.id) aplicarPendientesB2(el.dataset.id, el as HTMLButtonElement); break;
+    case "desemparejar-dispositivo":
+      if (el.dataset.id) desemparejarDispositivo(el.dataset.id); break;
     // Email
     case "sincronizar-email": sincronizarEmail(); break;
+    case "toggle-email-menu": {
+      const trigger = el as HTMLElement;
+      const dropdown = document.getElementById("email-menu-dropdown");
+      const abierto = !dropdown?.classList.contains("hidden");
+      dropdown?.classList.toggle("hidden", abierto);
+      trigger.closest(".email-menu-trigger")?.classList.toggle("abierto", !abierto);
+      break;
+    }
+    case "filtro-email": {
+      const vista = (el as HTMLElement).dataset.vista ?? "todos";
+      const label: Record<string, string> = {
+        todos: "TODOS", noleidos: "NO LEÍDOS", destacados: "DESTACADOS", archivados: "ARCHIVADOS"
+      };
+      document.getElementById("email-vista-label")!.textContent = label[vista] ?? "TODOS";
+      document.querySelectorAll(".email-menu-item").forEach(b => b.classList.remove("activo"));
+      (el as HTMLElement).classList.add("activo");
+      document.getElementById("email-menu-dropdown")?.classList.add("hidden");
+      document.querySelector(".email-menu-trigger")?.classList.remove("abierto");
+      _emailVista = vista;
+      cerrarVisorEmail();
+      if (vista === "archivados" || _emailsCache.length === 0) {
+        cargarBandejaEmail();
+      } else {
+        renderizarListaEmail(filtrarEmailsVista(_emailsCache, vista));
+      }
+      break;
+    }
     case "abrir-componer-email": abrirComponerEmail(); break;
     case "toggle-config-smtp": toggleConfigSmtp(); break;
     case "guardar-smtp": guardarConfigSmtp(); break;
+    case "iniciar-oauth-gmail": iniciarOAuthGmail(); break;
+    case "revocar-oauth-gmail": revocarOAuthGmail(); break;
+    case "conectar-gmail-desde-modal": cerrarModalConfigurarEmail(); iniciarOAuthGmail(); break;
+    case "cerrar-modal-configurar-email": cerrarModalConfigurarEmail(); break;
     case "seleccionar-archivo-email": seleccionarArchivoEmail(); break;
     case "enviar-email": enviarEmail(); break;
     case "enviar-email-seleccion": {
@@ -387,23 +659,419 @@ document.addEventListener("click", (e: MouseEvent) => {
       break;
     }
     case "responder-email": responderEmail(); break;
+    case "reenviar-email": reenviarEmail(); break;
     case "marcar-no-leido": marcarEmailNoLeido(); break;
+    case "archivar-email-actual": archivarEmailActual(); break;
+    case "toggle-destacado-visor": toggleDestacadoActual(); break;
+    case "limpiar-adjunto-email": limpiarAdjuntoEmail(); break;
     case "copiar-cuerpo-email": copiarCuerpoEmail(); break;
     case "cambiar-zoom-email": cambiarZoomEmail(Number(el.dataset.delta!)); break;
     case "eliminar-email-actual": eliminarEmailActual(); break;
     case "cerrar-visor-email": cerrarVisorEmail(); break;
     case "cerrar-compositor": cerrarCompositor(); break;
     case "insertar-plantilla": insertarPlantillaEmail(el.dataset.texto!); break;
+    // Registro diario
+    case "ir-a-registro": void irARegistro(); break;
+    case "registro-dia-anterior":
+      _registroFechaOffset -= 1;
+      _registroFiltroIPs.clear();
+      cargarRegistroDia().catch(() => {});
+      break;
+    case "registro-dia-siguiente":
+      if (_registroFechaOffset < 0) { _registroFechaOffset += 1; _registroFiltroIPs.clear(); cargarRegistroDia().catch(() => {}); }
+      break;
+    case "abrir-filtro-registro": abrirFiltroRegistro(); break;
+    case "limpiar-filtro-registro": limpiarFiltroRegistro(); break;
+    case "aplicar-filtro-registro": aplicarFiltroRegistro(); break;
+    case "confirmar-registro-primera-vez": void confirmarRegistroPrimeraVez(); break;
+    case "cerrar-registro-primera-vez":
+      document.getElementById("modal-registro-primera-vez")?.classList.add("hidden");
+      break;
+    case "cerrar-registro-popup":
+      document.getElementById("modal-registro-popup")?.classList.add("hidden");
+      break;
+    case "informar-evento-registro": informarEventoRegistro(el); break;
+    case "abrir-ajustes-registro": void abrirAjustesRegistro(); break;
+    case "cerrar-ajustes-registro":
+      document.getElementById("modal-ajustes-registro")?.classList.add("hidden");
+      break;
+    case "guardar-ajustes-registro": void guardarAjustesRegistro(); break;
+    // Modal de actualización automática
+    case "instalar-actualizacion": void instalarActualizacion(); break;
+    case "cerrar-modal-actualizacion":
+      document.getElementById("modal-actualizacion")?.classList.add("hidden");
+      break;
+    // Sistema de prueba gratuita
+    case "cerrar-modal-trial-aviso":
+      document.getElementById("modal-trial-aviso")?.classList.add("hidden");
+      break;
+    case "exportar-datos-trial":
+      // Exportar todos los archivos guardados antes de bloquear
+      void (async () => {
+        try {
+          await invoke("abrir_carpeta_guardados");
+        } catch {
+          mostrarToast("Abre ~/Babel/guardados para acceder a tus archivos cifrados", false);
+        }
+      })();
+      break;
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// REGISTRO DIARIO
+// ══════════════════════════════════════════════════════════════════════════════
+
+interface EventoDiario {
+  tipo: string;
+  timestamp: string;
+  ip: string;
+  detalle: string;
+}
+
+interface PreferenciasRegistro {
+  hora: number;
+  minuto: number;
+  segundo: number;
+  primera_vez: boolean;
+}
+
+let _registroFechaOffset = 0;
+let _registroFiltroTipos: Set<string> = new Set();
+let _registroFiltroIPs: Set<string> = new Set();
+let _registroEventosCache: EventoDiario[] = [];
+let _timerRegistroDiario: ReturnType<typeof setTimeout> | null = null;
+
+function fechaConOffset(offset: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}${m}${day}`;
+}
+
+function labelFecha(offset: number): string {
+  if (offset === 0) return "HOY";
+  if (offset === -1) return "AYER";
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function tipoLabelRegistro(tipo: string): string {
+  const labels: Record<string, string> = {
+    login: "Acceso",
+    ver_archivo: "Archivo visto",
+    mover_archivo: "Archivo movido",
+    traducir: "Traducción",
+    descargar: "Descarga",
+    importar: "Importación",
+    cerrar_sesion: "Sesión cerrada",
+  };
+  return labels[tipo] ?? tipo;
+}
+
+async function irARegistro(): Promise<void> {
+  document.getElementById("modal-registro-popup")?.classList.add("hidden");
+  _registroFechaOffset = 0;
+  mostrarPantalla("registro");
+}
+
+async function cargarRegistroDia(): Promise<void> {
+  const fecha = fechaConOffset(_registroFechaOffset);
+  document.getElementById("registro-fecha-label")!.textContent = labelFecha(_registroFechaOffset);
+  const btnSig = document.getElementById("btn-registro-siguiente") as HTMLButtonElement | null;
+  if (btnSig) {
+    btnSig.disabled = _registroFechaOffset >= 0;
+    btnSig.style.opacity = _registroFechaOffset >= 0 ? "0.2" : "0.8";
+    btnSig.style.cursor = _registroFechaOffset >= 0 ? "default" : "pointer";
+  }
+
+  try {
+    const [eventos, ips] = await Promise.all([
+      invoke<EventoDiario[]>("obtener_eventos_dia", { fecha }),
+      invoke<string[]>("obtener_ips_historial"),
+    ]);
+    _registroEventosCache = eventos;
+    renderizarRegistro(eventos, ips);
+  } catch {
+    document.getElementById("registro-lista")!.innerHTML =
+      `<p style="color:var(--texto-secundario);text-align:center;padding:20px;font-size:0.7rem;letter-spacing:1px;">Sin eventos registrados.</p>`;
+    document.getElementById("registro-resumen")!.innerHTML = "";
+  }
+}
+
+function renderizarRegistro(eventos: EventoDiario[], ipsHistorial: string[]): void {
+  const listaEl = document.getElementById("registro-lista")!;
+  const resumenEl = document.getElementById("registro-resumen")!;
+
+  const filtrados = eventos.filter(e =>
+    (_registroFiltroTipos.size === 0 || _registroFiltroTipos.has(e.tipo)) &&
+    (_registroFiltroIPs.size === 0 || _registroFiltroIPs.has(e.ip))
+  ).slice().reverse();
+
+  const logins = eventos.filter(e => e.tipo === "login").length;
+  const archivos = eventos.filter(e =>
+    ["ver_archivo", "traducir", "descargar", "importar"].includes(e.tipo)
+  ).length;
+  const sospechosos = eventos.filter(e =>
+    e.tipo === "login" && e.ip !== "IP no disponible" && !ipsHistorial.includes(e.ip)
+  ).length;
+
+  resumenEl.innerHTML = `
+    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+      <span class="registro-stat">${logins} <small>acceso${logins !== 1 ? "s" : ""}</small></span>
+      <span class="registro-stat">${archivos} <small>archivo${archivos !== 1 ? "s" : ""}</small></span>
+      <span class="registro-stat">${eventos.length} <small>total</small></span>
+      ${sospechosos > 0 ? `<span class="registro-stat-alerta">⚠ ${sospechosos} IP${sospechosos !== 1 ? "s" : ""} nueva${sospechosos !== 1 ? "s" : ""}</span>` : ""}
+    </div>
+  `;
+
+  if (filtrados.length === 0) {
+    listaEl.innerHTML = `<p style="color:var(--texto-secundario);text-align:center;padding:20px;font-size:0.7rem;letter-spacing:1px;">SIN EVENTOS${_registroFiltroTipos.size > 0 ? " CON ESTE FILTRO" : ""}</p>`;
+    return;
+  }
+
+  listaEl.innerHTML = filtrados.map((ev) => {
+    const esSospechoso = ev.tipo === "login" && ev.ip !== "IP no disponible" && !ipsHistorial.includes(ev.ip);
+    const hora = ev.timestamp.split("T")[1] ?? "";
+    return `
+      <div class="registro-evento${esSospechoso ? " registro-sospechoso" : ""}">
+        <div class="registro-evento-fila">
+          <span class="registro-evento-tipo">${escapeHTML(tipoLabelRegistro(ev.tipo))}</span>
+          <span class="registro-evento-hora">${escapeHTML(hora)}</span>
+        </div>
+        <div class="registro-evento-fila" style="margin-top:2px;">
+          <span class="registro-evento-ip">${escapeHTML(ev.ip)}</span>
+          ${ev.detalle ? `<span class="registro-evento-nombre">${escapeHTML(ev.detalle)}</span>` : ""}
+          ${esSospechoso ? `<span class="registro-badge-alerta">IP NUEVA</span>` : ""}
+        </div>
+        <button type="button" class="registro-btn-informar"
+          data-action="informar-evento-registro"
+          data-tipo="${escapeHTML(ev.tipo)}"
+          data-ts="${escapeHTML(ev.timestamp)}"
+          data-ip="${escapeHTML(ev.ip)}"
+          data-detalle="${escapeHTML(ev.detalle)}">
+          INFORMAR A BABEL
+        </button>
+      </div>
+    `;
+  }).join("");
+}
+
+function informarEventoRegistro(el: HTMLElement): void {
+  const tipo = el.dataset.tipo ?? "";
+  const ts = el.dataset.ts ?? "";
+  const ip = el.dataset.ip ?? "";
+  const detalle = el.dataset.detalle ?? "";
+
+  const asunto = encodeURIComponent(`[Babel] Actividad sospechosa — ${ts}`);
+  const lineas = [
+    "Hola equipo de Babel Security,",
+    "",
+    "He detectado una actividad que me parece sospechosa en mi cuenta de Babel.",
+    "",
+    "Detalles del evento:",
+    `- Tipo: ${tipoLabelRegistro(tipo)}`,
+    `- Fecha y hora: ${ts}`,
+    `- IP registrada: ${ip}`,
+    ...(detalle ? [`- Archivo: ${detalle}`] : []),
+    "",
+    "Por favor, ¿podéis revisarlo?",
+    "",
+    "Gracias.",
+  ];
+  const cuerpo = encodeURIComponent(lineas.join("\n"));
+  openUrl(`mailto:securitybabel@gmail.com?subject=${asunto}&body=${cuerpo}`).catch(() => {});
+}
+
+function abrirFiltroRegistro(): void {
+  document.querySelectorAll<HTMLInputElement>(".filtro-tipo").forEach(cb => {
+    cb.checked = _registroFiltroTipos.has(cb.value);
+  });
+  // Poblar IPs únicas del día desde la caché
+  const ipsUnicas = [...new Set(_registroEventosCache.map(e => e.ip).filter(ip => ip && ip !== "IP no disponible"))];
+  const contenedor = document.getElementById("filtro-ips-contenedor");
+  if (contenedor) {
+    if (ipsUnicas.length === 0) {
+      contenedor.innerHTML = `<p style="font-size:0.6rem;color:var(--texto-secundario);opacity:0.5;letter-spacing:1px;">Sin IPs registradas hoy</p>`;
+    } else {
+      contenedor.innerHTML = ipsUnicas.map(ip => `
+        <label class="registro-filtro-label">
+          <input type="checkbox" class="filtro-ip" value="${escapeHTML(ip)}"${_registroFiltroIPs.has(ip) ? " checked" : ""}>
+          ${escapeHTML(ip)}
+        </label>`).join("");
+    }
+  }
+  document.getElementById("modal-filtro-registro")?.classList.remove("hidden");
+}
+
+function limpiarFiltroRegistro(): void {
+  _registroFiltroTipos.clear();
+  _registroFiltroIPs.clear();
+  document.querySelectorAll<HTMLInputElement>(".filtro-tipo").forEach(cb => { cb.checked = false; });
+  document.querySelectorAll<HTMLInputElement>(".filtro-ip").forEach(cb => { cb.checked = false; });
+  document.getElementById("modal-filtro-registro")?.classList.add("hidden");
+  cargarRegistroDia().catch(() => {});
+}
+
+function aplicarFiltroRegistro(): void {
+  _registroFiltroTipos.clear();
+  _registroFiltroIPs.clear();
+  document.querySelectorAll<HTMLInputElement>(".filtro-tipo:checked").forEach(cb => {
+    _registroFiltroTipos.add(cb.value);
+  });
+  document.querySelectorAll<HTMLInputElement>(".filtro-ip:checked").forEach(cb => {
+    _registroFiltroIPs.add(cb.value);
+  });
+  document.getElementById("modal-filtro-registro")?.classList.add("hidden");
+  cargarRegistroDia().catch(() => {});
+}
+
+function programarPopupRegistroDiario(hora: number, minuto: number, segundo: number): void {
+  if (_timerRegistroDiario) {
+    clearTimeout(_timerRegistroDiario);
+    _timerRegistroDiario = null;
+  }
+  const ahora = new Date();
+  const objetivo = new Date();
+  objetivo.setHours(hora, minuto, segundo, 0);
+  let ms = objetivo.getTime() - ahora.getTime();
+  if (ms <= 0) ms += 24 * 60 * 60 * 1000;
+  _timerRegistroDiario = setTimeout(() => {
+    mostrarPopupResumenDiario().catch(() => {});
+    programarPopupRegistroDiario(hora, minuto, segundo);
+  }, ms);
+}
+
+async function mostrarPopupResumenDiario(): Promise<void> {
+  const fecha = fechaConOffset(0);
+  try {
+    const [eventos, ips] = await Promise.all([
+      invoke<EventoDiario[]>("obtener_eventos_dia", { fecha }),
+      invoke<string[]>("obtener_ips_historial"),
+    ]);
+
+    const logins = eventos.filter(e => e.tipo === "login").length;
+    const archivos = eventos.filter(e =>
+      ["ver_archivo", "traducir", "descargar", "importar"].includes(e.tipo)
+    ).length;
+    const sospechosos = eventos.filter(e =>
+      e.tipo === "login" && e.ip !== "IP no disponible" && !ips.includes(e.ip)
+    );
+
+    const popup = document.getElementById("registro-popup-contenido");
+    if (popup) {
+      popup.innerHTML = `
+        <p style="font-size:0.72rem;color:var(--texto-secundario);margin:0 0 12px;letter-spacing:1px;">
+          ${logins} acceso${logins !== 1 ? "s" : ""} · ${archivos} archivo${archivos !== 1 ? "s" : ""} tocado${archivos !== 1 ? "s" : ""}
+        </p>
+        ${sospechosos.length > 0 ? `
+          <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);border-radius:3px;padding:12px;margin-bottom:4px;">
+            <strong style="font-size:0.7rem;color:#ef4444;letter-spacing:1px;">
+              ⚠ ${sospechosos.length} acceso${sospechosos.length > 1 ? "s" : ""} desde IP nueva
+            </strong>
+            ${sospechosos.map(e => `
+              <div style="font-size:0.65rem;opacity:0.8;margin-top:4px;font-family:monospace;">
+                ${escapeHTML(e.timestamp.split("T")[1] ?? "")} — ${escapeHTML(e.ip)}
+              </div>`).join("")}
+          </div>
+        ` : `<p style="font-size:0.72rem;color:#22c55e;letter-spacing:1px;margin:0;">✓ Sin actividad sospechosa</p>`}
+      `;
+    }
+    document.getElementById("modal-registro-popup")?.classList.remove("hidden");
+  } catch {
+    // Silent — no interrumpir al usuario si el popup falla
+  }
+}
+
+async function iniciarRegistroDiario(): Promise<void> {
+  invoke("registrar_evento_diario", { tipo: "login", detalle: "" }).catch(() => {});
+  try {
+    const prefs = await invoke<PreferenciasRegistro>("obtener_preferencias_registro");
+    if (prefs.primera_vez) {
+      const horaEl = document.getElementById("rp-hora") as HTMLInputElement | null;
+      const minEl = document.getElementById("rp-minuto") as HTMLInputElement | null;
+      const secEl = document.getElementById("rp-segundo") as HTMLInputElement | null;
+      if (horaEl) horaEl.value = String(prefs.hora).padStart(2, "0");
+      if (minEl) minEl.value = String(prefs.minuto).padStart(2, "0");
+      if (secEl) secEl.value = String(prefs.segundo).padStart(2, "0");
+      document.getElementById("modal-registro-primera-vez")?.classList.remove("hidden");
+    } else {
+      programarPopupRegistroDiario(prefs.hora, prefs.minuto, prefs.segundo);
+    }
+  } catch {
+    // Silent
+  }
+}
+
+async function confirmarRegistroPrimeraVez(): Promise<void> {
+  const hora = Math.min(23, Math.max(0, parseInt((document.getElementById("rp-hora") as HTMLInputElement)?.value ?? "10", 10) || 0));
+  const minuto = Math.min(59, Math.max(0, parseInt((document.getElementById("rp-minuto") as HTMLInputElement)?.value ?? "0", 10) || 0));
+  const segundo = Math.min(59, Math.max(0, parseInt((document.getElementById("rp-segundo") as HTMLInputElement)?.value ?? "0", 10) || 0));
+  try {
+    await invoke("guardar_preferencias_registro", { hora, minuto, segundo });
+    await invoke("marcar_primera_vez_registro");
+    document.getElementById("modal-registro-primera-vez")?.classList.add("hidden");
+    programarPopupRegistroDiario(hora, minuto, segundo);
+    mostrarToast("Registro diario activado ✓", false);
+  } catch (e) {
+    mostrarToast("Error guardando preferencias: " + String(e), true);
+  }
+}
+
+async function abrirAjustesRegistro(): Promise<void> {
+  try {
+    const prefs = await invoke<PreferenciasRegistro>("obtener_preferencias_registro");
+    const horaEl = document.getElementById("ra-hora") as HTMLInputElement | null;
+    const minEl = document.getElementById("ra-minuto") as HTMLInputElement | null;
+    const secEl = document.getElementById("ra-segundo") as HTMLInputElement | null;
+    if (horaEl) horaEl.value = String(prefs.hora).padStart(2, "0");
+    if (minEl) minEl.value = String(prefs.minuto).padStart(2, "0");
+    if (secEl) secEl.value = String(prefs.segundo).padStart(2, "0");
+  } catch {
+    // defaults stay
+  }
+  document.getElementById("modal-ajustes-registro")?.classList.remove("hidden");
+}
+
+async function guardarAjustesRegistro(): Promise<void> {
+  const hora = Math.min(23, Math.max(0, parseInt((document.getElementById("ra-hora") as HTMLInputElement)?.value ?? "10", 10) || 0));
+  const minuto = Math.min(59, Math.max(0, parseInt((document.getElementById("ra-minuto") as HTMLInputElement)?.value ?? "0", 10) || 0));
+  const segundo = Math.min(59, Math.max(0, parseInt((document.getElementById("ra-segundo") as HTMLInputElement)?.value ?? "0", 10) || 0));
+  try {
+    await invoke("guardar_preferencias_registro", { hora, minuto, segundo });
+    document.getElementById("modal-ajustes-registro")?.classList.add("hidden");
+    programarPopupRegistroDiario(hora, minuto, segundo);
+    mostrarToast(`Notificación configurada a las ${String(hora).padStart(2,"0")}:${String(minuto).padStart(2,"0")}:${String(segundo).padStart(2,"0")} ✓`, false);
+  } catch (e) {
+    mostrarToast("Error guardando: " + String(e), true);
+  }
+}
 
 window.addEventListener("DOMContentLoaded", async () => {
   invoke("borrar_html_frase").catch(() => {});
   mostrarPantalla("carga");
 
-  // Evento Rust: servidor USB listo → toast
+  // Evento Rust: servidor USB listo → ocultar overlay + toast
   listen("servidor-usb-listo", () => {
+    document.getElementById("servidor-cargando-overlay")?.classList.add("hidden");
     mostrarToast("Traductor listo", false);
+  }).catch(() => {});
+
+  // Evento Rust: el sidecar no pudo arrancar o expiró el timeout
+  listen<string>("servidor-error", (ev) => {
+    document.getElementById("servidor-cargando-overlay")?.classList.add("hidden");
+    const msg = ev.payload ?? "El traductor no pudo iniciarse. Reinicia Babel.";
+    mostrarToast(`⚠ ${msg}`, true);
+  }).catch(() => {});
+
+  // Verificar estado inicial del servidor (el sidecar puede llevar ya varios segundos arrancando)
+  invoke<string>("estado_servidor_cmd").then((estado) => {
+    if (estado === "cargando") {
+      document.getElementById("servidor-cargando-overlay")?.classList.remove("hidden");
+    }
   }).catch(() => {});
 
   // Evento Rust: monitor periódico detectó nueva amenaza de seguridad
@@ -411,6 +1079,29 @@ window.addEventListener("DOMContentLoaded", async () => {
     const amenazas = evento.payload ?? [];
     if (amenazas.length > 0) mostrarAlertaAmenaza(amenazas);
   }).catch(() => {});
+
+  // Evento Rust: resultado del flujo OAuth Gmail
+  listen<{ ok: boolean; email?: string; error?: string }>("oauth_gmail_resultado", (ev) => {
+    document.getElementById("oauth-progreso")?.classList.add("hidden");
+    if (ev.payload.ok) {
+      const emailMostrado = ev.payload.email || "Gmail";
+      actualizarUIGmailOAuth(emailMostrado);
+      _smtpConfigurado = true;
+      _oauthGmailConectado = true;
+      cerrarModalConfigurarEmail();
+      mostrarToast(`Gmail conectado: ${emailMostrado}`, false);
+      cargarBandejaEmail();
+    } else {
+      mostrarToast(`Error OAuth: ${ev.payload.error ?? "desconocido"}`, true);
+    }
+  }).catch(() => {});
+
+  // Comprobar si ya hay OAuth Gmail guardado al iniciar sesión
+  invoke<string | null>("estado_oauth_gmail_tauri").then((email) => {
+    if (email) { actualizarUIGmailOAuth(email); _oauthGmailConectado = true; }
+  }).catch(() => {});
+
+  activarEntradaSeguraEnPasswords();
 
   // El comando traducir_documento_dialogo emite este evento justo tras elegir el archivo,
   // antes de empezar a traducir. Lo usamos para mostrar la burbuja "TÚ" y la barra.
@@ -431,6 +1122,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
     const textoEl = document.querySelector<HTMLElement>(".procesando-texto");
     const barraEl = document.getElementById("procesando-barra");
+    if (textoEl) textoEl.textContent = msg;
+    if (barraEl) barraEl.style.width = `${Math.min(pct, 100)}%`;
+  }).catch(() => {});
+
+  // Progreso de la unión de PDFs (panel modal, no la pantalla de traducción).
+  listen<{ pct: number; msg: string }>("progreso-union", (evento) => {
+    const { pct, msg } = evento.payload;
+    const textoEl = document.getElementById("union-progreso-texto");
+    const barraEl = document.getElementById("union-progreso-barra");
     if (textoEl) textoEl.textContent = msg;
     if (barraEl) barraEl.style.width = `${Math.min(pct, 100)}%`;
   }).catch(() => {});
@@ -469,6 +1169,32 @@ window.addEventListener("DOMContentLoaded", async () => {
   listen("finder-necesita-login", () => {
     getCurrentWindow().show().catch(() => {});
     getCurrentWindow().setFocus().catch(() => {});
+  }).catch(() => {});
+
+  // Actualización disponible → mostrar popup
+  listen<{ version: string; notas: string; fecha: string }>("actualizacion-disponible", (ev) => {
+    const { version, notas } = ev.payload;
+    const el = document.getElementById("modal-actualizacion");
+    const elVer = document.getElementById("upd-version");
+    const elNotas = document.getElementById("upd-notas");
+    if (!el || !elVer || !elNotas) return;
+    elVer.textContent = `Versión ${version}`;
+    elNotas.textContent = notas || "Nueva versión disponible.";
+    document.getElementById("upd-progreso")?.classList.add("hidden");
+    document.getElementById("upd-botones")?.removeAttribute("style");
+    el.classList.remove("hidden");
+  }).catch(() => {});
+
+  // Progreso de descarga/instalación
+  listen<{ estado: string }>("actualizacion-progreso", (ev) => {
+    const prog = document.getElementById("upd-progreso");
+    const texto = document.getElementById("upd-progreso-texto");
+    const botones = document.getElementById("upd-botones");
+    if (prog && texto && botones) {
+      prog.classList.remove("hidden");
+      botones.style.display = "none";
+      texto.textContent = ev.payload.estado === "instalando" ? "INSTALANDO..." : "DESCARGANDO...";
+    }
   }).catch(() => {});
 
   // Ocultar sidebar en fullscreen nativo (botón verde macOS)
@@ -529,7 +1255,38 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   const bunkerExiste = await invoke<boolean>("comprobar_estado_bunker");
-  mostrarPantalla(bunkerExiste ? "login" : "decision");
+  if (!bunkerExiste) { mostrarPantalla("decision"); return; }
+
+  // Intentar autologin con credenciales guardadas en el keychain del sistema.
+  // Saltar si el usuario hizo logout manual en esta misma sesión de la app.
+  const logoutManual = sessionStorage.getItem("babel-logout-manual");
+  sessionStorage.removeItem("babel-logout-manual");
+  if (!logoutManual) try {
+    const ok = await invoke<boolean>("autologin_tauri");
+    if (ok) {
+      _sesionActiva = true;
+      const nombreGuardado = localStorage.getItem("babel-nombre-display");
+      _sesionUsuario = nombreGuardado ?? "";
+      const bienvenida = document.getElementById("bienvenida-usuario");
+      if (bienvenida) bienvenida.textContent = _sesionUsuario ? `Bienvenido, ${_sesionUsuario}` : "Bienvenido";
+      activarTimerInactividad();
+      iniciarRegistroDiario().catch(() => {});
+      invoke("procesar_entrada_finder").catch(() => {});
+      invoke<boolean>("tiene_config_email").then(ok2 => {
+        _smtpConfigurado = ok2;
+        if (ok2) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
+      }).catch(() => {});
+      invoke<string | null>("estado_oauth_gmail_tauri").then((email) => {
+        if (email) { actualizarUIGmailOAuth(email); _oauthGmailConectado = true; }
+      }).catch(() => {});
+      mostrarPantalla(nombreGuardado === null ? "nombre" : "principal");
+      if (nombreGuardado !== null) cargarAjustesTraduccion().catch(() => {});
+      return;
+    }
+  } catch { /* keychain vacío o error — mostrar login normal */ }
+
+  mostrarPantalla("login");
+
 });
 
 // CREAR BÚNKER
@@ -590,12 +1347,16 @@ async function intentarAcceso(): Promise<void> {
       if (bienvenida) bienvenida.textContent = nombre ? `Bienvenido, ${nombre}` : "Bienvenido";
 
       activarTimerInactividad();
+      iniciarRegistroDiario().catch(() => {});
       // FINDER — drenar la cola de "Guardar con Babel" acumulada mientras no había sesión.
       invoke("procesar_entrada_finder").catch(() => {});
       invoke<boolean>("tiene_config_email").then(ok => {
         _smtpConfigurado = ok;
         if (ok) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
       }).catch(() => { });
+      invoke<string | null>("estado_oauth_gmail_tauri").then((email) => {
+        if (email) { actualizarUIGmailOAuth(email); _oauthGmailConectado = true; }
+      }).catch(() => {});
 
       if (nombreGuardado === null) {
         mostrarPantalla("nombre");
@@ -799,6 +1560,14 @@ function toggleBorradoAutomatico(activado: boolean): void {
   guardarAjustesTraduccion().catch(() => {});
 }
 
+function toggleSincronizacion(activado: boolean): void {
+  if (activado) {
+    invoke("iniciar_sinc_servidor").catch(() => {});
+  } else {
+    invoke("detener_sinc_servidor").catch(() => {});
+  }
+}
+
 // ============================================================
 // SIDEBAR — SELECTOR DE CATEGORÍA DE DICCIONARIO
 // Cuando el usuario cambia el tipo de diccionario en el sidebar,
@@ -821,6 +1590,8 @@ async function cambiarCategoriaDiccionario(categoria: string): Promise<void> {
 // SIDEBAR — SELECTOR DE IDIOMA DE TRADUCCIÓN — Sincroniza el selector del sidebar con el del header
 
 async function cerrarSesion(): Promise<void> {
+  // Registrar ANTES de cerrar sesión en Rust — si se hace después, la subclave ya no existe
+  await invoke("registrar_evento_diario", { tipo: "cerrar_sesion", detalle: "" }).catch(() => {});
   limpiarCamposSensibles();
   borrarChat();
   _sesionActiva = false;
@@ -828,8 +1599,11 @@ async function cerrarSesion(): Promise<void> {
   _firmaEmail = "0".repeat(_firmaEmail.length); _firmaEmail = "";
   _cuerpoEmailOriginal = "";
   desactivarTimerInactividad();
+  detenerPollSolicitudSinc();
   try { await invoke("cerrar_sesion_rust"); } catch { /* continúa cerrando aunque falle */ }
   limpiarCamposSensibles();
+  // Marcar que fue un logout manual — el autologin debe saltar en este reload
+  sessionStorage.setItem("babel-logout-manual", "1");
   localStorage.removeItem("babel-nombre-display");
   localStorage.removeItem("babel-buzon-activo");
   localStorage.removeItem("babel-buzon-activo-g");
@@ -931,6 +1705,12 @@ let buzonActivoGuardados: string = "todos";
 let terminoBusquedaArchivos = "";
 let terminoBusquedaBuzones = "";
 let _smtpConfigurado: boolean = false;
+// true cuando hay tokens OAuth de Gmail guardados y activos para esta sesión.
+// Distinto de _smtpConfigurado: puede haber config SMTP manual sin OAuth.
+let _oauthGmailConectado: boolean = false;
+// true = el usuario cerró el modal sin conectar en esta sesión; no vuelve a aparecer
+// hasta que reinicie la app. Se resetea a false al arrancar (variable en RAM, sin localStorage).
+let _modalEmailVistoEnSesion: boolean = false;
 // Tipo que refleja el struct Rust MetadatosArchivo
 interface MetadatosArchivo {
   nombre: string;
@@ -1096,10 +1876,17 @@ function actualizarSeleccionGuardados(): void {
   const seleccionados = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
   const hay = seleccionados.length > 0;
   const unico = seleccionados.length === 1;
+  const bases = Array.from(seleccionados).map(cb => {
+    const card = cb.closest(".archivo-card") as HTMLElement | null;
+    return (card?.dataset.base ?? "").toLowerCase();
+  });
+  const todasImagenes = hay && bases.every(b => /\.(png|jpe?g|webp|bmp|gif|tiff?)$/.test(b));
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.toggle("hidden", !hay);
   document.getElementById("btn-compartir-sel-g")?.classList.toggle("hidden", !unico);
   document.getElementById("btn-mail-sel-g")?.classList.toggle("hidden", !unico);
+  document.getElementById("btn-unir-pdfs-g")?.classList.toggle("hidden", seleccionados.length < 2);
+  document.getElementById("btn-convertir-img-pdf-g")?.classList.toggle("hidden", !todasImagenes);
   document.getElementById("ui-exportar-todo")?.classList.toggle("hidden", hay);
   document.getElementById("ui-finder")?.classList.toggle("hidden", hay);
   document.getElementById("ui-importar")?.classList.toggle("hidden", hay);
@@ -1360,6 +2147,95 @@ async function abrirImportarGuardado(): Promise<void> {
   }
 }
 
+// Menú del botón Importar: elegir un archivo suelto o una carpeta entera.
+let _popupImportar: HTMLElement | null = null;
+function mostrarPopupImportar(ancla: HTMLElement): void {
+  cerrarPopupImportar();
+  const popup = document.createElement("div");
+  popup.style.cssText = `
+    position:fixed;z-index:4000;background:var(--fondo-panel);
+    border:1px solid var(--borde);border-radius:3px;
+    padding:6px 0;min-width:150px;box-shadow:0 4px 16px rgba(0,0,0,0.5);
+  `;
+  const rect = ancla.getBoundingClientRect();
+  popup.style.top = (rect.bottom + 4) + "px";
+  popup.style.left = rect.left + "px";
+  const btnStyle = `display:block;width:100%;text-align:left;background:none;border:none;
+    color:var(--texto);padding:8px 16px;cursor:pointer;font-size:0.68rem;
+    letter-spacing:1px;font-family:'Times New Roman',Times,serif;`;
+  popup.innerHTML = `
+    <button style="${btnStyle}" id="pop-imp-archivo">📄 ARCHIVO</button>
+    <button style="${btnStyle}" id="pop-imp-carpeta">📁 CARPETA</button>
+  `;
+  document.body.appendChild(popup);
+  _popupImportar = popup;
+  popup.querySelector("#pop-imp-archivo")?.addEventListener("click", () => {
+    cerrarPopupImportar(); void abrirImportarGuardado();
+  });
+  popup.querySelector("#pop-imp-carpeta")?.addEventListener("click", () => {
+    cerrarPopupImportar(); void abrirImportarCarpeta();
+  });
+  requestAnimationFrame(() => {
+    document.addEventListener("click", cerrarPopupImportarClick, { once: true });
+  });
+}
+
+function cerrarPopupImportar(): void {
+  _popupImportar?.remove();
+  _popupImportar = null;
+}
+
+function cerrarPopupImportarClick(e: MouseEvent): void {
+  if (_popupImportar && !_popupImportar.contains(e.target as Node)) cerrarPopupImportar();
+}
+
+// Importa una carpeta entera vía diálogo nativo. El backend cifra cada archivo y
+// devuelve las rutas .babel; aquí aplicamos el destino por contexto (igual que el
+// arrastre): en "todos" creamos una carpeta con el nombre de la elegida; dentro de
+// una carpeta, todo cae ahí.
+async function abrirImportarCarpeta(): Promise<void> {
+  try {
+    const res = await invoke<{
+      nombre_carpeta: string;
+      rutas: string[];
+      guardados: number;
+      omitidos: number;
+    } | null>("importar_carpeta_dialogo");
+    if (!res) return; // cancelado
+    if (res.rutas.length > 0) {
+      let destino = buzonActivoGuardados;
+      if (destino === "todos") {
+        try {
+          destino = await invoke<string>("crear_buzon_guardado", {
+            nombre: (res.nombre_carpeta || "carpeta").toLowerCase(),
+            parent: null,
+          });
+        } catch (e) {
+          console.error("No se pudo crear la carpeta:", e);
+          destino = "todos";
+        }
+      }
+      if (destino !== "todos") {
+        for (const ruta of res.rutas) {
+          try {
+            await invoke("mover_archivo_guardado", { ruta, buzonDestino: destino });
+          } catch (e) {
+            console.error("Error moviendo a la carpeta:", e);
+          }
+        }
+      }
+    }
+    await cargarBuzonesGuardados();
+    await cargarArchivosGuardados();
+    mostrarToast(
+      `✓ ${res.guardados} guardado(s)${res.omitidos ? `, ${res.omitidos} omitido(s)` : ""}`,
+      res.omitidos > 0 && res.guardados === 0,
+    );
+  } catch (error) {
+    mostrarToast(`Error importando la carpeta: ${error}`, true);
+  }
+}
+
 async function verArchivoGuardado(): Promise<void> {
   const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
   if (checkboxes.length === 0) return;
@@ -1380,6 +2256,7 @@ async function verArchivoGuardado(): Promise<void> {
     modalNombre.textContent = nombre;
     renderizarEnContenedor(texto, modalContenido);
     modal.classList.remove("hidden");
+    invoke("registrar_evento_diario", { tipo: "ver_archivo", detalle: nombre.replace(/\.babel$/, "").replace(/^\d+_/, "") }).catch(() => {});
   } catch (e) {
     mostrarToast("Error abriendo archivo: " + e, true);
   }
@@ -1451,7 +2328,7 @@ async function compartirDirecto(): Promise<void> {
 
 // ── Menú compartir Babel — destinos personalizados por URL ───────────────────
 
-interface DestinoCompartir { nombre: string; url: string; }
+interface DestinoCompartir { nombre: string; url: string; bundle_id?: string; }
 let _destinosCompartir: DestinoCompartir[] = [];
 let _editandoDestinoIdx = -1;
 
@@ -1698,39 +2575,385 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   await cargarArchivosGuardados();
 }
 
+// ── UNIR PDFs ────────────────────────────────────────────────────────────────
+// Une varios PDFs guardados en uno solo, 100% local (PDFium nativo, en RAM),
+// conservando texto seleccionable. El resultado se guarda cifrado en el buzón.
+
+interface PdfUnionInfo { ruta: string; nombre: string; paginas: number; error: string | null; }
+
+let _bloquesUnion: PdfUnionInfo[] = [];
+let _dragUnionIdx = -1;
+let _unionEnCurso = false;
+
+async function abrirPanelUnion(): Promise<void> {
+  const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
+  const rutas: string[] = [];
+  checkboxes.forEach(cb => {
+    const card = cb.closest(".archivo-card") as HTMLElement | null;
+    if (card?.dataset.ruta) rutas.push(card.dataset.ruta);
+  });
+  if (rutas.length < 2) { mostrarToast("Selecciona al menos 2 PDFs", true); return; }
+
+  let infos: PdfUnionInfo[];
+  try {
+    infos = await invoke<PdfUnionInfo[]>("preparar_union_pdfs", { rutas });
+  } catch (e) {
+    mostrarToast("Error preparando la unión: " + String(e), true);
+    return;
+  }
+
+  // Requisito: solo PDFs. Si algún seleccionado no es PDF, no se puede unir.
+  const noPdf = infos.filter(i => i.error === "No es un PDF");
+  if (noPdf.length > 0) {
+    const nombres = noPdf.map(i => `"${i.nombre}"`).join(", ");
+    mostrarToast(
+      `No es posible unir: ${nombres} ${noPdf.length > 1 ? "no son PDF" : "no es un PDF"}. Solo se pueden unir archivos PDF.`,
+      true,
+    );
+    return;
+  }
+  // Otros errores (corrupto, protegido por contraseña, sin permisos).
+  const conError = infos.find(i => i.error);
+  if (conError) { mostrarToast(conError.error ?? "No se pudo leer un PDF", true); return; }
+
+  _bloquesUnion = infos;
+  const inputNombre = document.getElementById("input-nombre-union") as HTMLInputElement | null;
+  if (inputNombre) inputNombre.value = "documento_unido";
+  document.getElementById("union-progreso")?.classList.add("hidden");
+  const barra = document.getElementById("union-progreso-barra");
+  if (barra) barra.style.width = "0%";
+  const btn = document.getElementById("btn-confirmar-union") as HTMLButtonElement | null;
+  if (btn) btn.disabled = false;
+  renderBloquesUnion();
+  document.getElementById("modal-union-pdfs")?.classList.remove("hidden");
+}
+
+function renderBloquesUnion(): void {
+  const cont = document.getElementById("lista-union-pdfs");
+  if (!cont) return;
+  cont.innerHTML = _bloquesUnion.map((b, i) => `
+    <div class="union-bloque" draggable="true" data-idx="${i}"
+      style="display:flex;align-items:center;gap:10px;padding:9px 11px;
+        border:1px solid var(--borde);border-radius:3px;background:rgba(255,255,255,0.02);cursor:grab;">
+      <span style="color:var(--texto-secundario);font-size:0.9rem;">≡</span>
+      <span style="color:var(--dorado);font-size:0.7rem;min-width:18px;text-align:center;">${i + 1}</span>
+      <span style="flex:1;font-size:0.7rem;color:var(--texto);overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap;" title="${escapeHTML(b.nombre)}">${escapeHTML(b.nombre)}</span>
+      <span style="font-size:0.62rem;color:var(--texto-secundario);white-space:nowrap;">${b.paginas} pág.</span>
+    </div>`).join("");
+
+  cont.querySelectorAll<HTMLElement>(".union-bloque").forEach(el => {
+    el.addEventListener("dragstart", () => { _dragUnionIdx = Number(el.dataset.idx); el.style.opacity = "0.4"; });
+    el.addEventListener("dragend", () => { el.style.opacity = "1"; });
+    el.addEventListener("dragover", (e) => { e.preventDefault(); el.style.borderColor = "var(--dorado)"; });
+    el.addEventListener("dragleave", () => { el.style.borderColor = "var(--borde)"; });
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      el.style.borderColor = "var(--borde)";
+      const destino = Number(el.dataset.idx);
+      if (_dragUnionIdx < 0 || _dragUnionIdx === destino) return;
+      const [movido] = _bloquesUnion.splice(_dragUnionIdx, 1);
+      _bloquesUnion.splice(destino, 0, movido);
+      _dragUnionIdx = -1;
+      renderBloquesUnion();
+    });
+  });
+}
+
+function cerrarPanelUnion(): void {
+  if (_unionEnCurso) return; // no cerrar mientras se une
+  document.getElementById("modal-union-pdfs")?.classList.add("hidden");
+  _bloquesUnion = [];
+  _dragUnionIdx = -1;
+}
+
+async function confirmarUnion(): Promise<void> {
+  if (_unionEnCurso || _bloquesUnion.length < 2) return;
+  const inputNombre = document.getElementById("input-nombre-union") as HTMLInputElement | null;
+  const nombreSalida = (inputNombre?.value ?? "").trim() || "documento_unido";
+  const rutas = _bloquesUnion.map(b => b.ruta);
+  const borrarOriginales =
+    (document.getElementById("chk-borrar-originales-union") as HTMLInputElement | null)?.checked ?? true;
+
+  _unionEnCurso = true;
+  const btn = document.getElementById("btn-confirmar-union") as HTMLButtonElement | null;
+  if (btn) btn.disabled = true;
+  document.getElementById("union-progreso")?.classList.remove("hidden");
+
+  try {
+    await invoke<string>("unir_pdfs", {
+      rutas,
+      nombreSalida,
+      buzonId: buzonActivoGuardados,
+      borrarOriginales,
+    });
+  } catch (e) {
+    _unionEnCurso = false;
+    if (btn) btn.disabled = false;
+    document.getElementById("union-progreso")?.classList.add("hidden");
+    mostrarToast("Error al unir: " + String(e), true);
+    return;
+  }
+  _unionEnCurso = false;
+  document.getElementById("modal-union-pdfs")?.classList.add("hidden");
+  _bloquesUnion = [];
+  mostrarToast("✓ PDFs unidos y guardados", false);
+  cargarArchivosGuardados().catch(() => {});
+}
+
+
+// ── Convertir imagen(es) → PDF ────────────────────────────────────────────────
+
+function abrirModalImgAPdf(): void {
+  const sel = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
+  if (sel.length === 0) { mostrarToast("Selecciona al menos una imagen", true); return; }
+  if (sel.length === 1) {
+    void convertirImagenesAPdf("uno");
+    return;
+  }
+  document.getElementById("modal-img-a-pdf")?.classList.remove("hidden");
+}
+
+function cerrarModalImgAPdf(): void {
+  document.getElementById("modal-img-a-pdf")?.classList.add("hidden");
+}
+
+async function convertirImagenesAPdf(modo: "uno" | "varios"): Promise<void> {
+  cerrarModalImgAPdf();
+  const sel = Array.from(document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked"));
+  if (sel.length === 0) return;
+
+  const rutas = sel.map(cb => {
+    const card = cb.closest(".archivo-card") as HTMLElement | null;
+    return card?.dataset.ruta ?? "";
+  }).filter(Boolean);
+
+  const nombreSalida = sel.length === 1
+    ? (() => {
+        const card = sel[0].closest(".archivo-card") as HTMLElement | null;
+        return card?.dataset.base ?? "imagen_convertida";
+      })()
+    : "documento_convertido";
+
+  mostrarToast("Convirtiendo imágenes…", false);
+  try {
+    const resultado = await invoke<string[]>("convertir_imagenes_a_pdf", {
+      rutas,
+      nombreSalida,
+      buzonId: buzonActivoGuardados,
+      modo,
+    });
+    const n = resultado.length;
+    mostrarToast(n === 1 ? "✓ PDF generado y guardado" : `✓ ${n} PDFs generados y guardados`, false);
+    await cargarArchivosGuardados();
+  } catch (e) {
+    mostrarToast("Error al convertir: " + String(e), true);
+  }
+}
+
 let dropZoneInicializada = false;
 
+// Importación por arrastre. Usa drag&drop HTML5 (NO el nativo de wry, que en
+// macOS reciente aborta el proceso con un unwrap sobre el pasteboard). El webview
+// navegaría al archivo soltado (pantalla completa) si no hacemos preventDefault;
+// aquí lo interceptamos y guardamos por bytes. Los arrastres internos (reordenar
+// bloques de la unión) NO llevan "Files" en dataTransfer → pasan intactos.
 async function iniciarDropZone(): Promise<void> {
   if (dropZoneInicializada) return;
+  dropZoneInicializada = true;
 
-  await getCurrentWindow().onDragDropEvent(async (event) => {
+  const tieneArchivos = (dt: DataTransfer | null) =>
+    !!dt && Array.from(dt.types).includes("Files");
+  const barra = () => document.getElementById("chat-input-barra");
+  const zona = () => document.getElementById("drop-zone-guardados");
+  const resetZona = () => {
+    barra()?.classList.remove("drag-activo");
+    const z = zona();
+    if (z) { z.style.borderColor = "var(--borde)"; z.style.background = "transparent"; }
+  };
+
+  // preventDefault en dragover es imprescindible para que 'drop' llegue a dispararse
+  // y para impedir que el webview abra el archivo a pantalla completa.
+  window.addEventListener("dragover", (e) => {
+    if (!tieneArchivos(e.dataTransfer)) return;
+    e.preventDefault();
+    const enTraduccion = !document.getElementById("pantalla-traduccion")?.classList.contains("hidden");
+    const enGuardados = !document.getElementById("pantalla-archivos-guardados")?.classList.contains("hidden");
+    if (enTraduccion) barra()?.classList.add("drag-activo");
+    const z = zona();
+    if (enGuardados && z) { z.style.borderColor = "var(--dorado)"; z.style.background = "rgba(197,160,89,0.05)"; }
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (tieneArchivos(e.dataTransfer)) resetZona();
+  });
+  window.addEventListener("drop", async (e) => {
+    if (!tieneArchivos(e.dataTransfer)) return; // arrastre interno (reorden) → intacto
+    e.preventDefault();
+    resetZona();
     const enTraduccion = !document.getElementById("pantalla-traduccion")?.classList.contains("hidden");
     const enGuardados = !document.getElementById("pantalla-archivos-guardados")?.classList.contains("hidden");
     if (!enTraduccion && !enGuardados) return;
 
-    const barra = document.getElementById("chat-input-barra");
-    const zona = document.getElementById("drop-zone-guardados");
-    const resetZona = () => {
-      barra?.classList.remove("drag-activo");
-      if (zona) { zona.style.borderColor = "var(--borde)"; zona.style.background = "transparent"; }
-    };
-
-    if (event.payload.type === "over") {
-      if (enTraduccion) barra?.classList.add("drag-activo");
-      if (enGuardados && zona) { zona.style.borderColor = "var(--dorado)"; zona.style.background = "rgba(197,160,89,0.05)"; }
-    } else if (event.payload.type === "drop") {
-      resetZona();
-      const rutas = event.payload.paths;
-      if (rutas && rutas.length > 0) {
-        if (enTraduccion) procesarRuta(rutas[0]);
-        if (enGuardados) for (const ruta of rutas) await guardarArchivoSinTraducir(ruta);
+    if (enGuardados) {
+      // Capturamos las entradas del arrastre de forma SÍNCRONA: webkitGetAsEntry()
+      // debe llamarse dentro del propio evento; tras el primer await, dataTransfer.items
+      // se invalida. Las entradas distinguen archivo de carpeta (dataTransfer.files no).
+      const entradas = Array.from(e.dataTransfer?.items ?? [])
+        .map((it) => it.webkitGetAsEntry?.() ?? null)
+        .filter((x): x is FileSystemEntry => x != null);
+      if (entradas.length > 0) {
+        await importarEntradasGuardados(entradas);
+      } else {
+        // Navegador sin webkitGetAsEntry — degradamos a archivos sueltos.
+        const files = Array.from(e.dataTransfer?.files ?? []);
+        let ok = 0;
+        for (const f of files) if (await guardarArchivoDesdeFile(f, buzonActivoGuardados, false)) ok++;
+        await cargarArchivosGuardados();
+        if (ok > 0) mostrarToast(`✓ ${ok} guardado(s)`, false);
       }
-    } else {
-      resetZona();
+      return;
+    }
+
+    // Traducción: necesita una ruta → escribimos un temporal, traducimos y lo borramos.
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length === 0) return;
+    for (const f of files) {
+      try {
+        const buf = await f.arrayBuffer();
+        const b64 = bytesABase64(new Uint8Array(buf));
+        const tmp = await invoke<string>("preparar_temp_bytes", {
+          nombreArchivo: f.name, contenidoB64: b64,
+        });
+        await procesarRuta(tmp);
+        try { await invoke("borrar_archivo_fuente", { ruta: tmp }); } catch { /* ya borrado */ }
+      } catch (e) {
+        mostrarToast("Error procesando el archivo: " + String(e), true);
+      }
     }
   });
+}
 
-  dropZoneInicializada = true;
+// Lee un FileSystemFileEntry a un File (la API es por callback).
+function entradaAFile(entry: FileSystemFileEntry): Promise<File> {
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+// Recorre una carpeta arrastrada devolviendo TODOS sus archivos, aplanando las
+// subcarpetas (las carpetas de Babel son de un solo nivel). readEntries() entrega
+// las entradas en tandas: hay que llamarlo repetidamente hasta que devuelva [].
+async function leerCarpetaRecursivo(dir: FileSystemDirectoryEntry): Promise<File[]> {
+  const out: File[] = [];
+  const reader = dir.createReader();
+  const leerTanda = (): Promise<FileSystemEntry[]> =>
+    new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+  let tanda = await leerTanda();
+  while (tanda.length > 0) {
+    for (const e of tanda) {
+      if (e.isFile) out.push(await entradaAFile(e as FileSystemFileEntry));
+      else if (e.isDirectory) out.push(...(await leerCarpetaRecursivo(e as FileSystemDirectoryEntry)));
+    }
+    tanda = await leerTanda();
+  }
+  return out;
+}
+
+// Importa a "guardados" una mezcla de archivos y carpetas arrastrados. Destino por
+// contexto: una carpeta soltada en la vista "todos" crea una carpeta con su nombre;
+// dentro de una carpeta (o para archivos sueltos) todo cae en la carpeta activa.
+async function importarEntradasGuardados(entradas: FileSystemEntry[]): Promise<void> {
+  let guardados = 0;
+  let omitidos = 0;
+  const importar = async (f: File, destino: string) => {
+    if (await guardarArchivoDesdeFile(f, destino, false)) guardados++;
+    else omitidos++;
+  };
+  for (const entrada of entradas) {
+    if (entrada.isFile) {
+      await importar(await entradaAFile(entrada as FileSystemFileEntry), buzonActivoGuardados);
+    } else if (entrada.isDirectory) {
+      let destino = buzonActivoGuardados;
+      if (destino === "todos") {
+        // Crear una carpeta con el nombre de la soltada. Si falla (nombre inválido,
+        // etc.) caemos a "todos" para no perder los archivos.
+        try {
+          destino = await invoke<string>("crear_buzon_guardado", {
+            nombre: (entrada.name || "carpeta").toLowerCase(),
+            parent: null,
+          });
+        } catch (e) {
+          console.error("No se pudo crear la carpeta:", e);
+          destino = "todos";
+        }
+      }
+      const files = await leerCarpetaRecursivo(entrada as FileSystemDirectoryEntry);
+      for (const f of files) await importar(f, destino);
+    }
+  }
+  await cargarBuzonesGuardados();
+  await cargarArchivosGuardados();
+  if (guardados > 0 || omitidos > 0) {
+    mostrarToast(`✓ ${guardados} guardado(s)${omitidos ? `, ${omitidos} omitido(s)` : ""}`, omitidos > 0 && guardados === 0);
+  }
+}
+
+// Convierte bytes a base64 por bloques (btoa directo revienta la pila con arrays grandes).
+function bytesABase64(bytes: Uint8Array): string {
+  let binario = "";
+  const bloque = 0x8000;
+  for (let i = 0; i < bytes.length; i += bloque) {
+    binario += String.fromCharCode(...bytes.subarray(i, i + bloque));
+  }
+  return btoa(binario);
+}
+
+// Cifra y guarda un File arrastrado (sin ruta, solo bytes vía HTML5 drop).
+// `destino`: carpeta donde queda; "todos" = sin mover. `recargar`: al importar en
+// lote (una carpeta entera) se pasa false para no recargar la lista ni sacar un toast
+// por cada archivo — quien llama muestra un resumen al final. Devuelve si se guardó.
+async function guardarArchivoDesdeFile(
+  file: File,
+  destino: string = buzonActivoGuardados,
+  recargar: boolean = true,
+): Promise<boolean> {
+  const nombre = file.name || "archivo";
+  if (nombre.endsWith(".babel")) {
+    if (recargar) mostrarToast("Los archivos .babel ya están cifrados", true);
+    return false;
+  }
+  if (file.size > 150 * 1024 * 1024) {
+    if (recargar) mostrarToast(`"${nombre}" supera el límite de 150 MB`, true);
+    return false;
+  }
+  const nombreBase = nombre.replace(/\.[^/.]+$/, "");
+  const yaExiste = await invoke<boolean>("archivo_guardado_existe", { nombreBase }).catch(() => false);
+  if (yaExiste) {
+    if (recargar) mostrarToast(`"${nombre}" ya está guardado`, true);
+    return false;
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    const b64 = bytesABase64(new Uint8Array(buf));
+    const rutaCifrada = await invoke<string>("guardar_documento_desde_bytes", {
+      nombreArchivo: nombre,
+      contenidoB64: b64,
+    });
+    if (destino !== "todos") {
+      try {
+        await invoke("mover_archivo_guardado", { ruta: rutaCifrada, buzonDestino: destino });
+      } catch (e) {
+        console.error("Error moviendo a la carpeta:", e);
+      }
+    }
+    if (recargar) {
+      mostrarToast(`✓ ${nombre} guardado y cifrado`, false);
+      await cargarArchivosGuardados();
+    }
+    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombre }).catch(() => {});
+    return true;
+  } catch (error) {
+    if (recargar) mostrarToast(`Error guardando: ${error}`, true);
+    return false;
+  }
 }
 // NAVEGACIÓN — ENTRE PANTALLAS Y ACCIONES DE ARCHIVO
 
@@ -1746,48 +2969,6 @@ async function abrirCarpetaBabelGuardados(): Promise<void> {
 function irATraduccion(): void {
   mostrarPantalla("traduccion");
   setTimeout(() => iniciarDropZone(), 100);
-}
-
-// Cifra y guarda un archivo arrastrado sin traducirlo (solo cifrado)
-async function guardarArchivoSinTraducir(rutaArchivo: string): Promise<void> {
-  const nombre = rutaArchivo.split("/").pop() || "archivo";
-
-  if (nombre.endsWith(".babel")) {
-    mostrarToast("Los archivos .babel ya están cifrados", true);
-    return;
-  }
-
-  // Verificar duplicados contra el sistema de archivos real (no solo DOM visible)
-  const nombreBase = nombre.replace(/\.[^/.]+$/, "");
-  const yaExiste = await invoke<boolean>("archivo_guardado_existe", { nombreBase }).catch(() => false);
-  if (yaExiste) {
-    mostrarToast(`"${nombre}" ya está guardado`, true);
-    return;
-  }
-
-  try {
-    const rutaCifrada = await invoke<string>("guardar_documento_sin_traducir", {
-      nombreArchivo: nombre,
-      rutaCompleta: rutaArchivo,
-
-    });
-    if (buzonActivoGuardados !== "todos") {
-      try {
-        await invoke("mover_archivo_guardado", { ruta: rutaCifrada, buzonDestino: buzonActivoGuardados });
-      } catch (e) {
-        console.error("Error moviendo al buzón:", e);
-      }
-    }
-    let sufijo = "";
-    if (localStorage.getItem(LS_NO_PREG_BORRAR_ORIG) === "si") {
-      try { await invoke("borrar_archivo_fuente", { ruta: rutaArchivo }); sufijo = " · original destruido"; } catch { /* silencioso */ }
-    }
-    mostrarToast(`✓ ${nombre} guardado y cifrado${sufijo}`, false);
-    await cargarArchivosGuardados();
-
-  } catch (error) {
-    mostrarToast(`Error guardando: ${error}`, true);
-  }
 }
 
 async function irAArchivos(): Promise<void> {
@@ -1901,6 +3082,8 @@ async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent): Promi
           await invoke(cmd, { ruta, buzonDestino: id });
           await cargarArchivosGuardados();
           mostrarToast(`Movido a ${label}`, false);
+          const nombreMov = ruta.split("/").pop()?.replace(/\.babel$/, "").replace(/^\d+_/, "") ?? ruta;
+          invoke("registrar_evento_diario", { tipo: "mover_archivo", detalle: `${nombreMov} → ${label}` }).catch(() => {});
         } catch (error) { mostrarToast("Error: " + String(error), true); }
       };
       popup.appendChild(item);
@@ -1967,6 +3150,8 @@ async function exportarArchivo(ruta: string): Promise<void> {
   try {
     await invoke<string>("exportar_archivo", { ruta });
     mostrarToast("✓ Exportado correctamente", false);
+    const nombre = ruta.split("/").pop()?.replace(/\.babel$/, "").replace(/^\d+_/, "") ?? ruta;
+    invoke("registrar_evento_diario", { tipo: "descargar", detalle: nombre }).catch(() => {});
   } catch (error) {
     const msg = String(error);
     if (msg.includes("cancelada") || msg.includes("cancelado")) return;
@@ -2117,7 +3302,7 @@ async function eliminarSeleccionados(): Promise<void> {
 // CIERRE AUTOMÁTICO POR INACTIVIDAD
 let timerInactividad: ReturnType<typeof setTimeout> | null = null;
 let timerAvisoLock: ReturnType<typeof setTimeout> | null = null;
-let _tiempoLockMs: number = 60 * 60 * 1000; // default 60 min hasta que carguen los ajustes
+let _tiempoLockMs: number = 30 * 60 * 1000; // default 30 min
 
 function resetearTimerInactividad(): void {
   if (timerInactividad) clearTimeout(timerInactividad);
@@ -2131,6 +3316,12 @@ function resetearTimerInactividad(): void {
   }
 }
 
+function pausarTimerInactividad(): void {
+  // Al salir de la ventana se pausa el contador — no se bloquea por usar otra app
+  if (timerInactividad) clearTimeout(timerInactividad);
+  if (timerAvisoLock) clearTimeout(timerAvisoLock);
+}
+
 async function bloquearPantalla(): Promise<void> {
   desactivarTimerInactividad();
   _sesionActiva = false;
@@ -2138,6 +3329,7 @@ async function bloquearPantalla(): Promise<void> {
   const overlay = document.getElementById("pantalla-bloqueo");
   if (overlay) {
     overlay.classList.remove("hidden");
+    escanearKeyloggerAlEntrar();
     setTimeout(() => {
       (document.getElementById("bloqueo-maestra") as HTMLInputElement | null)?.focus();
     }, 100);
@@ -2173,6 +3365,10 @@ async function desbloquearPantalla(): Promise<void> {
         _smtpConfigurado = ok2;
         if (ok2) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
       }).catch(() => {});
+      invoke<string | null>("estado_oauth_gmail_tauri").then((email) => {
+        if (email) { actualizarUIGmailOAuth(email); _oauthGmailConectado = true; }
+        else { _oauthGmailConectado = false; }
+      }).catch(() => {});
       cargarAjustesTraduccion().catch(() => {});
     } else {
       mostrarMensaje("bloqueo-msg", "CREDENCIALES INCORRECTAS", true);
@@ -2187,6 +3383,9 @@ function activarTimerInactividad(): void {
   ["mousemove", "keydown", "mousedown", "touchstart", "click"].forEach(evento => {
     document.addEventListener(evento, resetearTimerInactividad);
   });
+  // Pausar al salir de la ventana, reanudar al volver — no bloquear por usar otra app
+  window.addEventListener("blur", pausarTimerInactividad);
+  window.addEventListener("focus", resetearTimerInactividad);
   resetearTimerInactividad();
 }
 
@@ -2196,6 +3395,8 @@ function desactivarTimerInactividad(): void {
   ["mousemove", "keydown", "mousedown", "touchstart", "click"].forEach(evento => {
     document.removeEventListener(evento, resetearTimerInactividad);
   });
+  window.removeEventListener("blur", pausarTimerInactividad);
+  window.removeEventListener("focus", resetearTimerInactividad);
 }
 // VISOR INDIVIDUAL — modal simple
 
@@ -2211,6 +3412,7 @@ async function traducirArchivoGuardado(ruta: string): Promise<void> {
     const nombreTrad = rutaResultado.replace(/\\/g, "/").split("/").pop() ?? rutaResultado;
     añadirResultadoArchivo(nombreTrad, rutaResultado);
     scrollAlFinal();
+    invoke("registrar_evento_diario", { tipo: "traducir", detalle: nombreMostrado }).catch(() => {});
   } catch (error) {
     mostrarProcesando(false);
     añadirMensajeBabel("Error al traducir: " + String(error), "BABEL · error");
@@ -2228,6 +3430,7 @@ async function verArchivo(ruta: string): Promise<void> {
     modalNombre.textContent = escapeHTML(nombre);
     renderizarEnContenedor(texto, modalContenido);
     modal.classList.remove("hidden");
+    invoke("registrar_evento_diario", { tipo: "ver_archivo", detalle: nombre.replace(/\.babel$/, "").replace(/^\d+_/, "") }).catch(() => {});
   } catch (error) {
     mostrarToast("Error abriendo archivo: " + String(error), true);
   }
@@ -2407,9 +3610,9 @@ function cambiarModoP2P(modo: string): void {
     panelChat?.classList.add("hidden");
     panelEmail?.classList.remove("hidden");
     if (subtitulo) subtitulo.textContent = "EMAIL · CIFRADO LOCAL";
-    if (!_smtpConfigurado) {
-      setTimeout(() => toggleConfigSmtp(), 300);
-    } else {
+    // Mostrar modal OAuth si no hay cuenta conectada (la función decide sola si procede)
+    setTimeout(() => mostrarModalConfigurarEmail(), 300);
+    if (_smtpConfigurado) {
       cargarBandejaEmail();
       iniciarRecargaAutomatica();
     }
@@ -2835,16 +4038,113 @@ interface EmailResumen {
   fecha: string;
   tiene_adjunto: boolean;
   leido: boolean;
+  destacado: boolean;
   snippet: string;
 }
 
 // Email seleccionado actualmente
 const emailsVistos = new Set<number>();
 let emailVisorActualId: number | null = null;
+let _emailVisorRemitente: string = "";
+let _emailVista: string = "todos";
+let _emailsCache: EmailResumen[] = [];
+let _emailPaginaVis: number = 25;
 let _firmaEmail: string = "";
 let _cuerpoEmailOriginal: string = "";
 let _imapCargando = false;   // B1: evita sesiones IMAP concurrentes en lectura
 let _imapMutando = false;    // B1: evita sesiones IMAP concurrentes en mutación
+
+function filtrarEmailsVista(emails: EmailResumen[], vista: string): EmailResumen[] {
+  if (vista === "noleidos") return emails.filter(e => !e.leido && !emailsVistos.has(e.id));
+  if (vista === "destacados") return emails.filter(e => e.destacado);
+  return emails;
+}
+
+function renderizarListaEmail(emails: EmailResumen[], resetPagina = true): void {
+  const lista = document.getElementById("email-lista");
+  if (!lista) return;
+
+  if (emails.length === 0) {
+    lista.innerHTML = `
+      <div class="email-vacio">
+        <span style="font-size:2rem;opacity:0.13;">✉</span>
+        <p class="email-vacio-titulo">Sin correos</p>
+        <p class="email-vacio-sub">No hay correos en esta vista</p>
+      </div>`;
+    return;
+  }
+
+  if (resetPagina) _emailPaginaVis = 25;
+  const visibles = emails.slice(0, _emailPaginaVis);
+  const hayMas = emails.length > _emailPaginaVis;
+
+  let noLeidos = 0;
+  const html = visibles.map(email => {
+    const visto = emailsVistos.has(email.id) || email.leido;
+    if (!visto) noLeidos++;
+    const idStr = String(Number(email.id));
+    return `
+    <div class="email-item${visto ? "" : " no-leido"}${email.destacado ? " destacado" : ""}"
+         data-action="seleccionar-email" data-id="${idStr}">
+      <div class="email-item-cabecera">
+        <div class="email-item-remitente">${escapeHTML(formatearRemitente(email.remitente))}</div>
+        ${!visto ? '<span class="email-punto-nuevo"></span>' : ""}
+      </div>
+      <div class="email-item-asunto">${escapeHTML(email.asunto)}</div>
+      ${email.snippet ? `<div class="email-item-snippet">${escapeHTML(email.snippet)}</div>` : ""}
+      <div class="email-item-meta">
+        <span class="email-item-fecha">${formatearFechaEmail(email.fecha)}</span>
+        <span class="email-item-meta-iconos">
+          ${email.tiene_adjunto ? '<span title="Tiene adjunto">📎</span>' : ""}
+        </span>
+      </div>
+      <div class="email-item-acciones">
+        <button class="email-accion-mini${email.destacado ? " activo" : ""}" title="${email.destacado ? "Quitar estrella" : "Destacar"}"
+          data-action="lista-destacar" data-id="${idStr}" data-val="${email.destacado ? "0" : "1"}">
+          ${email.destacado ? "★" : "☆"}
+        </button>
+        <button class="email-accion-mini" title="Archivar" data-action="lista-archivar" data-id="${idStr}">▽</button>
+        <button class="email-accion-mini peligro" title="Eliminar" data-action="lista-eliminar" data-id="${idStr}">🗑</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  const btnMas = hayMas
+    ? `<button class="email-cargar-mas" data-action="email-cargar-mas" data-total="${emails.length}">
+         Cargar más (${emails.length - _emailPaginaVis} restantes)
+       </button>`
+    : "";
+
+  lista.innerHTML = html + btnMas;
+
+  lista.onclick = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const btn = target.closest("[data-action]") as HTMLElement | null;
+    if (!btn) return;
+    const action = btn.dataset.action;
+    if (action === "email-cargar-mas") {
+      _emailPaginaVis += 25;
+      renderizarListaEmail(filtrarEmailsVista(_emailsCache, _emailVista), false);
+      return;
+    }
+    const id = parseInt(btn.dataset.id ?? "", 10);
+    if (!Number.isFinite(id)) return;
+    if (action === "seleccionar-email") { seleccionarEmail(id); return; }
+    // Botones de acción en fila — stopPropagation para no abrir el email
+    e.stopPropagation();
+    if (action === "lista-archivar") { void accionListaEmail(id, "archivar"); return; }
+    if (action === "lista-eliminar") { void accionListaEmail(id, "eliminar"); return; }
+    if (action === "lista-destacar") {
+      const destacar = btn.dataset.val === "1";
+      void accionListaEmail(id, "destacado", destacar);
+      return;
+    }
+  };
+
+  const tituloSidebar = document.querySelector(".email-sidebar-titulo");
+  if (tituloSidebar) tituloSidebar.textContent = noLeidos > 0 ? `BANDEJA (${noLeidos})` : "BANDEJA";
+  actualizarBadgeEmail(noLeidos);
+}
 
 async function cargarBandejaEmail(): Promise<void> {
   if (_imapCargando) return;
@@ -2859,50 +4159,34 @@ async function cargarBandejaEmail(): Promise<void> {
   lista.innerHTML = `<div class="email-vacio"><p class="email-vacio-titulo">Cargando...</p></div>`;
 
   try {
-    const emails = await invoke<EmailResumen[]>("obtener_emails_tauri");
+    const vistaImap = _emailVista === "archivados" ? "archivados" : "todos";
+    const idsAnteriores = new Set(_emailsCache.map(e => e.id));
+    const fetched = await invoke<EmailResumen[]>("obtener_emails_tauri", { vista: vistaImap });
+    if (vistaImap === "todos") {
+      // Detectar correos nuevos (solo en cargas posteriores a la primera)
+      if (_emailsCache.length > 0) {
+        const nuevos = fetched.filter(e => !idsAnteriores.has(e.id) && !e.leido);
+        if (nuevos.length > 0) {
+          mostrarToast(`${nuevos.length} correo${nuevos.length > 1 ? "s" : ""} nuevo${nuevos.length > 1 ? "s" : ""}`, false);
+        }
+      }
+      _emailsCache = fetched;
+    }
+
+    const emails = _emailVista === "archivados" ? fetched : filtrarEmailsVista(fetched, _emailVista);
 
     if (emails.length === 0) {
       lista.innerHTML = `
         <div class="email-vacio">
           <span style="font-size:2rem;opacity:0.13;">✉</span>
-          <p class="email-vacio-titulo">Bandeja vacía</p>
-          <p class="email-vacio-sub">No hay correos en la bandeja</p>
+          <p class="email-vacio-titulo">Sin correos</p>
+          <p class="email-vacio-sub">No hay correos en esta vista</p>
         </div>`;
       return;
     }
 
-    let noLeidos = 0;
-    lista.innerHTML = emails.map(email => {
-      const visto = emailsVistos.has(email.id) || email.leido;
-      if (!visto) noLeidos++;
-      return `
-      <div class="email-item${visto ? "" : " no-leido"}" data-action="seleccionar-email" data-id="${Number(email.id)}">
-        <div class="email-item-cabecera">
-          <div class="email-item-remitente">${escapeHTML(email.remitente)}</div>
-          ${!visto ? '<span class="email-punto-nuevo"></span>' : ""}
-        </div>
-        <div class="email-item-asunto">${escapeHTML(email.asunto)}</div>
-        ${email.snippet ? `<div class="email-item-snippet">${escapeHTML(email.snippet)}</div>` : ""}
-        <div class="email-item-meta">
-          <span class="email-item-fecha">${formatearFechaEmail(email.fecha)}</span>
-          ${email.tiene_adjunto ? '<span class="email-item-adjunto-icono" title="Tiene adjunto">📎</span>' : ""}
-        </div>
-      </div>`;
-    }).join("");
-
-    // Event delegation — evita onclick inline con IDs sin sanitizar
-    lista.onclick = (e: MouseEvent) => {
-      const item = (e.target as HTMLElement).closest("[data-action='seleccionar-email']") as HTMLElement | null;
-      if (!item) return;
-      const id = parseInt(item.dataset.id ?? "", 10);
-      if (!Number.isFinite(id)) return;
-      seleccionarEmail(id);
-    };
-
-    // Actualizar contador en el título y badge en botón EMAIL
-    const tituloSidebar = document.querySelector(".email-sidebar-titulo");
-    if (tituloSidebar) tituloSidebar.textContent = noLeidos > 0 ? `BANDEJA (${noLeidos})` : "BANDEJA";
-    actualizarBadgeEmail(noLeidos);
+    renderizarListaEmail(emails);
+    return;
 
   } catch (error) {
     lista.innerHTML = `
@@ -2916,6 +4200,18 @@ async function cargarBandejaEmail(): Promise<void> {
 }
 
 // Convierte fecha RFC 2822 a formato legible: hora si es hoy, día/mes si es anterior
+function formatearRemitente(remitente: string): string {
+  // "Nombre <email@dominio>" → "Nombre"
+  const match = remitente.match(/^(.+?)\s*<[^>]+>$/);
+  if (match) {
+    return match[1].trim().replace(/^["']|["']$/g, "") || remitente;
+  }
+  // Solo dirección email → mostrar la parte antes del @
+  const atIdx = remitente.indexOf("@");
+  if (atIdx > 0) return remitente.slice(0, atIdx);
+  return remitente;
+}
+
 function formatearFechaEmail(fecha: string): string {
   if (!fecha) return "";
   try {
@@ -2939,12 +4235,31 @@ function renderizarCuerpoEmail(contenedor: HTMLElement, cuerpo: string): void {
   }
   const esHTML = /<(p|div|br|img|html|body|span|table)[^>]*>/i.test(cuerpo);
   if (esHTML) {
-    contenedor.innerHTML = DOMPurify.sanitize(cuerpo, {
-      ALLOWED_TAGS: ["p", "div", "br", "span", "b", "i", "u", "strong", "em", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "a", "img", "h1", "h2", "h3", "h4", "blockquote", "pre", "code"],
-      ALLOWED_ATTR: ["href", "alt", "title", "class", "width", "height"],
-      FORBID_ATTR: ["style", "src", "onerror", "onload"],
+    const limpio = DOMPurify.sanitize(cuerpo, {
+      ALLOWED_TAGS: ["p", "div", "br", "span", "b", "i", "u", "strong", "em", "ul", "ol", "li",
+                     "table", "thead", "tbody", "tr", "th", "td", "a", "img",
+                     "h1", "h2", "h3", "h4", "blockquote", "pre", "code", "font", "center", "hr"],
+      ALLOWED_ATTR: ["href", "alt", "title", "class", "width", "height", "style",
+                     "src", "align", "valign", "bgcolor", "color", "size", "border",
+                     "cellpadding", "cellspacing"],
+      FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover", "onfocus", "onblur"],
       ALLOW_DATA_ATTR: false,
       FORCE_BODY: true,
+    });
+    // Fondo blanco: los emails HTML asumen fondo blanco — sin esto el texto oscuro es invisible
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText = "background:#ffffff;color:#222222;padding:20px 24px;border-radius:6px;line-height:1.6;font-family:sans-serif;";
+    wrapper.innerHTML = limpio;
+    contenedor.appendChild(wrapper);
+    // Interceptar clicks en links para abrirlos en el navegador externo
+    wrapper.querySelectorAll("a[href]").forEach(el => {
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        const href = (el as HTMLAnchorElement).href;
+        if (href.startsWith("https://") || href.startsWith("http://")) {
+          openUrl(href).catch(() => {});
+        }
+      });
     });
   } else {
     // Texto plano: URLs como enlaces seguros, resto como textContent
@@ -2956,7 +4271,10 @@ function renderizarCuerpoEmail(contenedor: HTMLElement, cuerpo: string): void {
         a.textContent = parte;
         a.style.color = "var(--dorado)";
         a.rel = "noopener noreferrer";
-        a.target = "_blank";
+        a.addEventListener("click", (e) => {
+          e.preventDefault();
+          openUrl(parte).catch(() => {});
+        });
         contenedor.appendChild(a);
       } else {
         contenedor.appendChild(document.createTextNode(parte));
@@ -2994,6 +4312,12 @@ async function seleccionarEmail(id: number): Promise<void> {
     }>("obtener_email_completo_tauri", { id });
 
     emailVisorActualId = email.id;
+    _emailVisorRemitente = email.remitente;
+    // Sincronizar estado destacado con el ítem de la lista
+    const itemActual = document.querySelector(`.email-item[data-id="${email.id}"]`);
+    _emailVisorDestacado = itemActual?.classList.contains("destacado") ?? false;
+    const btnDest = document.getElementById("btn-destacar-visor");
+    if (btnDest) btnDest.textContent = _emailVisorDestacado ? "★ Destacado" : "☆ Destacar";
     if (asuntoEl) asuntoEl.textContent = email.asunto || "Sin asunto";
     if (metaEl) metaEl.textContent = `De: ${email.remitente} · ${formatearFechaEmail(email.fecha)}`;
     if (adjuntosEl) adjuntosEl.innerHTML = email.adjuntos.map(a => `<span class="email-adjunto-tag">📎 ${escapeHTML(a)}</span>`).join("");
@@ -3006,6 +4330,7 @@ async function seleccionarEmail(id: number): Promise<void> {
     lectorVacio?.classList.remove("hidden");
     visor?.classList.add("hidden");
     emailVisorActualId = null;
+    _emailVisorRemitente = "";
   }
 }
 
@@ -3024,6 +4349,14 @@ function abrirComponerEmail(): void {
   }
 }
 
+// Quita el adjunto seleccionado sin cerrar el compositor
+function limpiarAdjuntoEmail(): void {
+  archivoEmailRuta = "";
+  archivoEmailFile = null;
+  const el = document.getElementById("comp-archivo-nombre");
+  if (el) el.textContent = "📎 Adjuntar (opcional)";
+}
+
 // Cierra el compositor y limpia los campos y archivos adjuntos
 function cerrarCompositor(): void {
   document.getElementById("email-compositor")?.classList.add("hidden");
@@ -3031,7 +4364,7 @@ function cerrarCompositor(): void {
   archivoEmailRuta = "";
   archivoEmailFile = null;
   const g = (id: string) => document.getElementById(id);
-  const n = g("comp-archivo-nombre"); if (n) n.textContent = "📎 Adjuntar documento";
+  const n = g("comp-archivo-nombre"); if (n) n.textContent = "📎 Adjuntar (opcional)";
   const s = g("comp-estado"); if (s) s.textContent = "";
   for (const id of ["input-archivo-email","comp-destinatario","comp-asunto","comp-cc","comp-cco","comp-cuerpo"]) {
     const f = g(id) as HTMLInputElement | null; if (f) f.value = "";
@@ -3043,12 +4376,23 @@ function cerrarVisorEmail(): void {
   document.getElementById("email-visor")?.classList.add("hidden");
   document.getElementById("email-lector-vacio")?.classList.remove("hidden");
   emailVisorActualId = null;
+  _emailVisorRemitente = "";
   _cuerpoEmailOriginal = "";
 }
 
-// Abre el selector de archivo del sistema para adjuntar al email
-function seleccionarArchivoEmail(): void {
-  document.getElementById("input-archivo-email")?.click();
+// Abre el selector de archivo en la carpeta ~/Babel
+async function seleccionarArchivoEmail(): Promise<void> {
+  try {
+    const resultado = await invoke<[string, number[]] | null>("seleccionar_archivo_email_dialogo");
+    if (!resultado) return;
+    const [nombre, bytesArr] = resultado;
+    archivoEmailFile = new File([new Uint8Array(bytesArr)], nombre);
+    archivoEmailRuta = "";
+    const el = document.getElementById("comp-archivo-nombre");
+    if (el) el.textContent = "📎 " + nombre;
+  } catch (e) {
+    mostrarToast("Error abriendo selector: " + String(e), true);
+  }
 }
 
 // Actualiza el nombre del archivo adjunto en el compositor cuando el usuario selecciona uno
@@ -3060,6 +4404,75 @@ function manejarSeleccionArchivoEmail(event: Event): void {
   archivoEmailFile = archivo;
   const el = document.getElementById("comp-archivo-nombre");
   if (el) el.textContent = "📎 " + archivo.name;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MODAL CONFIGURAR CORREO
+// ──────────────────────────────────────────────────────────────────────────────
+
+function mostrarModalConfigurarEmail(): void {
+  // No mostrar si ya se cerró en esta sesión o si hay OAuth Gmail activo
+  if (_modalEmailVistoEnSesion || _oauthGmailConectado) return;
+  document.getElementById("modal-configurar-email")?.classList.remove("hidden");
+}
+
+function cerrarModalConfigurarEmail(): void {
+  // Suprimir para el resto de la sesión (no persiste entre reinicios)
+  _modalEmailVistoEnSesion = true;
+  document.getElementById("modal-configurar-email")?.classList.add("hidden");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GMAIL OAUTH
+// ──────────────────────────────────────────────────────────────────────────────
+
+function actualizarUIGmailOAuth(email: string): void {
+  const conectado = document.getElementById("oauth-estado-conectado");
+  const desconectado = document.getElementById("oauth-estado-desconectado");
+  const emailValor = document.getElementById("oauth-email-valor");
+  const btnConectar = document.getElementById("btn-conectar-gmail");
+  const btnDesconectar = document.getElementById("btn-desconectar-gmail");
+  if (emailValor) emailValor.textContent = email;
+  conectado?.classList.remove("hidden");
+  desconectado?.classList.add("hidden");
+  btnConectar?.classList.add("hidden");
+  btnDesconectar?.classList.remove("hidden");
+}
+
+function resetUIGmailOAuth(): void {
+  const conectado = document.getElementById("oauth-estado-conectado");
+  const desconectado = document.getElementById("oauth-estado-desconectado");
+  const btnConectar = document.getElementById("btn-conectar-gmail");
+  const btnDesconectar = document.getElementById("btn-desconectar-gmail");
+  conectado?.classList.add("hidden");
+  desconectado?.classList.remove("hidden");
+  btnConectar?.classList.remove("hidden");
+  btnDesconectar?.classList.add("hidden");
+}
+
+async function iniciarOAuthGmail(): Promise<void> {
+  const progreso = document.getElementById("oauth-progreso");
+  progreso?.classList.remove("hidden");
+  try {
+    const url = await invoke<string>("iniciar_oauth_gmail_tauri");
+    await openUrl(url);
+  } catch (e) {
+    progreso?.classList.add("hidden");
+    mostrarToast("Error iniciando OAuth: " + String(e), true);
+  }
+}
+
+async function revocarOAuthGmail(): Promise<void> {
+  try {
+    await invoke("revocar_oauth_gmail_tauri");
+    resetUIGmailOAuth();
+    _smtpConfigurado = false;
+    _oauthGmailConectado = false;
+    _modalEmailVistoEnSesion = false;
+    mostrarToast("Gmail desconectado", false);
+  } catch (e) {
+    mostrarToast("Error al desconectar: " + String(e), true);
+  }
 }
 
 // Muestra u oculta el panel de configuración de correo
@@ -3140,23 +4553,27 @@ async function enviarEmail(): Promise<void> {
     mostrarToast("Rellena destinatario y asunto", true);
     return;
   }
-  if (!archivoEmailFile && !archivoEmailRuta) {
-    mostrarToast("Selecciona un archivo para adjuntar", true);
-    return;
-  }
 
-  const confirmado = window.confirm(
-    "AVISO DE SEGURIDAD\n\n" +
-    "Vas a enviar este documento DESCIFRADO por email.\n" +
-    "El destinatario podrá leerlo sin necesitar Babel.\n\n" +
-    "¿Continuar?"
-  );
-  if (!confirmado) return;
+  const tieneAdjunto = !!(archivoEmailFile || archivoEmailRuta);
+
+  // Solo mostrar aviso de seguridad si se adjunta un documento de Babel (descifrado)
+  if (tieneAdjunto) {
+    const confirmado = window.confirm(
+      "AVISO DE SEGURIDAD\n\n" +
+      "Vas a enviar este documento DESCIFRADO por email.\n" +
+      "El destinatario podrá leerlo sin necesitar Babel.\n\n" +
+      "¿Continuar?"
+    );
+    if (!confirmado) return;
+  }
 
   if (estado) estado.textContent = "Enviando...";
 
   try {
-    if (archivoEmailFile) {
+    if (!tieneAdjunto) {
+      // Email de solo texto — sin adjunto
+      await invoke("enviar_solo_texto_tauri", { destinatario, asunto, cuerpo, cc, cco });
+    } else if (archivoEmailFile) {
       const bytes = Array.from(new Uint8Array(await archivoEmailFile.arrayBuffer()));
       await invoke("enviar_bytes_cifrados_tauri", {
         nombreArchivo: archivoEmailFile.name,
@@ -3178,8 +4595,9 @@ async function enviarEmail(): Promise<void> {
       });
     }
     if (estado) estado.textContent = "";
-    mostrarToast("✓ Enviado cifrado", false);
+    mostrarToast(tieneAdjunto ? "✓ Enviado cifrado" : "✓ Enviado", false);
     cerrarCompositor();
+    await cargarBandejaEmail();
   } catch (error) {
     if (estado) estado.textContent = "";
     mostrarToast("Error enviando: " + String(error), true);
@@ -3194,19 +4612,63 @@ async function sincronizarEmail(): Promise<void> {
   await cargarBandejaEmail();
 }
 
+function textoPlanoDeEmail(cuerpo: string): string {
+  // Extrae texto legible de HTML o devuelve el texto plano tal cual
+  if (!cuerpo.trim().startsWith("<")) return cuerpo;
+  const div = document.createElement("div");
+  div.innerHTML = cuerpo;
+  return div.innerText;
+}
+
+function bloquesCita(cuerpo: string): string {
+  return textoPlanoDeEmail(cuerpo)
+    .split("\n")
+    .map(l => `> ${l}`)
+    .join("\n");
+}
+
 function responderEmail(): void {
   const asuntoEl = document.getElementById("visor-asunto");
-  const metaEl = document.getElementById("visor-meta");
   const asunto = asuntoEl?.textContent ?? "";
+  const metaEl = document.getElementById("visor-meta");
   const meta = metaEl?.textContent ?? "";
-  const remitente = meta.replace(/^De: /, "").split(" · ")[0] ?? "";
 
   abrirComponerEmail();
 
   const destinatario = document.getElementById("comp-destinatario") as HTMLInputElement;
   const asuntoComp = document.getElementById("comp-asunto") as HTMLInputElement;
-  if (destinatario) destinatario.value = remitente;
+  const cuerpoComp = document.getElementById("comp-cuerpo") as HTMLTextAreaElement;
+
+  if (destinatario) destinatario.value = _emailVisorRemitente;
   if (asuntoComp && asunto) asuntoComp.value = asunto.startsWith("Re:") ? asunto : `Re: ${asunto}`;
+
+  if (cuerpoComp && _cuerpoEmailOriginal) {
+    const firma = _firmaEmail ? `\n\n—\n${_firmaEmail}` : "";
+    cuerpoComp.value = `${firma}\n\n${meta}\n${bloquesCita(_cuerpoEmailOriginal)}`;
+    cuerpoComp.setSelectionRange(0, 0);
+    cuerpoComp.scrollTop = 0;
+  }
+}
+
+function reenviarEmail(): void {
+  const asuntoEl = document.getElementById("visor-asunto");
+  const asunto = asuntoEl?.textContent ?? "";
+  const metaEl = document.getElementById("visor-meta");
+  const meta = metaEl?.textContent ?? "";
+
+  abrirComponerEmail();
+
+  const asuntoComp = document.getElementById("comp-asunto") as HTMLInputElement;
+  const cuerpoComp = document.getElementById("comp-cuerpo") as HTMLTextAreaElement;
+
+  if (asuntoComp && asunto) asuntoComp.value = asunto.startsWith("Fwd:") ? asunto : `Fwd: ${asunto}`;
+
+  if (cuerpoComp && _cuerpoEmailOriginal) {
+    const firma = _firmaEmail ? `\n\n—\n${_firmaEmail}` : "";
+    cuerpoComp.value = `${firma}\n\n---------- Mensaje reenviado ----------\n${meta}\n\n${textoPlanoDeEmail(_cuerpoEmailOriginal)}`;
+    cuerpoComp.setSelectionRange(0, 0);
+    cuerpoComp.scrollTop = 0;
+  }
 }
 
 let _zoomEmailRem: number = 0.92;
@@ -3260,6 +4722,37 @@ function insertarPlantillaEmail(texto: string): void {
   cuerpo.focus();
 }
 
+async function accionListaEmail(id: number, accion: "archivar" | "eliminar" | "destacado", destacar?: boolean): Promise<void> {
+  if (_imapMutando) return;
+  _imapMutando = true;
+  try {
+    if (accion === "archivar") {
+      await invoke("archivar_email_tauri", { id });
+      document.querySelector(`.email-item[data-id="${id}"]`)?.remove();
+      if (emailVisorActualId === id) cerrarVisorEmail();
+      mostrarToast("Archivado.", false);
+    } else if (accion === "eliminar") {
+      await invoke("eliminar_email_tauri", { id });
+      document.querySelector(`.email-item[data-id="${id}"]`)?.remove();
+      if (emailVisorActualId === id) cerrarVisorEmail();
+      mostrarToast("Eliminado.", false);
+    } else if (accion === "destacado") {
+      const val = destacar ?? true;
+      await invoke("marcar_destacado_tauri", { id, destacar: val });
+      const itemEl = document.querySelector(`.email-item[data-id="${id}"]`) as HTMLElement | null;
+      if (itemEl) {
+        itemEl.classList.toggle("destacado", val);
+        const btn = itemEl.querySelector("[data-action='lista-destacar']") as HTMLElement | null;
+        if (btn) { btn.dataset.val = val ? "0" : "1"; btn.textContent = val ? "★" : "☆"; btn.classList.toggle("activo", val); }
+      }
+    }
+  } catch (e) {
+    mostrarToast(`Error: ${e}`, true);
+  } finally {
+    _imapMutando = false;
+  }
+}
+
 async function eliminarEmailActual(): Promise<void> {
   if (emailVisorActualId === null || _imapMutando) return;
   _imapMutando = true;
@@ -3275,6 +4768,58 @@ async function eliminarEmailActual(): Promise<void> {
     _imapMutando = false;
   }
 }
+
+async function archivarEmailActual(): Promise<void> {
+  if (emailVisorActualId === null || _imapMutando) return;
+  _imapMutando = true;
+  const id = emailVisorActualId;
+  try {
+    await invoke("archivar_email_tauri", { id });
+    cerrarVisorEmail();
+    mostrarToast("Correo archivado.", false);
+    await cargarBandejaEmail();
+  } catch (e) {
+    mostrarToast(`Error archivando: ${e}`, true);
+  } finally {
+    _imapMutando = false;
+  }
+}
+
+let _emailVisorDestacado = false;
+
+async function toggleDestacadoActual(): Promise<void> {
+  if (emailVisorActualId === null || _imapMutando) return;
+  _imapMutando = true;
+  const id = emailVisorActualId;
+  const nuevoValor = !_emailVisorDestacado;
+  try {
+    await invoke("marcar_destacado_tauri", { id, destacar: nuevoValor });
+    _emailVisorDestacado = nuevoValor;
+    const btn = document.getElementById("btn-destacar-visor");
+    if (btn) btn.textContent = nuevoValor ? "★ Destacado" : "☆ Destacar";
+    mostrarToast(nuevoValor ? "⭐ Destacado" : "☆ Quitado de destacados", false);
+    // Actualizar lista sin recargar IMAP
+    const itemEl = document.querySelector(`.email-item[data-id="${id}"]`) as HTMLElement | null;
+    if (itemEl) {
+      itemEl.classList.toggle("destacado", nuevoValor);
+      const btnLista = itemEl.querySelector("[data-action='toggle-destacado-lista']") as HTMLElement | null;
+      if (btnLista) { btnLista.dataset.destacar = nuevoValor ? "0" : "1"; btnLista.textContent = nuevoValor ? "★" : "☆"; }
+      const iconos = itemEl.querySelector(".email-item-meta-iconos");
+      if (iconos) {
+        const estrella = iconos.querySelector("span[title='Destacado']");
+        if (nuevoValor && !estrella) { const s = document.createElement("span"); s.title = "Destacado"; s.textContent = "⭐"; iconos.appendChild(s); }
+        else if (!nuevoValor && estrella) estrella.remove();
+      }
+    }
+  } catch (e) {
+    mostrarToast(`Error: ${e}`, true);
+  } finally {
+    _imapMutando = false;
+  }
+}
+
+// Acciones rápidas desde los botones de la lista (sin abrir el email)
+
 
 async function cambiarIdiomaEmail(idioma: string): Promise<void> {
   const cuerpoEl = document.getElementById("email-visor-cuerpo");
@@ -3478,6 +5023,7 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).toggleBorrarOriginal = toggleBorrarOriginal;
 (window as any).toggleModoRapido = toggleModoRapido;
 (window as any).toggleBorradoAutomatico = toggleBorradoAutomatico;
+(window as any).toggleSincronizacion = toggleSincronizacion;
 (window as any).cambiarIdiomaDesdeSelectores = cambiarIdiomaDesdeSelectores;
 (window as any).cambiarIdiomaDesdeAjustes = cambiarIdiomaDesdeAjustes;
 (window as any).cambiarCategoriaDiccionario = cambiarCategoriaDiccionario;
@@ -3562,7 +5108,7 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     borrarChat: "BORRAR CHAT", configuracion: "CONFIGURACIÓN", borrarAlSalir: "BORRAR AL SALIR",
     borrarAlSalirDesc: "Limpia el chat al volver al panel", emailAuto: "EMAIL AUTO", proximamente: "Próximamente",
     diccionario: "DICCIONARIO", vocabularioActivo: "Vocabulario activo", volver: "← VOLVER",
-    verArchivo: "◫ VER ARCHIVO", eliminar: "✕ ELIMINAR", compartir: "⇪ COMPARTIR",
+    verArchivo: "◫ VER ARCHIVO", eliminar: "✕ ELIMINAR", compartir: "⇪ COMPARTIR", unirPdfs: "⊕ UNIR PDFs",
     exportarTodo: "↓ EXPORTAR TODO", importar: "+ IMPORTAR", tema: "TEMA", idiomaInterfaz: "IDIOMA DE LA INTERFAZ",
     bienvenido: "BIENVENIDO AL SISTEMA", bienvenidoSistema: "BIENVENIDO AL SISTEMA", accederBunker: "ACCEDER A BÚNKER EXISTENTE",
     autenticacion: "AUTENTICACIÓN REQUERIDA", ajustesTitulo: "AJUSTES", volverPanel: "← VOLVER AL PANEL",
@@ -3570,13 +5116,18 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     traducidosGuardados: "TRADUCIDOS Y GUARDADOS", buzones: "BUZONES", archivosTitulo: "ARCHIVOS",
     noArchivos: "No hay archivos guardados", arrastra: "Arrastra documentos aquí para cifrarlos",
     buzonesTord: "BUZONES", finder: "◫ FINDER",
+    modalEmailTitulo: "CONFIGURAR CORREO",
+    modalEmailDesc: "Para leer y enviar correos desde Babel, conecta tu cuenta de Gmail.",
+    modalEmailBtnConectar: "CONECTAR CON GMAIL",
+    modalEmailAviso: "Tu correo se conecta de forma segura a través de Google. Babel nunca ve ni almacena tu contraseña. Autoriza solo desde dispositivos en los que confíes.",
+    modalEmailBtnPosponer: "Ahora no",
   },
   en: {
     traducir: "TRANSLATE", archivos: "FILES", p2p: "P2P", ajustes: "⚙ SETTINGS", cerrarSesion: "SIGN OUT",
     borrarChat: "CLEAR CHAT", configuracion: "SETTINGS", borrarAlSalir: "CLEAR ON EXIT",
     borrarAlSalirDesc: "Clears chat when returning to panel", emailAuto: "AUTO EMAIL", proximamente: "Coming soon",
     diccionario: "DICTIONARY", vocabularioActivo: "Active vocabulary", volver: "← BACK",
-    verArchivo: "◫ VIEW FILE", eliminar: "✕ DELETE", compartir: "⇪ SHARE",
+    verArchivo: "◫ VIEW FILE", eliminar: "✕ DELETE", compartir: "⇪ SHARE", unirPdfs: "⊕ MERGE PDFs",
     exportarTodo: "↓ EXPORT ALL", importar: "+ IMPORT", tema: "THEME", idiomaInterfaz: "INTERFACE LANGUAGE",
     bienvenido: "WELCOME TO THE SYSTEM", bienvenidoSistema: "WELCOME TO THE SYSTEM", accederBunker: "ACCESS EXISTING VAULT",
     autenticacion: "AUTHENTICATION REQUIRED", ajustesTitulo: "SETTINGS", volverPanel: "← BACK TO PANEL",
@@ -3584,13 +5135,18 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     traducidosGuardados: "TRANSLATED & SAVED", buzones: "FOLDERS", archivosTitulo: "FILES",
     noArchivos: "No saved files", arrastra: "Drag documents here to encrypt them",
     buzonesTord: "FOLDERS", finder: "◫ FINDER",
+    modalEmailTitulo: "SET UP EMAIL",
+    modalEmailDesc: "To read and send emails from Babel, connect your Gmail account.",
+    modalEmailBtnConectar: "CONNECT WITH GMAIL",
+    modalEmailAviso: "Your email connects securely through Google. Babel never sees or stores your password. Only authorize this on devices you trust.",
+    modalEmailBtnPosponer: "Not now",
   },
   fr: {
     traducir: "TRADUIRE", archivos: "FICHIERS", p2p: "P2P", ajustes: "⚙ PARAMÈTRES", cerrarSesion: "DÉCONNEXION",
     borrarChat: "EFFACER CHAT", configuracion: "CONFIGURATION", borrarAlSalir: "EFFACER EN QUITTANT",
     borrarAlSalirDesc: "Efface le chat au retour au panneau", emailAuto: "EMAIL AUTO", proximamente: "Bientôt",
     diccionario: "DICTIONNAIRE", vocabularioActivo: "Vocabulaire actif", volver: "← RETOUR",
-    verArchivo: "◫ VOIR FICHIER", eliminar: "✕ SUPPRIMER", compartir: "⇪ PARTAGER",
+    verArchivo: "◫ VOIR FICHIER", eliminar: "✕ SUPPRIMER", compartir: "⇪ PARTAGER", unirPdfs: "⊕ FUSIONNER PDF",
     exportarTodo: "↓ TOUT EXPORTER", importar: "+ IMPORTER", tema: "THÈME", idiomaInterfaz: "LANGUE DE L'INTERFACE",
     bienvenido: "BIENVENUE DANS LE SYSTÈME", bienvenidoSistema: "BIENVENUE DANS LE SYSTÈME", accederBunker: "ACCÉDER AU COFFRE EXISTANT",
     autenticacion: "AUTHENTIFICATION REQUISE", ajustesTitulo: "PARAMÈTRES", volverPanel: "← RETOUR AU PANNEAU",
@@ -3598,13 +5154,18 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     traducidosGuardados: "TRADUITS ET SAUVEGARDÉS", buzones: "DOSSIERS", archivosTitulo: "FICHIERS",
     noArchivos: "Aucun fichier sauvegardé", arrastra: "Faites glisser des documents ici pour les chiffrer",
     buzonesTord: "DOSSIERS", finder: "◫ FINDER",
+    modalEmailTitulo: "CONFIGURER LE COURRIER",
+    modalEmailDesc: "Pour lire et envoyer des courriels depuis Babel, connectez votre compte Gmail.",
+    modalEmailBtnConectar: "CONNECTER AVEC GMAIL",
+    modalEmailAviso: "Votre courrier se connecte de manière sécurisée via Google. Babel ne voit ni ne stocke jamais votre mot de passe. N'autorisez ceci que depuis des appareils de confiance.",
+    modalEmailBtnPosponer: "Pas maintenant",
   },
   ar: {
     traducir: "ترجمة", archivos: "ملفات", p2p: "P2P", ajustes: "⚙ إعدادات", cerrarSesion: "تسجيل الخروج",
     borrarChat: "مسح المحادثة", configuracion: "الإعدادات", borrarAlSalir: "مسح عند الخروج",
     borrarAlSalirDesc: "يمسح المحادثة عند العودة", emailAuto: "بريد تلقائي", proximamente: "قريباً",
     diccionario: "القاموس", vocabularioActivo: "المفردات النشطة", volver: "→ رجوع",
-    verArchivo: "◫ عرض الملف", eliminar: "✕ حذف", compartir: "⇪ مشاركة",
+    verArchivo: "◫ عرض الملف", eliminar: "✕ حذف", compartir: "⇪ مشاركة", unirPdfs: "⊕ دمج PDF",
     exportarTodo: "↓ تصدير الكل", importar: "+ استيراد", tema: "المظهر", idiomaInterfaz: "لغة الواجهة",
     bienvenido: "مرحباً بك في النظام", bienvenidoSistema: "مرحباً بك في النظام", accederBunker: "الدخول إلى الخزنة",
     autenticacion: "المصادقة مطلوبة", ajustesTitulo: "الإعدادات", volverPanel: "→ العودة إلى اللوحة",
@@ -3612,6 +5173,11 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     traducidosGuardados: "مترجم ومحفوظ", buzones: "المجلدات", archivosTitulo: "الملفات",
     noArchivos: "لا توجد ملفات محفوظة", arrastra: "اسحب المستندات هنا لتشفيرها",
     buzonesTord: "المجلدات", finder: "◫ FINDER",
+    modalEmailTitulo: "إعداد البريد الإلكتروني",
+    modalEmailDesc: "لقراءة رسائلك وإرسالها من بابل، اربط حساب Gmail الخاص بك.",
+    modalEmailBtnConectar: "ربط حساب Gmail",
+    modalEmailAviso: "يتصل بريدك بشكل آمن عبر Google. لا يرى بابل ولا يخزن كلمة مرورك. لا تصرح إلا على الأجهزة التي تثق بها.",
+    modalEmailBtnPosponer: "ليس الآن",
   },
 };
 
@@ -3627,6 +5193,7 @@ function cambiarIdiomaUI(idioma: string): void {
     "ui-proximamente": t.proximamente, "ui-diccionario": t.diccionario,
     "ui-vocabulario-activo": t.vocabularioActivo, "ui-volver-archivos": t.volver,
     "btn-ver-sel-g": t.verArchivo, "btn-compartir-sel-g": t.compartir, "btn-eliminar-sel-g": t.eliminar,
+    "btn-unir-pdfs-g": t.unirPdfs,
     "ui-exportar-todo": t.exportarTodo, "ui-importar": t.importar, "ui-tema": t.tema,
     "ui-idioma-interfaz": t.idiomaInterfaz, "ui-bienvenido-sistema": t.bienvenidoSistema,
     "ui-acceder-bunker": t.accederBunker, "ui-autenticacion-requerida": t.autenticacion,
@@ -3635,6 +5202,11 @@ function cambiarIdiomaUI(idioma: string): void {
     "ui-traducidos-guardados": t.traducidosGuardados, "ui-buzones": t.buzones,
     "ui-finder": t.finder, "ui-archivos-titulo": t.archivosTitulo,
     "ui-no-archivos": t.noArchivos, "ui-arrastra": t.arrastra,
+    "modal-email-titulo": t.modalEmailTitulo,
+    "modal-email-desc": t.modalEmailDesc,
+    "modal-email-btn-conectar": t.modalEmailBtnConectar,
+    "modal-email-aviso": t.modalEmailAviso,
+    "modal-email-btn-posponer": t.modalEmailBtnPosponer,
   };
   for (const [id, texto] of Object.entries(mapa)) {
     const el = document.getElementById(id);
@@ -3671,6 +5243,15 @@ function cargarAjustesGuardados(): void {
 (window as any).cambiarIdiomaUI = cambiarIdiomaUI;
 
 (window as any).enviarMensajeP2P = enviarMensajeP2P;
+
+async function instalarActualizacion(): Promise<void> {
+  try {
+    await invoke("instalar_actualizacion");
+  } catch (e) {
+    console.error("Error al instalar actualización:", e);
+  }
+}
+(window as any).instalarActualizacion = instalarActualizacion;
 (window as any).guardarNombreDisplay = guardarNombreDisplay;
 
 function guardarNombreDisplay(): void {
@@ -3719,6 +5300,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const modales = [
       "modal-visor", "modal-paralelo", "modal-frase-app",
       "modal-renombrar", "modal-solicitud-p2p", "modal-renombrar-archivo",
+      "modal-sinc",
       "modal-compartir-onboarding", "modal-menu-compartir", "modal-compartir",
     ];
     for (const id of modales) {
@@ -3838,6 +5420,356 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SINCRONIZACIÓN DE DISPOSITIVOS
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface DispositivoPublico { id: string; nombre: string; ts: number; ip_ultima: string; }
+interface SolicitudSinc { nombre: string; ip: string; tiene_b2: boolean; }
+interface ResultadoEmparejamiento { emparejado: boolean; nombre: string; b2_enviado: boolean; b2_conflicto: boolean; }
+
+let _sincPollInterval: number | null = null;
+let _sincDecisionTomada = false; // evita re-mostrar modal tras aceptar/rechazar
+
+function abrirSincronizacion(): void {
+  document.getElementById("modal-sinc")?.classList.remove("hidden");
+  mostrarFaseSinc("busqueda");
+  invoke<string>("iniciar_sinc_servidor").catch(() => {});
+  cargarListaEmparejados();
+  buscarDispositivosSinc();
+  iniciarPollSolicitudSinc();
+}
+
+function cerrarSincronizacion(): void {
+  document.getElementById("modal-sinc")?.classList.add("hidden");
+  // No detenemos el poll de solicitudes — puede haber una solicitud entrante pendiente
+}
+
+function mostrarFaseSinc(fase: "busqueda" | "espera" | "resultado"): void {
+  const fases: Record<string, string> = {
+    busqueda: "sinc-fase-busqueda",
+    espera:   "sinc-fase-espera",
+    resultado: "sinc-fase-resultado",
+  };
+  for (const [key, id] of Object.entries(fases)) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = key === fase ? "" : "none";
+  }
+}
+
+async function buscarDispositivosSinc(): Promise<void> {
+  const lista = document.getElementById("sinc-lista-peers-modal");
+  const msg = document.getElementById("sinc-msg-buscando");
+  if (!lista) return;
+  lista.innerHTML = "";
+  if (msg) msg.textContent = "Buscando dispositivos Babel en la red local...";
+  try {
+    const peers = await invoke<Array<{ip: string; nombre: string; puerto: number}>>("buscar_dispositivos_sinc");
+    if (msg) msg.textContent = peers.length
+      ? `${peers.length} dispositivo(s) encontrado(s)`
+      : "No se encontró ningún Babel en la red local.";
+    for (const p of peers) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.style.cssText = "width:100%;padding:12px 16px;background:rgba(201,168,76,0.05);" +
+        "border:1px solid rgba(201,168,76,0.3);color:var(--dorado);cursor:pointer;" +
+        "font-family:'Times New Roman',Times,serif;font-size:0.7rem;letter-spacing:2px;" +
+        "text-align:left;display:flex;justify-content:space-between;align-items:center;";
+      btn.innerHTML = `<span>${escapeHTML(p.nombre)}</span>` +
+        `<span style="font-size:0.55rem;opacity:0.5;letter-spacing:1px;">${escapeHTML(p.ip)}</span>`;
+      btn.addEventListener("click", () => seleccionarDispSinc(p.ip, p.nombre));
+      lista.appendChild(btn);
+    }
+  } catch (e) {
+    if (msg) msg.textContent = "Error buscando dispositivos: " + String(e);
+  }
+}
+
+async function seleccionarDispSinc(ip: string, nombre: string): Promise<void> {
+  const nomEl = document.getElementById("sinc-nombre-destino");
+  if (nomEl) nomEl.textContent = nombre;
+  mostrarFaseSinc("espera");
+  try {
+    const res = await invoke<ResultadoEmparejamiento>("solicitar_emparejamiento_sinc", { ip });
+    if (res.emparejado) {
+      mostrarResultadoSinc(true, res.nombre, undefined, res.b2_enviado, res.b2_conflicto);
+      cargarListaEmparejados();
+    } else {
+      mostrarResultadoSinc(false, "");
+    }
+  } catch (e) {
+    mostrarResultadoSinc(false, "", String(e));
+  }
+}
+
+function mostrarResultadoSinc(ok: boolean, nombre: string, error?: string, b2Enviado?: boolean, b2Conflicto?: boolean): void {
+  mostrarFaseSinc("resultado");
+  const icono = document.getElementById("sinc-resultado-icono");
+  const texto = document.getElementById("sinc-resultado-texto");
+  const sub   = document.getElementById("sinc-resultado-sub");
+  if (ok) {
+    if (icono) icono.textContent = "◈";
+    if (texto) texto.textContent = `EMPAREJADO CON ${nombre.toUpperCase()}`;
+    let subTexto = "La clave compartida ha sido guardada de forma segura.";
+    if (b2Conflicto) {
+      subTexto += " — El otro dispositivo ya tiene credenciales de buzón distintas; no se sobreescribieron.";
+    } else if (b2Enviado) {
+      subTexto += " — Credenciales de buzón compartidas con el dispositivo remoto.";
+    }
+    if (sub) sub.textContent = subTexto;
+    const toastExtra = b2Conflicto ? " (conflicto de credenciales B2)" : b2Enviado ? " + acceso al buzón compartido" : "";
+    mostrarToast(`Emparejado con ${nombre}${toastExtra}`, false);
+  } else {
+    if (icono) { icono.textContent = "✕"; icono.style.color = "rgba(255,80,80,0.7)"; }
+    if (texto) { texto.textContent = "EMPAREJAMIENTO RECHAZADO"; texto.style.color = "rgba(255,80,80,0.7)"; }
+    if (sub) sub.textContent = error || "El otro dispositivo rechazó la solicitud o no respondió.";
+  }
+}
+
+async function aceptarSinc(): Promise<void> {
+  _sincDecisionTomada = true;
+  document.getElementById("modal-solicitud-sinc")?.classList.add("hidden");
+  try {
+    await invoke("aceptar_emparejamiento_sinc");
+    cargarListaEmparejados();
+    mostrarToast("Emparejamiento aceptado — clave guardada.", false);
+  } catch (e) {
+    mostrarToast("Error al aceptar: " + String(e), true);
+  }
+}
+
+async function rechazarSinc(): Promise<void> {
+  _sincDecisionTomada = true;
+  document.getElementById("modal-solicitud-sinc")?.classList.add("hidden");
+  try {
+    await invoke("rechazar_emparejamiento_sinc");
+  } catch (_) {}
+}
+
+interface ResultadoConexionDirecta {
+  ok: boolean;
+  via_buzon: boolean;
+  ip_publica_remota: string;
+  latencia_ms: number;
+  error: string;
+}
+
+interface ConteoB2 {
+  id_par: string;
+  nombre: string;
+  n: number;
+}
+
+interface ResultadoAplicarB2 {
+  key: string;
+  tipo: string;
+  contenido: string;
+  nombre_origen: string;
+  timestamp: number;
+}
+
+async function probarConexionDispositivo(id: string, btn: HTMLButtonElement): Promise<void> {
+  const textoOriginal = btn.textContent ?? "PROBAR";
+  btn.textContent = "···";
+  btn.disabled = true;
+  try {
+    const res = await invoke<ResultadoConexionDirecta>("probar_conexion_dispositivo", { id });
+    if (res.ok) {
+      btn.textContent = `✓ ${res.latencia_ms}ms`;
+      btn.style.color = "rgba(100,200,100,0.9)";
+      btn.style.borderColor = "rgba(100,200,100,0.4)";
+      mostrarToast(`Conexión directa OK — IP pública: ${res.ip_publica_remota} (${res.latencia_ms} ms)`, false);
+    } else if (res.via_buzon) {
+      btn.textContent = "✉ buzón";
+      btn.style.color = "rgba(201,168,76,0.9)";
+      btn.style.borderColor = "rgba(201,168,76,0.4)";
+      mostrarToast(`Dispositivo offline — ${escapeHTML(res.error)}`, false);
+      cargarListaEmparejados(); // refresca badges de pendientes
+    } else {
+      btn.textContent = "✗";
+      btn.style.color = "rgba(255,80,80,0.7)";
+      btn.style.borderColor = "rgba(255,80,80,0.3)";
+      mostrarToast(res.error || "Conexión directa no disponible.", true);
+    }
+  } catch (e) {
+    btn.textContent = "✗";
+    btn.style.color = "rgba(255,80,80,0.7)";
+    btn.style.borderColor = "rgba(255,80,80,0.3)";
+    mostrarToast("Error al probar conexión: " + String(e), true);
+  } finally {
+    setTimeout(() => {
+      btn.textContent = textoOriginal;
+      btn.style.color = "";
+      btn.style.borderColor = "";
+      btn.disabled = false;
+    }, 5000);
+  }
+}
+
+async function desemparejarDispositivo(id: string): Promise<void> {
+  try {
+    await invoke("desemparejar_dispositivo", { id });
+    cargarListaEmparejados();
+    mostrarToast("Dispositivo desemparejado.", false);
+  } catch (e) {
+    mostrarToast("Error: " + String(e), true);
+  }
+}
+
+async function cargarListaEmparejados(): Promise<void> {
+  const contenedor = document.getElementById("sinc-lista-emparejados");
+  if (!contenedor) return;
+  try {
+    const lista = await invoke<DispositivoPublico[]>("listar_dispositivos_emparejados");
+    if (!lista || lista.length === 0) {
+      contenedor.innerHTML =
+        `<div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;` +
+        `letter-spacing:1px;color:var(--texto-secundario);opacity:0.45;text-align:center;padding:4px 0;">` +
+        `Sin dispositivos emparejados</div>`;
+      return;
+    }
+    // Obtener conteos de buzón B2 para todos los pares (falla silenciosa si B2 no configurado)
+    let conteos: ConteoB2[] = [];
+    try { conteos = await invoke<ConteoB2[]>("verificar_buzones_todos"); } catch (_) {}
+
+    contenedor.innerHTML = "";
+    for (const d of lista) {
+      const fecha = new Date(d.ts * 1000).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+      const conteo = conteos.find(c => c.id_par === d.id);
+      const nPend = conteo?.n ?? 0;
+      const buzonLabel = nPend > 0 ? `BUZÓN (${nPend})` : "BUZÓN";
+      const buzonColor = nPend > 0 ? "rgba(201,168,76,0.9)" : "rgba(201,168,76,0.35)";
+      const buzonBorder = nPend > 0 ? "rgba(201,168,76,0.5)" : "rgba(201,168,76,0.15)";
+
+      const fila = document.createElement("div");
+      fila.style.cssText = "display:flex;align-items:center;justify-content:space-between;" +
+        "padding:10px 12px;border:1px solid rgba(201,168,76,0.15);";
+      fila.innerHTML =
+        `<div style="flex:1;min-width:0;">` +
+        `<div style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;` +
+        `color:var(--dorado);letter-spacing:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">` +
+        `${escapeHTML(d.nombre)}</div>` +
+        `<div style="font-family:'Times New Roman',Times,serif;font-size:0.55rem;` +
+        `color:var(--texto-secundario);opacity:0.5;letter-spacing:0.5px;margin-top:2px;">` +
+        `${escapeHTML(d.ip_ultima)} · ${fecha}</div>` +
+        `</div>` +
+        `<div style="display:flex;gap:6px;flex-shrink:0;margin-left:12px;">` +
+        `<button type="button" data-action="probar-conexion-dispositivo" data-id="${escapeHTML(d.id)}"` +
+        ` style="background:transparent;border:1px solid rgba(197,160,89,0.3);` +
+        `color:var(--dorado);padding:4px 10px;cursor:pointer;font-family:'Times New Roman',Times,serif;` +
+        `font-size:0.52rem;letter-spacing:1.5px;">PROBAR</button>` +
+        `<button type="button" data-action="aplicar-buzon-b2" data-id="${escapeHTML(d.id)}"` +
+        ` style="background:transparent;border:1px solid ${buzonBorder};` +
+        `color:${buzonColor};padding:4px 10px;cursor:pointer;font-family:'Times New Roman',Times,serif;` +
+        `font-size:0.52rem;letter-spacing:1.5px;">${buzonLabel}</button>` +
+        `<button type="button" data-action="desemparejar-dispositivo" data-id="${escapeHTML(d.id)}"` +
+        ` style="background:transparent;border:1px solid rgba(255,80,80,0.3);` +
+        `color:rgba(255,80,80,0.7);padding:4px 10px;cursor:pointer;font-family:'Times New Roman',Times,serif;` +
+        `font-size:0.52rem;letter-spacing:1.5px;">QUITAR</button>` +
+        `</div>`;
+      contenedor.appendChild(fila);
+      bindOnclicks(fila);
+    }
+
+    // Auto-aplicar pendientes al abrir Ajustes (spec: verificar y aplicar automáticamente al arrancar)
+    verificarYAplicarBuzones(lista.map(d => d.id));
+  } catch (_) {}
+}
+
+// Guard para evitar que verificarYAplicarBuzones → cargarListaEmparejados → verificarYAplicarBuzones
+// cause un bucle infinito cuando hay ítems pendientes.
+let _aplicandoBuzon = false;
+
+async function verificarYAplicarBuzones(ids: string[]): Promise<void> {
+  if (_aplicandoBuzon) return;
+  _aplicandoBuzon = true;
+  let huboItems = false;
+  try {
+    for (const id of ids) {
+      try {
+        const resultados = await invoke<ResultadoAplicarB2[]>("aplicar_pendientes_buzon", { id });
+        for (const r of resultados) {
+          const fecha = new Date(r.timestamp * 1000).toLocaleString("es-ES", {
+            day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+          });
+          mostrarToast(
+            `Buzón: mensaje de ${escapeHTML(r.nombre_origen)} recibido el ${fecha}`,
+            false
+          );
+          huboItems = true;
+        }
+      } catch (_) { /* B2 no configurado o sin red, ignorar */ }
+    }
+  } finally {
+    _aplicandoBuzon = false;
+  }
+  // Refrescar badges solo tras liberar el guard (la segunda llamada a
+  // cargarListaEmparejados vuelve a llamar verificarYAplicarBuzones pero el
+  // guard la hace salir inmediatamente, rompiendo el bucle).
+  if (huboItems) cargarListaEmparejados();
+}
+
+async function aplicarPendientesB2(id: string, btn: HTMLButtonElement): Promise<void> {
+  const textoOriginal = btn.textContent ?? "BUZÓN";
+  btn.textContent = "···";
+  btn.disabled = true;
+  try {
+    const resultados = await invoke<ResultadoAplicarB2[]>("aplicar_pendientes_buzon", { id });
+    if (resultados.length === 0) {
+      mostrarToast("No hay mensajes pendientes en el buzón para este dispositivo.", false);
+    } else {
+      for (const r of resultados) {
+        const fecha = new Date(r.timestamp * 1000).toLocaleString("es-ES", {
+          day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+        });
+        mostrarToast(
+          `Buzón: ${escapeHTML(r.nombre_origen)} — ${escapeHTML(r.tipo)} (${fecha})`,
+          false
+        );
+      }
+      cargarListaEmparejados(); // refrescar badges
+    }
+  } catch (e) {
+    mostrarToast("Error al acceder al buzón B2: " + escapeHTML(String(e)), true);
+  } finally {
+    setTimeout(() => {
+      btn.textContent = textoOriginal;
+      btn.disabled = false;
+    }, 3000);
+  }
+}
+
+function iniciarPollSolicitudSinc(): void {
+  if (_sincPollInterval !== null) return;
+  _sincPollInterval = window.setInterval(async () => {
+    try {
+      const sol = await invoke<SolicitudSinc | null>("obtener_solicitud_sinc");
+      if (sol && !_sincDecisionTomada) {
+        const modal = document.getElementById("modal-solicitud-sinc");
+        if (modal && modal.classList.contains("hidden")) {
+          _sincDecisionTomada = false;
+          const nomEl  = document.getElementById("sinc-sol-nombre");
+          const ipEl   = document.getElementById("sinc-sol-ip");
+          const b2El   = document.getElementById("sinc-sol-b2-aviso");
+          if (nomEl) nomEl.textContent = sol.nombre;
+          if (ipEl)  ipEl.textContent  = sol.ip;
+          if (b2El) b2El.style.display = sol.tiene_b2 ? "" : "none";
+          modal.classList.remove("hidden");
+        }
+      } else if (!sol) {
+        _sincDecisionTomada = false; // solicitud limpiada por Rust → resetear flag
+      }
+    } catch (_) {}
+  }, 2000);
+}
+
+function detenerPollSolicitudSinc(): void {
+  if (_sincPollInterval !== null) {
+    clearInterval(_sincPollInterval);
+    _sincPollInterval = null;
+  }
+}
+
 // Tauri v2 inyecta nonces en script-src; con nonces 'unsafe-inline' queda ignorado
 // por spec CSP, bloqueando onclick="fn()". Convertimos todos a addEventListener.
 // MutationObserver lo aplica también a HTML generado dinámicamente (buzones, etc.)
@@ -3891,3 +5823,61 @@ function bindOnclicks(root: Element) {
   const selector = INLINE_EVENT_MAP.map(([a]) => `[${a}]`).join(",");
   root.querySelectorAll<HTMLElement>(selector).forEach(bindOnclickEl);
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TESTS MODAL CONFIGURAR CORREO
+// Ejecutar desde la consola del browser: window.__babelTest.modalEmail()
+// ──────────────────────────────────────────────────────────────────────────────
+(window as any).__babelTest = {
+  modalEmail(): void {
+    let ok = 0;
+    let fail = 0;
+    const assert = (cond: boolean, msg: string) => {
+      if (cond) { console.log(`  ✓ ${msg}`); ok++; }
+      else       { console.error(`  ✗ ${msg}`); fail++; }
+    };
+
+    console.group("Tests: modal configurar correo");
+
+    // T1: sin OAuth y sin haber cerrado → modal visible
+    _oauthGmailConectado = false;
+    _modalEmailVistoEnSesion = false;
+    mostrarModalConfigurarEmail();
+    assert(
+      !document.getElementById("modal-configurar-email")?.classList.contains("hidden"),
+      "T1: aparece cuando no hay cuenta conectada"
+    );
+
+    // T2: cerrarlo lo oculta y activa bandera de sesión
+    cerrarModalConfigurarEmail();
+    assert(
+      document.getElementById("modal-configurar-email")?.classList.contains("hidden") ?? false,
+      "T2: se oculta al cerrarlo"
+    );
+    assert(_modalEmailVistoEnSesion as boolean, "T2: bandera de sesión queda activada");
+
+    // T3: después de cerrarlo en la sesión no reaparece
+    mostrarModalConfigurarEmail();
+    assert(
+      document.getElementById("modal-configurar-email")?.classList.contains("hidden") === true,
+      "T3: no reaparece si ya fue cerrado en la sesión"
+    );
+
+    // T4: con OAuth conectado nunca aparece (aunque se resetee la bandera)
+    _oauthGmailConectado = true;
+    _modalEmailVistoEnSesion = false;
+    mostrarModalConfigurarEmail();
+    assert(
+      document.getElementById("modal-configurar-email")?.classList.contains("hidden") === true,
+      "T4: no aparece si ya hay OAuth Gmail activo"
+    );
+
+    // Restaurar estado real
+    _oauthGmailConectado = false;
+    _modalEmailVistoEnSesion = false;
+    document.getElementById("modal-configurar-email")?.classList.add("hidden");
+
+    console.groupEnd();
+    console.log(`Resultado: ${ok}/${ok + fail} tests pasaron`);
+  },
+};

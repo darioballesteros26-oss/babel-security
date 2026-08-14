@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Babel Security",
+  "productName": "Security Babel",
   "version": "0.1.0",
-  "identifier": "com.babel.seguridad",
+  "identifier": "com.security.babel",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,9 +14,10 @@
     "macOSPrivateApi": false,
     "windows": [
       {
-        "title": "Babel Security",
+        "title": "Security Babel",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -39,15 +40,26 @@
     },
     "externalBin": [
       "binaries/servidor_babel"
+    ],
+    "resources": [
+      "binaries/pdfium/*"
     ]
   },
   "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU5MDdFN0I2QTlDRkRBNTQKUldSVTJzK3B0dWNINlYzL2FCK0gwQnlWdEVDTTNyVWRVc2toelIrYy9JVlNPZk5jQVZkZ3ZYSVUK",
+      "endpoints": [
+        "https://github.com/darioballesteros26-oss/babel-security/releases/latest/download/latest.json"
+      ]
+    },
     "shell": {
       "open": false
     },
     "deep-link": {
       "desktop": {
-        "schemes": ["babel"]
+        "schemes": [
+          "babel"
+        ]
       }
     }
   }

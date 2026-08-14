@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Credenciales B2 — nunca al repo
+b2.json
+b2.toml
+
 # Modelos de traducción y binarios de build (no van al repo)
 servidor_babel/modelos/
 servidor_babel/modelos_usb/

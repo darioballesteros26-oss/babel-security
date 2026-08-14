@@ -1567,7 +1567,16 @@ fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
             use sha2::{Digest, Sha256};
             let nuevo_hash: [u8; 32] = Sha256::digest(&cifrado).into();
             use std::io::Write;
-            if let Ok(mut f) = fs::OpenOptions::new().append(true).create(true).open(ruta) {
+            // Crear la bitácora con permisos 0600 (append-only, no se puede usar
+            // escribir_privado porque trunca). Evita que quede 0644 en la primera creación.
+            let mut opts = fs::OpenOptions::new();
+            opts.append(true).create(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            if let Ok(mut f) = opts.open(ruta) {
                 let len = (cifrado.len() as u32).to_le_bytes();
                 if let Err(e) = f.write_all(&len).and_then(|_| f.write_all(&cifrado)) {
                     log::error!("[!] Fallo escribiendo evento de auditoría en {}: {}", ruta, e);
@@ -1820,4 +1829,182 @@ pub fn analizar_amenazas_nuevas(subclave_hex: &str) -> Vec<String> {
         }
     }
     nuevas
+}
+
+// CAPA 4C — ENTRADA SEGURA DE TECLADO (anti-keylogger en la entrada)
+//
+// EnableSecureEventInput() de macOS activa el "modo de entrada segura" del sistema:
+// mientras está activo, ningún otro proceso puede leer las pulsaciones vía event
+// taps de Quartz ni IOHIDSystem — es exactamente la protección que usan Terminal
+// y los gestores de contraseñas al teclear un secreto. No requiere privilegios root.
+//
+// Mantenemos un flag global para garantizar que cada Enable tenga EXACTAMENTE un
+// Disable. Activar dos veces no acumula, y nunca dejamos el sistema colgado en modo
+// seguro — algo que dejaría el teclado inutilizable para OTRAS apps del usuario.
+
+#[cfg(target_os = "macos")]
+static ENTRADA_SEGURA_ACTIVA: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+#[link(name = "Carbon", kind = "framework")]
+extern "C" {
+    fn EnableSecureEventInput() -> i32;
+    fn DisableSecureEventInput() -> i32;
+}
+
+/// Activa el modo de entrada segura de macOS. Idempotente: si ya estaba activo no
+/// hace nada, para no desbalancear el contador interno del SO.
+#[cfg(target_os = "macos")]
+pub fn activar_entrada_segura_os() {
+    use std::sync::atomic::Ordering;
+    if ENTRADA_SEGURA_ACTIVA
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        unsafe { EnableSecureEventInput(); }
+    }
+}
+
+/// Desactiva el modo de entrada segura. Idempotente: solo llama a Disable si
+/// nosotros lo habíamos activado, para no robarle el modo seguro a otra app.
+#[cfg(target_os = "macos")]
+pub fn desactivar_entrada_segura_os() {
+    use std::sync::atomic::Ordering;
+    if ENTRADA_SEGURA_ACTIVA
+        .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        unsafe { DisableSecureEventInput(); }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn activar_entrada_segura_os() {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn desactivar_entrada_segura_os() {}
+
+// CAPA 4D — DETECCIÓN DE CAPTURA / COMPARTICIÓN DE PANTALLA EN VIVO
+//
+// macOS no expone una API pública perfecta para "¿me están grabando AHORA?", así que
+// combinamos dos señales de alta confianza que sí podemos consultar barato:
+//   1. Duplicación de pantalla activa (CGDisplayIsInMirrorSet) — típico de AirPlay,
+//      proyector o segunda pantalla espejada, la vía habitual para proyectar en una sala.
+//   2. Procesos de grabación / videoconferencia con compartición ejecutándose ahora.
+// El frontend consulta esto en un bucle corto solo mientras hay contenido sensible.
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGMainDisplayID() -> u32;
+    // boolean_t es `int` en macOS → i32 (no `bool`, cuyo tamaño no está garantizado en FFI)
+    fn CGDisplayIsInMirrorSet(display: u32) -> i32;
+}
+
+/// Resultado de la detección de captura, separado por nivel de confianza:
+///   • `bloqueo`: señales de que se está capturando AHORA (ocultar el contenido).
+///   • `aviso`:   apps capaces de compartir que solo están abiertas (advertir, no bloquear).
+/// La distinción evita el falso positivo de tapar la pantalla por tener Zoom o
+/// QuickTime abiertos sin estar compartiendo nada.
+#[derive(Debug, Serialize)]
+pub struct EstadoCaptura {
+    pub bloqueo: Vec<String>,
+    pub aviso: Vec<String>,
+}
+
+/// Alta confianza: estos procesos solo corren cuando de verdad se está grabando o
+/// compartiendo (la utilidad de captura de macOS, el daemon de compartición remota,
+/// o una herramienta dedicada de grabación como OBS).
+fn apps_captura_alta() -> &'static [&'static str] {
+    &["screencaptureui", "screensharingd", "obs"]
+}
+
+/// Baja confianza: apps de videoconferencia o edición que pueden estar abiertas sin
+/// estar compartiendo la pantalla. Solo generan un aviso discreto.
+fn apps_captura_baja() -> &'static [&'static str] {
+    &[
+        "zoom.us", "quicktime", "msteams", "microsoft teams", "webex",
+        "screenflow", "camtasia", "loom", "snagit", "movavi screen",
+        "screen recorder",
+    ]
+}
+
+#[cfg(target_os = "macos")]
+fn mirroring_activo() -> bool {
+    unsafe { CGDisplayIsInMirrorSet(CGMainDisplayID()) != 0 }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn mirroring_activo() -> bool {
+    false
+}
+
+/// Devuelve el estado de captura de pantalla ahora mismo, separado por confianza.
+/// `bloqueo` y `aviso` vacíos = no se detecta captura ni compartición.
+pub fn detectar_captura_pantalla() -> EstadoCaptura {
+    let mut bloqueo = Vec::new();
+    let mut aviso = Vec::new();
+
+    // El mirroring es señal de alta confianza: proyector/AirPlay activo justo ahora.
+    if mirroring_activo() {
+        bloqueo.push(
+            "Duplicación de pantalla activa (AirPlay o pantalla externa espejada)".to_string(),
+        );
+    }
+
+    let mut s = System::new();
+    s.refresh_processes();
+    let mut vistos_alta = std::collections::HashSet::new();
+    let mut vistos_baja = std::collections::HashSet::new();
+    for (_pid, proceso) in s.processes() {
+        let nombre = proceso.name().to_lowercase();
+
+        let mut clasificado = false;
+        for app in apps_captura_alta() {
+            if nombre.contains(app) && vistos_alta.insert(*app) {
+                bloqueo.push(format!(
+                    "Grabación/compartición de pantalla activa: {}",
+                    proceso.name()
+                ));
+                clasificado = true;
+                break;
+            }
+        }
+        if clasificado {
+            continue;
+        }
+        for app in apps_captura_baja() {
+            if nombre.contains(app) && vistos_baja.insert(*app) {
+                aviso.push(format!(
+                    "App capaz de compartir pantalla abierta: {}",
+                    proceso.name()
+                ));
+                break;
+            }
+        }
+    }
+
+    EstadoCaptura { bloqueo, aviso }
+}
+
+#[cfg(test)]
+mod tests_proteccion {
+    // Valida que los FFI nativos (CoreGraphics / Carbon) enlazan y ejecutan en
+    // tiempo real, no solo que compilan. Es el riesgo principal de estos bindings.
+    #[test]
+    fn detectar_captura_no_panica() {
+        let r = super::detectar_captura_pantalla();
+        println!("[test] indicadores de captura: {:?}", r);
+    }
+
+    #[test]
+    fn entrada_segura_es_idempotente() {
+        // Activar dos veces y desactivar una debe dejar el sistema en estado limpio,
+        // sin descuadrar el contador interno del SO ni hacer panic.
+        super::activar_entrada_segura_os();
+        super::activar_entrada_segura_os();
+        super::desactivar_entrada_segura_os();
+        super::desactivar_entrada_segura_os();
+    }
 }
