@@ -127,6 +127,65 @@ function mostrarPantalla(nombre: Pantalla): void {
   if (nombre === "registro") {
     cargarRegistroDia().catch(() => {});
   }
+  if (nombre === "principal") {
+    comprobarEstadoPrueba().catch(() => {});
+  }
+}
+
+// ── SISTEMA DE PRUEBA GRATUITA ──────────────────────────────────────────────
+
+let _avisoTrialMostrado = false;
+
+interface EstadoPrueba {
+  en_prueba: boolean;
+  dias_restantes: number;
+  expirado: boolean;
+  advertencia: boolean;
+}
+
+async function comprobarEstadoPrueba(): Promise<void> {
+  let estado: EstadoPrueba;
+  try {
+    estado = await invoke<EstadoPrueba>("obtener_estado_prueba");
+  } catch {
+    return; // Si falla, no bloquear — beneficio de la duda
+  }
+
+  const banner = document.getElementById("banner-prueba");
+  const overlay = document.getElementById("overlay-trial-expirado");
+  const modalAviso = document.getElementById("modal-trial-aviso");
+
+  if (!estado.en_prueba) {
+    // Licencia activa: ocultar todo
+    if (banner) banner.style.display = "none";
+    if (overlay) overlay.style.display = "none";
+    return;
+  }
+
+  if (estado.expirado) {
+    if (banner) banner.style.display = "none";
+    if (overlay) overlay.style.display = "flex";
+    return;
+  }
+
+  // En prueba, no expirado
+  if (overlay) overlay.style.display = "none";
+
+  const dias = estado.dias_restantes;
+  const diasTexto = dias === 1 ? "1 día" : `${dias} días`;
+  const bannerDias = document.getElementById("banner-dias-texto");
+  if (bannerDias) bannerDias.textContent = diasTexto;
+  if (banner) banner.style.display = "block";
+
+  // Modal de aviso (solo una vez por sesión, con ≤3 días)
+  if (estado.advertencia && !_avisoTrialMostrado && modalAviso) {
+    _avisoTrialMostrado = true;
+    const titulo = document.getElementById("modal-trial-aviso-titulo");
+    const cuerpo = document.getElementById("modal-trial-aviso-cuerpo");
+    if (titulo) titulo.textContent = dias === 1 ? "Tu prueba termina mañana" : `Tu prueba termina en ${dias} días`;
+    if (cuerpo) cuerpo.textContent = `Activa tu licencia para no perder el acceso a Babel Security. Tus archivos siempre estarán disponibles para exportar.`;
+    modalAviso.classList.remove("hidden");
+  }
 }
 
 function mostrarMensaje(id: string, texto: string, esError: boolean): void {
@@ -641,6 +700,20 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "instalar-actualizacion": void instalarActualizacion(); break;
     case "cerrar-modal-actualizacion":
       document.getElementById("modal-actualizacion")?.classList.add("hidden");
+      break;
+    // Sistema de prueba gratuita
+    case "cerrar-modal-trial-aviso":
+      document.getElementById("modal-trial-aviso")?.classList.add("hidden");
+      break;
+    case "exportar-datos-trial":
+      // Exportar todos los archivos guardados antes de bloquear
+      void (async () => {
+        try {
+          await invoke("abrir_carpeta_guardados");
+        } catch {
+          mostrarToast("Abre ~/Babel/guardados para acceder a tus archivos cifrados", false);
+        }
+      })();
       break;
   }
 });

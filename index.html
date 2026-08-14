@@ -139,6 +139,14 @@
       <div id="nllb-badge" title="Estado NLLB"
         style="position:absolute;top:16px;right:16px;width:8px;height:8px;border-radius:50%;background:#f59e0b;opacity:0.7;transition:background 0.5s,opacity 0.5s;">
       </div>
+
+      <!-- Banner prueba gratuita — visible solo en modo trial -->
+      <div id="banner-prueba" style="display:none;width:100%;box-sizing:border-box;padding:8px 16px;background:rgba(212,175,55,0.12);border-bottom:1px solid rgba(212,175,55,0.3);text-align:center;font-size:0.62rem;letter-spacing:1.5px;color:var(--dorado);">
+        PRUEBA GRATUITA — <strong id="banner-dias-texto">14 días</strong> restantes
+        <a id="banner-activar-link" href="https://securitybabel.netlify.app#prueba-gratis" target="_blank" rel="noopener noreferrer"
+          style="color:var(--dorado);margin-left:12px;text-decoration:underline;cursor:pointer;">ACTIVAR LICENCIA →</a>
+      </div>
+
       <div class="logo-babel small">BABEL</div>
       <p class="descripcion" id="bienvenida-usuario">Bienvenido</p>
       <div class="panel-botones">
@@ -161,6 +169,42 @@
         style="margin-top:8px;letter-spacing:2px;" id="pantalla-texto-ajustes">⚙ AJUSTES</button>
       <button type="button" data-action="cerrar-sesion" class="btn-link" style="margin-top:8px"
         id="pantalla-texto-cerrar">CERRAR SESIÓN</button>
+
+      <!-- Overlay prueba expirada — cubre toda la pantalla principal -->
+      <div id="overlay-trial-expirado" style="display:none;position:absolute;inset:0;background:rgba(9,9,11,0.97);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:32px;text-align:center;">
+        <div style="font-family:'Times New Roman',Times,serif;font-size:1.1rem;letter-spacing:3px;color:var(--dorado);">BABEL</div>
+        <div style="font-size:0.72rem;letter-spacing:2px;color:#f1f5f9;margin-top:4px;">TU PRUEBA GRATUITA HA TERMINADO</div>
+        <div style="font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);max-width:280px;line-height:1.7;">
+          Activa tu licencia para seguir usando Babel Security.<br>Tus datos están a salvo — puedes exportarlos en cualquier momento.
+        </div>
+        <a href="https://securitybabel.netlify.app#prueba-gratis" target="_blank" rel="noopener noreferrer"
+          style="display:inline-block;margin-top:8px;padding:14px 32px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;text-decoration:none;font-weight:bold;">
+          OBTENER LICENCIA
+        </a>
+        <button type="button" data-action="exportar-datos-trial"
+          style="padding:10px 24px;border:1px solid rgba(197,160,89,0.4);background:transparent;color:var(--texto-secundario);font-family:'Times New Roman',Times,serif;font-size:0.6rem;letter-spacing:2px;cursor:pointer;margin-top:4px;">
+          EXPORTAR MIS DATOS
+        </button>
+      </div>
+    </div>
+
+    <!-- Modal aviso 3 días restantes -->
+    <div id="modal-trial-aviso" class="hidden" style="position:fixed;inset:0;background:rgba(9,9,11,0.85);z-index:300;display:flex;align-items:center;justify-content:center;">
+      <div style="background:#111115;border:1px solid rgba(212,175,55,0.35);padding:36px 32px;max-width:340px;width:90%;text-align:center;">
+        <div style="font-size:0.65rem;letter-spacing:2.5px;color:var(--dorado);margin-bottom:16px;">PRUEBA GRATUITA</div>
+        <div style="font-size:0.72rem;letter-spacing:1px;color:#f1f5f9;margin-bottom:10px;" id="modal-trial-aviso-titulo">Tu prueba termina pronto</div>
+        <div style="font-size:0.58rem;letter-spacing:0.5px;color:var(--texto-secundario);line-height:1.7;margin-bottom:24px;" id="modal-trial-aviso-cuerpo">
+          Te quedan pocos días. Activa tu licencia para no perder el acceso.
+        </div>
+        <a href="https://securitybabel.netlify.app#prueba-gratis" target="_blank" rel="noopener noreferrer"
+          style="display:block;margin-bottom:10px;padding:12px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;font-size:0.62rem;letter-spacing:2px;text-decoration:none;font-weight:bold;">
+          ACTIVAR AHORA
+        </a>
+        <button type="button" data-action="cerrar-modal-trial-aviso"
+          style="padding:10px;width:100%;border:1px solid rgba(197,160,89,0.3);background:transparent;color:var(--texto-secundario);font-size:0.58rem;letter-spacing:1.5px;cursor:pointer;font-family:'Times New Roman',Times,serif;">
+          CONTINUAR CON LA PRUEBA
+        </button>
+      </div>
     </div>
 
     <!-- PANTALLA 6 — TRADUCCIÓN CHAT -->

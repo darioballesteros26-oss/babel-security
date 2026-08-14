@@ -716,6 +716,105 @@ fn borrar_credenciales_keychain() {
     }
 }
 
+// ── SISTEMA DE PRUEBA GRATUITA (14 días) ─────────────────────────────────────
+// Datos en ~/Babel/prueba.babel — AES-GCM con machine key (mismo que autologin).
+// Formato interno (JSON cifrado): {"inicio": u64_unix, "ultimo": u64_unix}
+// • `inicio`  = primer arranque (nunca se sobreescribe hacia atrás)
+// • `ultimo`  = timestamp máximo visto → detecta rollback de reloj del sistema
+
+const DURACION_PRUEBA_DIAS: i64 = 14;
+
+#[derive(serde::Serialize)]
+struct EstadoPrueba {
+    en_prueba: bool,
+    dias_restantes: i64,
+    expirado: bool,
+    advertencia: bool,
+}
+
+fn prueba_babel_path() -> Option<std::path::PathBuf> {
+    let dir = babel_dir();
+    if std::fs::create_dir_all(&dir).is_err() { return None; }
+    Some(dir.join("prueba.babel"))
+}
+
+fn prueba_ahora_unix() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn prueba_cifrar(inicio: u64, ultimo: u64) -> Option<Vec<u8>> {
+    use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, OsRng, rand_core::RngCore}};
+    let key = autologin_machine_key();
+    let cipher = Aes256Gcm::new((&key).into());
+    let mut nonce_bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+    let payload = format!("{{\"inicio\":{},\"ultimo\":{}}}", inicio, ultimo);
+    let ct = cipher.encrypt(nonce, payload.as_bytes()).ok()?;
+    let mut blob = Vec::with_capacity(12 + ct.len());
+    blob.extend_from_slice(&nonce_bytes);
+    blob.extend_from_slice(&ct);
+    Some(blob)
+}
+
+fn prueba_descifrar(blob: &[u8]) -> Option<(u64, u64)> {
+    use aes_gcm::{Aes256Gcm, KeyInit, aead::Aead};
+    if blob.len() < 13 { return None; }
+    let key = autologin_machine_key();
+    let cipher = Aes256Gcm::new((&key).into());
+    let nonce = aes_gcm::Nonce::from_slice(&blob[..12]);
+    let plain = cipher.decrypt(nonce, &blob[12..]).ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&plain).ok()?;
+    let inicio = json["inicio"].as_u64()?;
+    let ultimo = json["ultimo"].as_u64()?;
+    Some((inicio, ultimo))
+}
+
+#[tauri::command]
+fn obtener_estado_prueba() -> EstadoPrueba {
+    let ahora = prueba_ahora_unix();
+    let path = match prueba_babel_path() {
+        Some(p) => p,
+        None => return EstadoPrueba { en_prueba: true, dias_restantes: 0, expirado: true, advertencia: false },
+    };
+
+    let (inicio, ultimo) = if path.exists() {
+        match std::fs::read(&path).ok().and_then(|b| prueba_descifrar(&b)) {
+            Some((i, u)) => (i, u),
+            // Archivo corrupto o de otra máquina → tratar como expirado (no reiniciar)
+            None => {
+                let dias_restantes = 0i64;
+                return EstadoPrueba { en_prueba: true, dias_restantes, expirado: true, advertencia: false };
+            }
+        }
+    } else {
+        // Primera instalación: crear registro de prueba
+        let nuevo_inicio = ahora;
+        if let Some(blob) = prueba_cifrar(nuevo_inicio, nuevo_inicio) {
+            let _ = escribir_privado(&path, &blob);
+        }
+        (nuevo_inicio, nuevo_inicio)
+    };
+
+    // Anti-rollback: usar el máximo entre ahora y el último timestamp guardado
+    let effective_now = ahora.max(ultimo);
+
+    // Actualizar `ultimo` si el tiempo avanzó (guarda el progreso normal)
+    if ahora > ultimo {
+        if let Some(blob) = prueba_cifrar(inicio, ahora) {
+            let _ = escribir_privado(&path, &blob);
+        }
+    }
+
+    let elapsed_days = effective_now.saturating_sub(inicio) / 86400;
+    let dias_restantes = DURACION_PRUEBA_DIAS - elapsed_days as i64;
+    let expirado = dias_restantes <= 0;
+    let advertencia = dias_restantes > 0 && dias_restantes <= 3;
+
+    EstadoPrueba { en_prueba: true, dias_restantes, expirado, advertencia }
+}
+
 /// Intenta hacer login automático con credenciales guardadas en el keychain.
 /// Devuelve true si hay credenciales guardadas Y son válidas.
 #[tauri::command]
@@ -5541,6 +5640,7 @@ fn main() {
             seleccionar_archivo_email_dialogo,
             autologin_tauri,
             olvidar_sesion_tauri,
+            obtener_estado_prueba,
             instalar_actualizacion,
             iniciar_oauth_gmail_tauri,
             estado_oauth_gmail_tauri,

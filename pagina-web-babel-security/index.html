@@ -1223,7 +1223,7 @@
           <svg class="faq-icon flex-shrink-0 w-5 h-5 text-slate-400 transition-transform duration-300" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
         </button>
         <div class="faq-body">
-          <div><p class="px-6 pb-5 text-slate-400 text-sm leading-relaxed" data-i18n="faq_a5">Por el momento no hay un periodo de prueba automático. Si quieres valorarlo antes de decidir, escríbeme a través del formulario y lo acordamos.</p></div>
+          <div><p class="px-6 pb-5 text-slate-400 text-sm leading-relaxed" data-i18n="faq_a5">Sí — descarga Babel Security y obtén 14 días de acceso completo automáticamente, sin tarjeta de crédito. Al finalizar, activa tu licencia Pro para continuar.</p></div>
         </div>
       </div>
 
@@ -1353,6 +1353,8 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
           <span class="dl-label" data-i18n="dl_win">Descargar para Windows</span>
         </a>
+        <!-- Nota: mismo instalador para prueba y Pro -->
+        <p class="text-slate-500 text-xs mt-1" data-i18n="dl_trial_note">Incluye 14 días de acceso completo. Sin tarjeta.</p>
         <p id="dl-note" class="text-slate-500 text-sm"></p>
       </div>
 
@@ -1362,6 +1364,48 @@
         <a class="dl-err-link c-gold text-sm underline" href="https://github.com/darioballesteros26-oss/babel-security/releases/latest" target="_blank" rel="noopener noreferrer" data-i18n="dl_err_link">Ver releases en GitHub →</a>
       </div>
 
+    </div>
+
+    <!-- Comparativa Prueba vs Pro -->
+    <div class="sr mt-16 max-w-2xl mx-auto w-full">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid rgba(212,175,55,0.2);border-radius:16px;overflow:hidden;">
+
+        <!-- Columna Prueba -->
+        <div style="padding:28px 24px;border-right:1px solid rgba(212,175,55,0.15);">
+          <div style="font-size:0.6rem;letter-spacing:2px;color:var(--color-gold,#D4AF37);margin-bottom:6px;" data-i18n="cmp_trial_label">PRUEBA GRATUITA</div>
+          <div style="font-size:1.5rem;font-weight:900;color:#f1f5f9;margin-bottom:4px;" data-i18n="cmp_trial_price">0 €</div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:20px;" data-i18n="cmp_trial_duration">14 días · sin tarjeta</div>
+          <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px;font-size:0.7rem;color:#94a3b8;">
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat1">Cifrado AES-256-GCM</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat2">Traducción IA local</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat3">Email cifrado</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat4">Chat P2P cifrado</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat5">Actualizaciones automáticas</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg><span style="color:#475569;" data-i18n="cmp_feat6_no">Acceso tras 14 días</span></li>
+          </ul>
+        </div>
+
+        <!-- Columna Pro -->
+        <div style="padding:28px 24px;background:rgba(212,175,55,0.04);position:relative;">
+          <div style="position:absolute;top:12px;right:12px;font-size:0.5rem;letter-spacing:1.5px;padding:3px 8px;background:rgba(212,175,55,0.15);color:#D4AF37;border-radius:999px;" data-i18n="cmp_pro_rec">RECOMENDADO</div>
+          <div style="font-size:0.6rem;letter-spacing:2px;color:var(--color-gold,#D4AF37);margin-bottom:6px;" data-i18n="cmp_pro_label">PRO</div>
+          <div style="font-size:1.5rem;font-weight:900;color:#f1f5f9;margin-bottom:4px;" data-i18n="cmp_pro_price">Próximamente</div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:20px;" data-i18n="cmp_pro_duration">acceso ilimitado</div>
+          <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px;font-size:0.7rem;color:#94a3b8;">
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat1">Cifrado AES-256-GCM</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat2">Traducción IA local</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat3">Email cifrado</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat4">Chat P2P cifrado</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat5">Actualizaciones automáticas</span></li>
+            <li style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="cmp_feat6_yes">Acceso ilimitado</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Enlace contacto para Pro -->
+      <p class="text-slate-500 text-xs text-center mt-5" data-i18n="cmp_contact_note">
+        ¿Interesado en la versión Pro? <a href="#contacto" style="color:#D4AF37;text-decoration:underline;" data-i18n="cmp_contact_link">Escríbenos</a>
+      </p>
     </div>
 
   </div>
@@ -1517,7 +1561,7 @@ const translations = {
     faq_q4: "¿Qué pasa si necesito ayuda o algo no funciona?",
     faq_a4: "Puedes escribirme a través del formulario de contacto de esta página. Respondo en un plazo de 24-48 horas según disponibilidad. El soporte es directo — sin tickets, sin bots, sin intermediarios.",
     faq_q5: "¿Puedo probar Security Babel antes de contratarlo?",
-    faq_a5: "Sí — próximamente podrás descargarlo y probarlo 14 días totalmente gratis, sin tarjeta de crédito. Al día 15 decides si quieres continuar. Por ahora escríbeme a través del formulario si quieres acceso anticipado.",
+    faq_a5: "Sí — descarga Babel Security y obtén 14 días de acceso completo automáticamente, sin tarjeta de crédito. Al finalizar, activa tu licencia Pro para continuar.",
     /* comparativa */
     cmp_title: "Security Babel vs. la nube tradicional",
     cmp_subtitle: "La diferencia es estructural, no cosmética.",
@@ -1604,6 +1648,24 @@ const translations = {
     dl_win:            "Descargar para Windows",
     dl_err_link:       "Ver releases en GitHub →",
     dl_err_msg:        "No se pudo cargar el enlace de descarga. Inténtalo desde GitHub.",
+    dl_trial_note:     "Incluye 14 días de acceso completo. Sin tarjeta.",
+    /* comparativa */
+    cmp_trial_label:   "PRUEBA GRATUITA",
+    cmp_trial_price:   "0 €",
+    cmp_trial_duration:"14 días · sin tarjeta",
+    cmp_pro_label:     "PRO",
+    cmp_pro_rec:       "RECOMENDADO",
+    cmp_pro_price:     "Próximamente",
+    cmp_pro_duration:  "acceso ilimitado",
+    cmp_feat1:         "Cifrado AES-256-GCM",
+    cmp_feat2:         "Traducción IA local",
+    cmp_feat3:         "Email cifrado",
+    cmp_feat4:         "Chat P2P cifrado",
+    cmp_feat5:         "Actualizaciones automáticas",
+    cmp_feat6_no:      "Acceso tras 14 días",
+    cmp_feat6_yes:     "Acceso ilimitado",
+    cmp_contact_note:  "¿Interesado en la versión Pro?",
+    cmp_contact_link:  "Escríbenos",
   },
 
   /* ── ENGLISH ── */
@@ -1712,7 +1774,7 @@ const translations = {
     faq_q4: "What if I need help or something isn't working?",
     faq_a4: "You can write to me via the contact form on this page. I respond within 24-48 hours depending on availability. Support is direct — no tickets, no bots, no middlemen.",
     faq_q5: "Can I try Security Babel before subscribing?",
-    faq_a5: "Yes — a 14-day free trial is coming soon, no credit card required. On day 15 you decide whether to continue. For now, write to me via the contact form if you'd like early access.",
+    faq_a5: "Yes — download Babel Security and get 14 days of full access automatically, no credit card required. When the trial ends, activate your Pro license to continue.",
     cmp_title: "Security Babel vs. traditional cloud", cmp_subtitle: "The difference is structural, not cosmetic.",
     cmp_col_feature: "Feature", cmp_col_cloud: "Traditional cloud", cmp_col_babel: "Security Babel",
     cmp_r1: "Your data passes through external servers",
@@ -1794,6 +1856,23 @@ const translations = {
     dl_win:            "Download for Windows",
     dl_err_link:       "View releases on GitHub →",
     dl_err_msg:        "Download link unavailable. Try from the GitHub releases page.",
+    dl_trial_note:     "Includes 14 days of full access. No credit card.",
+    cmp_trial_label:   "FREE TRIAL",
+    cmp_trial_price:   "€0",
+    cmp_trial_duration:"14 days · no card",
+    cmp_pro_label:     "PRO",
+    cmp_pro_rec:       "RECOMMENDED",
+    cmp_pro_price:     "Coming soon",
+    cmp_pro_duration:  "unlimited access",
+    cmp_feat1:         "AES-256-GCM encryption",
+    cmp_feat2:         "Local AI translation",
+    cmp_feat3:         "Encrypted email",
+    cmp_feat4:         "Encrypted P2P chat",
+    cmp_feat5:         "Automatic updates",
+    cmp_feat6_no:      "Access after 14 days",
+    cmp_feat6_yes:     "Unlimited access",
+    cmp_contact_note:  "Interested in the Pro version?",
+    cmp_contact_link:  "Contact us",
   },
 
   /* ── РУССКИЙ ── */
@@ -1902,7 +1981,7 @@ const translations = {
     faq_q4: "Что делать, если мне нужна помощь или что-то не работает?",
     faq_a4: "Вы можете написать мне через форму обратной связи на этой странице. Отвечаю в течение 24-48 часов при наличии возможности. Поддержка прямая — без тикетов, без ботов, без посредников.",
     faq_q5: "Могу ли я попробовать Security Babel перед подпиской?",
-    faq_a5: "Да — скоро появится бесплатный пробный период на 14 дней без банковской карты. На 15-й день вы решаете, хотите ли продолжить. Пока что напишите мне через форму обратной связи, если хотите ранний доступ.",
+    faq_a5: "Да — скачайте Babel Security и получите 14 дней полного доступа автоматически, без банковской карты. По окончании активируйте лицензию Pro для продолжения.",
     cmp_title: "Security Babel против облачных сервисов", cmp_subtitle: "Разница структурная, а не косметическая.",
     cmp_col_feature: "Характеристика", cmp_col_cloud: "Традиционное облако", cmp_col_babel: "Security Babel",
     cmp_r1: "Ваши данные проходят через внешние серверы",
@@ -1984,6 +2063,23 @@ const translations = {
     dl_win:            "Скачать для Windows",
     dl_err_link:       "Посмотреть релизы на GitHub →",
     dl_err_msg:        "Не удалось загрузить ссылку. Попробуйте с GitHub.",
+    dl_trial_note:     "14 дней полного доступа. Без карты.",
+    cmp_trial_label:   "БЕСПЛАТНО",
+    cmp_trial_price:   "€0",
+    cmp_trial_duration:"14 дней · без карты",
+    cmp_pro_label:     "ПРО",
+    cmp_pro_rec:       "РЕКОМЕНДУЕМ",
+    cmp_pro_price:     "Скоро",
+    cmp_pro_duration:  "неограниченный доступ",
+    cmp_feat1:         "Шифрование AES-256-GCM",
+    cmp_feat2:         "Локальный ИИ-перевод",
+    cmp_feat3:         "Зашифрованная почта",
+    cmp_feat4:         "Зашифрованный P2P-чат",
+    cmp_feat5:         "Автоматические обновления",
+    cmp_feat6_no:      "Доступ после 14 дней",
+    cmp_feat6_yes:     "Неограниченный доступ",
+    cmp_contact_note:  "Интересует версия Про?",
+    cmp_contact_link:  "Напишите нам",
   },
 
   /* ── العربية (RTL) ── */
@@ -2092,7 +2188,7 @@ const translations = {
     faq_q4: "ماذا أفعل إذا احتجت مساعدة أو لم يعمل شيء ما؟",
     faq_a4: "يمكنك مراسلتي عبر نموذج التواصل في هذه الصفحة. أرد خلال 24-48 ساعة حسب التوفر. الدعم مباشر — بدون تذاكر، بدون بوتات، بدون وسطاء.",
     faq_q5: "هل يمكنني تجربة Security Babel قبل الاشتراك؟",
-    faq_a5: "نعم — قريبًا ستتوفر فترة تجريبية مجانية مدتها ١٤ يومًا بدون بطاقة ائتمان. في اليوم الخامس عشر تقرر ما إذا كنت تريد الاستمرار. في الوقت الحالي راسلني عبر النموذج إذا أردت وصولًا مبكرًا.",
+    faq_a5: "نعم — حمّل Babel Security واحصل على ١٤ يومًا من الوصول الكامل تلقائيًا بدون بطاقة ائتمان. عند انتهاء الفترة التجريبية، فعّل ترخيص Pro للاستمرار.",
     cmp_title: "Security Babel مقابل السحابة التقليدية", cmp_subtitle: "الفرق هيكلي، وليس مجرد مظهر.",
     cmp_col_feature: "الميزة", cmp_col_cloud: "السحابة التقليدية", cmp_col_babel: "Security Babel",
     cmp_r1: "بياناتك تمر عبر خوادم خارجية",
@@ -2174,6 +2270,23 @@ const translations = {
     dl_win:            "تنزيل لـ Windows",
     dl_err_link:       "عرض الإصدارات على GitHub →",
     dl_err_msg:        "تعذّر تحميل الرابط. حاول من صفحة GitHub.",
+    dl_trial_note:     "يشمل ١٤ يومًا من الوصول الكامل. بدون بطاقة.",
+    cmp_trial_label:   "تجربة مجانية",
+    cmp_trial_price:   "€٠",
+    cmp_trial_duration:"١٤ يومًا · بدون بطاقة",
+    cmp_pro_label:     "برو",
+    cmp_pro_rec:       "موصى به",
+    cmp_pro_price:     "قريبًا",
+    cmp_pro_duration:  "وصول غير محدود",
+    cmp_feat1:         "تشفير AES-256-GCM",
+    cmp_feat2:         "ترجمة ذكاء اصطناعي محلية",
+    cmp_feat3:         "بريد إلكتروني مشفّر",
+    cmp_feat4:         "دردشة P2P مشفّرة",
+    cmp_feat5:         "تحديثات تلقائية",
+    cmp_feat6_no:      "الوصول بعد ١٤ يومًا",
+    cmp_feat6_yes:     "وصول غير محدود",
+    cmp_contact_note:  "مهتم بنسخة برو؟",
+    cmp_contact_link:  "راسلنا",
   },
 };
 
