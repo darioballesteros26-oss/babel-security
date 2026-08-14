@@ -1110,22 +1110,25 @@ fn cifrar_y_guardar_desde_bytes(
         return Err("El archivo supera el límite de 150 MB.".into());
     }
 
-    // Auto-optimización: todo PDF que entra a Babel pasa por dos etapas sin pérdida
+    // Auto-optimización: todo PDF que entra a Babel pasa por tres etapas sin pérdida
     // visible, conservando texto y vectores intactos. El resultado solo se acepta si
     // es más pequeño que la entrada; si alguna etapa no mejora, se descarta su salida.
     //   1. reducir: recomprime imágenes JPEG sobredimensionadas (~170 DPI, q82).
     //   2. deduplicar_imagenes: elimina copias redundantes de la misma imagen
     //      (logos, sellos, marcas de agua repetidas en múltiples páginas).
+    //   3. subset_fuentes: elimina los glifos no usados de las fuentes TrueType
+    //      embebidas (aplica a PDFs generados por Word, LibreOffice, Acrobat).
     let reducido: Option<Vec<u8>> = if detectar_ext(contenido) == "pdf" {
         let tras_reducir = pdf_reducir::reducir(contenido);
-        // La deduplicación corre sobre el resultado ya reducido para máximo ahorro.
-        // Si no hay imágenes duplicadas (dedup devuelve None), se conserva la salida
-        // de reducir (si la hubo). Si tampoco reducir mejoró, el resultado es None y
-        // el llamador usa el contenido original.
-        let base: &[u8] = tras_reducir.as_deref().unwrap_or(contenido);
-        match pdf_reducir::deduplicar_imagenes(base) {
-            Some(dedup) => Some(dedup),
-            None => tras_reducir,
+        let base1: &[u8] = tras_reducir.as_deref().unwrap_or(contenido);
+        let tras_dedup = pdf_reducir::deduplicar_imagenes(base1);
+        let base2: &[u8] = tras_dedup.as_deref().unwrap_or(base1);
+        let tras_subset = pdf_reducir::subset_fuentes(base2);
+        // Prioridad: subset > dedup > reducir > None (siempre la salida más compacta).
+        match (tras_subset, tras_dedup, tras_reducir) {
+            (Some(s), _, _) => Some(s),
+            (None, Some(d), _) => Some(d),
+            (None, None, r) => r,
         }
     } else {
         None

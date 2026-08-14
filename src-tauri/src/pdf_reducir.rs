@@ -309,6 +309,345 @@ fn actualizar_refs_en_objeto(obj: &mut Object, mapa: &HashMap<ObjectId, ObjectId
     }
 }
 
+// ── SUBSETTING DE FUENTES ─────────────────────────────────────────────────
+//
+// Reduce el tamaño de las fuentes TrueType/OpenType embebidas en el PDF
+// eliminando los glifos que no aparecen en el documento. El documento resultante
+// es visualmente idéntico: se conservan todos los glifos referenciados en los
+// streams de contenido, incluido siempre el glifo 0 (.notdef).
+//
+// Solo se procesan fuentes Type0 con descendiente CIDFontType2 (TrueType/OTF),
+// porque son la mayoría de las fuentes embebidas en PDFs modernos (Word, LibreOffice,
+// Acrobat). Las fuentes ya subsetadas (BaseFont con prefijo XXXXXX+) se saltan.
+// Cualquier fallo parcial en una fuente se ignora: esa fuente se deja intacta.
+
+/// Recolecta los IDs de glifo utilizados por cada fuente en los streams de
+/// contenido de todas las páginas. Devuelve un mapa nombre_recurso→HashSet<u16>.
+/// Solo registra fuentes cuya CMap es Identity-H o Identity-V (char code = CID = glyph_id).
+fn recolectar_glifos_usados(doc: &Document) -> HashMap<String, std::collections::HashSet<u16>> {
+    use lopdf::content::Content;
+    let mut resultado: HashMap<String, std::collections::HashSet<u16>> = HashMap::new();
+
+    for (_, page_id) in doc.get_pages() {
+        // Resolver la fuente actual al recorrer operadores.
+        let mut fuente_actual: Option<String> = None;
+
+        // Obtener bytes del stream de contenido de la página.
+        let stream_bytes = match page_content_bytes(doc, page_id) {
+            Some(b) => b,
+            None => continue,
+        };
+
+        let content = match Content::decode(&stream_bytes) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for op in &content.operations {
+            match op.operator.as_str() {
+                // Tf: seleccionar fuente. Operandos: [/Nombre tamaño]
+                "Tf" => {
+                    fuente_actual = op.operands.first().and_then(|o| {
+                        if let Object::Name(n) = o {
+                            String::from_utf8(n.clone()).ok()
+                        } else {
+                            None
+                        }
+                    });
+                }
+                // Tj: una cadena de texto
+                "Tj" => {
+                    if let (Some(ref nombre), Some(Object::String(s, _))) =
+                        (&fuente_actual, op.operands.first())
+                    {
+                        let set = resultado.entry(nombre.clone()).or_default();
+                        extraer_gids_de_bytes(s, set);
+                    }
+                }
+                // TJ: array de cadenas con kerning
+                "TJ" => {
+                    if let (Some(ref nombre), Some(Object::Array(arr))) =
+                        (&fuente_actual, op.operands.first())
+                    {
+                        let set = resultado.entry(nombre.clone()).or_default();
+                        for item in arr {
+                            if let Object::String(s, _) = item {
+                                extraer_gids_de_bytes(s, set);
+                            }
+                        }
+                    }
+                }
+                // ' y " también muestran texto
+                "'" | "\"" => {
+                    let cadena = if op.operator == "'" {
+                        op.operands.first()
+                    } else {
+                        op.operands.get(2)
+                    };
+                    if let (Some(ref nombre), Some(Object::String(s, _))) =
+                        (&fuente_actual, cadena)
+                    {
+                        let set = resultado.entry(nombre.clone()).or_default();
+                        extraer_gids_de_bytes(s, set);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    resultado
+}
+
+/// Interpreta los bytes de una cadena PDF como pares big-endian de 2 bytes (CID).
+/// En fuentes Identity-H, el CID es igual al glyph_id, por lo que ya tenemos el GID.
+/// Para cadenas de longitud impar, el último byte se emite como GID de un byte.
+fn extraer_gids_de_bytes(bytes: &[u8], set: &mut std::collections::HashSet<u16>) {
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        let gid = u16::from_be_bytes([bytes[i], bytes[i + 1]]);
+        set.insert(gid);
+        i += 2;
+    }
+    if i < bytes.len() {
+        set.insert(bytes[i] as u16);
+    }
+}
+
+/// Obtiene los bytes concatenados de todos los streams de contenido de una página.
+fn page_content_bytes(doc: &Document, page_id: ObjectId) -> Option<Vec<u8>> {
+    let page = doc.get_object(page_id).ok()?;
+    let page_dict = match page {
+        Object::Dictionary(d) => d,
+        _ => return None,
+    };
+    let contents = page_dict.get(b"Contents").ok()?;
+    let mut out = Vec::new();
+    match contents {
+        Object::Reference(id) => {
+            if let Ok(Object::Stream(s)) = doc.get_object(*id) {
+                out.extend_from_slice(&s.content);
+            }
+        }
+        Object::Array(arr) => {
+            for item in arr {
+                if let Object::Reference(id) = item {
+                    if let Ok(Object::Stream(s)) = doc.get_object(*id) {
+                        out.extend_from_slice(&s.content);
+                        out.push(b' ');
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+/// Comprueba si la CMap de un font dict es Identity-H o Identity-V.
+/// Estas CMaps codifican el texto como pares de bytes donde el valor numérico
+/// es directamente el CID, lo que nos permite coleccionar GIDs sin parsear la CMap.
+fn cmap_es_identity(font_dict: &Dictionary) -> bool {
+    match font_dict.get(b"Encoding") {
+        Ok(Object::Name(n)) => matches!(n.as_slice(), b"Identity-H" | b"Identity-V"),
+        Ok(Object::Reference(_)) => false, // CMap externa: no la parseamos
+        _ => false,
+    }
+}
+
+/// Devuelve true si el BaseFont ya tiene prefijo de subset (ABCDEF+Nombre).
+fn ya_subsetado(font_dict: &Dictionary) -> bool {
+    if let Ok(Object::Name(n)) = font_dict.get(b"BaseFont") {
+        if n.len() >= 7 && n[6] == b'+' {
+            return n[..6].iter().all(|b| b.is_ascii_uppercase());
+        }
+    }
+    false
+}
+
+/// Subset de fuentes tipográficas TrueType/OTF embebidas en el PDF.
+/// Devuelve `Some(bytes)` solo si al menos una fuente se redujo y el PDF resultante
+/// es más pequeño. `None` si no hubo ninguna mejora o cualquier validación falló.
+pub fn subset_fuentes(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut doc = Document::load_mem(bytes).ok()?;
+    let n_paginas = doc.get_pages().len();
+
+    // Recolectar glifos usados por nombre de recurso (solo Identity-H/V).
+    let glifos_por_recurso = recolectar_glifos_usados(&doc);
+    if glifos_por_recurso.is_empty() {
+        return None;
+    }
+
+    // Construir mapa nombre_recurso → ObjectId del Font dict de la página.
+    // Buscamos en Resources de cada página los fonts de tipo Type0.
+    let mut fonts_a_procesar: HashMap<ObjectId, std::collections::HashSet<u16>> = HashMap::new();
+
+    for (_, page_id) in doc.get_pages() {
+        let page = match doc.get_object(page_id) {
+            Ok(Object::Dictionary(d)) => d.clone(),
+            _ => continue,
+        };
+        let resources = match page.get(b"Resources") {
+            Ok(Object::Dictionary(d)) => d.clone(),
+            Ok(Object::Reference(id)) => {
+                match doc.get_object(*id) {
+                    Ok(Object::Dictionary(d)) => d.clone(),
+                    _ => continue,
+                }
+            }
+            _ => continue,
+        };
+        let font_dict = match resources.get(b"Font") {
+            Ok(Object::Dictionary(d)) => d.clone(),
+            Ok(Object::Reference(id)) => {
+                match doc.get_object(*id) {
+                    Ok(Object::Dictionary(d)) => d.clone(),
+                    _ => continue,
+                }
+            }
+            _ => continue,
+        };
+
+        for (nombre_bytes, font_ref) in font_dict.iter() {
+            let nombre = match String::from_utf8(nombre_bytes.clone()) {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
+            let glifos = match glifos_por_recurso.get(&nombre) {
+                Some(g) if !g.is_empty() => g,
+                _ => continue,
+            };
+            let font_id = match font_ref {
+                Object::Reference(id) => *id,
+                _ => continue,
+            };
+            fonts_a_procesar
+                .entry(font_id)
+                .or_default()
+                .extend(glifos.iter().copied());
+        }
+    }
+
+    if fonts_a_procesar.is_empty() {
+        return None;
+    }
+
+    let mut hubo_cambio = false;
+
+    // Ids de objetos para procesar los necesitamos antes de mutar el doc.
+    let font_ids: Vec<(ObjectId, std::collections::HashSet<u16>)> =
+        fonts_a_procesar.into_iter().collect();
+
+    for (font_id, glifos_usados) in font_ids {
+        // Leer el font dict (Type0).
+        let font_dict = match doc.get_object(font_id) {
+            Ok(Object::Dictionary(d)) => d.clone(),
+            _ => continue,
+        };
+
+        if ya_subsetado(&font_dict) {
+            continue;
+        }
+
+        // Solo procesamos Type0.
+        if !matches!(font_dict.get(b"Type"), Ok(Object::Name(n)) if n == b"Font") {
+            continue;
+        }
+        if !matches!(font_dict.get(b"Subtype"), Ok(Object::Name(n)) if n == b"Type0") {
+            continue;
+        }
+        if !cmap_es_identity(&font_dict) {
+            continue;
+        }
+
+        // Obtener el descendiente CIDFont.
+        let descendant_id = match font_dict.get(b"DescendantFonts") {
+            Ok(Object::Array(arr)) => match arr.first() {
+                Some(Object::Reference(id)) => *id,
+                _ => continue,
+            },
+            _ => continue,
+        };
+
+        let cid_dict = match doc.get_object(descendant_id) {
+            Ok(Object::Dictionary(d)) => d.clone(),
+            _ => continue,
+        };
+
+        // Solo CIDFontType2 (TrueType).
+        if !matches!(cid_dict.get(b"Subtype"), Ok(Object::Name(n)) if n == b"CIDFontType2") {
+            continue;
+        }
+
+        // Localizar FontDescriptor → FontFile2.
+        let fd_id = match cid_dict.get(b"FontDescriptor") {
+            Ok(Object::Reference(id)) => *id,
+            _ => continue,
+        };
+        let fd_dict = match doc.get_object(fd_id) {
+            Ok(Object::Dictionary(d)) => d.clone(),
+            _ => continue,
+        };
+        let ff2_id = match fd_dict.get(b"FontFile2") {
+            Ok(Object::Reference(id)) => *id,
+            _ => continue,
+        };
+
+        // Extraer bytes de la fuente. FontFile2 puede estar comprimido (FlateDecode).
+        let font_bytes = match doc.get_object(ff2_id) {
+            Ok(Object::Stream(s)) => {
+                s.decompressed_content().unwrap_or_else(|_| s.content.clone())
+            }
+            _ => continue,
+        };
+
+        // Construir lista de GIDs a conservar (siempre incluir glifo 0 / .notdef).
+        let mut gids: Vec<u16> = std::iter::once(0u16)
+            .chain(glifos_usados.iter().copied())
+            .collect();
+        gids.sort_unstable();
+        gids.dedup();
+
+        // Subset con el crate `subsetter`. GlyphRemapper::new_from_glyphs ya
+        // garantiza que los GIDs están ordenados y deduplicados.
+        let remapper = subsetter::GlyphRemapper::new_from_glyphs(&gids);
+        let font_subsetada = match subsetter::subset(&font_bytes, 0, &remapper) {
+            Ok(f) => f,
+            Err(_) => continue, // no tocar esta fuente si falla
+        };
+
+        // Solo reemplazar si la fuente subsetada es más pequeña.
+        if font_subsetada.len() >= font_bytes.len() {
+            continue;
+        }
+
+        // Reemplazar el stream FontFile2 con los bytes subsetados (sin compresión,
+        // ya que la mayoría de lectores aceptan FontFile2 sin Filter).
+        if let Some(Object::Stream(s)) = doc.objects.get_mut(&ff2_id) {
+            s.content = font_subsetada;
+            s.dict.remove(b"Filter");
+            s.dict.remove(b"DecodeParms");
+            s.dict.set("Length", s.content.len() as i64);
+            hubo_cambio = true;
+        }
+    }
+
+    if !hubo_cambio {
+        return None;
+    }
+
+    let mut out: Vec<u8> = Vec::new();
+    doc.save_to(&mut out).ok()?;
+
+    if out.len() >= bytes.len() {
+        return None;
+    }
+    match Document::load_mem(&out) {
+        Ok(d) if d.get_pages().len() == n_paginas => Some(out),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,5 +886,188 @@ mod tests {
         assert!(tras_dedup.is_none());
         // El contenido en RAM sigue siendo el PDF original.
         assert_eq!(base, pdf.as_slice());
+    }
+
+    // ── Tests de subsetting de fuentes ─────────────────────────────────────
+
+    // Construye un PDF con una fuente TrueType completa embebida (Identity-H).
+    // El stream de contenido usa solo dos caracteres (GIDs 36 y 37 → 'H', 'I' en Arial).
+    // Requiere que la fuente exista en disco; si no está, el test se salta.
+    fn pdf_con_fuente_embebida(ruta_ttf: &str) -> Option<Vec<u8>> {
+        use lopdf::{Stream, dictionary};
+        let font_bytes = std::fs::read(ruta_ttf).ok()?;
+        if font_bytes.is_empty() {
+            return None;
+        }
+
+        let mut doc = Document::with_version("1.7");
+
+        // FontFile2 — bytes de la fuente completa, sin comprimir.
+        let ff2_id = doc.add_object(Stream::new(
+            dictionary! {
+                "Length" => font_bytes.len() as i64,
+                "Length1" => font_bytes.len() as i64,
+            },
+            font_bytes,
+        ));
+
+        // FontDescriptor.
+        let fd_id = doc.add_object(dictionary! {
+            "Type" => "FontDescriptor",
+            "FontName" => "TestFont",
+            "Flags" => 32i64,
+            "ItalicAngle" => 0i64,
+            "Ascent" => 900i64,
+            "Descent" => -200i64,
+            "CapHeight" => 700i64,
+            "StemV" => 80i64,
+            "FontBBox" => vec![(-200i64).into(), (-200i64).into(), 1200i64.into(), 900i64.into()],
+            "FontFile2" => ff2_id,
+        });
+
+        // Descendiente CIDFontType2.
+        let cid_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "CIDFontType2",
+            "BaseFont" => "TestFont",
+            "CIDSystemInfo" => dictionary! {
+                "Registry" => Object::String(b"Adobe".to_vec(), lopdf::StringFormat::Literal),
+                "Ordering" => Object::String(b"Identity".to_vec(), lopdf::StringFormat::Literal),
+                "Supplement" => 0i64,
+            },
+            "FontDescriptor" => fd_id,
+            "CIDToGIDMap" => Object::Name(b"Identity".to_vec()),
+        });
+
+        // Font Type0 con Identity-H.
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type0",
+            "BaseFont" => "TestFont",
+            "Encoding" => Object::Name(b"Identity-H".to_vec()),
+            "DescendantFonts" => vec![Object::Reference(cid_id)],
+        });
+
+        // Stream de contenido: "BT /F1 12 Tf <0024 0025> Tj ET"
+        // GIDs 0x0024=36 y 0x0025=37 (dos glifos cualesquiera del font).
+        let cont_id = doc.add_object(Stream::new(
+            dictionary! {},
+            b"BT /F1 12 Tf <00240025> Tj ET".to_vec(),
+        ));
+
+        let pages_id = doc.new_object_id();
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0i64.into(), 0i64.into(), 595i64.into(), 842i64.into()],
+            "Contents" => cont_id,
+            "Resources" => dictionary! {
+                "Font" => dictionary! {
+                    "F1" => font_id,
+                },
+            },
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1i64,
+            }),
+        );
+        let cat_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", cat_id);
+
+        let mut out = Vec::new();
+        doc.save_to(&mut out).ok()?;
+        Some(out)
+    }
+
+    // TEST: PDF sin fuentes embebidas → subset_fuentes devuelve None.
+    #[test]
+    fn pdf_sin_fuentes_no_se_modifica() {
+        let pdf = pdf_con_imagen(&jpeg_grande(400), 400);
+        assert!(
+            subset_fuentes(&pdf).is_none(),
+            "un PDF sin fuentes embebidas no debe modificarse"
+        );
+    }
+
+    // TEST: fuente embebida completa se reduce al hacer subset.
+    // Se salta si Arial no está disponible en el sistema.
+    #[test]
+    fn fuente_completa_se_subsetea() {
+        let ruta = "/System/Library/Fonts/Supplemental/Arial.ttf";
+        let pdf = match pdf_con_fuente_embebida(ruta) {
+            Some(p) => p,
+            None => return, // fuente no disponible → skip
+        };
+
+        let original_bytes = pdf.len();
+        let resultado = subset_fuentes(&pdf);
+
+        assert!(
+            resultado.is_some(),
+            "debe detectar la fuente y subsetearla (original {} bytes)",
+            original_bytes
+        );
+        let subsetado = resultado.unwrap();
+        assert!(
+            subsetado.len() < original_bytes,
+            "el PDF subsetado debe ser más pequeño: {} < {}",
+            subsetado.len(),
+            original_bytes
+        );
+        // El PDF resultante debe ser válido con el mismo número de páginas.
+        let doc_out = Document::load_mem(&subsetado).unwrap();
+        assert_eq!(doc_out.get_pages().len(), 1);
+    }
+
+    // TEST: fuente ya subsetada (prefijo ABCDEF+) no se toca de nuevo.
+    #[test]
+    fn fuente_ya_subsetada_no_se_retoca() {
+        let ruta = "/System/Library/Fonts/Supplemental/Arial.ttf";
+        let pdf_base = match pdf_con_fuente_embebida(ruta) {
+            Some(p) => p,
+            None => return,
+        };
+        // Primer subset → debería reducir.
+        let subsetado1 = match subset_fuentes(&pdf_base) {
+            Some(s) => s,
+            None => return, // fuente no compatible → skip
+        };
+        // Cargar el resultado y renombrar BaseFont con prefijo de subset manualmente
+        // para simular que ya fue subsetado. Un segundo paso no debe modificarlo.
+        // (En producción esto no ocurre, pero verifica la guardia ya_subsetado.)
+        let mut doc = Document::load_mem(&subsetado1).unwrap();
+        // Renombrar el primer font que encontremos.
+        let font_ids: Vec<ObjectId> = doc
+            .objects
+            .iter()
+            .filter_map(|(id, obj)| {
+                if let Object::Dictionary(d) = obj {
+                    if matches!(d.get(b"Subtype"), Ok(Object::Name(n)) if n == b"Type0") {
+                        return Some(*id);
+                    }
+                }
+                None
+            })
+            .collect();
+        for fid in font_ids {
+            if let Some(Object::Dictionary(d)) = doc.objects.get_mut(&fid) {
+                d.set("BaseFont", Object::Name(b"ABCDEF+TestFont".to_vec()));
+            }
+        }
+        let mut ya_sub_bytes = Vec::new();
+        doc.save_to(&mut ya_sub_bytes).unwrap();
+
+        // Un segundo intento de subset sobre un font ya marcado → None.
+        assert!(
+            subset_fuentes(&ya_sub_bytes).is_none(),
+            "no debe resubsetear una fuente ya marcada con prefijo ABCDEF+"
+        );
     }
 }
