@@ -311,4 +311,98 @@ mod tests {
         assert!(original.exists(), "el original NO debe borrarse si el cifrado falla");
         assert!(!staged.exists(), "la copia staged en claro sí se limpia");
     }
+
+    // TEST 4 — Un directorio de staging vacío devuelve cero resultados sin pánico.
+    #[test]
+    fn directorio_vacio_devuelve_sin_resultados() {
+        let dir = dir_temporal();
+        let resultados = procesar_entradas(&dir, |_n, _s| Ok("ok".to_string()));
+        assert!(resultados.is_empty());
+    }
+
+    // TEST 5 — Archivos ocultos, sidecars .orig y directorios no se incluyen en el escaneo.
+    #[test]
+    fn escanear_ignora_entradas_invalidas() {
+        let dir = dir_temporal();
+        // Oculto
+        fs::write(dir.join(".oculto"), b"datos").unwrap();
+        // Sidecar solo (sin archivo staged correspondiente)
+        fs::write(dir.join("abc-999.orig"), "/tmp/ruta").unwrap();
+        // Directorio con nombre de staging válido — debe ignorarse
+        fs::create_dir(dir.join("xyz-111__carpeta.pdf")).unwrap();
+        // Archivo sin doble guion bajo (formato desconocido)
+        fs::write(dir.join("archivo_sin_separador.pdf"), b"datos").unwrap();
+        // Sólo este debe detectarse
+        fs::write(dir.join("real-uuid__doc.pdf"), b"datos").unwrap();
+
+        let entradas = escanear_entrada(&dir);
+        assert_eq!(entradas.len(), 1);
+        assert_eq!(entradas[0].nombre, "doc.pdf");
+    }
+
+    // TEST 6 — Múltiples archivos: algunos tienen éxito y otros fallan.
+    // Los staged de ambos se limpian; solo el original del exitoso se borra.
+    #[test]
+    fn multiples_archivos_mixto_exito_y_fallo() {
+        let dir = dir_temporal();
+
+        // Archivo A — tendrá éxito
+        let orig_a = dir.join("orig_a.pdf");
+        fs::write(&orig_a, b"pdf_a").unwrap();
+        let staged_a = dir.join("a1__orig_a.pdf");
+        fs::write(&staged_a, b"pdf_a").unwrap();
+        let sidecar_a = dir.join("a1.orig");
+        fs::write(&sidecar_a, orig_a.to_string_lossy().as_bytes()).unwrap();
+
+        // Archivo B — fallará
+        let orig_b = dir.join("orig_b.pdf");
+        fs::write(&orig_b, b"pdf_b").unwrap();
+        let staged_b = dir.join("b2__orig_b.pdf");
+        fs::write(&staged_b, b"pdf_b").unwrap();
+        let sidecar_b = dir.join("b2.orig");
+        fs::write(&sidecar_b, orig_b.to_string_lossy().as_bytes()).unwrap();
+
+        let resultados = procesar_entradas(&dir, |nombre, _s| {
+            if nombre.contains("_b") { Err("fallo simulado".to_string()) } else { Ok("ok".to_string()) }
+        });
+
+        assert_eq!(resultados.len(), 2);
+        let ok_count = resultados.iter().filter(|r| r.ok).count();
+        let err_count = resultados.iter().filter(|r| !r.ok).count();
+        assert_eq!(ok_count, 1);
+        assert_eq!(err_count, 1);
+
+        // Ambos staged deben haberse eliminado
+        assert!(!staged_a.exists(), "staged_a debe borrarse");
+        assert!(!staged_b.exists(), "staged_b debe borrarse");
+        // Solo el original exitoso se borra
+        assert!(!orig_a.exists(), "orig_a debe borrarse tras éxito");
+        assert!(orig_b.exists(), "orig_b NO debe borrarse tras fallo");
+        // Error propagado
+        let err_res = resultados.iter().find(|r| !r.ok).unwrap();
+        assert_eq!(err_res.error.as_deref(), Some("fallo simulado"));
+    }
+
+    // TEST 7 — Sidecar con ruta relativa: ruta_original_segura la rechaza y el
+    // archivo referenciado NO se elimina (protección contra path traversal).
+    #[test]
+    fn sidecar_ruta_relativa_no_borra_nada() {
+        let dir = dir_temporal();
+
+        let staged = dir.join("uuid3__secreto.txt");
+        fs::write(&staged, b"secreto").unwrap();
+        let sidecar = dir.join("uuid3.orig");
+        // Ruta relativa — debe ser rechazada por ruta_original_segura (no empieza por /)
+        fs::write(&sidecar, b"../algun/archivo.txt").unwrap();
+
+        let resultados = procesar_entradas(&dir, |_n, _s| Ok("ok".to_string()));
+
+        assert_eq!(resultados.len(), 1);
+        assert!(resultados[0].ok, "el cifrado debe tener éxito");
+        // Staged y sidecar se limpian igualmente
+        assert!(!staged.exists(), "staged debe borrarse");
+        assert!(!sidecar.exists(), "sidecar debe limpiarse");
+        // La ruta relativa fue bloqueada silenciosamente
+        assert!(!resultados[0].original_no_borrado);
+    }
 }

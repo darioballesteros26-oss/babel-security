@@ -1110,11 +1110,23 @@ fn cifrar_y_guardar_desde_bytes(
         return Err("El archivo supera el límite de 150 MB.".into());
     }
 
-    // Auto-reducción: TODO PDF que entra a Babel se optimiza (imágenes grandes →
-    // ~150 DPI / JPEG q82) sin pérdida visible, conservando texto. Silencioso y
-    // seguro: si no reduce o no valida, se guarda el original tal cual.
+    // Auto-optimización: todo PDF que entra a Babel pasa por dos etapas sin pérdida
+    // visible, conservando texto y vectores intactos. El resultado solo se acepta si
+    // es más pequeño que la entrada; si alguna etapa no mejora, se descarta su salida.
+    //   1. reducir: recomprime imágenes JPEG sobredimensionadas (~170 DPI, q82).
+    //   2. deduplicar_imagenes: elimina copias redundantes de la misma imagen
+    //      (logos, sellos, marcas de agua repetidas en múltiples páginas).
     let reducido: Option<Vec<u8>> = if detectar_ext(contenido) == "pdf" {
-        pdf_reducir::reducir(contenido)
+        let tras_reducir = pdf_reducir::reducir(contenido);
+        // La deduplicación corre sobre el resultado ya reducido para máximo ahorro.
+        // Si no hay imágenes duplicadas (dedup devuelve None), se conserva la salida
+        // de reducir (si la hubo). Si tampoco reducir mejoró, el resultado es None y
+        // el llamador usa el contenido original.
+        let base: &[u8] = tras_reducir.as_deref().unwrap_or(contenido);
+        match pdf_reducir::deduplicar_imagenes(base) {
+            Some(dedup) => Some(dedup),
+            None => tras_reducir,
+        }
     } else {
         None
     };
@@ -1542,6 +1554,14 @@ fn procesar_finder_bloqueante(
     let resultados = finder::procesar_entradas(&dir, |nombre, staged| {
         cifrar_y_guardar_desde_ruta(nombre, staged, subclave_hex, id_usuario)
     });
+
+    // Comprobamos antes de emitir si la ventana es visible, para decidir después si
+    // hace falta una notificación nativa del sistema.
+    let ventana_visible = app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
+
     for r in &resultados {
         let _ = app.emit(
             "finder-guardado",
@@ -1553,7 +1573,42 @@ fn procesar_finder_bloqueante(
             }),
         );
     }
-    resultados.iter().filter(|r| r.ok).count()
+
+    let ok_count = resultados.iter().filter(|r| r.ok).count();
+    let err_count = resultados.len() - ok_count;
+
+    // Cuando la ventana está oculta (procesado en segundo plano) los toasts de la app
+    // no son visibles. Emitimos una notificación nativa de macOS para que el usuario
+    // sepa que su archivo ya está en el búnker.
+    if !ventana_visible && !resultados.is_empty() {
+        #[cfg(target_os = "macos")]
+        {
+            let msg = match (ok_count, err_count) {
+                (1, 0) => {
+                    let nombre = resultados.iter().find(|r| r.ok).map(|r| r.nombre.as_str()).unwrap_or("Archivo");
+                    format!("{} cifrado y guardado en Babel.", nombre)
+                }
+                (n, 0) => format!("{} archivos cifrados y guardados en Babel.", n),
+                (0, _) => "No se pudo cifrar ningún archivo.".to_string(),
+                (n, e) => format!("{} cifrado(s). {} no pudo(n) guardarse.", n, e),
+            };
+            notificar_macos("Babel", &msg);
+        }
+    }
+
+    ok_count
+}
+
+/// Muestra una notificación nativa de macOS vía osascript (no requiere dependencia extra).
+/// Reemplaza comillas dobles por simples en el mensaje para evitar inyección en el script.
+#[cfg(target_os = "macos")]
+fn notificar_macos(titulo: &str, mensaje: &str) {
+    let msg_safe = mensaje.replace('"', "'");
+    let tit_safe = titulo.replace('"', "'");
+    let script = format!(r#"display notification "{}" with title "{}""#, msg_safe, tit_safe);
+    let _ = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .spawn();
 }
 
 // Comando invocado por el frontend tras el login para drenar la cola de staging.
