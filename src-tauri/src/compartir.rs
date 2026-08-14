@@ -25,6 +25,22 @@ pub fn compartidos_dir() -> std::path::PathBuf {
     dir
 }
 
+/// Como `barrer_plaintext_compartidos` pero sin límite de antigüedad.
+/// Se llama al cerrar sesión para garantizar que ningún archivo en claro persiste.
+pub fn barrer_plaintext_compartidos_logout() {
+    let dir = compartidos_dir();
+    let Ok(entradas) = fs::read_dir(&dir) else { return };
+    for e in entradas.flatten() {
+        let p = e.path();
+        if !p.is_file() { continue; }
+        let es_html = p.extension().and_then(|x| x.to_str())
+            .map(|x| x.eq_ignore_ascii_case("html")).unwrap_or(false);
+        if !es_html {
+            crate::borrar_seguro(&p.to_string_lossy());
+        }
+    }
+}
+
 /// Borra de forma segura las copias EN CLARO que compartir_a_url deja en compartidos/
 /// (el documento descifrado que se copia al portapapeles). El .html de compartición SÍ
 /// se conserva: es el entregable. Solo se limpian los temporales no-.html con > 1 h de

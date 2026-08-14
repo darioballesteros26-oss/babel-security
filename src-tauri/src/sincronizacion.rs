@@ -3,13 +3,15 @@
 // Protocolo de handshake sobre TCP puro (puerto 47826, sin mTLS):
 //
 //   Solicitante A → Receptor B:  BABEL_SINC_REQ:{nom_A}:{ip_A}:{ts}:{hmac8}\n
-//   B → A (acepta):              BABEL_SINC_OK:{nom_B}:{clave_hex64}:{ts}:{hmac8}\n
+//   B → A (acepta):              BABEL_SINC_OK:{nom_B}:{nonce12+ct_hex}:{ts}:{hmac8}\n
 //   B → A (rechaza):             BABEL_SINC_NO:{ts}\n
 //
-// La autenticación real es la confirmación explícita del usuario en ambos lados.
-// El HMAC protege contra escáneres de red genéricos. La clave compartida (32 bytes
-// aleatorios de OsRng) se transmite dentro del canal TCP local y se almacena
-// cifrada con AES-256-GCM en ~/Babel/p2p/dispositivos.babel.
+// La clave compartida se cifra con AES-256-GCM antes de enviarse (envelope):
+//   clave_envelope = HKDF(ikm=APP_SINC_KEY, salt=ts_bytes, info=b"sinc-envelope-v1")
+//   nonce12+ct_hex = hex(nonce || AES-GCM-encrypt(clave_hex, key=clave_envelope))
+//
+// Esto protege contra captura pasiva en LAN. La autenticación real sigue siendo
+// la confirmación explícita del usuario en ambos lados.
 //
 // Límite: 3 dispositivos emparejados por cuenta.
 // Timeout del handshake: 30 s de espera en cada lado.
@@ -23,7 +25,9 @@ use std::sync::{Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use aes_gcm::aead::rand_core::RngCore as _;
 use hmac::{Hmac, Mac};
+use hkdf::Hkdf;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -33,6 +37,51 @@ pub const PUERTO_SINC: u16 = 47826;
 pub const MAX_EMPAREJADOS: usize = 3;
 const TIMEOUT_HANDSHAKE_SECS: u64 = 30;
 const APP_SINC_KEY: &[u8] = b"babel-sinc-handshake-2026-v1";
+
+// ── Envelope AES-GCM para la clave compartida en tránsito ──────────────────
+
+// Formato del blob cifrado: [salt_aleatorio(16b) | nonce_gcm(12b) | ciphertext+tag]
+// El salt_aleatorio añade entropía por sesión para que el timestamp observable en el
+// mensaje no sea el único factor que determina la clave del envelope.
+fn envelope_sinc_key(salt: &[u8; 16], ts: u64) -> [u8; 32] {
+    use sha2::Sha256 as Sha256H;
+    let mut ikm = [0u8; 8 + 16];
+    ikm[..8].copy_from_slice(&ts.to_le_bytes());
+    ikm[8..].copy_from_slice(salt);
+    let hk = Hkdf::<Sha256H>::new(Some(APP_SINC_KEY), &ikm);
+    let mut key = [0u8; 32];
+    let _ = hk.expand(b"sinc-envelope-v1", &mut key);
+    key
+}
+
+fn envelope_cifrar(ts: u64, clave_hex: &str) -> String {
+    use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, OsRng, rand_core::RngCore}};
+    let mut salt = [0u8; 16];
+    OsRng.fill_bytes(&mut salt);
+    let key_bytes = envelope_sinc_key(&salt, ts);
+    let cipher = Aes256Gcm::new((&key_bytes).into());
+    let mut nonce_bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+    let ct = cipher.encrypt(nonce, clave_hex.as_bytes()).unwrap_or_default();
+    let mut blob = Vec::with_capacity(16 + 12 + ct.len());
+    blob.extend_from_slice(&salt);
+    blob.extend_from_slice(&nonce_bytes);
+    blob.extend_from_slice(&ct);
+    hex::encode(blob)
+}
+
+fn envelope_descifrar(ts: u64, blob_hex: &str) -> Option<String> {
+    use aes_gcm::{Aes256Gcm, KeyInit, aead::Aead};
+    let blob = hex::decode(blob_hex).ok()?;
+    if blob.len() < 29 { return None; } // 16 salt + 12 nonce + 1 byte mínimo ct
+    let salt: [u8; 16] = blob[..16].try_into().ok()?;
+    let key_bytes = envelope_sinc_key(&salt, ts);
+    let cipher = Aes256Gcm::new((&key_bytes).into());
+    let nonce = aes_gcm::Nonce::from_slice(&blob[16..28]);
+    let pt = cipher.decrypt(nonce, &blob[28..]).ok()?;
+    String::from_utf8(pt).ok()
+}
 
 // ── HMAC anti-scanner ───────────────────────────────────────────────────────
 
@@ -336,11 +385,12 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             if let Some(clave_z) = clave_zeroizing {
                 let ts_resp = ahora_unix();
                 let hmac_resp = hmac_sinc("resp_ok", ts_resp);
-                // Indicamos si nosotros (B) tenemos b2.json para que A lo sepa
                 let tenemos_b2 = if crate::buzon_b2::leer_config_raw().is_some() { "1" } else { "0" };
+                // Cifrar la clave compartida con AES-GCM antes de enviarla (envelope).
+                let clave_cifrada = envelope_cifrar(ts_resp, &*clave_z);
                 let msg = format!(
                     "BABEL_SINC_OK:{}:{}:{}:{}:{}\n",
-                    nombre_local, *clave_z, ts_resp, hmac_resp, tenemos_b2
+                    nombre_local, clave_cifrada, ts_resp, hmac_resp, tenemos_b2
                 );
                 let _ = writer.write_all(msg.as_bytes());
                 clave_compartida = Some(clave_z); // mantiene Zeroizing
@@ -480,7 +530,7 @@ pub fn solicitar_emparejamiento(
             .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '.')
             .take(64)
             .collect();
-        let clave_hex = partes[1].trim().to_string();
+        let clave_cifrada = partes[1].trim().to_string();
         let ts_resp: u64 = partes[2].parse().unwrap_or(0);
         let hmac_resp = partes[3];
         let b_tiene_b2 = partes.get(4).map(|s| s.trim() == "1").unwrap_or(false);
@@ -492,6 +542,9 @@ pub fn solicitar_emparejamiento(
         if hmac_sinc("resp_ok", ts_resp) != hmac_resp {
             return Err("HMAC de respuesta inválido — posible manipulación".into());
         }
+        // Descifrar la clave compartida del envelope AES-GCM
+        let clave_hex = envelope_descifrar(ts_resp, &clave_cifrada)
+            .ok_or("No se pudo descifrar la clave compartida")?;
         if clave_hex.len() != 64 || !clave_hex.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err("Clave compartida inválida en respuesta".into());
         }

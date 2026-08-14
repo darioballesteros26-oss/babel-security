@@ -81,7 +81,11 @@ pub struct UsuarioBabel {
     pub nivel: NivelAcceso,
     pub id: String,
     pub creditos: u32,
+    #[serde(default = "schema_version_default")]
+    pub schema_version: u32,
 }
+
+fn schema_version_default() -> u32 { 1 }
 
 /// Resultado de un análisis de seguridad del entorno
 pub struct ResultadoSeguridad {
@@ -1743,7 +1747,9 @@ fn leer_contador_desde(nombre: &str) -> u32 {
     let partes: Vec<&str> = contenido.trim().splitn(2, ':').collect();
     if partes.len() != 2 { return 0; }
     let count: u32 = match partes[0].parse() { Ok(n) => n, Err(_) => return 0 };
-    let secret = match clave_hmac_bloqueo() { Some(s) => s, None => return 0 };
+    // Si master.salt falta/está corrupto no podemos verificar el HMAC.
+    // Devolver MAX en lugar de 0 para no abrir una ventana de fuerza bruta.
+    let secret = match clave_hmac_bloqueo() { Some(s) => s, None => return u32::MAX };
     let mut mac = match <Hmac<Sha256> as KeyInit>::new_from_slice(&secret) {
         Ok(m) => m, Err(_) => return 0,
     };

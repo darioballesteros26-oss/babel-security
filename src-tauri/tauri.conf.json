@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Security Babel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.security.babel",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -42,7 +42,8 @@
       "binaries/servidor_babel"
     ],
     "resources": [
-      "binaries/pdfium/*"
+      "binaries/pdfium/*",
+      "modelos_usb/small100-int8/*"
     ]
   },
   "plugins": {

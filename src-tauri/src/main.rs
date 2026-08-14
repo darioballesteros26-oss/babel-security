@@ -38,6 +38,7 @@ const MAX_ARCHIVOS: usize = 1000;
 // (.buzon_index*.babel). Sin esto, dos operaciones de mover/renombrar concurrentes
 // pueden perder actualizaciones (last-write-wins sobre estado obsoleto).
 static BUZON_INDEX_MUTEX: Mutex<()> = Mutex::new(());
+static PRUEBA_INIT_MUTEX: Mutex<()> = Mutex::new(());
 
 // Proceso hijo del servidor de traducción (sidecar PyInstaller).
 // Módulo-nivel para poder matar desde el panic hook y desde on_window_event.
@@ -168,6 +169,8 @@ pub struct SesionActiva {
     pub idioma: Mutex<String>,
     pub buzon_activo: Mutex<String>,
     pub contador: Mutex<u32>,
+    pub ultimo_acceso: Mutex<std::time::Instant>,
+    pub timeout_minutos: Mutex<u32>,
 }
 
 impl SesionActiva {
@@ -179,13 +182,32 @@ impl SesionActiva {
             idioma: Mutex::new(String::from("es_en")),
             buzon_activo: Mutex::new(String::from("todos")),
             contador: Mutex::new(0),
+            ultimo_acceso: Mutex::new(std::time::Instant::now()),
+            timeout_minutos: Mutex::new(0),
         }
     }
 
     /// Codifica la subclave residente a hex bajo demanda para las funciones cripto que
-    /// esperan `&str`. Devuelve un `Zeroizing<String>` (se borra al final del comando) y
-    /// cadena vacía cuando no hay sesión — así los checks `is_empty()` siguen funcionando.
+    /// esperan `&str`. Verifica el timeout de inactividad y actualiza el timestamp.
+    /// Devuelve un `Zeroizing<String>` (se borra al final del comando) y cadena vacía
+    /// cuando no hay sesión — así los checks `is_empty()` siguen funcionando.
     fn subclave_hex(&self) -> Result<Zeroizing<String>, String> {
+        // Verificar timeout de inactividad en backend
+        let timeout_mins = self.timeout_minutos.lock()
+            .map_err(|_| "Error leyendo sesión.".to_string())
+            .map(|g| *g)?;
+        if timeout_mins > 0 {
+            let elapsed = self.ultimo_acceso.lock()
+                .map_err(|_| "Error leyendo sesión.".to_string())
+                .map(|g| g.elapsed().as_secs())?;
+            if elapsed > (timeout_mins as u64 * 60) {
+                return Err("Sesión expirada por inactividad.".into());
+            }
+        }
+        if let Ok(mut t) = self.ultimo_acceso.lock() {
+            *t = std::time::Instant::now();
+        }
+
         let guard = self
             .subclave
             .lock()
@@ -217,6 +239,9 @@ impl SesionActiva {
         }
         if let Ok(mut c) = self.contador.lock() {
             *c = 0; // no arrastrar intentos fallidos entre sesiones
+        }
+        if let Ok(mut t) = self.timeout_minutos.lock() {
+            *t = 0;
         }
     }
 }
@@ -512,6 +537,7 @@ fn crear_acceso_bunker(maestra: String, usuario: String, pass: String) -> Result
                 .as_secs()
         ),
         creditos: 9999,
+        schema_version: 1,
     };
 
     let salt = traductor::cargar_o_crear_salt();
@@ -555,6 +581,16 @@ fn incrementar_contador_y_bloquear(sesion: &tauri::State<SesionActiva>) -> Resul
         return Err("Bloqueado 10 minutos por demasiados intentos fallidos.".into());
     }
     Ok(())
+}
+
+fn cargar_settings_timeout(subclave_hex: &str) -> u32 {
+    let ruta = babel_path("settings.babel");
+    fs::read(&ruta).ok()
+        .and_then(|b| seguridad::descifrar_documento(b, subclave_hex).ok())
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok())
+        .and_then(|v| v["timeout_sesion_minutos"].as_u64())
+        .map(|m| m.min(1440) as u32)
+        .unwrap_or(60)
 }
 
 #[tauri::command]
@@ -620,9 +656,17 @@ fn verificar_login(
         *c = 0;
     }
     seguridad::borrar_contador_intentos();
-    // Resetear amenazas conocidas para que el monitor periódico las reporte de nuevo
     seguridad::resetear_amenazas_conocidas();
     crate::sincronizacion::establecer_subclave_sesion(&subclave_hex);
+
+    // Cargar timeout de inactividad desde la configuración del usuario
+    if let Ok(mut t) = sesion.ultimo_acceso.lock() {
+        *t = std::time::Instant::now();
+    }
+    let timeout_mins = cargar_settings_timeout(&subclave_hex);
+    if let Ok(mut tm) = sesion.timeout_minutos.lock() {
+        *tm = timeout_mins;
+    }
 
     // Guardar credenciales en el keychain del sistema para autologin en el próximo arranque
     guardar_credenciales_keychain(pass.as_str(), pass_usuario.as_str());
@@ -650,6 +694,11 @@ fn autologin_machine_key() -> [u8; 32] {
     use hkdf::Hkdf;
     use sha2::Sha256;
 
+    // NOTA DE DISEÑO: esta clave protege el autologin por COMODIDAD, no por seguridad fuerte.
+    // Cualquier proceso local con acceso a ioreg puede calcularla. La protección real
+    // de las credenciales viene de FileVault (cifrado de disco) y de los permisos 0600
+    // del archivo autologin.babel. Sin FileVault activo, el autologin no debe usarse.
+    //
     // UUID hardware del Mac vía ioreg (único por máquina, no cambia con builds)
     let uuid = std::process::Command::new("ioreg")
         .args(["-d2", "-c", "IOPlatformExpertDevice"])
@@ -670,7 +719,8 @@ fn autologin_machine_key() -> [u8; 32] {
 
     let hk = Hkdf::<Sha256>::new(Some(b"babel-autologin-salt-v1"), uuid.as_bytes());
     let mut key = [0u8; 32];
-    hk.expand(b"autologin-aes-key", &mut key).unwrap();
+    // HKDF solo falla si okm es demasiado largo (255*hashlen). Con 32 bytes es imposible.
+    let _ = hk.expand(b"autologin-aes-key", &mut key);
     key
 }
 
@@ -733,7 +783,10 @@ struct EstadoPrueba {
 }
 
 fn prueba_babel_path() -> Option<std::path::PathBuf> {
-    let dir = babel_dir();
+    // Usar home_dir() fijo (igual que autologin_babel_path) para que BABEL_DATA_DIR
+    // no permita redirigir la prueba a un directorio vacío y resetear el contador.
+    let home = dirs::home_dir()?;
+    let dir = home.join("Babel");
     if std::fs::create_dir_all(&dir).is_err() { return None; }
     Some(dir.join("prueba.babel"))
 }
@@ -789,12 +842,22 @@ fn obtener_estado_prueba() -> EstadoPrueba {
             }
         }
     } else {
-        // Primera instalación: crear registro de prueba
-        let nuevo_inicio = ahora;
-        if let Some(blob) = prueba_cifrar(nuevo_inicio, nuevo_inicio) {
-            let _ = escribir_privado(&path, &blob);
+        // Primera instalación: crear registro de prueba.
+        // Mutex evita que dos llamadas concurrentes creen el archivo con timestamps distintos.
+        let _guard = PRUEBA_INIT_MUTEX.lock();
+        if !path.exists() {
+            let nuevo_inicio = ahora;
+            if let Some(blob) = prueba_cifrar(nuevo_inicio, nuevo_inicio) {
+                let _ = escribir_privado(&path, &blob);
+            }
+            (nuevo_inicio, nuevo_inicio)
+        } else {
+            // Otro hilo lo creó mientras esperábamos el lock — leerlo
+            match std::fs::read(&path).ok().and_then(|b| prueba_descifrar(&b)) {
+                Some((i, u)) => (i, u),
+                None => return EstadoPrueba { en_prueba: true, dias_restantes: 0, expirado: true, advertencia: false },
+            }
         }
-        (nuevo_inicio, nuevo_inicio)
     };
 
     // Anti-rollback: usar el máximo entre ahora y el último timestamp guardado
@@ -815,6 +878,14 @@ fn obtener_estado_prueba() -> EstadoPrueba {
     EstadoPrueba { en_prueba: true, dias_restantes, expirado, advertencia }
 }
 
+fn verificar_prueba_no_expirada() -> Result<(), String> {
+    if obtener_estado_prueba().expirado {
+        Err("Prueba gratuita expirada. Obtén una licencia en securitybabel.netlify.app".into())
+    } else {
+        Ok(())
+    }
+}
+
 /// Intenta hacer login automático con credenciales guardadas en el keychain.
 /// Devuelve true si hay credenciales guardadas Y son válidas.
 #[tauri::command]
@@ -825,8 +896,18 @@ fn autologin_tauri(
         Some(c) => c,
         None => return Ok(false),
     };
-    // Reutilizar la lógica de verificar_login directamente
-    verificar_login(maestra.to_string(), pass_usuario.to_string(), sesion)
+    // Si las credenciales guardadas ya no son válidas (contraseña cambiada, etc.),
+    // limpiamos el keychain y reseteamos el contador para que el fallo automático
+    // no consuma intentos manuales del usuario.
+    match verificar_login(maestra.to_string(), pass_usuario.to_string(), sesion) {
+        Ok(true) => Ok(true),
+        Ok(false) => {
+            borrar_credenciales_keychain();
+            seguridad::borrar_contador_intentos();
+            Ok(false)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Borra las credenciales guardadas del keychain (logout permanente).
@@ -871,6 +952,9 @@ async fn traducir_documento(
     contenido: Vec<u8>,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
+    // Verificar que la prueba no ha expirado antes de procesar (enforcement backend).
+    verificar_prueba_no_expirada()?;
+
     // Extraer datos de sesión ANTES de spawn_blocking — State no es Send.
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
@@ -1064,6 +1148,7 @@ fn guardar_documento_sin_traducir(
     ruta_completa: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
+    verificar_prueba_no_expirada()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -1088,6 +1173,7 @@ fn guardar_documento_desde_bytes(
     contenido_b64: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
+    verificar_prueba_no_expirada()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -1161,6 +1247,11 @@ fn preparar_temp_bytes(nombre_archivo: String, contenido_b64: String) -> Result<
     }
     let base = std::env::temp_dir().join("babel_dnd");
     let _ = std::fs::create_dir_all(&base);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700));
+    }
     // S-3: limpia restos viejos de fallos anteriores.
     barrer_temp_dnd(&base);
     // S-3: subdirectorio único → sin colisiones entre archivos con el mismo nombre,
@@ -1751,8 +1842,8 @@ fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
     babel_p2p::detener_servidor_p2p();
     crate::sincronizacion::limpiar_subclave_sesion();
     sesion.limpiar();
-    // Limpiar copias en claro que compartir_a_url pudiera haber dejado en compartidos/.
-    compartir::barrer_plaintext_compartidos();
+    // Al cerrar sesión: borrar TODOS los archivos en claro de compartidos/ sin esperar 1h.
+    compartir::barrer_plaintext_compartidos_logout();
     // Limpiar todas las rutas pendientes de borrado al cerrar sesión
     if let Ok(mut guard) = PENDING_BORRAR_ORIGINAL.lock() { *guard = None; }
     // Borrar temporales en claro con 3 pasadas (0x00, 0xFF, 0xAA) + fsync antes de eliminar
@@ -1795,6 +1886,7 @@ async fn traducir_documento_ruta(
     nombre_archivo: String,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
+    verificar_prueba_no_expirada()?;
     // Extraer datos de sesión ANTES de spawn_blocking — State no es Send.
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
@@ -1961,6 +2053,7 @@ async fn traducir_documento_dialogo(
     app: tauri::AppHandle,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<Option<String>, String> {
+    verificar_prueba_no_expirada()?;
     // Extraer datos de sesión ANTES de cruzar a spawn_blocking (State no es Send).
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
@@ -2967,7 +3060,7 @@ fn renombrar_archivo(
         let json = serde_json::to_string(&index).map_err(|e| format!("Error: {}", e))?;
         let cifrado = seguridad::blindar_documento(&json, &subclave_hex)
             .map_err(|e| format!("Error: {}", e))?;
-        let _ = escribir_privado(&ruta_index, cifrado);
+        let _ = escribir_privado_atomico(&ruta_index, &cifrado);
     }
 
     Ok(nueva_ruta.to_string_lossy().to_string())
@@ -3378,10 +3471,12 @@ fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, Stri
                 if let Ok(json) = serde_json::to_string(&settings) {
                     if let Ok(cifrado) = seguridad::blindar_documento(&json, &subclave_hex) {
                         let ok = escribir_privado(babel_path("settings.babel"), cifrado).is_ok();
-                        if ok { let _ = fs::remove_file(babel_path("settings.json")); }
+                        // Borrar settings.json tanto si la migración tuvo éxito como si no:
+                        // si falló el cifrado, mejor perder la config que dejar datos en claro.
+                        let _ = fs::remove_file(babel_path("settings.json"));
                         traductor::registrar_evento(
                             if ok { "settings.json migrado a settings.babel cifrado" }
-                            else { "AVISO: migración settings.json fallida — no se pudo escribir settings.babel" },
+                            else { "AVISO: migración settings.json fallida — settings.json borrado igualmente" },
                             &subclave_hex,
                         );
                     }
@@ -4069,13 +4164,15 @@ fn enviar_solo_texto_tauri(
 async fn seleccionar_archivo_email_dialogo(
     app: tauri::AppHandle,
 ) -> Result<Option<(String, Vec<u8>)>, String> {
+    // Directorio inicial fuera de ~/Babel/ para no exponer archivos internos del vault.
+    let dir_inicial = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
     let dir_babel = babel_dir();
     tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
         let seleccion = app
             .dialog()
             .file()
-            .set_directory(&dir_babel)
+            .set_directory(&dir_inicial)
             .blocking_pick_file();
 
         let ruta_fp = match seleccion {
@@ -4083,6 +4180,10 @@ async fn seleccionar_archivo_email_dialogo(
             None => return Ok(None),
         };
         let ruta = ruta_fp.into_path().map_err(|e| format!("Ruta inválida: {}", e))?;
+        // Rechazar archivos dentro de ~/Babel/ para evitar adjuntar material criptográfico.
+        if ruta.starts_with(&dir_babel) {
+            return Err("No se puede adjuntar un archivo interno de Babel.".into());
+        }
         let nombre = ruta
             .file_name()
             .and_then(|n| n.to_str())
@@ -4903,7 +5004,7 @@ async fn compartir_directo(
     escribir_privado(&ruta_compartir, html.as_bytes())
         .map_err(|e| format!("Error escribiendo HTML temporal: {}", e))?;
 
-    log::info!("[compartir_directo] HTML listo: {}", ruta_compartir);
+    log::info!("[compartir_directo] HTML listo");
 
     // macOS: NSSharingServicePicker (bloquea hasta que el usuario termina de compartir)
     // → BorrarAlSalir limpia el HTML al salir, incluso en error.
@@ -5072,6 +5173,11 @@ fn guardar_destinos_compartir(
         if !d.url.starts_with("http://") && !d.url.starts_with("https://") {
             return Err(format!("La URL debe empezar con http:// o https://: '{}'", d.url));
         }
+        if let Some(ref bid) = d.bundle_id {
+            if bid.len() > 128 || !bid.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-') {
+                return Err(format!("Bundle ID inválido: '{}'", bid));
+            }
+        }
     }
     compartir::guardar_destinos(&destinos, &subclave_hex)
 }
@@ -5137,6 +5243,9 @@ fn compartir_a_url(
     // Si hay bundle_id y la app está instalada → abrirla; si no → abrir URL
     #[cfg(target_os = "macos")]
     if let Some(ref bid) = bundle_id {
+        if bid.len() > 128 || !bid.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-') {
+            return Err(format!("Bundle ID inválido: '{}'", bid));
+        }
         if compartir::verificar_app_instalada(bid) {
             compartir::abrir_app_bundle(bid)
                 .map_err(|e| {
@@ -5230,12 +5339,15 @@ async fn verificar_actualizacion(app: tauri::AppHandle) {
         let _ = app.emit("actualizacion-disponible", &info);
     } else {
         // Notificación nativa macOS cuando Babel está en segundo plano
-        let version  = update.version.clone();
+        let version_raw = update.version.clone();
+        let version_safe: String = version_raw.chars()
+            .filter(|c| c.is_alphanumeric() || ".-+".contains(*c))
+            .collect();
         let _ = std::process::Command::new("osascript")
             .arg("-e")
             .arg(format!(
                 "display notification \"Babel {} está disponible. Ábrela para actualizar.\" with title \"Security Babel — Actualización\"",
-                version
+                version_safe
             ))
             .output();
     }

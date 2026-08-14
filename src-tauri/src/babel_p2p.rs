@@ -132,7 +132,7 @@ fn guardar_peers_trusted(peers: &HashMap<String, String>, subclave_hex: &str) {
     }
     if let Ok(json) = serde_json::to_string(peers) {
         if let Ok(cifrado) = crate::seguridad::blindar_documento(&json, subclave_hex) {
-            let _ = fs::write(ruta_peers_trusted(), cifrado);
+            let _ = crate::escribir_privado(ruta_peers_trusted(), &cifrado);
         }
     }
 }
@@ -717,22 +717,27 @@ fn clave_privada_p2p_enc(subclave_hex: &str) -> Option<Zeroizing<String>> {
 
 /// Esquema legacy (v1): SHA-256(master.salt). Solo para migración automática.
 fn clave_privada_p2p_enc_legacy() -> Option<Zeroizing<String>> {
+    use hkdf::Hkdf;
+    use sha2::Sha256 as Sha256Hkdf;
     let salt = fs::read(crate::babel_dir().join("master.salt")).ok()?;
     if salt.len() < 32 { return None; }
-    let mut hasher = Sha256::new();
-    hasher.update(b"babel-p2p-clave-privada-v1:");
-    hasher.update(&salt[..32]);
-    let derived: [u8; 32] = hasher.finalize().into();
-    Some(Zeroizing::new(hex::encode(derived)))
+    let hk = Hkdf::<Sha256Hkdf>::new(None, &salt);
+    let mut key = [0u8; 32];
+    hk.expand(b"babel-p2p-clave-privada-v1", &mut key).ok()?;
+    Some(Zeroizing::new(hex::encode(key)))
 }
 
-// Deriva la clave para cifrar certs_autorizados.dat desde master.salt.
-// Los fingerprints no son contraseñas, pero revelan con qué peers hemos
-// comunicado — cifrarlos equipara la protección a peers_trusted.babel.
+// Deriva la clave para cifrar certs_autorizados.dat desde master.salt usando HKDF
+// con contexto explícito — evita reutilizar el mismo material en distintos dominios.
 fn clave_certs_autorizados() -> Option<Zeroizing<String>> {
+    use hkdf::Hkdf;
+    use sha2::Sha256 as Sha256Hkdf;
     let bytes = fs::read(crate::babel_dir().join("master.salt")).ok()?;
     if bytes.len() < 32 { return None; }
-    Some(Zeroizing::new(hex::encode(&bytes[..32])))
+    let hk = Hkdf::<Sha256Hkdf>::new(None, &bytes);
+    let mut key = [0u8; 32];
+    hk.expand(b"babel-certs-autorizados-v1", &mut key).ok()?;
+    Some(Zeroizing::new(hex::encode(key)))
 }
 
 // Formato de cada línea del texto plano interno: `fingerprint:unix_timestamp`
@@ -768,12 +773,11 @@ fn guardar_certs_autorizados(certs: &std::collections::HashSet<String>) {
 
     if let Some(clave) = clave_certs_autorizados() {
         if let Ok(cifrado) = crate::seguridad::blindar_documento(&contenido, &clave) {
-            let _ = fs::write(ruta_certs_autorizados(), cifrado);
-            return;
+            let _ = crate::escribir_privado(ruta_certs_autorizados(), &cifrado);
         }
+        // Si blindar falla con master.salt disponible: no escribir en claro.
     }
-    // Fallback texto plano si master.salt no existe (primera ejecución)
-    let _ = fs::write(ruta_certs_autorizados(), contenido);
+    // Si master.salt no existe: no persistir — se reconstruirá via TOFU en la siguiente sesión.
 }
 
 #[derive(Debug)]
@@ -1022,7 +1026,7 @@ impl ServidorP2P {
         let nombre_babel = format!("{}_p2p_{}_{}.babel", self.id_usuario, nombre_sin_ext, ts);
         let ruta = recibidos_dir().join(&nombre_babel);
 
-        match fs::write(&ruta, cifrado) {
+        match crate::escribir_privado(&ruta, &cifrado).map_err(|e| e.to_string()) {
             Ok(_) => {
                 log::info!("[OK] P2P recibido y cifrado: {}", ruta.display());
                 crate::seguridad::registrar_evento_seguridad(
