@@ -1123,7 +1123,12 @@ fn cifrar_y_guardar_desde_bytes(
     //      color/gris: JPEG q85 (DCTDecode, sin pérdida perceptible).
     //   5. comprimir_streams: FlateDecode nivel 9 sobre streams sin filtro
     //      (streams de contenido, fuentes subsetadas, ToUnicode, perfiles ICC…).
-    let reducido: Option<Vec<u8>> = if detectar_ext(contenido) == "pdf" {
+    let reducido: Option<Vec<u8>> = if detectar_ext(contenido) == "docx"
+        || detectar_ext(contenido) == "pptx"
+        || detectar_ext(contenido) == "xlsx"
+    {
+        pdf_reducir::reducir_docx(contenido)
+    } else if detectar_ext(contenido) == "pdf" {
         let tras_reducir = pdf_reducir::reducir(contenido);
         let base1: &[u8] = tras_reducir.as_deref().unwrap_or(contenido);
         let tras_dedup = pdf_reducir::deduplicar_imagenes(base1);
