@@ -110,7 +110,6 @@ pub fn comprimir_b64(data: &[u8]) -> String {
     let es_binario = data.starts_with(b"\x89PNG")
         || data.starts_with(b"\xff\xd8\xff")
         || data.starts_with(b"GIF")
-        || data.starts_with(b"%PDF")
         || data.starts_with(b"PK");
     if es_binario {
         return base64::engine::general_purpose::STANDARD.encode(data);

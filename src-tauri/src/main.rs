@@ -1110,7 +1110,7 @@ fn cifrar_y_guardar_desde_bytes(
         return Err("El archivo supera el límite de 150 MB.".into());
     }
 
-    // Auto-optimización: todo PDF que entra a Babel pasa por tres etapas sin pérdida
+    // Auto-optimización: todo PDF que entra a Babel pasa por cinco etapas sin pérdida
     // visible, conservando texto y vectores intactos. El resultado solo se acepta si
     // es más pequeño que la entrada; si alguna etapa no mejora, se descarta su salida.
     //   1. reducir: recomprime imágenes JPEG sobredimensionadas (~170 DPI, q82).
@@ -1118,17 +1118,28 @@ fn cifrar_y_guardar_desde_bytes(
     //      (logos, sellos, marcas de agua repetidas en múltiples páginas).
     //   3. subset_fuentes: elimina los glifos no usados de las fuentes TrueType
     //      embebidas (aplica a PDFs generados por Word, LibreOffice, Acrobat).
+    //   4. comprimir_imagenes: imágenes en crudo o FlateDecode →
+    //      B/N puro: 1-bit+FlateDecode (≡ JBIG2, soporte universal);
+    //      color/gris: JPEG q85 (DCTDecode, sin pérdida perceptible).
+    //   5. comprimir_streams: FlateDecode nivel 9 sobre streams sin filtro
+    //      (streams de contenido, fuentes subsetadas, ToUnicode, perfiles ICC…).
     let reducido: Option<Vec<u8>> = if detectar_ext(contenido) == "pdf" {
         let tras_reducir = pdf_reducir::reducir(contenido);
         let base1: &[u8] = tras_reducir.as_deref().unwrap_or(contenido);
         let tras_dedup = pdf_reducir::deduplicar_imagenes(base1);
         let base2: &[u8] = tras_dedup.as_deref().unwrap_or(base1);
         let tras_subset = pdf_reducir::subset_fuentes(base2);
-        // Prioridad: subset > dedup > reducir > None (siempre la salida más compacta).
-        match (tras_subset, tras_dedup, tras_reducir) {
-            (Some(s), _, _) => Some(s),
-            (None, Some(d), _) => Some(d),
-            (None, None, r) => r,
+        let base3: &[u8] = tras_subset.as_deref().unwrap_or(base2);
+        let tras_comprimir = pdf_reducir::comprimir_imagenes(base3);
+        let base4: &[u8] = tras_comprimir.as_deref().unwrap_or(base3);
+        let tras_streams = pdf_reducir::comprimir_streams(base4);
+        // Prioridad: salida más compacta (etapa posterior gana porque acumula todas las anteriores).
+        match (tras_streams, tras_comprimir, tras_subset, tras_dedup, tras_reducir) {
+            (Some(s), _, _, _, _) => Some(s),
+            (None, Some(c), _, _, _) => Some(c),
+            (None, None, Some(s), _, _) => Some(s),
+            (None, None, None, Some(d), _) => Some(d),
+            (None, None, None, None, r) => r,
         }
     } else {
         None
