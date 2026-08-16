@@ -61,6 +61,7 @@ libc  = "0.2"
 pbkdf2 = { version = "0.12", features = ["hmac"] }
 ttf-parser   = "0.25"
 subsetter    = "0.2"
+flate2       = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

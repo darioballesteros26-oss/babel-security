@@ -1839,11 +1839,13 @@ mod tests {
     //   - Imagen B&N cruda 500×500 (comprimir_imagenes B/N path)
     //   - Imagen RGB cruda 400×400 (comprimir_imagenes color path)
     //   - Fuente TrueType embebida si Arial está disponible (subset_fuentes)
-    // Mide el tamaño antes/después de CADA etapa por separado y del pipeline completo.
-    // Ejecutar: cargo test -p babel-interfaz benchmark -- --ignored --nocapture
+    //   - Streams de contenido sin comprimir (comprimir_streams / técnica D)
+    // Mide el tamaño antes/después de CADA etapa por separado, del pipeline completo,
+    // y el tiempo de cada etapa. Ejecutar:
+    //   cargo test benchmark -- --ignored --nocapture
     #[test]
     #[ignore]
-    fn benchmark_pipeline_4_etapas() {
+    fn benchmark_pipeline_5_etapas() {
         fn cuenta_xobjects_imagen(doc: &Document) -> usize {
             doc.objects.values().filter(|o| {
                 if let Object::Stream(s) = o {
@@ -2053,27 +2055,42 @@ mod tests {
         let doc_orig = Document::load_mem(&original).unwrap();
         let img_count_orig = cuenta_xobjects_imagen(&doc_orig);
 
-        // ── Medir cada etapa POR SEPARADO sobre el original ───────────────
-        let solo_reducir    = reducir(&original);
-        let solo_dedup      = deduplicar_imagenes(&original);
-        let solo_subset     = subset_fuentes(&original);
-        let solo_comprimir  = comprimir_imagenes(&original);
+        // ── Medir cada etapa POR SEPARADO sobre el original (con tiempos) ─
+        use std::time::Instant;
 
-        // ── Medir pipeline completo ───────────────────────────────────────
-        let base1 = solo_reducir.as_deref().unwrap_or(&original);
+        let t = Instant::now(); let solo_reducir   = reducir(&original);          let ms_r = t.elapsed().as_millis();
+        let t = Instant::now(); let solo_dedup     = deduplicar_imagenes(&original); let ms_d = t.elapsed().as_millis();
+        let t = Instant::now(); let solo_subset    = subset_fuentes(&original);    let ms_s = t.elapsed().as_millis();
+        let t = Instant::now(); let solo_comprimir = comprimir_imagenes(&original); let ms_c = t.elapsed().as_millis();
+        let t = Instant::now(); let solo_streams   = comprimir_streams(&original);  let ms_st = t.elapsed().as_millis();
+
+        // ── Medir pipeline completo (tiempos acumulados) ──────────────────
+        // Nota: reducir se vuelve a ejecutar aquí para que ms_pipeline incluya
+        // la etapa más costosa y el total sea comparable con la suma de aisaldos.
+        let t = Instant::now();
+        let pipeline_reducir = reducir(&original);
+        let base1 = pipeline_reducir.as_deref().unwrap_or(&original);
         let tras_dedup   = deduplicar_imagenes(base1);
         let base2 = tras_dedup.as_deref().unwrap_or(base1);
         let tras_subset  = subset_fuentes(base2);
         let base3 = tras_subset.as_deref().unwrap_or(base2);
         let tras_comprimir = comprimir_imagenes(base3);
-        let final_bytes = tras_comprimir.as_deref().unwrap_or(base3);
+        let base4 = tras_comprimir.as_deref().unwrap_or(base3);
+        let tras_streams = comprimir_streams(base4);
+        let final_bytes = tras_streams.as_deref().unwrap_or(base4);
+        let ms_pipeline = t.elapsed().as_millis();
 
-        let tam0 = original.len();
+        let tam0   = original.len();
         let tam_r  = solo_reducir.as_ref().map(|v| v.len()).unwrap_or(tam0);
         let tam_d  = solo_dedup.as_ref().map(|v| v.len()).unwrap_or(tam0);
         let tam_s  = solo_subset.as_ref().map(|v| v.len()).unwrap_or(tam0);
         let tam_c  = solo_comprimir.as_ref().map(|v| v.len()).unwrap_or(tam0);
+        let tam_st = solo_streams.as_ref().map(|v| v.len()).unwrap_or(tam0);
         let tam_fin = final_bytes.len();
+
+        // Reducción incremental de D sobre el resultado acumulado de A+B+C
+        let tam_antes_d = base4.len();
+        let reduccion_d_incremental = pct(tam_antes_d, tam_fin);
 
         // ── Validar salida ────────────────────────────────────────────────
         let doc_fin = Document::load_mem(final_bytes).expect("PDF final debe parsear");
@@ -2081,40 +2098,44 @@ mod tests {
         let img_count_fin = cuenta_xobjects_imagen(&doc_fin);
 
         // ── Imprimir resultados ───────────────────────────────────────────
-        println!("\n╔══════════════════════════════════════════════════════╗");
-        println!("║      BENCHMARK PIPELINE COMPRESIÓN HIPER-AGRESIVA   ║");
-        println!("╠══════════════════════════════════════════════════════╣");
-        println!("║  Contenido del PDF de prueba:                        ║");
-        println!("║    • 4 páginas                                       ║");
-        println!("║    • JPEG 2500×2500 px + copia duplicada             ║");
-        println!("║    • Imagen B&N cruda 500×500 px                     ║");
-        println!("║    • Imagen RGB cruda 400×400 px                     ║");
-        println!("║    • Fuente Arial embebida: {}                   ║", if tiene_arial {"SÍ "} else {"NO "});
-        println!("╠══════════════════════════════════════════════════════╣");
-        println!("║  MEDICIÓN AISLADA (cada etapa sobre el PDF original) ║");
-        println!("║  Original:              {:>8} KB                  ║", tam0 / 1024);
-        println!("║  Solo reducir:          {:>8} KB   ({:+.1}%)           ║", tam_r / 1024, -pct(tam0, tam_r));
-        println!("║  Solo deduplicar:       {:>8} KB   ({:+.1}%)           ║", tam_d / 1024, -pct(tam0, tam_d));
-        println!("║  Solo subset fuentes:   {:>8} KB   ({:+.1}%)           ║", tam_s / 1024, -pct(tam0, tam_s));
-        println!("║  Solo comprimir imgs:   {:>8} KB   ({:+.1}%)           ║", tam_c / 1024, -pct(tam0, tam_c));
-        println!("╠══════════════════════════════════════════════════════╣");
-        println!("║  PIPELINE COMPLETO (secuencial, acumulativo)         ║");
-        println!("║  Original:              {:>8} KB  (100%)             ║", tam0 / 1024);
-        println!("║  Tras reducir:          {:>8} KB  ({:.1}% del orig)  ║", base1.len() / 1024, base1.len() as f64 / tam0 as f64 * 100.0);
-        println!("║  Tras deduplicar:       {:>8} KB  ({:.1}% del orig)  ║", base2.len() / 1024, base2.len() as f64 / tam0 as f64 * 100.0);
-        println!("║  Tras subset fuentes:   {:>8} KB  ({:.1}% del orig)  ║", base3.len() / 1024, base3.len() as f64 / tam0 as f64 * 100.0);
-        println!("║  FINAL (tras comprimir):{:>8} KB  ({:.1}% del orig)  ║", tam_fin / 1024, tam_fin as f64 / tam0 as f64 * 100.0);
-        println!("║  ─────────────────────────────────────────────────── ║");
-        println!("║  Reducción total:       {:.1}% ({} KB → {} KB)        ║", pct(tam0, tam_fin), tam0 / 1024, tam_fin / 1024);
-        println!("╠══════════════════════════════════════════════════════╣");
-        println!("║  VERIFICACIÓN INTEGRIDAD:                            ║");
-        println!("║  Páginas antes: 4  →  después: {}                    ║", paginas_fin);
-        println!("║  XObjects imagen antes: {}  →  después: {} {}        ║",
+        println!("\n╔═══════════════════════════════════════════════════════════════╗");
+        println!("║       BENCHMARK PIPELINE COMPRESIÓN HIPER-AGRESIVA (5 ETAPAS)║");
+        println!("╠═══════════════════════════════════════════════════════════════╣");
+        println!("║  Contenido del PDF de prueba:                                 ║");
+        println!("║    • 4 páginas                                                ║");
+        println!("║    • JPEG 2500×2500 px + copia duplicada                      ║");
+        println!("║    • Imagen B&N cruda 500×500 px                              ║");
+        println!("║    • Imagen RGB cruda 400×400 px                              ║");
+        println!("║    • Fuente Arial embebida: {}                             ║", if tiene_arial {"SÍ "} else {"NO "});
+        println!("╠═══════════════════════════════════════════════════════════════╣");
+        println!("║  MEDICIÓN AISLADA (cada etapa sobre el original + tiempo)     ║");
+        println!("║  Original:                {:>8} KB                           ║", tam0 / 1024);
+        println!("║  A reducir:               {:>8} KB  ({:+.1}%)  {:>5} ms        ║", tam_r  / 1024, -pct(tam0, tam_r),  ms_r);
+        println!("║  B deduplicar:            {:>8} KB  ({:+.1}%)  {:>5} ms        ║", tam_d  / 1024, -pct(tam0, tam_d),  ms_d);
+        println!("║  C subset fuentes:        {:>8} KB  ({:+.1}%)  {:>5} ms        ║", tam_s  / 1024, -pct(tam0, tam_s),  ms_s);
+        println!("║  C comprimir imágenes:    {:>8} KB  ({:+.1}%)  {:>5} ms        ║", tam_c  / 1024, -pct(tam0, tam_c),  ms_c);
+        println!("║  D comprimir streams:     {:>8} KB  ({:+.1}%)  {:>5} ms        ║", tam_st / 1024, -pct(tam0, tam_st), ms_st);
+        println!("╠═══════════════════════════════════════════════════════════════╣");
+        println!("║  PIPELINE COMPLETO (secuencial, acumulativo)                  ║");
+        println!("║  Original:                {:>8} KB  (100.0%)                 ║", tam0 / 1024);
+        println!("║  Tras A reducir:          {:>8} KB  ({:.1}% del orig)        ║", base1.len() / 1024, base1.len() as f64 / tam0 as f64 * 100.0);
+        println!("║  Tras B deduplicar:       {:>8} KB  ({:.1}% del orig)        ║", base2.len() / 1024, base2.len() as f64 / tam0 as f64 * 100.0);
+        println!("║  Tras C subset fuentes:   {:>8} KB  ({:.1}% del orig)        ║", base3.len() / 1024, base3.len() as f64 / tam0 as f64 * 100.0);
+        println!("║  Tras C comprimir imgs:   {:>8} KB  ({:.1}% del orig)        ║", base4.len() / 1024, base4.len() as f64 / tam0 as f64 * 100.0);
+        println!("║  Tras D comprimir strs:   {:>8} KB  ({:.1}% del orig)        ║", tam_fin / 1024, tam_fin as f64 / tam0 as f64 * 100.0);
+        println!("║  ──────────────────────────────────────────────────────────── ║");
+        println!("║  Reducción total A+B+C+D: {:.1}% ({} KB → {} KB)             ║", pct(tam0, tam_fin), tam0 / 1024, tam_fin / 1024);
+        println!("║  Aporte incremental D:    {:.1}% ({} KB → {} KB)             ║", reduccion_d_incremental, tam_antes_d / 1024, tam_fin / 1024);
+        println!("║  Tiempo pipeline total:   {:>5} ms                            ║", ms_pipeline);
+        println!("╠═══════════════════════════════════════════════════════════════╣");
+        println!("║  VERIFICACIÓN INTEGRIDAD:                                     ║");
+        println!("║  Páginas antes: 4  →  después: {}                             ║", paginas_fin);
+        println!("║  XObjects imagen antes: {}  →  después: {} {}               ║",
             img_count_orig, img_count_fin,
             if img_count_fin <= img_count_orig { "✓" } else { "⚠" }
         );
-        println!("║  PDF resultante parseable: SÍ ✓                     ║");
-        println!("╚══════════════════════════════════════════════════════╝");
+        println!("║  PDF resultante parseable: SÍ ✓                              ║");
+        println!("╚═══════════════════════════════════════════════════════════════╝");
 
         // Assertions mínimas para que el test falle si algo sale mal.
         assert_eq!(paginas_fin, 4, "el PDF final debe tener 4 páginas");

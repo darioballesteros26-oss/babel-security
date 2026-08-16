@@ -443,6 +443,7 @@ dependencies = [
  "dirs 5.0.1",
  "docx-rs",
  "env_logger",
+ "flate2",
  "hex",
  "hkdf",
  "hmac 0.12.1",
