@@ -1104,7 +1104,9 @@ fn cifrar_y_guardar_desde_bytes(
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
     if !["pdf", "docx", "txt", "png", "jpg", "jpeg"].contains(&ext.as_str()) {
-        return Err(format!("Tipo de archivo no permitido: .{}", ext));
+        let msg = hint_formato_no_soportado(&ext)
+            .unwrap_or("Tipo de archivo no permitido");
+        return Err(msg.to_string());
     }
     if contenido.len() as u64 > LIMITE_IMPORT_BYTES {
         return Err("El archivo supera el límite de 150 MB.".into());
@@ -1989,7 +1991,9 @@ async fn traducir_documento_ruta(
             .map(|e| e.to_lowercase())
             .unwrap_or_default();
         if !["pdf", "docx", "txt"].contains(&ext.as_str()) {
-            return Err(format!("Tipo de archivo no permitido: .{}", ext));
+            let msg = hint_formato_no_soportado(&ext)
+                .unwrap_or("Tipo de archivo no permitido para traducción");
+            return Err(msg.to_string());
         }
 
         // En sandbox, is_file() devuelve false para archivos arrastrados hasta que el OS
@@ -2278,6 +2282,36 @@ fn abrir_descifrado_vault(ruta: &str, subclave_hex: &str) -> Result<Zeroizing<Ve
     validar_ruta_en(ruta, archivos_dir())
         .or_else(|_| validar_ruta_en(ruta, guardados_dir()))?;
     Ok(Zeroizing::new(descifrar_a_bytes(ruta, subclave_hex)?))
+}
+
+// Para formatos de documento propietarios conocidos que Babel no puede procesar,
+// devuelve un mensaje en español con instrucciones para convertirlos. Devuelve None
+// para extensiones soportadas o desconocidas.
+fn hint_formato_no_soportado(ext: &str) -> Option<&'static str> {
+    match ext {
+        "pages" => Some("Este archivo es de Apple Pages y no se puede procesar directamente. \
+            Expórtalo a PDF o Word desde Pages: Archivo → Exportar a → PDF (o Word)."),
+        "odt" => Some("Este archivo es de LibreOffice Writer (.odt) y no se puede procesar \
+            directamente. Guárdalo como Word desde LibreOffice: Archivo → Guardar como → \
+            Word 2007-365 (.docx)."),
+        "numbers" => Some("Este archivo es de Apple Numbers y no se puede procesar directamente. \
+            Expórtalo desde Numbers: Archivo → Exportar a → PDF."),
+        "key" => Some("Este archivo es de Apple Keynote y no se puede procesar directamente. \
+            Expórtalo desde Keynote: Archivo → Exportar a → PDF (o PowerPoint)."),
+        "doc" => Some("El formato .doc (Word antiguo) no está soportado directamente. \
+            Ábrelo en Word y guárdalo como .docx: Archivo → Guardar como → Word (.docx)."),
+        "xls" => Some("El formato .xls (Excel antiguo) no está soportado directamente. \
+            Ábrelo en Excel y expórtalo a PDF: Archivo → Exportar → Crear documento PDF."),
+        "ppt" => Some("El formato .ppt (PowerPoint antiguo) no está soportado directamente. \
+            Ábrelo en PowerPoint y expórtalo a PDF: Archivo → Exportar → Crear documento PDF."),
+        "rtf" => Some("El formato .rtf no está soportado directamente. \
+            Ábrelo en TextEdit o Word y guárdalo como .docx o .txt."),
+        "ods" => Some("Este archivo es de LibreOffice Calc (.ods) y no se puede procesar \
+            directamente. Expórtalo como PDF desde LibreOffice: Archivo → Exportar como PDF."),
+        "odp" => Some("Este archivo es de LibreOffice Impress (.odp) y no se puede procesar \
+            directamente. Expórtalo como PDF desde LibreOffice: Archivo → Exportar como PDF."),
+        _ => None,
+    }
 }
 
 // Detecta la extensión real de un archivo por sus magic bytes.
@@ -5955,5 +5989,74 @@ mod tests_sidecar {
     fn test_usb_child_mutex_inicial_vacio() {
         let guard = USB_CHILD.lock().unwrap_or_else(|p| p.into_inner());
         assert!(guard.is_none(), "USB_CHILD debe estar vacío al inicio");
+    }
+}
+
+#[cfg(test)]
+mod tests_formatos_no_soportados {
+    use super::hint_formato_no_soportado;
+
+    #[test]
+    fn pages_devuelve_mensaje_con_instrucciones() {
+        let msg = hint_formato_no_soportado("pages");
+        assert!(msg.is_some(), ".pages debe tener mensaje");
+        let msg = msg.unwrap();
+        assert!(msg.contains("Apple Pages"), "debe mencionar Apple Pages");
+        assert!(msg.contains("Exportar"), "debe incluir la ruta de exportación");
+    }
+
+    #[test]
+    fn odt_devuelve_mensaje_con_instrucciones() {
+        let msg = hint_formato_no_soportado("odt");
+        assert!(msg.is_some(), ".odt debe tener mensaje");
+        let msg = msg.unwrap();
+        assert!(msg.contains("LibreOffice"), "debe mencionar LibreOffice");
+        assert!(msg.contains(".docx"), "debe indicar el formato de destino");
+    }
+
+    #[test]
+    fn numbers_devuelve_mensaje() {
+        let msg = hint_formato_no_soportado("numbers");
+        assert!(msg.is_some());
+        assert!(msg.unwrap().contains("Apple Numbers"));
+    }
+
+    #[test]
+    fn key_devuelve_mensaje() {
+        let msg = hint_formato_no_soportado("key");
+        assert!(msg.is_some());
+        assert!(msg.unwrap().contains("Keynote"));
+    }
+
+    #[test]
+    fn doc_xls_ppt_devuelven_mensaje() {
+        assert!(hint_formato_no_soportado("doc").is_some());
+        assert!(hint_formato_no_soportado("xls").is_some());
+        assert!(hint_formato_no_soportado("ppt").is_some());
+    }
+
+    #[test]
+    fn rtf_ods_odp_devuelven_mensaje() {
+        assert!(hint_formato_no_soportado("rtf").is_some());
+        assert!(hint_formato_no_soportado("ods").is_some());
+        assert!(hint_formato_no_soportado("odp").is_some());
+    }
+
+    #[test]
+    fn formatos_soportados_devuelven_none() {
+        // Babel sí procesa estos — no debe mostrar aviso
+        assert!(hint_formato_no_soportado("pdf").is_none());
+        assert!(hint_formato_no_soportado("docx").is_none());
+        assert!(hint_formato_no_soportado("txt").is_none());
+        assert!(hint_formato_no_soportado("png").is_none());
+        assert!(hint_formato_no_soportado("jpg").is_none());
+    }
+
+    #[test]
+    fn extension_desconocida_devuelve_none() {
+        // Para extensiones desconocidas el backend ya devuelve un error genérico
+        assert!(hint_formato_no_soportado("xyz").is_none());
+        assert!(hint_formato_no_soportado("").is_none());
+        assert!(hint_formato_no_soportado("zip").is_none());
     }
 }

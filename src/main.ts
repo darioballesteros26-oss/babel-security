@@ -2818,6 +2818,8 @@ async function iniciarDropZone(): Promise<void> {
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
     for (const f of files) {
+      const msgFmt = mensajeFormatoNoSoportado(f.name);
+      if (msgFmt) { mostrarToast(msgFmt, true); continue; }
       try {
         const buf = await f.arrayBuffer();
         const b64 = bytesABase64(new Uint8Array(buf));
@@ -2906,6 +2908,82 @@ function bytesABase64(bytes: Uint8Array): string {
   return btoa(binario);
 }
 
+// Devuelve un mensaje localizado cuando el formato del archivo no está soportado
+// por Babel, con instrucciones concretas para convertirlo. Devuelve null si el
+// formato sí está soportado (o no se reconoce — el backend dará su propio error).
+function mensajeFormatoNoSoportado(nombre: string): string | null {
+  const lang = localStorage.getItem("babel-idioma-ui") ?? "es";
+  const ext = nombre.split(".").pop()?.toLowerCase() ?? "";
+
+  type Msgs = { es: string; en: string; fr: string; ar: string };
+  const msgs: Record<string, Msgs> = {
+    pages: {
+      es: "Este archivo es de Apple Pages y no se puede procesar directamente. Para usarlo con Babel, expórtalo a PDF o Word desde Pages: Archivo → Exportar a → PDF (o Word).",
+      en: "This file is in Apple Pages format and cannot be processed directly. To use it with Babel, export it to PDF or Word from Pages: File → Export To → PDF (or Word).",
+      fr: "Ce fichier est au format Apple Pages et ne peut pas être traité directement. Pour l'utiliser avec Babel, exportez-le en PDF ou Word depuis Pages : Fichier → Exporter vers → PDF (ou Word).",
+      ar: "هذا الملف بتنسيق Apple Pages ولا يمكن معالجته مباشرةً. لاستخدامه مع Babel، صدّره بتنسيق PDF أو Word من Pages: ملف ← تصدير إلى ← PDF (أو Word).",
+    },
+    odt: {
+      es: "Este archivo es de LibreOffice Writer (.odt) y no se puede procesar directamente. Guárdalo como Word desde LibreOffice: Archivo → Guardar como → Word 2007-365 (.docx).",
+      en: "This file is in LibreOffice Writer format (.odt) and cannot be processed directly. Save it as Word from LibreOffice: File → Save As → Word 2007-365 (.docx).",
+      fr: "Ce fichier est au format LibreOffice Writer (.odt) et ne peut pas être traité directement. Enregistrez-le comme Word depuis LibreOffice : Fichier → Enregistrer sous → Word 2007-365 (.docx).",
+      ar: "هذا الملف بتنسيق LibreOffice Writer ‏(.odt) ولا يمكن معالجته مباشرةً. احفظه بتنسيق Word من LibreOffice: ملف ← حفظ باسم ← Word 2007-365 ‏(.docx).",
+    },
+    numbers: {
+      es: "Este archivo es de Apple Numbers y no se puede procesar directamente. Expórtalo desde Numbers: Archivo → Exportar a → PDF.",
+      en: "This file is in Apple Numbers format and cannot be processed directly. Export it from Numbers: File → Export To → PDF.",
+      fr: "Ce fichier est au format Apple Numbers et ne peut pas être traité directement. Exportez-le depuis Numbers : Fichier → Exporter vers → PDF.",
+      ar: "هذا الملف بتنسيق Apple Numbers ولا يمكن معالجته مباشرةً. صدّره من Numbers: ملف ← تصدير إلى ← PDF.",
+    },
+    key: {
+      es: "Este archivo es de Apple Keynote y no se puede procesar directamente. Expórtalo desde Keynote: Archivo → Exportar a → PDF (o PowerPoint).",
+      en: "This file is in Apple Keynote format and cannot be processed directly. Export it from Keynote: File → Export To → PDF (or PowerPoint).",
+      fr: "Ce fichier est au format Apple Keynote et ne peut pas être traité directement. Exportez-le depuis Keynote : Fichier → Exporter vers → PDF (ou PowerPoint).",
+      ar: "هذا الملف بتنسيق Apple Keynote ولا يمكن معالجته مباشرةً. صدّره من Keynote: ملف ← تصدير إلى ← PDF (أو PowerPoint).",
+    },
+    doc: {
+      es: "El formato .doc (Word antiguo) no está soportado directamente. Ábrelo en Word y guárdalo como .docx: Archivo → Guardar como → Word (.docx).",
+      en: "The .doc format (legacy Word) is not directly supported. Open it in Word and save it as .docx: File → Save As → Word (.docx).",
+      fr: "Le format .doc (Word ancien) n'est pas pris en charge directement. Ouvrez-le dans Word et enregistrez-le en .docx : Fichier → Enregistrer sous → Word (.docx).",
+      ar: "تنسيق .doc (Word القديم) غير مدعوم مباشرةً. افتحه في Word واحفظه بتنسيق .docx: ملف ← حفظ باسم ← Word ‏(.docx).",
+    },
+    xls: {
+      es: "El formato .xls (Excel antiguo) no está soportado directamente. Ábrelo en Excel y expórtalo a PDF: Archivo → Exportar → Crear documento PDF.",
+      en: "The .xls format (legacy Excel) is not directly supported. Open it in Excel and export to PDF: File → Export → Create PDF Document.",
+      fr: "Le format .xls (Excel ancien) n'est pas pris en charge directement. Ouvrez-le dans Excel et exportez-le en PDF : Fichier → Exporter → Créer un document PDF.",
+      ar: "تنسيق .xls (Excel القديم) غير مدعوم مباشرةً. افتحه في Excel وصدّره بصيغة PDF: ملف ← تصدير ← إنشاء مستند PDF.",
+    },
+    ppt: {
+      es: "El formato .ppt (PowerPoint antiguo) no está soportado directamente. Ábrelo en PowerPoint y expórtalo a PDF: Archivo → Exportar → Crear documento PDF.",
+      en: "The .ppt format (legacy PowerPoint) is not directly supported. Open it in PowerPoint and export to PDF: File → Export → Create PDF Document.",
+      fr: "Le format .ppt (PowerPoint ancien) n'est pas pris en charge directement. Ouvrez-le dans PowerPoint et exportez-le en PDF : Fichier → Exporter → Créer un document PDF.",
+      ar: "تنسيق .ppt (PowerPoint القديم) غير مدعوم مباشرةً. افتحه في PowerPoint وصدّره بصيغة PDF: ملف ← تصدير ← إنشاء مستند PDF.",
+    },
+    rtf: {
+      es: "El formato .rtf no está soportado directamente. Ábrelo en TextEdit o Word y guárdalo como .docx o .txt.",
+      en: "The .rtf format is not directly supported. Open it in TextEdit or Word and save it as .docx or .txt.",
+      fr: "Le format .rtf n'est pas pris en charge directement. Ouvrez-le dans TextEdit ou Word et enregistrez-le en .docx ou .txt.",
+      ar: "تنسيق .rtf غير مدعوم مباشرةً. افتحه في TextEdit أو Word واحفظه بتنسيق .docx أو .txt.",
+    },
+    ods: {
+      es: "Este archivo es de LibreOffice Calc (.ods) y no se puede procesar directamente. Expórtalo como PDF desde LibreOffice: Archivo → Exportar como PDF.",
+      en: "This file is in LibreOffice Calc format (.ods) and cannot be processed directly. Export it as PDF from LibreOffice: File → Export As PDF.",
+      fr: "Ce fichier est au format LibreOffice Calc (.ods) et ne peut pas être traité directement. Exportez-le en PDF depuis LibreOffice : Fichier → Exporter en PDF.",
+      ar: "هذا الملف بتنسيق LibreOffice Calc ‏(.ods) ولا يمكن معالجته مباشرةً. صدّره بصيغة PDF من LibreOffice: ملف ← تصدير بصيغة PDF.",
+    },
+    odp: {
+      es: "Este archivo es de LibreOffice Impress (.odp) y no se puede procesar directamente. Expórtalo como PDF desde LibreOffice: Archivo → Exportar como PDF.",
+      en: "This file is in LibreOffice Impress format (.odp) and cannot be processed directly. Export it as PDF from LibreOffice: File → Export As PDF.",
+      fr: "Ce fichier est au format LibreOffice Impress (.odp) et ne peut pas être traité directement. Exportez-le en PDF depuis LibreOffice : Fichier → Exporter en PDF.",
+      ar: "هذا الملف بتنسيق LibreOffice Impress ‏(.odp) ولا يمكن معالجته مباشرةً. صدّره بصيغة PDF من LibreOffice: ملف ← تصدير بصيغة PDF.",
+    },
+  };
+
+  const entry = msgs[ext];
+  if (!entry) return null;
+  return entry[lang as keyof Msgs] ?? entry.es;
+}
+
 // Cifra y guarda un File arrastrado (sin ruta, solo bytes vía HTML5 drop).
 // `destino`: carpeta donde queda; "todos" = sin mover. `recargar`: al importar en
 // lote (una carpeta entera) se pasa false para no recargar la lista ni sacar un toast
@@ -2918,6 +2996,11 @@ async function guardarArchivoDesdeFile(
   const nombre = file.name || "archivo";
   if (nombre.endsWith(".babel")) {
     if (recargar) mostrarToast("Los archivos .babel ya están cifrados", true);
+    return false;
+  }
+  const msgFormato = mensajeFormatoNoSoportado(nombre);
+  if (msgFormato) {
+    if (recargar) mostrarToast(msgFormato, true);
     return false;
   }
   if (file.size > 150 * 1024 * 1024) {
