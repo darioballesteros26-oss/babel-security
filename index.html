@@ -1697,6 +1697,86 @@
     </div>
   </div>
 
+  <!-- PANTALLA BLOQUEO RAT — overlay fijo, distinto del bloqueo por inactividad -->
+  <div id="pantalla-bloqueo-rat" class="hidden"
+    style="position:fixed;inset:0;z-index:10000;background:#0d0000;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:24px;">
+    <div style="text-align:center;margin-bottom:20px;">
+      <div style="font-family:'Times New Roman',Times,serif;font-size:1.8rem;letter-spacing:8px;color:#ef4444;margin-bottom:6px;">BABEL</div>
+      <p style="letter-spacing:4px;font-size:0.6rem;color:#ef4444;margin-bottom:4px;">ACCESO BLOQUEADO</p>
+      <p style="font-size:0.7rem;color:#fca5a5;margin:0;">Se ha detectado una herramienta de acceso remoto activa:</p>
+      <p id="rat-proceso-nombre" style="font-size:0.85rem;color:#ef4444;font-weight:bold;letter-spacing:2px;margin:6px 0 0;"></p>
+    </div>
+
+    <div style="background:#1a0000;border:1px solid #ef4444;border-radius:6px;padding:24px 28px;min-width:320px;max-width:420px;width:100%;">
+
+      <!-- VÍA 1: dispositivo emparejado -->
+      <div style="margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid rgba(239,68,68,0.2);">
+        <p style="font-size:0.65rem;letter-spacing:2px;color:#fca5a5;margin-bottom:8px;">VÍA 1 — DISPOSITIVO EMPAREJADO</p>
+        <p style="font-size:0.72rem;color:#fca5a5;margin-bottom:10px;line-height:1.5;">Pide a otro dispositivo Babel emparejado que confirme el desbloqueo.</p>
+        <button id="rat-btn-solicitar" type="button"
+          style="width:100%;padding:10px;background:transparent;border:1px solid #ef4444;color:#ef4444;letter-spacing:2px;font-size:0.65rem;cursor:pointer;border-radius:3px;transition:background 0.2s;">
+          SOLICITAR DESBLOQUEO AL PAR
+        </button>
+        <p id="rat-solicitud-status" style="font-size:0.65rem;color:#fca5a5;margin-top:6px;min-height:16px;text-align:center;"></p>
+      </div>
+
+      <!-- VÍA 2: frase BIP39 -->
+      <div>
+        <p style="font-size:0.65rem;letter-spacing:2px;color:#fca5a5;margin-bottom:8px;">VÍA 2 — FRASE DE RECUPERACIÓN BIP39</p>
+
+        <!-- ADVERTENCIA PROMINENTE -->
+        <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.4);border-radius:4px;padding:10px 12px;margin-bottom:12px;">
+          <p style="font-size:0.62rem;color:#fca5a5;line-height:1.6;margin:0;">
+            ⚠ <strong style="color:#ef4444;">IMPORTANTE:</strong> Tu frase de 12 palabras es la única copia de seguridad del búnker.
+            Guárdala en papel, fuera del dispositivo. Si la pierdes, perderás acceso permanente a todos tus archivos cifrados.
+            <strong style="color:#ef4444;">No la compartas nunca.</strong>
+          </p>
+        </div>
+
+        <p style="font-size:0.7rem;color:#fca5a5;margin-bottom:8px;line-height:1.5;">Escribe las 12 palabras separadas por espacios:</p>
+        <textarea id="rat-bip39-input"
+          rows="3"
+          placeholder="palabra1 palabra2 palabra3 … palabra12"
+          style="width:100%;box-sizing:border-box;background:#0d0000;border:1px solid #ef4444;color:#fca5a5;padding:8px;font-size:0.7rem;font-family:monospace;border-radius:3px;resize:none;letter-spacing:0.5px;">
+        </textarea>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;margin-bottom:10px;">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.65rem;color:#fca5a5;flex:1;">
+            <input type="checkbox" id="rat-marcar-confiable" style="accent-color:#ef4444;cursor:pointer;">
+            Confiar en este programa durante esta sesión
+          </label>
+        </div>
+        <button id="rat-btn-bip39" type="button"
+          style="width:100%;padding:10px;background:transparent;border:1px solid #991b1b;color:#fca5a5;letter-spacing:2px;font-size:0.65rem;cursor:pointer;border-radius:3px;">
+          VERIFICAR FRASE
+        </button>
+        <p id="rat-bip39-msg" style="font-size:0.65rem;color:#fca5a5;margin-top:6px;min-height:16px;text-align:center;"></p>
+        <p id="rat-intentos-label" style="font-size:0.6rem;color:#6b7280;margin-top:2px;text-align:center;"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CONFIRMAR DESBLOQUEO RAT (mostrado en el par B) -->
+  <div id="modal-confirmar-rat" class="hidden"
+    style="position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;">
+    <div style="background:#0d0000;border:1px solid #ef4444;border-radius:6px;padding:28px 28px 22px;min-width:300px;max-width:380px;">
+      <p style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;letter-spacing:3px;color:#ef4444;margin-bottom:14px;">
+        SOLICITUD DE DESBLOQUEO RAT
+      </p>
+      <p id="rat-modal-descripcion" style="font-size:0.8rem;color:#fca5a5;margin-bottom:20px;line-height:1.6;"></p>
+      <div style="display:flex;gap:10px;">
+        <button id="rat-modal-confirmar" type="button"
+          style="flex:1;padding:10px;background:transparent;border:1px solid #ef4444;color:#ef4444;letter-spacing:2px;font-size:0.65rem;cursor:pointer;border-radius:3px;">
+          CONFIRMAR
+        </button>
+        <button id="rat-modal-rechazar" type="button"
+          style="flex:1;padding:10px;background:transparent;border:1px solid #374151;color:#9ca3af;letter-spacing:2px;font-size:0.65rem;cursor:pointer;border-radius:3px;">
+          RECHAZAR
+        </button>
+      </div>
+      <p id="rat-modal-status" style="font-size:0.65rem;color:#fca5a5;margin-top:8px;min-height:16px;text-align:center;"></p>
+    </div>
+  </div>
+
   <div
     style="position:fixed;bottom:4px;right:8px;opacity:0.25;font-size:0.55rem;letter-spacing:1.5px;font-family:'Times New Roman', Times, serif,sans-serif;pointer-events:none;">
     100% LOCAL · CERO SERVIDORES · CERO EMISIONES

@@ -182,6 +182,15 @@ pub struct ResultadoEmparejamiento {
 
 pub static SOLICITUD_PENDIENTE: Mutex<Option<SolicitudSincPublica>> = Mutex::new(None);
 
+// ── Solicitud de desbloqueo RAT (recibida en el par B desde el dispositivo bloqueado A) ──
+#[derive(Clone, serde::Serialize)]
+pub struct SolicitudDesbloqueoRat {
+    pub nombre: String,
+    pub proceso: String,
+    pub ip: String,
+}
+pub static SOLICITUD_DESBLOQUEO_RAT: Mutex<Option<SolicitudDesbloqueoRat>> = Mutex::new(None);
+
 static DECISION_MUTEX: Mutex<Option<bool>> = Mutex::new(None);
 static DECISION_CONDVAR: Condvar = Condvar::new();
 static CLAVE_PARA_ENVIAR: Mutex<Option<Zeroizing<String>>> = Mutex::new(None);
@@ -199,6 +208,11 @@ pub fn limpiar_subclave_sesion() {
     if let Ok(mut g) = SUBCLAVE_SESION.lock() {
         *g = None;
     }
+}
+
+/// Retorna una copia de la subclave de sesión actual (para uso en módulos hermanos).
+pub fn obtener_subclave_sesion_copy() -> Option<String> {
+    SUBCLAVE_SESION.lock().ok()?.as_deref().map(|s| s.to_string())
 }
 
 pub fn detener_servidor_sinc() {
@@ -303,6 +317,66 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
     // Sólo cuando A tiene b2.json y B todavía no lo recibió (flag b2_pendiente).
     if linea.starts_with("BABEL_B2_REINTENTO:") {
         manejar_reintento_b2(stream, ip_origen, &nombre_local, &linea);
+        return;
+    }
+
+    // ── Desbloqueo RAT — solicitud desde dispositivo bloqueado A ───────────────
+    // A → B: BABEL_RAT_REQ:{nombre_A}:{proceso}:{ts}:{hmac8}\n
+    // B responde BABEL_RAT_ACK:{ts}\n y guarda la solicitud para que la UI la muestre.
+    if linea.starts_with("BABEL_RAT_REQ:") {
+        let partes: Vec<&str> = linea.splitn(5, ':').collect();
+        if partes.len() >= 5 {
+            let nombre_solicitante = partes[1].chars()
+                .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '.')
+                .take(64).collect::<String>();
+            let proceso = partes[2].chars()
+                .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-')
+                .take(64).collect::<String>();
+            let ts: u64 = partes[3].parse().unwrap_or(0);
+            let hmac_rx = partes[4].trim();
+            let ahora = ahora_unix();
+            if ts > 0 && ahora.saturating_sub(ts) <= 60
+                && crate::rat_detector::hmac_rat("rat_req", ts) == hmac_rx
+            {
+                if let Ok(mut slot) = SOLICITUD_DESBLOQUEO_RAT.lock() {
+                    *slot = Some(SolicitudDesbloqueoRat {
+                        nombre: nombre_solicitante,
+                        proceso,
+                        ip: ip_origen.clone(),
+                    });
+                }
+                let ts_resp = ahora_unix();
+                let mut w = match stream.try_clone() { Ok(s) => s, Err(_) => return };
+                let _ = w.write_all(format!("BABEL_RAT_ACK:{}\n", ts_resp).as_bytes());
+                log::info!("[RAT] Solicitud de desbloqueo recibida de {}", ip_origen);
+            } else {
+                log::warn!("[RAT] BABEL_RAT_REQ con HMAC o timestamp inválido de {}", ip_origen);
+            }
+        }
+        return;
+    }
+
+    // ── Desbloqueo RAT — confirmación del par B hacia el dispositivo bloqueado A ─
+    // B → A: BABEL_RAT_OK:{nombre_B}:{ts}:{hmac8}\n
+    // A verifica y si es válido, desbloquea Babel y responde BABEL_RAT_OK_ACK\n.
+    if linea.starts_with("BABEL_RAT_OK:") {
+        let partes: Vec<&str> = linea.splitn(4, ':').collect();
+        if partes.len() >= 4 {
+            let ts: u64 = partes[2].parse().unwrap_or(0);
+            let hmac_rx = partes[3].trim();
+            let ahora = ahora_unix();
+            if ts > 0 && ahora.saturating_sub(ts) <= 60
+                && crate::rat_detector::hmac_rat("rat_ok", ts) == hmac_rx
+                && crate::rat_detector::es_rat_bloqueado()
+            {
+                crate::rat_detector::desbloquear_rat_desde_red();
+                let mut w = match stream.try_clone() { Ok(s) => s, Err(_) => return };
+                let _ = w.write_all(b"BABEL_RAT_OK_ACK\n");
+                log::info!("[RAT] Desbloqueado por confirmación de {}", ip_origen);
+            } else {
+                log::warn!("[RAT] BABEL_RAT_OK inválido o sin bloqueo activo de {}", ip_origen);
+            }
+        }
         return;
     }
 

@@ -779,6 +779,7 @@ function tipoLabelRegistro(tipo: string): string {
     importar: "Importación",
     cerrar_sesion: "Sesión cerrada",
     sospecha_hw: "Copia no autorizada bloqueada",
+    sospecha_rat: "Acceso remoto bloqueado",
   };
   return labels[tipo] ?? tipo;
 }
@@ -809,14 +810,17 @@ function renderizarSospechas(eventos: EventoDiario[]): void {
   const listaEl = document.getElementById("registro-lista")!;
   const resumenEl = document.getElementById("registro-resumen")!;
 
-  const sospechas = eventos.filter(e => e.tipo === "sospecha_hw");
+  const sospechas = eventos.filter(e => e.tipo === "sospecha_hw" || e.tipo === "sospecha_rat");
 
+  const nHw = eventos.filter(e => e.tipo === "sospecha_hw").length;
+  const nRat = eventos.filter(e => e.tipo === "sospecha_rat").length;
   resumenEl.innerHTML = sospechas.length > 0
-    ? `<div style="display:flex;gap:16px;align-items:center;">
-        <span class="registro-stat-alerta">⚠ ${sospechas.length} intento${sospechas.length !== 1 ? "s" : ""} de acceso no autorizado bloqueado${sospechas.length !== 1 ? "s" : ""} hoy</span>
+    ? `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+        ${nHw > 0 ? `<span class="registro-stat-alerta">⚠ ${nHw} copia${nHw !== 1 ? "s" : ""} no autorizada${nHw !== 1 ? "s" : ""}</span>` : ""}
+        ${nRat > 0 ? `<span class="registro-stat-alerta" style="color:#ef4444;">⚠ ${nRat} acceso${nRat !== 1 ? "s" : ""} remoto${nRat !== 1 ? "s" : ""} bloqueado${nRat !== 1 ? "s" : ""}</span>` : ""}
       </div>`
     : `<div style="display:flex;gap:16px;align-items:center;">
-        <span class="registro-stat" style="color:#22c55e;">✓ Sin copias no autorizadas detectadas</span>
+        <span class="registro-stat" style="color:#22c55e;">✓ Sin sospechas detectadas</span>
       </div>`;
 
   if (sospechas.length === 0) {
@@ -829,16 +833,19 @@ function renderizarSospechas(eventos: EventoDiario[]): void {
     ? `<div class="registro-evento registro-sospechoso" style="margin:8px 16px;border-radius:4px;">
         <div class="registro-evento-fila">
           <span class="registro-evento-tipo" style="color:#ef4444;letter-spacing:2px;">
-            ${sospechas.length} COPIAS NO AUTORIZADAS ELIMINADAS
+            ${sospechas.length} AMENAZA${sospechas.length !== 1 ? "S" : ""} DETECTADA${sospechas.length !== 1 ? "S" : ""}
           </span>
           <span class="registro-badge-alerta">HOY</span>
         </div>
         <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(239,68,68,0.15);">
           ${sospechas.map(ev => {
             const hora = ev.timestamp.split("T")[1] ?? "";
+            const esRat = ev.tipo === "sospecha_rat";
+            const etiqueta = esRat ? "RAT" : "COPIA";
             return `<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;font-size:0.62rem;opacity:0.85;">
               <span style="font-family:monospace;color:var(--texto-secundario);flex-shrink:0;">${escapeHTML(hora)}</span>
               <span style="font-family:monospace;color:var(--texto-secundario);flex-shrink:0;">${escapeHTML(ev.ip)}</span>
+              <span style="color:${esRat ? "#ef4444" : "var(--texto-secundario)"};flex-shrink:0;letter-spacing:1px;">[${etiqueta}]</span>
               <span style="color:var(--texto-secundario);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHTML(ev.detalle)}">${escapeHTML(ev.detalle)}</span>
             </div>`;
           }).join("")}
@@ -849,16 +856,19 @@ function renderizarSospechas(eventos: EventoDiario[]): void {
   const individuales = sospechas.length === 1
     ? sospechas.map(ev => {
         const hora = ev.timestamp.split("T")[1] ?? "";
+        const esRat = ev.tipo === "sospecha_rat";
+        const titulo = esRat ? "ACCESO REMOTO BLOQUEADO" : "COPIA NO AUTORIZADA BLOQUEADA";
+        const badge = esRat ? "RAT" : "ELIMINADO";
         return `
           <div class="registro-evento registro-sospechoso">
             <div class="registro-evento-fila">
-              <span class="registro-evento-tipo">COPIA NO AUTORIZADA BLOQUEADA</span>
+              <span class="registro-evento-tipo" style="${esRat ? "color:#ef4444;" : ""}">${titulo}</span>
               <span class="registro-evento-hora">${escapeHTML(hora)}</span>
             </div>
             <div class="registro-evento-fila" style="margin-top:2px;">
               <span class="registro-evento-ip">${escapeHTML(ev.ip)}</span>
               ${ev.detalle ? `<span class="registro-evento-nombre">${escapeHTML(ev.detalle)}</span>` : ""}
-              <span class="registro-badge-alerta">ELIMINADO</span>
+              <span class="registro-badge-alerta">${badge}</span>
             </div>
           </div>`;
       }).join("")
@@ -915,6 +925,7 @@ function renderizarRegistro(eventos: EventoDiario[], ipsHistorial: string[]): vo
 
   const filtrados = eventos.filter(e =>
     e.tipo !== "sospecha_hw" &&
+    e.tipo !== "sospecha_rat" &&
     (_registroFiltroTipos.size === 0 || _registroFiltroTipos.has(e.tipo)) &&
     (_registroFiltroIPs.size === 0 || _registroFiltroIPs.has(e.ip))
   ).slice().reverse();
@@ -931,7 +942,7 @@ function renderizarRegistro(eventos: EventoDiario[], ipsHistorial: string[]): vo
     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
       <span class="registro-stat">${logins} <small>acceso${logins !== 1 ? "s" : ""}</small></span>
       <span class="registro-stat">${archivos} <small>archivo${archivos !== 1 ? "s" : ""}</small></span>
-      <span class="registro-stat">${eventos.filter(e => e.tipo !== "sospecha_hw").length} <small>total</small></span>
+      <span class="registro-stat">${eventos.filter(e => e.tipo !== "sospecha_hw" && e.tipo !== "sospecha_rat").length} <small>total</small></span>
       ${sospechosos > 0 ? `<span class="registro-stat-alerta">⚠ ${sospechosos} IP${sospechosos !== 1 ? "s" : ""} nueva${sospechosos !== 1 ? "s" : ""}</span>` : ""}
     </div>
   `;
@@ -1304,6 +1315,131 @@ window.addEventListener("DOMContentLoaded", async () => {
       texto.textContent = ev.payload.estado === "instalando" ? "INSTALANDO..." : "DESCARGANDO...";
     }
   }).catch(() => {});
+
+  // ── Detección RAT ─────────────────────────────────────────────────────────
+  let _ratSolicitudIpActual = "";
+
+  listen<{ proceso: string }>("rat-detectado", (ev) => {
+    const overlay = document.getElementById("pantalla-bloqueo-rat");
+    const nombreEl = document.getElementById("rat-proceso-nombre");
+    const statusEl = document.getElementById("rat-solicitud-status");
+    const bip39MsgEl = document.getElementById("rat-bip39-msg");
+    const intentosEl = document.getElementById("rat-intentos-label");
+    const bip39Input = document.getElementById("rat-bip39-input") as HTMLTextAreaElement | null;
+    if (overlay) overlay.classList.remove("hidden");
+    if (nombreEl) nombreEl.textContent = ev.payload.proceso.toUpperCase();
+    if (statusEl) statusEl.textContent = "";
+    if (bip39MsgEl) bip39MsgEl.textContent = "";
+    if (intentosEl) intentosEl.textContent = "";
+    if (bip39Input) bip39Input.value = "";
+  }).catch(() => {});
+
+  listen("rat-desbloqueado", () => {
+    document.getElementById("pantalla-bloqueo-rat")?.classList.add("hidden");
+    document.getElementById("modal-confirmar-rat")?.classList.add("hidden");
+  }).catch(() => {});
+
+  // Botón: solicitar desbloqueo al par emparejado
+  document.getElementById("rat-btn-solicitar")?.addEventListener("click", async () => {
+    const statusEl = document.getElementById("rat-solicitud-status");
+    if (statusEl) statusEl.textContent = "Enviando solicitud…";
+    try {
+      const hostname = await invoke<string>("iniciar_sinc_servidor").catch(() => "Babel");
+      const acks = await invoke<number>("solicitar_desbloqueo_a_pares", { nombreLocal: hostname });
+      if (statusEl) {
+        statusEl.textContent = acks > 0
+          ? `✓ Solicitud enviada a ${acks} dispositivo${acks !== 1 ? "s" : ""}. Confirma desde el otro dispositivo.`
+          : "Sin dispositivos emparejados disponibles. Usa la frase BIP39.";
+      }
+    } catch (e) {
+      if (statusEl) statusEl.textContent = `Error: ${String(e)}`;
+    }
+  });
+
+  // Botón: verificar frase BIP39
+  document.getElementById("rat-btn-bip39")?.addEventListener("click", async () => {
+    const bip39Input = document.getElementById("rat-bip39-input") as HTMLTextAreaElement | null;
+    const msgEl = document.getElementById("rat-bip39-msg");
+    const intentosEl = document.getElementById("rat-intentos-label");
+    const marcarConfiable = (document.getElementById("rat-marcar-confiable") as HTMLInputElement | null)?.checked ?? false;
+    if (!bip39Input || !msgEl) return;
+
+    const palabras = bip39Input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (palabras.length !== 12) {
+      msgEl.style.color = "#ef4444";
+      msgEl.textContent = `Necesitas exactamente 12 palabras (tienes ${palabras.length}).`;
+      return;
+    }
+    msgEl.style.color = "#fca5a5";
+    msgEl.textContent = "Verificando…";
+    try {
+      const valida = await invoke<boolean>("desbloquear_rat_bip39", { palabras, marcarConfiable });
+      if (valida) {
+        msgEl.style.color = "#22c55e";
+        msgEl.textContent = "✓ Frase correcta. Desbloqueando…";
+      } else {
+        msgEl.style.color = "#ef4444";
+        msgEl.textContent = "Frase incorrecta. Intenta de nuevo.";
+        const estado = await invoke<{ intentos_bip39: number; max_intentos_bip39: number }>("estado_bloqueo_rat").catch(() => null);
+        if (estado && intentosEl) {
+          const restantes = estado.max_intentos_bip39 - estado.intentos_bip39;
+          intentosEl.textContent = restantes > 0
+            ? `Intentos restantes: ${restantes}`
+            : "Sin más intentos. Usa el dispositivo emparejado.";
+        }
+      }
+    } catch (e) {
+      msgEl.style.color = "#ef4444";
+      msgEl.textContent = String(e);
+    }
+  });
+
+  // Poll cada 5 s: comprobar si llegó una solicitud de desbloqueo RAT desde un par
+  setInterval(async () => {
+    try {
+      const sol = await invoke<{ nombre: string; proceso: string; ip: string } | null>(
+        "obtener_solicitud_desbloqueo_rat"
+      );
+      const modal = document.getElementById("modal-confirmar-rat");
+      if (sol && modal && modal.classList.contains("hidden")) {
+        _ratSolicitudIpActual = sol.ip;
+        const desc = document.getElementById("rat-modal-descripcion");
+        if (desc) {
+          desc.textContent = `El dispositivo "${sol.nombre}" (${sol.ip}) está bloqueado por "${sol.proceso}" y solicita que lo desbloquees.`;
+        }
+        const ratStatus = document.getElementById("rat-modal-status");
+        if (ratStatus) ratStatus.textContent = "";
+        modal.classList.remove("hidden");
+      } else if (!sol && modal && !modal.classList.contains("hidden")) {
+        modal.classList.add("hidden");
+      }
+    } catch { /* sin sesión activa */ }
+  }, 5000);
+
+  // Botones del modal de confirmación RAT (en el par B)
+  document.getElementById("rat-modal-confirmar")?.addEventListener("click", async () => {
+    const statusEl = document.getElementById("rat-modal-status");
+    if (statusEl) statusEl.textContent = "Enviando confirmación…";
+    try {
+      const hostname = await invoke<string>("iniciar_sinc_servidor").catch(() => "Babel");
+      const ok = await invoke<boolean>("confirmar_desbloqueo_rat_cmd", {
+        ipBloqueado: _ratSolicitudIpActual,
+        nombreLocal: hostname,
+      });
+      if (statusEl) {
+        statusEl.textContent = ok ? "✓ Confirmado." : "No se pudo conectar. El dispositivo puede haberse desbloqueado ya.";
+      }
+      setTimeout(() => document.getElementById("modal-confirmar-rat")?.classList.add("hidden"), 1500);
+    } catch (e) {
+      if (statusEl) statusEl.textContent = String(e);
+    }
+  });
+
+  document.getElementById("rat-modal-rechazar")?.addEventListener("click", async () => {
+    await invoke("rechazar_solicitud_desbloqueo_rat").catch(() => {});
+    document.getElementById("modal-confirmar-rat")?.classList.add("hidden");
+  });
+  // ── Fin RAT ────────────────────────────────────────────────────────────────
 
   // Ocultar sidebar en fullscreen nativo (botón verde macOS)
   getCurrentWindow().onResized(async () => {

@@ -163,6 +163,27 @@ pub fn registrar_sospecha_hw(archivo: &str, subclave_hex: &str) {
     let _ = guardar_eventos_dia_inner(&fecha, &eventos, subclave_hex);
 }
 
+/// Registra una detección de herramienta de acceso remoto en el historial.
+pub fn registrar_sospecha_rat(proceso: &str, subclave_hex: &str) {
+    if subclave_hex.is_empty() {
+        return;
+    }
+    let evento = EventoDiario {
+        tipo: "sospecha_rat".into(),
+        timestamp: ahora_str(),
+        ip: get_ip(),
+        detalle: proceso.to_string(),
+    };
+    let _lock = match REGISTRO_MUTEX.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    let fecha = hoy_str();
+    let mut eventos = leer_eventos_dia(&fecha, subclave_hex);
+    eventos.push(evento);
+    let _ = guardar_eventos_dia_inner(&fecha, &eventos, subclave_hex);
+}
+
 // ── COMANDOS TAURI ────────────────────────────────────────────
 
 /// Añade un evento al registro cifrado del día en curso.

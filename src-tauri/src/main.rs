@@ -14,6 +14,7 @@ mod pdf_reducir;
 mod conexion_directa;
 mod buzon_b2;
 mod pdf_union;
+mod rat_detector;
 mod registro_diario;
 mod seguridad;
 mod sincronizacion;
@@ -599,6 +600,7 @@ fn verificar_login(
     pass: String,
     pass_usuario: String,
     sesion: tauri::State<SesionActiva>,
+    app: tauri::AppHandle,
 ) -> Result<bool, String> {
     let pass = Zeroizing::new(pass);
     let pass_usuario = Zeroizing::new(pass_usuario);
@@ -672,6 +674,9 @@ fn verificar_login(
             crate::registro_diario::registrar_sospecha_hw(nombre, &subclave_hex);
         }
     }
+
+    // Monitor RAT: arrancar en segundo plano tras login correcto
+    crate::rat_detector::iniciar_monitor_rat(app.clone());
 
     // Cargar timeout de inactividad desde la configuración del usuario
     if let Ok(mut t) = sesion.ultimo_acceso.lock() {
@@ -905,6 +910,7 @@ fn verificar_prueba_no_expirada() -> Result<(), String> {
 #[tauri::command]
 fn autologin_tauri(
     sesion: tauri::State<SesionActiva>,
+    app: tauri::AppHandle,
 ) -> Result<bool, String> {
     let (maestra, pass_usuario) = match cargar_credenciales_keychain() {
         Some(c) => c,
@@ -913,7 +919,7 @@ fn autologin_tauri(
     // Si las credenciales guardadas ya no son válidas (contraseña cambiada, etc.),
     // limpiamos el keychain y reseteamos el contador para que el fallo automático
     // no consuma intentos manuales del usuario.
-    match verificar_login(maestra.to_string(), pass_usuario.to_string(), sesion) {
+    match verificar_login(maestra.to_string(), pass_usuario.to_string(), sesion, app) {
         Ok(true) => Ok(true),
         Ok(false) => {
             borrar_credenciales_keychain();
@@ -966,6 +972,7 @@ async fn traducir_documento(
     contenido: Vec<u8>,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     // Verificar que la prueba no ha expirado antes de procesar (enforcement backend).
     verificar_prueba_no_expirada()?;
 
@@ -1932,6 +1939,7 @@ fn mover_archivo_guardado(
 // COMANDO 6 — Cerrar sesión (limpia la RAM)
 #[tauri::command]
 fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
+    crate::rat_detector::detener_monitor_rat();
     babel_p2p::detener_servidor_p2p();
     crate::sincronizacion::limpiar_subclave_sesion();
     sesion.limpiar();
@@ -2951,6 +2959,7 @@ async fn exportar_archivo(
     app: tauri::AppHandle,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -3481,6 +3490,7 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
 
 #[tauri::command]
 fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
     let subclave_hex = sesion.subclave_hex()?;
@@ -5902,6 +5912,13 @@ fn main() {
             registro_diario::marcar_primera_vez_registro,
             registro_diario::obtener_ips_historial,
             estado_servidor_cmd,
+            rat_detector::estado_bloqueo_rat,
+            rat_detector::solicitar_desbloqueo_a_pares,
+            rat_detector::desbloquear_rat_bip39,
+            rat_detector::confirmar_desbloqueo_rat_cmd,
+            rat_detector::rechazar_solicitud_desbloqueo_rat,
+            rat_detector::obtener_solicitud_desbloqueo_rat,
+            rat_detector::marcar_rat_confiable_tauri,
         ]);
     if let Err(e) = app.run(tauri::generate_context!()) {
         eprintln!("[!] Error crítico al iniciar Babel: {}", e);
