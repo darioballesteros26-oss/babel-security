@@ -245,6 +245,9 @@ fn activar_bloqueo_rat(proceso: &str, app: &tauri::AppHandle) {
 pub fn desbloquear_rat_desde_red() {
     RAT_BLOQUEADO.store(false, Ordering::Release);
     RAT_BIP39_INTENTOS.store(0, Ordering::Release);
+    if let Ok(mut g) = RAT_PROCESO.lock() {
+        *g = None;
+    }
     if let Ok(g) = RAT_APP_HANDLE.lock() {
         if let Some(app) = g.as_ref() {
             let _ = app.emit("rat-desbloqueado", serde_json::json!({}));
