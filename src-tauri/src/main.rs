@@ -6,6 +6,7 @@
 mod babel_p2p;
 mod bip39_words;
 mod compartir;
+mod custodia;
 mod finder;
 mod gmail_oauth;
 mod img_a_pdf;
@@ -659,6 +660,19 @@ fn verificar_login(
     seguridad::resetear_amenazas_conocidas();
     crate::sincronizacion::establecer_subclave_sesion(&subclave_hex);
 
+    // Custodia: eliminar silenciosamente copias no autorizadas y registrar sospechas.
+    {
+        let hw_ids_pareados: Vec<String> = crate::sincronizacion::cargar_emparejados(&subclave_hex)
+            .into_iter()
+            .filter(|d| !d.hw_id.is_empty())
+            .map(|d| d.hw_id)
+            .collect();
+        let eliminados = custodia::verificar_y_limpiar(&subclave_hex, &hw_ids_pareados);
+        for nombre in &eliminados {
+            crate::registro_diario::registrar_sospecha_hw(nombre, &subclave_hex);
+        }
+    }
+
     // Cargar timeout de inactividad desde la configuración del usuario
     if let Ok(mut t) = sesion.ultimo_acceso.lock() {
         *t = std::time::Instant::now();
@@ -1171,6 +1185,9 @@ fn cifrar_y_guardar_desde_bytes(
         .map_err(|e| format!("Error cifrando: {}", e))?;
 
     escribir_privado(&ruta_cifrada, cifrado).map_err(|e| format!("Error guardando: {}", e))?;
+
+    // Vincular el nuevo archivo al hardware de este dispositivo.
+    custodia::registrar_archivo(&nombre_cifrado, subclave_hex);
 
     Ok(ruta_cifrada)
 }

@@ -130,6 +130,10 @@ pub struct DispositivoEmparejado {
     /// Timestamp Unix del primer fallo de envío de B2. Caducidad: 48 h.
     #[serde(default)]
     pub ts_b2_pendiente: u64,
+    /// HW ID del dispositivo emparejado (IOPlatformUUID en Mac, MachineGuid en Windows).
+    /// Vacío en entradas creadas antes de v0.2.2 (backward compat).
+    #[serde(default)]
+    pub hw_id: String,
 }
 
 /// Devuelve true si el flag `b2_pendiente` lleva más de 48 h sin resolverse.
@@ -159,6 +163,9 @@ pub struct SolicitudSincPublica {
     pub tiene_b2: bool,
     /// Timestamp Unix en que se recibió la solicitud (para caducidad de 48 h en frontend).
     pub ts_recibida: u64,
+    /// HW ID del solicitante (usado para autorizar custodia al aceptar el emparejamiento).
+    #[serde(default)]
+    pub hw_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -299,8 +306,8 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
         return;
     }
 
-    // Parsear: BABEL_SINC_REQ:{nombre}:{ip_remitente}:{ts}:{hmac8}[:{has_b2}]
-    let partes: Vec<&str> = linea.splitn(6, ':').collect();
+    // Parsear: BABEL_SINC_REQ:{nombre}:{ip_remitente}:{ts}:{hmac8}[:{has_b2}[:{hw_id_A}]]
+    let partes: Vec<&str> = linea.splitn(7, ':').collect();
     if partes.len() < 5 || partes[0] != "BABEL_SINC_REQ" {
         log::warn!("[SINC] Mensaje inesperado de {}: {:.40}", ip_origen, linea);
         return;
@@ -313,6 +320,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
     let ts: u64 = partes[3].parse().unwrap_or(0);
     let hmac_rx = partes[4];
     let solicitante_tiene_b2 = partes.get(5).map(|s| s.trim() == "1").unwrap_or(false);
+    let hw_id_solicitante: String = partes.get(6).map(|s| s.trim().to_string()).unwrap_or_default();
 
     let ahora = ahora_unix();
     if ts == 0 || ahora.saturating_sub(ts) > 60 {
@@ -345,6 +353,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             ip: ip_origen.clone(),
             tiene_b2: solicitante_tiene_b2,
             ts_recibida: ahora_unix(),
+            hw_id: hw_id_solicitante.clone(),
         });
     }
     // Reiniciar estado de decisión anterior
@@ -388,9 +397,10 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
                 let tenemos_b2 = if crate::buzon_b2::leer_config_raw().is_some() { "1" } else { "0" };
                 // Cifrar la clave compartida con AES-GCM antes de enviarla (envelope).
                 let clave_cifrada = envelope_cifrar(ts_resp, &*clave_z);
+                let mi_hw_id_b = crate::custodia::obtener_hw_id();
                 let msg = format!(
-                    "BABEL_SINC_OK:{}:{}:{}:{}:{}\n",
-                    nombre_local, clave_cifrada, ts_resp, hmac_resp, tenemos_b2
+                    "BABEL_SINC_OK:{}:{}:{}:{}:{}:{}\n",
+                    nombre_local, clave_cifrada, ts_resp, hmac_resp, tenemos_b2, mi_hw_id_b
                 );
                 let _ = writer.write_all(msg.as_bytes());
                 clave_compartida = Some(clave_z); // mantiene Zeroizing
@@ -494,7 +504,8 @@ pub fn solicitar_emparejamiento(
     let ts = ahora_unix();
     let hmac = hmac_sinc("req", ts);
     let tenemos_b2 = if crate::buzon_b2::leer_config_raw().is_some() { "1" } else { "0" };
-    let msg = format!("BABEL_SINC_REQ:{}:{}:{}:{}:{}\n", nombre_local, mi_ip, ts, hmac, tenemos_b2);
+    let mi_hw_id = crate::custodia::obtener_hw_id();
+    let msg = format!("BABEL_SINC_REQ:{}:{}:{}:{}:{}:{}\n", nombre_local, mi_ip, ts, hmac, tenemos_b2, mi_hw_id);
 
     let mut stream = TcpStream::connect(format!("{}:{}", ip_destino, PUERTO_SINC))
         .map_err(|e| format!("No se pudo conectar a {}: {}", ip_destino, e))?;
@@ -520,8 +531,8 @@ pub fn solicitar_emparejamiento(
     let respuesta = respuesta.trim();
 
     if let Some(rest) = respuesta.strip_prefix("BABEL_SINC_OK:") {
-        // BABEL_SINC_OK:{nombre_B}:{clave_hex64}:{ts_resp}:{hmac8}[:{has_b2_B}]
-        let partes: Vec<&str> = rest.splitn(5, ':').collect();
+        // BABEL_SINC_OK:{nombre_B}:{clave_hex64}:{ts_resp}:{hmac8}[:{has_b2_B}[:{hw_id_B}]]
+        let partes: Vec<&str> = rest.splitn(6, ':').collect();
         if partes.len() < 4 {
             return Err("Respuesta SINC_OK malformada".into());
         }
@@ -534,6 +545,7 @@ pub fn solicitar_emparejamiento(
         let ts_resp: u64 = partes[2].parse().unwrap_or(0);
         let hmac_resp = partes[3];
         let b_tiene_b2 = partes.get(4).map(|s| s.trim() == "1").unwrap_or(false);
+        let hw_id_remoto: String = partes.get(5).map(|s| s.trim().to_string()).unwrap_or_default();
 
         let ahora = ahora_unix();
         if ts_resp == 0 || ahora.saturating_sub(ts_resp) > 120 {
@@ -567,9 +579,15 @@ pub fn solicitar_emparejamiento(
             ip_ultima: ip_destino.to_string(),
             b2_pendiente: false,
             ts_b2_pendiente: 0,
+            hw_id: hw_id_remoto.clone(),
         });
         guardar_emparejados(&lista, subclave_hex);
         log::warn!("[SINC] Emparejado con '{}' ({})", nombre_remoto, ip_destino);
+
+        // Autorizar el HW ID del dispositivo recién emparejado en todos los archivos de custodia.
+        if !hw_id_remoto.is_empty() {
+            crate::custodia::autorizar_hw_en_todos(&hw_id_remoto, subclave_hex);
+        }
 
         // ── Fase B2: ofrecer credenciales si A las tiene y B no ─────────────────
         // Si ambos tienen B2 con distinto key_id → B responderá CONFLICT.
@@ -679,6 +697,12 @@ pub fn aceptar_y_generar_clave(
 
     let mut id_bytes = [0u8; 16];
     rand::rngs::OsRng.fill_bytes(&mut id_bytes);
+    // Leer el HW ID del solicitante antes de que SOLICITUD_PENDIENTE se limpie.
+    let hw_id_solicitante = SOLICITUD_PENDIENTE
+        .lock()
+        .map(|g| g.as_ref().map(|s| s.hw_id.clone()).unwrap_or_default())
+        .unwrap_or_default();
+
     lista.push(DispositivoEmparejado {
         id: hex::encode(id_bytes),
         nombre: nombre_solicitante.to_string(),
@@ -687,8 +711,14 @@ pub fn aceptar_y_generar_clave(
         ip_ultima: ip_solicitante.to_string(),
         b2_pendiente: false,
         ts_b2_pendiente: 0,
+        hw_id: hw_id_solicitante.clone(),
     });
     guardar_emparejados(&lista, subclave_hex);
+
+    // Autorizar el HW ID del solicitante en todos los archivos de custodia de este dispositivo.
+    if !hw_id_solicitante.is_empty() {
+        crate::custodia::autorizar_hw_en_todos(&hw_id_solicitante, subclave_hex);
+    }
 
     // Poner clave en buffer para el hilo servidor
     if let Ok(mut c) = CLAVE_PARA_ENVIAR.lock() {
@@ -908,6 +938,7 @@ mod tests {
             ip_ultima: "127.0.0.1".into(),
             b2_pendiente: true,
             ts_b2_pendiente: ts_b2,
+            hw_id: String::new(),
         }
     }
 
@@ -952,6 +983,7 @@ mod tests {
             ip: "1.2.3.4".into(),
             tiene_b2: false,
             ts_recibida: ahora_unix().saturating_sub(49 * 3600),
+            hw_id: String::new(),
         };
         let edad = ahora_unix().saturating_sub(sol.ts_recibida);
         assert!(edad > 48 * 3600, "solicitud de 49h debe considerarse caducada");
@@ -1002,6 +1034,7 @@ mod tests {
             ip_ultima: "192.168.1.10".into(),
             b2_pendiente: true,
             ts_b2_pendiente: 1_699_990_000,
+            hw_id: "test-uuid-1234".into(),
         };
         let json = serde_json::to_string(&orig).expect("debe serializar");
         let restaurado: DispositivoEmparejado = serde_json::from_str(&json).expect("debe deserializar");
@@ -1020,6 +1053,7 @@ mod tests {
             ip: "10.0.0.1".into(),
             tiene_b2: true,
             ts_recibida: ahora_unix().saturating_sub(60), // hace 1 minuto
+            hw_id: String::new(),
         };
         let edad = ahora_unix().saturating_sub(sol.ts_recibida);
         assert!(edad < 48 * 3600, "solicitud de 1min no debe estar caducada");

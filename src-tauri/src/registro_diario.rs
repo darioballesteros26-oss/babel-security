@@ -139,6 +139,30 @@ fn actualizar_ips_historial(ip: &str, subclave_hex: &str) {
     }
 }
 
+// ── API interna (sin Tauri State) ─────────────────────────────
+
+/// Registra un evento de custodia directamente desde código Rust (no Tauri command).
+/// Usado al inicio de sesión, antes de que el frontend esté listo.
+pub fn registrar_sospecha_hw(archivo: &str, subclave_hex: &str) {
+    if subclave_hex.is_empty() {
+        return;
+    }
+    let evento = EventoDiario {
+        tipo: "sospecha_hw".into(),
+        timestamp: ahora_str(),
+        ip: get_ip(),
+        detalle: archivo.to_string(),
+    };
+    let _lock = match REGISTRO_MUTEX.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    let fecha = hoy_str();
+    let mut eventos = leer_eventos_dia(&fecha, subclave_hex);
+    eventos.push(evento);
+    let _ = guardar_eventos_dia_inner(&fecha, &eventos, subclave_hex);
+}
+
 // ── COMANDOS TAURI ────────────────────────────────────────────
 
 /// Añade un evento al registro cifrado del día en curso.

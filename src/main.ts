@@ -680,6 +680,8 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "registro-dia-siguiente":
       if (_registroFechaOffset < 0) { _registroFechaOffset += 1; _registroFiltroIPs.clear(); cargarRegistroDia().catch(() => {}); }
       break;
+    case "tab-registro": activarTabRegistro(); break;
+    case "tab-sospechas": activarTabSospechas(); break;
     case "abrir-filtro-registro": abrirFiltroRegistro(); break;
     case "limpiar-filtro-registro": limpiarFiltroRegistro(); break;
     case "aplicar-filtro-registro": aplicarFiltroRegistro(); break;
@@ -741,6 +743,7 @@ let _registroFiltroTipos: Set<string> = new Set();
 let _registroFiltroIPs: Set<string> = new Set();
 let _registroEventosCache: EventoDiario[] = [];
 let _timerRegistroDiario: ReturnType<typeof setTimeout> | null = null;
+let _modoSospechas = false;
 
 function fechaConOffset(offset: number): string {
   const d = new Date();
@@ -768,13 +771,105 @@ function tipoLabelRegistro(tipo: string): string {
     descargar: "Descarga",
     importar: "Importación",
     cerrar_sesion: "Sesión cerrada",
+    sospecha_hw: "Copia no autorizada bloqueada",
   };
   return labels[tipo] ?? tipo;
+}
+
+function activarTabRegistro(): void {
+  _modoSospechas = false;
+  const btnH = document.getElementById("btn-tab-registro");
+  const btnS = document.getElementById("btn-tab-sospechas");
+  const btnF = document.getElementById("btn-filtro-registro");
+  if (btnH) { btnH.style.color = "var(--dorado)"; btnH.style.opacity = "1"; }
+  if (btnS) { btnS.style.color = ""; btnS.style.opacity = "0.4"; }
+  if (btnF) btnF.classList.remove("hidden");
+  cargarRegistroDia().catch(() => {});
+}
+
+function activarTabSospechas(): void {
+  _modoSospechas = true;
+  const btnH = document.getElementById("btn-tab-registro");
+  const btnS = document.getElementById("btn-tab-sospechas");
+  const btnF = document.getElementById("btn-filtro-registro");
+  if (btnH) { btnH.style.color = ""; btnH.style.opacity = "0.4"; }
+  if (btnS) { btnS.style.color = "var(--dorado)"; btnS.style.opacity = "1"; }
+  if (btnF) btnF.classList.add("hidden");
+  cargarRegistroDia().catch(() => {});
+}
+
+function renderizarSospechas(eventos: EventoDiario[]): void {
+  const listaEl = document.getElementById("registro-lista")!;
+  const resumenEl = document.getElementById("registro-resumen")!;
+
+  const sospechas = eventos.filter(e => e.tipo === "sospecha_hw");
+
+  resumenEl.innerHTML = sospechas.length > 0
+    ? `<div style="display:flex;gap:16px;align-items:center;">
+        <span class="registro-stat-alerta">⚠ ${sospechas.length} intento${sospechas.length !== 1 ? "s" : ""} de acceso no autorizado bloqueado${sospechas.length !== 1 ? "s" : ""} hoy</span>
+      </div>`
+    : `<div style="display:flex;gap:16px;align-items:center;">
+        <span class="registro-stat" style="color:#22c55e;">✓ Sin copias no autorizadas detectadas</span>
+      </div>`;
+
+  if (sospechas.length === 0) {
+    listaEl.innerHTML = `<p style="color:var(--texto-secundario);text-align:center;padding:32px 20px;font-size:0.7rem;letter-spacing:1px;">SIN SOSPECHAS REGISTRADAS</p>`;
+    return;
+  }
+
+  // Si hay varias sospechas en el mismo día, mostrar entrada agrupada + detalles
+  const agrupado = sospechas.length > 1
+    ? `<div class="registro-evento registro-sospechoso" style="margin:8px 16px;border-radius:4px;">
+        <div class="registro-evento-fila">
+          <span class="registro-evento-tipo" style="color:#ef4444;letter-spacing:2px;">
+            ${sospechas.length} COPIAS NO AUTORIZADAS ELIMINADAS
+          </span>
+          <span class="registro-badge-alerta">HOY</span>
+        </div>
+        <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(239,68,68,0.15);">
+          ${sospechas.map(ev => {
+            const hora = ev.timestamp.split("T")[1] ?? "";
+            return `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:0.62rem;opacity:0.85;">
+              <span style="font-family:monospace;color:var(--texto-secundario);">${escapeHTML(hora)}</span>
+              <span style="color:var(--texto-secundario);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHTML(ev.detalle)}">${escapeHTML(ev.detalle)}</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>`
+    : "";
+
+  const individuales = sospechas.length === 1
+    ? sospechas.map(ev => {
+        const hora = ev.timestamp.split("T")[1] ?? "";
+        return `
+          <div class="registro-evento registro-sospechoso">
+            <div class="registro-evento-fila">
+              <span class="registro-evento-tipo">COPIA NO AUTORIZADA BLOQUEADA</span>
+              <span class="registro-evento-hora">${escapeHTML(hora)}</span>
+            </div>
+            <div class="registro-evento-fila" style="margin-top:2px;">
+              <span class="registro-evento-ip">${escapeHTML(ev.ip)}</span>
+              ${ev.detalle ? `<span class="registro-evento-nombre">${escapeHTML(ev.detalle)}</span>` : ""}
+              <span class="registro-badge-alerta">ELIMINADO</span>
+            </div>
+          </div>`;
+      }).join("")
+    : "";
+
+  listaEl.innerHTML = agrupado + individuales;
 }
 
 async function irARegistro(): Promise<void> {
   document.getElementById("modal-registro-popup")?.classList.add("hidden");
   _registroFechaOffset = 0;
+  _modoSospechas = false;
+  // Restablecer el estado visual de las tabs
+  const btnH = document.getElementById("btn-tab-registro");
+  const btnS = document.getElementById("btn-tab-sospechas");
+  const btnF = document.getElementById("btn-filtro-registro");
+  if (btnH) { btnH.style.color = "var(--dorado)"; btnH.style.opacity = "1"; }
+  if (btnS) { btnS.style.color = ""; btnS.style.opacity = "0.4"; }
+  if (btnF) btnF.classList.remove("hidden");
   mostrarPantalla("registro");
 }
 
@@ -794,7 +889,11 @@ async function cargarRegistroDia(): Promise<void> {
       invoke<string[]>("obtener_ips_historial"),
     ]);
     _registroEventosCache = eventos;
-    renderizarRegistro(eventos, ips);
+    if (_modoSospechas) {
+      renderizarSospechas(eventos);
+    } else {
+      renderizarRegistro(eventos, ips);
+    }
   } catch {
     document.getElementById("registro-lista")!.innerHTML =
       `<p style="color:var(--texto-secundario);text-align:center;padding:20px;font-size:0.7rem;letter-spacing:1px;">Sin eventos registrados.</p>`;
@@ -807,6 +906,7 @@ function renderizarRegistro(eventos: EventoDiario[], ipsHistorial: string[]): vo
   const resumenEl = document.getElementById("registro-resumen")!;
 
   const filtrados = eventos.filter(e =>
+    e.tipo !== "sospecha_hw" &&
     (_registroFiltroTipos.size === 0 || _registroFiltroTipos.has(e.tipo)) &&
     (_registroFiltroIPs.size === 0 || _registroFiltroIPs.has(e.ip))
   ).slice().reverse();

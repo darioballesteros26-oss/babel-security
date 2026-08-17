@@ -1646,8 +1646,12 @@
     <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--borde);flex-shrink:0;width:100%;">
       <button type="button" data-action="volver-al-panel" class="btn-link" style="font-size:0.65rem;letter-spacing:2px;">← PANEL</button>
-      <span style="font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:4px;color:var(--dorado);">REGISTRO DIARIO</span>
-      <button type="button" data-action="abrir-filtro-registro" class="btn-link" style="font-size:0.65rem;letter-spacing:1px;" title="Filtrar tipos de evento">⚙ FILTRAR</button>
+      <div style="display:flex;gap:12px;align-items:center;">
+        <button type="button" id="btn-tab-registro" data-action="tab-registro" class="btn-link" style="font-size:0.65rem;letter-spacing:3px;color:var(--dorado);">HISTORIAL</button>
+        <span style="color:var(--borde);font-size:0.65rem;">|</span>
+        <button type="button" id="btn-tab-sospechas" data-action="tab-sospechas" class="btn-link" style="font-size:0.65rem;letter-spacing:3px;opacity:0.4;">SOSPECHAS</button>
+      </div>
+      <button type="button" data-action="abrir-filtro-registro" id="btn-filtro-registro" class="btn-link" style="font-size:0.65rem;letter-spacing:1px;" title="Filtrar tipos de evento">⚙ FILTRAR</button>
     </div>
     <!-- Navegación de días -->
     <div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:12px 20px;flex-shrink:0;border-bottom:1px solid var(--borde);width:100%;">
