@@ -1396,6 +1396,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Poll cada 5 s: comprobar si llegó una solicitud de desbloqueo RAT desde un par
   setInterval(async () => {
+    if (!_sesionActiva) return;
     try {
       const sol = await invoke<{ nombre: string; proceso: string; ip: string } | null>(
         "obtener_solicitud_desbloqueo_rat"

@@ -203,6 +203,14 @@ pub fn detener_monitor_rat() {
     if let Ok(mut g) = RAT_PROCESO.lock() {
         *g = None;
     }
+    // Limpiar sesiones confiables para que no se filtren al siguiente login.
+    if let Ok(mut c) = RAT_SESIONES_CONFIABLES.lock() {
+        *c = None;
+    }
+    // Limpiar el handle: mensajes TCP retrasados no deben emitir eventos post-logout.
+    if let Ok(mut h) = RAT_APP_HANDLE.lock() {
+        *h = None;
+    }
 }
 
 fn activar_bloqueo_rat(proceso: &str, app: &tauri::AppHandle) {
@@ -244,7 +252,10 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
     if palabras.len() != 12 {
         return Ok(false);
     }
+    // Palabras fuera del wordlist cuentan como intento: el atacante no puede
+    // hacer sondeos infinitos con strings arbitrarios para evitar el límite.
     if !palabras.iter().all(|p| crate::bip39_words::WORDLIST.contains(&p.as_str())) {
+        RAT_BIP39_INTENTOS.fetch_add(1, Ordering::AcqRel);
         return Ok(false);
     }
     let cifrado = std::fs::read(crate::babel_path("recovery.babel"))
@@ -447,8 +458,12 @@ pub async fn confirmar_desbloqueo_rat_cmd(
 ) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let ok = enviar_confirmacion_desbloqueo(&ip_bloqueado, &nombre_local);
-        if let Ok(mut slot) = crate::sincronizacion::SOLICITUD_DESBLOQUEO_RAT.lock() {
-            *slot = None;
+        // Solo limpiar el slot si el envío tuvo éxito. En caso de fallo TCP
+        // el dispositivo A sigue bloqueado y el usuario puede reintentar.
+        if ok {
+            if let Ok(mut slot) = crate::sincronizacion::SOLICITUD_DESBLOQUEO_RAT.lock() {
+                *slot = None;
+            }
         }
         Ok(ok)
     })
@@ -473,21 +488,9 @@ pub fn obtener_solicitud_desbloqueo_rat()
         .clone()
 }
 
-#[tauri::command]
-pub fn marcar_rat_confiable_tauri(app: tauri::AppHandle) {
-    if let Some(proceso) = RAT_PROCESO.lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-    {
-        if let Ok(mut c) = RAT_SESIONES_CONFIABLES.lock() {
-            c.get_or_insert_with(HashSet::new).insert(proceso);
-        }
-    }
-    RAT_BLOQUEADO.store(false, Ordering::Release);
-    RAT_BIP39_INTENTOS.store(0, Ordering::Release);
-    let _ = app.emit("rat-desbloqueado", serde_json::json!({}));
-    log::info!("[RAT] Proceso marcado como confiable para esta sesión.");
-}
+// marcar_rat_confiable_tauri ELIMINADO: era un bypass sin autenticación.
+// La opción "confiar en este programa" se gestiona vía desbloquear_rat_bip39
+// con marcar_confiable=true, que exige la frase BIP39 antes de confiar.
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -533,10 +536,13 @@ mod tests {
     }
 
     #[test]
-    fn bip39_palabras_invalidas_no_pasan() {
+    fn bip39_palabras_invalidas_consumen_intento() {
+        RAT_BIP39_INTENTOS.store(0, Ordering::Release);
         let invalidas = vec!["xxxxxxinvalido123".to_string(); 12];
-        // Palabras fuera del wordlist retornan false sin recuperar archivo
+        // Palabras fuera del wordlist retornan false Y consumen un intento.
         assert_eq!(verificar_frase_bip39_para_rat(&invalidas).unwrap(), false);
+        assert_eq!(RAT_BIP39_INTENTOS.load(Ordering::Acquire), 1);
+        RAT_BIP39_INTENTOS.store(0, Ordering::Release);
     }
 
     #[test]
@@ -571,6 +577,19 @@ mod tests {
             set.remove("TestRAT");
             assert!(!set.contains("TestRAT"));
         }
+    }
+
+    #[test]
+    fn detener_limpia_sesiones_confiables() {
+        // Insertar una sesión confiable y verificar que detener_monitor_rat la limpia.
+        if let Ok(mut c) = RAT_SESIONES_CONFIABLES.lock() {
+            c.get_or_insert_with(HashSet::new).insert("TeamViewer".to_string());
+        }
+        detener_monitor_rat();
+        let vacio = RAT_SESIONES_CONFIABLES.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none();
+        assert!(vacio, "las sesiones confiables deben limpiarse al detener el monitor");
     }
 
     #[test]

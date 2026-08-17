@@ -335,7 +335,13 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             let ts: u64 = partes[3].parse().unwrap_or(0);
             let hmac_rx = partes[4].trim();
             let ahora = ahora_unix();
-            if ts > 0 && ahora.saturating_sub(ts) <= 60
+            // ts <= ahora + 5 evita que timestamps futuros pasen por saturating_sub==0.
+            let ts_valido = ts > 0 && ahora.saturating_sub(ts) <= 60 && ts <= ahora + 5;
+            // Solo aceptar de un par emparejado conocido por IP.
+            let subclave = obtener_subclave_sesion_copy().unwrap_or_default();
+            let es_par = !subclave.is_empty()
+                && cargar_emparejados(&subclave).iter().any(|d| d.ip_ultima == ip_origen);
+            if ts_valido && es_par
                 && crate::rat_detector::hmac_rat("rat_req", ts) == hmac_rx
             {
                 if let Ok(mut slot) = SOLICITUD_DESBLOQUEO_RAT.lock() {
@@ -350,7 +356,8 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
                 let _ = w.write_all(format!("BABEL_RAT_ACK:{}\n", ts_resp).as_bytes());
                 log::info!("[RAT] Solicitud de desbloqueo recibida de {}", ip_origen);
             } else {
-                log::warn!("[RAT] BABEL_RAT_REQ con HMAC o timestamp inválido de {}", ip_origen);
+                log::warn!("[RAT] BABEL_RAT_REQ inválido (ts={} ahora={} es_par={}) de {}",
+                    ts, ahora, es_par, ip_origen);
             }
         }
         return;
@@ -365,7 +372,13 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             let ts: u64 = partes[2].parse().unwrap_or(0);
             let hmac_rx = partes[3].trim();
             let ahora = ahora_unix();
-            if ts > 0 && ahora.saturating_sub(ts) <= 60
+            // ts <= ahora + 5 evita que timestamps futuros pasen por saturating_sub==0.
+            let ts_valido = ts > 0 && ahora.saturating_sub(ts) <= 60 && ts <= ahora + 5;
+            // Solo aceptar de un par emparejado conocido por IP.
+            let subclave = obtener_subclave_sesion_copy().unwrap_or_default();
+            let es_par = !subclave.is_empty()
+                && cargar_emparejados(&subclave).iter().any(|d| d.ip_ultima == ip_origen);
+            if ts_valido && es_par
                 && crate::rat_detector::hmac_rat("rat_ok", ts) == hmac_rx
                 && crate::rat_detector::es_rat_bloqueado()
             {
@@ -374,7 +387,8 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
                 let _ = w.write_all(b"BABEL_RAT_OK_ACK\n");
                 log::info!("[RAT] Desbloqueado por confirmación de {}", ip_origen);
             } else {
-                log::warn!("[RAT] BABEL_RAT_OK inválido o sin bloqueo activo de {}", ip_origen);
+                log::warn!("[RAT] BABEL_RAT_OK inválido (ts={} ahora={} es_par={}) de {}",
+                    ts, ahora, es_par, ip_origen);
             }
         }
         return;

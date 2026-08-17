@@ -3700,6 +3700,7 @@ fn generar_frase_recuperacion(
 fn recuperar_y_autenticar(
     palabras: Vec<String>,
     sesion: tauri::State<SesionActiva>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     // Reutilizar la misma lógica de recuperación para obtener las credenciales
     let (maestra, pass, aviso) = recuperar_con_frase_interno(&palabras, &sesion)?;
@@ -3739,6 +3740,9 @@ fn recuperar_y_autenticar(
     seguridad::borrar_contador_intentos();
     seguridad::resetear_amenazas_conocidas();
     crate::sincronizacion::establecer_subclave_sesion(&subclave_hex);
+
+    // Arrancar el monitor RAT igual que en verificar_login.
+    crate::rat_detector::iniciar_monitor_rat(app);
 
     Ok(aviso)
 }
@@ -5918,7 +5922,6 @@ fn main() {
             rat_detector::confirmar_desbloqueo_rat_cmd,
             rat_detector::rechazar_solicitud_desbloqueo_rat,
             rat_detector::obtener_solicitud_desbloqueo_rat,
-            rat_detector::marcar_rat_confiable_tauri,
         ]);
     if let Err(e) = app.run(tauri::generate_context!()) {
         eprintln!("[!] Error crítico al iniciar Babel: {}", e);
