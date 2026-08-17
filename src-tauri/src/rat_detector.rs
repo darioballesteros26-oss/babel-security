@@ -526,6 +526,10 @@ pub fn obtener_solicitud_desbloqueo_rat()
 mod tests {
     use super::*;
 
+    // Serializa los tests que leen y escriben RAT_BIP39_INTENTOS para evitar
+    // interferencias cuando el runner ejecuta tests en paralelo dentro del módulo.
+    static BIP39_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn lista_rat_no_vacia() {
         assert!(!PROCESOS_RAT.is_empty(), "debe haber al menos un proceso en la lista RAT");
@@ -559,28 +563,33 @@ mod tests {
 
     #[test]
     fn bip39_frase_corta_no_pasa() {
+        let _g = BIP39_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        RAT_BIP39_INTENTOS.store(0, Ordering::SeqCst);
         let pocas = vec!["abandon".to_string(); 5];
         assert_eq!(verificar_frase_bip39_para_rat(&pocas).unwrap(), false);
+        RAT_BIP39_INTENTOS.store(0, Ordering::SeqCst);
     }
 
     #[test]
     fn bip39_palabras_invalidas_consumen_intento() {
-        RAT_BIP39_INTENTOS.store(0, Ordering::Release);
+        let _g = BIP39_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        RAT_BIP39_INTENTOS.store(0, Ordering::SeqCst);
         let invalidas = vec!["xxxxxxinvalido123".to_string(); 12];
-        // Palabras fuera del wordlist retornan false Y consumen un intento (fetch_update atómico).
         assert_eq!(verificar_frase_bip39_para_rat(&invalidas).unwrap(), false);
-        assert_eq!(RAT_BIP39_INTENTOS.load(Ordering::Acquire), 1,
+        assert_eq!(RAT_BIP39_INTENTOS.load(Ordering::SeqCst), 1,
             "palabras inválidas deben consumir un intento");
-        RAT_BIP39_INTENTOS.store(0, Ordering::Release);
+        RAT_BIP39_INTENTOS.store(0, Ordering::SeqCst);
     }
 
     #[test]
     fn bip39_longitud_incorrecta_no_consume_intento() {
-        RAT_BIP39_INTENTOS.store(0, Ordering::Release);
+        let _g = BIP39_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        RAT_BIP39_INTENTOS.store(0, Ordering::SeqCst);
         let corta = vec!["abandon".to_string(); 5];
         assert_eq!(verificar_frase_bip39_para_rat(&corta).unwrap(), false);
-        assert_eq!(RAT_BIP39_INTENTOS.load(Ordering::Acquire), 0,
+        assert_eq!(RAT_BIP39_INTENTOS.load(Ordering::SeqCst), 0,
             "longitud incorrecta no debe consumir intento");
+        RAT_BIP39_INTENTOS.store(0, Ordering::SeqCst);
     }
 
     #[test]
@@ -598,12 +607,12 @@ mod tests {
 
     #[test]
     fn bloqueo_bip39_tras_max_intentos() {
-        RAT_BIP39_INTENTOS.store(MAX_INTENTOS_BIP39, Ordering::Release);
-        // Cualquier frase, incluso con palabras válidas, debe fallar
+        let _g = BIP39_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        RAT_BIP39_INTENTOS.store(MAX_INTENTOS_BIP39, Ordering::SeqCst);
         let palabras = vec!["abandon".to_string(); 12];
         let result = verificar_frase_bip39_para_rat(&palabras);
         assert!(result.is_err(), "debe retornar Err tras alcanzar MAX intentos");
-        RAT_BIP39_INTENTOS.store(0, Ordering::Release);
+        RAT_BIP39_INTENTOS.store(0, Ordering::SeqCst);
     }
 
     #[test]
