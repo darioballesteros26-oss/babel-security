@@ -4601,6 +4601,17 @@ fn obtener_mensajes_p2p(sesion: tauri::State<SesionActiva>) -> Result<Vec<String
 
 // COMANDOS SINCRONIZACIÓN — Emparejamiento de dispositivos
 
+/// Devuelve el nombre local del dispositivo (formato "Babel-<hostname>") sin
+/// arrancar ningún servicio. Usado por el overlay RAT para identificar este nodo.
+#[tauri::command]
+fn obtener_nombre_local() -> String {
+    let hostname = hostname::get()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    format!("Babel-{}", hostname)
+}
+
 #[tauri::command]
 fn iniciar_sinc_servidor(sesion: tauri::State<SesionActiva>) -> Result<String, String> {
     let subclave = sesion.subclave_hex()?;
@@ -5846,6 +5857,7 @@ fn main() {
             listar_peers_pendientes_cmd,
             aprobar_peer_pendiente_cmd,
             iniciar_sinc_servidor,
+            obtener_nombre_local,
             detener_sinc_servidor,
             buscar_dispositivos_sinc,
             solicitar_emparejamiento_sinc,

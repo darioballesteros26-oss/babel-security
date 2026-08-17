@@ -25,6 +25,9 @@ use tauri::Emitter;
 static RAT_BLOQUEADO: AtomicBool = AtomicBool::new(false);
 static RAT_MONITOR_ACTIVO: AtomicBool = AtomicBool::new(false);
 static RAT_BIP39_INTENTOS: AtomicU8 = AtomicU8::new(0);
+// Generación del hilo monitor: se incrementa en detener_monitor_rat para que un hilo
+// antiguo que aún esté durmiendo (hasta 30 s) se autodestruya al despertar.
+static RAT_MONITOR_GEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 const MAX_INTENTOS_BIP39: u8 = 5;
 
 static RAT_PROCESO: Mutex<Option<String>> = Mutex::new(None);
@@ -178,11 +181,17 @@ pub fn iniciar_monitor_rat(app: tauri::AppHandle) {
     if RAT_MONITOR_ACTIVO.swap(true, Ordering::SeqCst) {
         return; // ya corriendo
     }
+    // Leer la generación actual DESPUÉS del swap para que el hilo la use como
+    // identificador de sesión. detener_monitor_rat la incrementa, lo que hace que
+    // este hilo se autodestruya al despertar incluso si el flag aún no llegó.
+    let gen = RAT_MONITOR_GEN.load(Ordering::SeqCst);
     thread::spawn(move || {
         // Espera inicial para evitar falsos positivos justo al login
         thread::sleep(Duration::from_secs(4));
         loop {
-            if !RAT_MONITOR_ACTIVO.load(Ordering::SeqCst) {
+            if !RAT_MONITOR_ACTIVO.load(Ordering::SeqCst)
+                || RAT_MONITOR_GEN.load(Ordering::SeqCst) != gen
+            {
                 break;
             }
             // No reemitir si ya estamos bloqueados
@@ -197,6 +206,9 @@ pub fn iniciar_monitor_rat(app: tauri::AppHandle) {
 }
 
 pub fn detener_monitor_rat() {
+    // Incrementar la generación invalida el hilo que esté durmiendo (hasta 30 s
+    // de latencia), evitando que arranque un nuevo hilo antes de que el viejo muera.
+    RAT_MONITOR_GEN.fetch_add(1, Ordering::SeqCst);
     RAT_MONITOR_ACTIVO.store(false, Ordering::SeqCst);
     RAT_BLOQUEADO.store(false, Ordering::Release);
     RAT_BIP39_INTENTOS.store(0, Ordering::Release);
@@ -246,52 +258,67 @@ pub fn desbloquear_rat_desde_red() {
 /// Verifica la frase BIP39 sin incrementar el contador de intentos del vault.
 /// Tiene su propio contador (MAX_INTENTOS_BIP39 = 5) para prevenir brute-force.
 pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, String> {
-    if RAT_BIP39_INTENTOS.load(Ordering::Acquire) >= MAX_INTENTOS_BIP39 {
+    // Reservar un slot de intento de forma atómica: evita que un doble-clic o
+    // llamadas concurrentes puedan superar el límite con una race condition.
+    if RAT_BIP39_INTENTOS.fetch_update(
+        Ordering::AcqRel, Ordering::Acquire,
+        |v| if v < MAX_INTENTOS_BIP39 { Some(v + 1) } else { None },
+    ).is_err() {
         return Err("Máximo de intentos alcanzado. Usa el dispositivo emparejado para desbloquear.".into());
     }
+
     if palabras.len() != 12 {
+        RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel); // longitud inválida: no es un intento real
         return Ok(false);
     }
-    // Palabras fuera del wordlist cuentan como intento: el atacante no puede
-    // hacer sondeos infinitos con strings arbitrarios para evitar el límite.
+    // Palabras fuera del wordlist: mantener el slot (intento consumido).
+    // El atacante no puede sondear indefinidamente con strings arbitrarios.
     if !palabras.iter().all(|p| crate::bip39_words::WORDLIST.contains(&p.as_str())) {
-        RAT_BIP39_INTENTOS.fetch_add(1, Ordering::AcqRel);
         return Ok(false);
     }
-    let cifrado = std::fs::read(crate::babel_path("recovery.babel"))
-        .map_err(|_| "Sin frase de recuperación configurada en este búnker.".to_string())?;
+    let cifrado = match std::fs::read(crate::babel_path("recovery.babel")) {
+        Ok(c) => c,
+        Err(_) => {
+            RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel); // error de infraestructura: liberar slot
+            return Err("Sin frase de recuperación configurada en este búnker.".to_string());
+        }
+    };
 
     let salt_maestra = crate::traductor::cargar_o_crear_salt();
     let recovery_salt = crate::seguridad::derivar_recovery_salt_v2(&salt_maestra);
 
-    // Intentar v3 → v2 → v1 → v0 para compatibilidad con búnkers antiguos
+    // Intentar v3 → v2 → v1 → v0 para compatibilidad con búnkers antiguos.
+    // En éxito se libera el slot: una frase correcta no debe consumir un intento.
     if let Ok(key) = crate::seguridad::derivar_clave_recuperacion_v3(palabras, &recovery_salt) {
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado.clone(), &hex).is_ok() {
+            RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
             return Ok(true);
         }
     }
     if let Ok(key) = crate::seguridad::derivar_clave_recuperacion_v2(palabras, &recovery_salt) {
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado.clone(), &hex).is_ok() {
+            RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
             return Ok(true);
         }
     }
     if let Ok(key) = crate::seguridad::derivar_clave_recuperacion(palabras) {
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado.clone(), &hex).is_ok() {
+            RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
             return Ok(true);
         }
     }
     if let Ok(key) = crate::seguridad::derivar_clave_recuperacion_v0(palabras) {
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado, &hex).is_ok() {
+            RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
             return Ok(true);
         }
     }
 
-    RAT_BIP39_INTENTOS.fetch_add(1, Ordering::AcqRel);
-    Ok(false)
+    Ok(false) // frase incorrecta: el slot ya está consumido
 }
 
 // ── Protocolo TCP para desbloqueo remoto ──────────────────────────────────────
@@ -437,10 +464,8 @@ pub async fn desbloquear_rat_bip39(
             }
             RAT_BLOQUEADO.store(false, Ordering::Release);
             RAT_BIP39_INTENTOS.store(0, Ordering::Release);
-            if !marcar_confiable {
-                if let Ok(mut g) = RAT_PROCESO.lock() {
-                    *g = None;
-                }
+            if let Ok(mut g) = RAT_PROCESO.lock() {
+                *g = None; // limpiar siempre: el proceso ya está en RAT_SESIONES_CONFIABLES si aplica
             }
             let _ = app.emit("rat-desbloqueado", serde_json::json!({}));
             log::info!("[RAT] Desbloqueado con BIP39. Confiable esta sesión: {}", marcar_confiable);
@@ -539,10 +564,20 @@ mod tests {
     fn bip39_palabras_invalidas_consumen_intento() {
         RAT_BIP39_INTENTOS.store(0, Ordering::Release);
         let invalidas = vec!["xxxxxxinvalido123".to_string(); 12];
-        // Palabras fuera del wordlist retornan false Y consumen un intento.
+        // Palabras fuera del wordlist retornan false Y consumen un intento (fetch_update atómico).
         assert_eq!(verificar_frase_bip39_para_rat(&invalidas).unwrap(), false);
-        assert_eq!(RAT_BIP39_INTENTOS.load(Ordering::Acquire), 1);
+        assert_eq!(RAT_BIP39_INTENTOS.load(Ordering::Acquire), 1,
+            "palabras inválidas deben consumir un intento");
         RAT_BIP39_INTENTOS.store(0, Ordering::Release);
+    }
+
+    #[test]
+    fn bip39_longitud_incorrecta_no_consume_intento() {
+        RAT_BIP39_INTENTOS.store(0, Ordering::Release);
+        let corta = vec!["abandon".to_string(); 5];
+        assert_eq!(verificar_frase_bip39_para_rat(&corta).unwrap(), false);
+        assert_eq!(RAT_BIP39_INTENTOS.load(Ordering::Acquire), 0,
+            "longitud incorrecta no debe consumir intento");
     }
 
     #[test]

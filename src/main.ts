@@ -1344,7 +1344,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const statusEl = document.getElementById("rat-solicitud-status");
     if (statusEl) statusEl.textContent = "Enviando solicitud…";
     try {
-      const hostname = await invoke<string>("iniciar_sinc_servidor").catch(() => "Babel");
+      const hostname = await invoke<string>("obtener_nombre_local").catch(() => "Babel");
       const acks = await invoke<number>("solicitar_desbloqueo_a_pares", { nombreLocal: hostname });
       if (statusEl) {
         statusEl.textContent = acks > 0
@@ -1422,7 +1422,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const statusEl = document.getElementById("rat-modal-status");
     if (statusEl) statusEl.textContent = "Enviando confirmación…";
     try {
-      const hostname = await invoke<string>("iniciar_sinc_servidor").catch(() => "Babel");
+      const hostname = await invoke<string>("obtener_nombre_local").catch(() => "Babel");
       const ok = await invoke<boolean>("confirmar_desbloqueo_rat_cmd", {
         ipBloqueado: _ratSolicitudIpActual,
         nombreLocal: hostname,
