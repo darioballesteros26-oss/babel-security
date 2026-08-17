@@ -94,11 +94,25 @@ fn cargar_custodia(subclave_hex: &str) -> CustodiaIndex {
     if subclave_hex.is_empty() {
         return CustodiaIndex::default();
     }
-    fs::read(custodia_path())
+    let path = custodia_path();
+    let bytes = match fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return CustodiaIndex::default(),
+        Err(e) => {
+            log::error!("[CUSTODIA] Error leyendo custodia.babel: {}", e);
+            return CustodiaIndex::default();
+        }
+    };
+    match crate::seguridad::descifrar_documento(bytes, subclave_hex)
         .ok()
-        .and_then(|bytes| crate::seguridad::descifrar_documento(bytes, subclave_hex).ok())
         .and_then(|json| serde_json::from_str(&json).ok())
-        .unwrap_or_default()
+    {
+        Some(idx) => idx,
+        None => {
+            log::warn!("[CUSTODIA] custodia.babel existe pero no pudo descifrarse — verificación saltada en esta sesión");
+            CustodiaIndex::default()
+        }
+    }
 }
 
 fn guardar_custodia(idx: &CustodiaIndex, subclave_hex: &str) {
@@ -216,25 +230,34 @@ pub fn verificar_y_limpiar(subclave_hex: &str, hw_ids_pareados: &[String]) -> Ve
 
     let guardados = crate::babel_dir().join("guardados");
     let mut eliminados = Vec::new();
+    let mut indice_modificado = false;
 
     for nombre in &no_autorizados {
         let ruta = guardados.join(nombre);
-        // Solo eliminar si el archivo realmente existe aquí (puede haberse borrado ya)
-        if ruta.exists() {
-            match fs::remove_file(&ruta) {
-                Ok(_) => {
-                    eliminados.push(nombre.clone());
-                    log::warn!("[CUSTODIA] Copia no autorizada eliminada: {}", nombre);
-                }
-                Err(e) => {
-                    log::error!("[CUSTODIA] No se pudo eliminar {}: {}", nombre, e);
-                }
+        // remove_file es la única operación: evita TOCTOU de exists()+remove.
+        // NotFound = el archivo ya no estaba → limpiar entrada del índice igualmente.
+        // Cualquier otro error = el archivo sigue en disco → conservar la entrada
+        //   para que sea detectado de nuevo en la próxima sesión.
+        match fs::remove_file(&ruta) {
+            Ok(_) => {
+                eliminados.push(nombre.clone());
+                idx.quitar(nombre);
+                indice_modificado = true;
+                log::warn!("[CUSTODIA] Copia no autorizada eliminada: {}", nombre);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                idx.quitar(nombre);
+                indice_modificado = true;
+            }
+            Err(e) => {
+                // El archivo sigue en disco; NO quitar del índice para reintentarlo
+                // en la siguiente sesión.
+                log::error!("[CUSTODIA] No se pudo eliminar {}: {}", nombre, e);
             }
         }
-        idx.quitar(nombre);
     }
 
-    if !eliminados.is_empty() || !no_autorizados.is_empty() {
+    if indice_modificado {
         guardar_custodia(&idx, subclave_hex);
     }
 

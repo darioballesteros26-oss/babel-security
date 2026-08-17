@@ -125,6 +125,13 @@ function mostrarPantalla(nombre: Pantalla): void {
     cargarListaEmparejados().catch(() => {});
   }
   if (nombre === "registro") {
+    _modoSospechas = false;
+    const btnH = document.getElementById("btn-tab-registro");
+    const btnS = document.getElementById("btn-tab-sospechas");
+    const btnF = document.getElementById("btn-filtro-registro");
+    if (btnH) { btnH.style.color = "var(--dorado)"; btnH.style.opacity = "1"; }
+    if (btnS) { btnS.style.color = ""; btnS.style.opacity = "0.4"; }
+    if (btnF) btnF.classList.remove("hidden");
     cargarRegistroDia().catch(() => {});
   }
   if (nombre === "principal") {
@@ -829,9 +836,10 @@ function renderizarSospechas(eventos: EventoDiario[]): void {
         <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(239,68,68,0.15);">
           ${sospechas.map(ev => {
             const hora = ev.timestamp.split("T")[1] ?? "";
-            return `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:0.62rem;opacity:0.85;">
-              <span style="font-family:monospace;color:var(--texto-secundario);">${escapeHTML(hora)}</span>
-              <span style="color:var(--texto-secundario);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHTML(ev.detalle)}">${escapeHTML(ev.detalle)}</span>
+            return `<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;font-size:0.62rem;opacity:0.85;">
+              <span style="font-family:monospace;color:var(--texto-secundario);flex-shrink:0;">${escapeHTML(hora)}</span>
+              <span style="font-family:monospace;color:var(--texto-secundario);flex-shrink:0;">${escapeHTML(ev.ip)}</span>
+              <span style="color:var(--texto-secundario);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHTML(ev.detalle)}">${escapeHTML(ev.detalle)}</span>
             </div>`;
           }).join("")}
         </div>
@@ -923,7 +931,7 @@ function renderizarRegistro(eventos: EventoDiario[], ipsHistorial: string[]): vo
     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
       <span class="registro-stat">${logins} <small>acceso${logins !== 1 ? "s" : ""}</small></span>
       <span class="registro-stat">${archivos} <small>archivo${archivos !== 1 ? "s" : ""}</small></span>
-      <span class="registro-stat">${eventos.length} <small>total</small></span>
+      <span class="registro-stat">${eventos.filter(e => e.tipo !== "sospecha_hw").length} <small>total</small></span>
       ${sospechosos > 0 ? `<span class="registro-stat-alerta">⚠ ${sospechosos} IP${sospechosos !== 1 ? "s" : ""} nueva${sospechosos !== 1 ? "s" : ""}</span>` : ""}
     </div>
   `;
