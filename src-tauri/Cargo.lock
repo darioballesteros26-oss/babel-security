@@ -440,6 +440,7 @@ dependencies = [
  "argon2",
  "base64 0.22.1",
  "chrono",
+ "core-foundation-sys",
  "dirs 5.0.1",
  "docx-rs",
  "env_logger",

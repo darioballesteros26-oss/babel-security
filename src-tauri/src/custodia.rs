@@ -14,6 +14,10 @@
 // Exenciones:
 //   - Archivos en ~/Babel/archivos/ (traducciones) → no aplica custodia.
 //   - Archivos compartidos por email (HTML autónomo) → fuera del vault, no aplica.
+//
+// Schema v2 (2026-08-17): los identificadores de hardware se almacenan como HwEntry
+// con tipo explícito ("se" | "tpm" | "uuid"). El formato v1 (Vec<String> de UUIDs)
+// se deserializa automáticamente como tipo="uuid" para migración transparente.
 
 use std::collections::HashMap;
 use std::fs;
@@ -29,50 +33,139 @@ fn custodia_path() -> std::path::PathBuf {
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+/// Entrada de hardware en el índice de custodia.
+/// El campo `tipo` indica el mecanismo de vinculación:
+///   "se"   — clave pública EC del Secure Enclave (macOS)
+///   "tpm"  — clave pública EC del TPM (Windows)
+///   "uuid" — UUID plano de la plataforma (fallback)
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct HwEntry {
+    pub tipo: String,
+    pub id: String,
+}
+
+impl HwEntry {
+    /// Construye un HwEntry desde la representación string del hw_id.
+    /// "se:<hex>"  → tipo="se",  id=<hex>
+    /// "tpm:<hex>" → tipo="tpm", id=<hex>
+    /// (sin prefijo) → tipo="uuid", id=<str>
+    pub fn from_hw_id(hw_id: &str) -> Self {
+        if let Some(pubkey) = hw_id.strip_prefix("se:") {
+            HwEntry { tipo: "se".into(), id: pubkey.to_string() }
+        } else if let Some(pubkey) = hw_id.strip_prefix("tpm:") {
+            HwEntry { tipo: "tpm".into(), id: pubkey.to_string() }
+        } else {
+            HwEntry { tipo: "uuid".into(), id: hw_id.to_string() }
+        }
+    }
+
+    /// Comprueba si este HwEntry corresponde al hw_id dado (con prefijo).
+    fn matches_hw_id(&self, hw_id: &str) -> bool {
+        match self.tipo.as_str() {
+            "se"  => hw_id == format!("se:{}", self.id),
+            "tpm" => hw_id == format!("tpm:{}", self.id),
+            _     => hw_id == self.id,
+        }
+    }
+}
+
+/// Enum auxiliar para deserializar tanto el formato v1 (String) como v2 (HwEntry).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum HwEntradaRaw {
+    Legacy(String),
+    Nueva(HwEntry),
+}
+
+/// Índice de custodia. Se serializa como JSON y se cifra en custodia.babel.
+///
+/// Serialización hacia disco: siempre en formato v2 (Vec<HwEntry>).
+/// Deserialización desde disco: acepta v1 (Vec<String>) y v2 (Vec<HwEntry>).
+#[derive(Serialize, Clone, Default)]
 pub struct CustodiaIndex {
-    entradas: HashMap<String, Vec<String>>,
+    entradas: HashMap<String, Vec<HwEntry>>,
+}
+
+impl<'de> Deserialize<'de> for CustodiaIndex {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Wire {
+            #[serde(default)]
+            entradas: HashMap<String, Vec<HwEntradaRaw>>,
+        }
+        let wire = Wire::deserialize(d)?;
+        let entradas = wire
+            .entradas
+            .into_iter()
+            .map(|(k, vs)| {
+                let entries = vs
+                    .into_iter()
+                    .map(|e| match e {
+                        HwEntradaRaw::Legacy(s) => HwEntry { tipo: "uuid".into(), id: s },
+                        HwEntradaRaw::Nueva(e) => e,
+                    })
+                    .collect();
+                (k, entries)
+            })
+            .collect();
+        Ok(CustodiaIndex { entradas })
+    }
 }
 
 impl CustodiaIndex {
     /// Un archivo es accesible si no tiene entrada (legacy) o si el hw_id local
     /// o el de algún dispositivo emparejado está en su lista de autorizados.
-    pub fn es_autorizado(&self, nombre: &str, hw_id_local: &str, hw_ids_pareados: &[String]) -> bool {
+    pub fn es_autorizado(
+        &self,
+        nombre: &str,
+        hw_id_local: &str,
+        hw_ids_pareados: &[String],
+    ) -> bool {
         match self.entradas.get(nombre) {
             None => true, // sin entrada → archivo legacy, sin restricción
-            Some(ids) => {
-                ids.contains(&hw_id_local.to_string())
-                    || ids.iter().any(|id| hw_ids_pareados.contains(id))
+            Some(entries) => {
+                entries.iter().any(|e| e.matches_hw_id(hw_id_local))
+                    || entries
+                        .iter()
+                        .any(|e| hw_ids_pareados.iter().any(|p| e.matches_hw_id(p)))
             }
         }
     }
 
     /// Registra hw_id como autorizado para el archivo. Sin duplicados.
     pub fn agregar(&mut self, nombre: &str, hw_id: &str) {
-        let ids = self.entradas.entry(nombre.to_string()).or_default();
-        let hw = hw_id.to_string();
-        if !ids.contains(&hw) {
-            ids.push(hw);
+        let entry = HwEntry::from_hw_id(hw_id);
+        let entries = self.entradas.entry(nombre.to_string()).or_default();
+        // Sin duplicados: comparamos por id (no por tipo+id) para tolerar
+        // casos donde el mismo dispositivo migre de uuid a se.
+        if !entries.iter().any(|e| e.id == entry.id) {
+            entries.push(entry);
         }
     }
 
     /// Autoriza hw_id en TODOS los archivos registrados (llamado al emparejar un nuevo dispositivo).
     pub fn autorizar_hw_en_todos(&mut self, hw_id: &str) {
-        let hw = hw_id.to_string();
-        for ids in self.entradas.values_mut() {
-            if !ids.contains(&hw) {
-                ids.push(hw.clone());
+        let entry = HwEntry::from_hw_id(hw_id);
+        for entries in self.entradas.values_mut() {
+            if !entries.iter().any(|e| e.id == entry.id) {
+                entries.push(entry.clone());
             }
         }
     }
 
     /// Devuelve los nombres de archivos cuyo hw_id local y ningún hw_id pareado están autorizados.
-    pub fn archivos_no_autorizados(&self, hw_id_local: &str, hw_ids_pareados: &[String]) -> Vec<String> {
+    pub fn archivos_no_autorizados(
+        &self,
+        hw_id_local: &str,
+        hw_ids_pareados: &[String],
+    ) -> Vec<String> {
         self.entradas
             .iter()
-            .filter(|(_, ids)| {
-                !ids.contains(&hw_id_local.to_string())
-                    && !ids.iter().any(|id| hw_ids_pareados.contains(id))
+            .filter(|(_, entries)| {
+                !entries.iter().any(|e| e.matches_hw_id(hw_id_local))
+                    && !entries
+                        .iter()
+                        .any(|e| hw_ids_pareados.iter().any(|p| e.matches_hw_id(p)))
             })
             .map(|(nombre, _)| nombre.clone())
             .collect()
@@ -109,7 +202,9 @@ fn cargar_custodia(subclave_hex: &str) -> CustodiaIndex {
     {
         Some(idx) => idx,
         None => {
-            log::warn!("[CUSTODIA] custodia.babel existe pero no pudo descifrarse — verificación saltada en esta sesión");
+            log::warn!(
+                "[CUSTODIA] custodia.babel existe pero no pudo descifrarse — verificación saltada en esta sesión"
+            );
             CustodiaIndex::default()
         }
     }
@@ -130,53 +225,10 @@ fn guardar_custodia(idx: &CustodiaIndex, subclave_hex: &str) {
 
 // ── Hardware ID ───────────────────────────────────────────────────────────────
 
-/// Devuelve el identificador de hardware único del dispositivo actual.
-/// macOS: IOPlatformUUID (ioreg). Windows: MachineGuid (registro). Fallback: hostname.
+/// Devuelve el identificador de hardware del dispositivo actual.
+/// Delega en enclave::obtener_hw_id() que intenta SE/TPM antes de UUID plano.
 pub fn obtener_hw_id() -> String {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("ioreg")
-            .args(["-d2", "-c", "IOPlatformExpertDevice"])
-            .output()
-            .ok()
-            .and_then(|o| {
-                let s = String::from_utf8_lossy(&o.stdout).to_string();
-                s.lines()
-                    .find(|l| l.contains("IOPlatformUUID"))
-                    .and_then(|l| l.split('"').nth(3))
-                    .map(|u| u.to_string())
-            })
-            .unwrap_or_else(|| {
-                hostname::get()
-                    .map(|h| h.to_string_lossy().to_string())
-                    .unwrap_or_else(|_| "babel-hw-fallback".to_string())
-            })
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("reg")
-            .args(["query", r"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography", "/v", "MachineGuid"])
-            .output()
-            .ok()
-            .and_then(|o| {
-                let s = String::from_utf8_lossy(&o.stdout).to_string();
-                s.lines()
-                    .find(|l| l.contains("MachineGuid"))
-                    .and_then(|l| l.split_whitespace().last())
-                    .map(|u| u.trim().to_string())
-            })
-            .unwrap_or_else(|| {
-                hostname::get()
-                    .map(|h| h.to_string_lossy().to_string())
-                    .unwrap_or_else(|_| "babel-hw-fallback".to_string())
-            })
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        hostname::get()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "babel-hw-fallback".to_string())
-    }
+    crate::enclave::obtener_hw_id()
 }
 
 // ── API pública ───────────────────────────────────────────────────────────────
@@ -250,8 +302,6 @@ pub fn verificar_y_limpiar(subclave_hex: &str, hw_ids_pareados: &[String]) -> Ve
                 indice_modificado = true;
             }
             Err(e) => {
-                // El archivo sigue en disco; NO quitar del índice para reintentarlo
-                // en la siguiente sesión.
                 log::error!("[CUSTODIA] No se pudo eliminar {}: {}", nombre, e);
             }
         }
@@ -279,7 +329,6 @@ mod tests {
     #[test]
     fn sin_entrada_siempre_autorizado() {
         let idx = CustodiaIndex::default();
-        // Archivo sin entrada en el índice → autorizado (backward compat con archivos legacy)
         assert!(idx.es_autorizado("archivo.babel", "hw-A", &[]));
         assert!(idx.es_autorizado("archivo.babel", "hw-A", &["hw-B".into()]));
     }
@@ -295,8 +344,7 @@ mod tests {
     #[test]
     fn hw_pareado_en_lista_es_autorizado() {
         let mut idx = CustodiaIndex::default();
-        idx.agregar("doc.babel", "hw-A"); // creado en A
-        // Dispositivo B lee el archivo; A es su par → autorizado
+        idx.agregar("doc.babel", "hw-A");
         let pareados = vec!["hw-A".to_string()];
         assert!(idx.es_autorizado("doc.babel", "hw-B", &pareados));
     }
@@ -305,7 +353,6 @@ mod tests {
     fn hw_no_autorizado_no_par_es_rechazado() {
         let mut idx = CustodiaIndex::default();
         idx.agregar("doc.babel", "hw-A");
-        // Dispositivo C: hw-A no es su hw local ni está en sus pares → no autorizado
         let pareados = vec!["hw-B".to_string()];
         assert!(!idx.es_autorizado("doc.babel", "hw-C", &pareados));
         assert!(!idx.es_autorizado("doc.babel", "hw-C", &[]));
@@ -315,7 +362,7 @@ mod tests {
     fn agregar_no_duplica() {
         let mut idx = CustodiaIndex::default();
         idx.agregar("f.babel", "hw-A");
-        idx.agregar("f.babel", "hw-A"); // duplicado
+        idx.agregar("f.babel", "hw-A");
         idx.agregar("f.babel", "hw-A");
         let ids = idx.entradas.get("f.babel").unwrap();
         assert_eq!(ids.len(), 1, "agregar varias veces el mismo hw_id no debe duplicar");
@@ -326,7 +373,6 @@ mod tests {
         let mut idx = CustodiaIndex::default();
         idx.agregar("a.babel", "hw-A");
         idx.agregar("b.babel", "hw-A");
-        // Dispositivo B se empareja → autorizar hw-B en todos
         idx.autorizar_hw_en_todos("hw-B");
         assert!(idx.es_autorizado("a.babel", "hw-B", &[]));
         assert!(idx.es_autorizado("b.babel", "hw-B", &[]));
@@ -335,20 +381,26 @@ mod tests {
     #[test]
     fn archivos_no_autorizados_lista_correcta() {
         let mut idx = CustodiaIndex::default();
-        idx.agregar("mio.babel",    "hw-A"); // este dispositivo (A)
-        idx.agregar("ajeno.babel",  "hw-X"); // de dispositivo desconocido
-        idx.agregar("pareado.babel","hw-B"); // del par de A
+        idx.agregar("mio.babel", "hw-A");
+        idx.agregar("ajeno.babel", "hw-X");
+        idx.agregar("pareado.babel", "hw-B");
 
         let hw_local = "hw-A";
-        let pareados  = vec!["hw-B".to_string()];
+        let pareados = vec!["hw-B".to_string()];
         let no_auth = idx.archivos_no_autorizados(hw_local, &pareados);
 
-        assert!(no_auth.contains(&"ajeno.babel".to_string()),
-            "archivo de hw desconocido debe ser no autorizado");
-        assert!(!no_auth.contains(&"mio.babel".to_string()),
-            "archivo propio no debe aparecer");
-        assert!(!no_auth.contains(&"pareado.babel".to_string()),
-            "archivo del par no debe aparecer");
+        assert!(
+            no_auth.contains(&"ajeno.babel".to_string()),
+            "archivo de hw desconocido debe ser no autorizado"
+        );
+        assert!(
+            !no_auth.contains(&"mio.babel".to_string()),
+            "archivo propio no debe aparecer"
+        );
+        assert!(
+            !no_auth.contains(&"pareado.babel".to_string()),
+            "archivo del par no debe aparecer"
+        );
     }
 
     #[test]
@@ -357,9 +409,10 @@ mod tests {
         idx.agregar("doc.babel", "hw-A");
         assert!(idx.tiene_entrada("doc.babel"));
         idx.quitar("doc.babel");
-        assert!(!idx.tiene_entrada("doc.babel"),
-            "quitar debe eliminar la entrada del índice");
-        // Sin entrada → autorizado (backward compat)
+        assert!(
+            !idx.tiene_entrada("doc.babel"),
+            "quitar debe eliminar la entrada del índice"
+        );
         assert!(idx.es_autorizado("doc.babel", "hw-X", &[]));
     }
 
@@ -375,5 +428,89 @@ mod tests {
         let d: crate::registro_diario::EventoDiario = serde_json::from_str(&j).unwrap();
         assert_eq!(d.tipo, "sospecha_hw");
         assert_eq!(d.detalle, "extraño_12345.babel");
+    }
+
+    // ── Tests schema v2 ────────────────────────────────────────────────────────
+
+    #[test]
+    fn hw_entry_from_hw_id_uuid() {
+        let e = HwEntry::from_hw_id("6B29FC40-CA28-4D95-8C21-DEADBEEF");
+        assert_eq!(e.tipo, "uuid");
+        assert_eq!(e.id, "6B29FC40-CA28-4D95-8C21-DEADBEEF");
+    }
+
+    #[test]
+    fn hw_entry_from_hw_id_se() {
+        let pubkey = "04".repeat(32) + "ff";
+        let hw_id = format!("se:{}", pubkey);
+        let e = HwEntry::from_hw_id(&hw_id);
+        assert_eq!(e.tipo, "se");
+        assert_eq!(e.id, pubkey);
+    }
+
+    #[test]
+    fn hw_entry_from_hw_id_tpm() {
+        let pubkey = "04aabbcc";
+        let hw_id = format!("tpm:{}", pubkey);
+        let e = HwEntry::from_hw_id(&hw_id);
+        assert_eq!(e.tipo, "tpm");
+        assert_eq!(e.id, pubkey);
+    }
+
+    #[test]
+    fn hw_entry_matches_hw_id() {
+        let e_uuid = HwEntry { tipo: "uuid".into(), id: "ABCD-1234".into() };
+        assert!(e_uuid.matches_hw_id("ABCD-1234"));
+        assert!(!e_uuid.matches_hw_id("XXXX-9999"));
+
+        let e_se = HwEntry { tipo: "se".into(), id: "04deadbeef".into() };
+        assert!(e_se.matches_hw_id("se:04deadbeef"));
+        assert!(!e_se.matches_hw_id("04deadbeef")); // sin prefijo → no coincide
+        assert!(!e_se.matches_hw_id("tpm:04deadbeef"));
+
+        let e_tpm = HwEntry { tipo: "tpm".into(), id: "04cafebabe".into() };
+        assert!(e_tpm.matches_hw_id("tpm:04cafebabe"));
+        assert!(!e_tpm.matches_hw_id("se:04cafebabe"));
+    }
+
+    #[test]
+    fn se_id_autoriza_correctamente() {
+        let mut idx = CustodiaIndex::default();
+        let hw_se = "se:04aabbccddeeff";
+        idx.agregar("doc.babel", hw_se);
+        assert!(idx.es_autorizado("doc.babel", hw_se, &[]));
+        assert!(!idx.es_autorizado("doc.babel", "se:04FFFFFF", &[]));
+        assert!(!idx.es_autorizado("doc.babel", "04aabbccddeeff", &[])); // sin prefijo
+    }
+
+    #[test]
+    fn migracion_v1_string_a_hwentry() {
+        // Simular JSON en formato v1 (Vec<String>) y verificar que se deserializa
+        // correctamente como Vec<HwEntry> con tipo="uuid".
+        let json_v1 = r#"{"entradas":{"doc.babel":["UUID-VIEJO-1","UUID-VIEJO-2"]}}"#;
+        let idx: CustodiaIndex = serde_json::from_str(json_v1).expect("debe deserializar formato v1");
+        assert!(idx.tiene_entrada("doc.babel"));
+        assert!(idx.es_autorizado("doc.babel", "UUID-VIEJO-1", &[]));
+        assert!(idx.es_autorizado("doc.babel", "UUID-VIEJO-2", &[]));
+        assert!(!idx.es_autorizado("doc.babel", "UUID-DESCONOCIDO", &[]));
+    }
+
+    #[test]
+    fn migracion_v2_hwentry_preserva_tipo() {
+        let json_v2 = r#"{"entradas":{"doc.babel":[{"tipo":"se","id":"04abcdef"}]}}"#;
+        let idx: CustodiaIndex = serde_json::from_str(json_v2).expect("debe deserializar formato v2");
+        assert!(idx.es_autorizado("doc.babel", "se:04abcdef", &[]));
+        assert!(!idx.es_autorizado("doc.babel", "04abcdef", &[]));
+    }
+
+    #[test]
+    fn agregar_uuid_y_se_no_se_duplican_si_mismo_id() {
+        let mut idx = CustodiaIndex::default();
+        // Mismo id en tipo diferente: de uuid → se (migración manual)
+        // La deduplicación es por .id, no por tipo+id
+        idx.agregar("f.babel", "ABCD-1234");      // uuid
+        idx.agregar("f.babel", "ABCD-1234");      // duplicado uuid → no agrega
+        let len = idx.entradas.get("f.babel").unwrap().len();
+        assert_eq!(len, 1, "no debe haber duplicado por id idéntico");
     }
 }

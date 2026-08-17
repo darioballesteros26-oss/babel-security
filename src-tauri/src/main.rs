@@ -7,9 +7,11 @@ mod babel_p2p;
 mod bip39_words;
 mod compartir;
 mod custodia;
+mod enclave;
 mod finder;
 mod gmail_oauth;
 mod img_a_pdf;
+mod integridad;
 mod pdf_reducir;
 mod conexion_directa;
 mod buzon_b2;
@@ -1114,6 +1116,15 @@ fn cifrar_y_guardar_desde_bytes(
     subclave_hex: &str,
     id_usuario: &str,
 ) -> Result<String, String> {
+    // Bloquear operaciones sensibles si el binario no superó la verificación de integridad.
+    if !integridad::integridad_ok() {
+        return Err(
+            "Esta copia de Babel parece haber sido modificada y podría no ser segura. \
+             Reinstala desde la fuente oficial para restaurar el acceso a las funciones de cifrado."
+                .to_string(),
+        );
+    }
+
     let nombre_seguro = std::path::Path::new(nombre_archivo)
         .file_name()
         .and_then(|n| n.to_str())
@@ -3491,6 +3502,13 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
 #[tauri::command]
 fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<String, String> {
     crate::rat_detector::verificar_no_bloqueado_rat()?;
+    if !integridad::integridad_ok() {
+        return Err(
+            "Esta copia de Babel parece haber sido modificada y podría no ser segura. \
+             Reinstala desde la fuente oficial para restaurar el acceso al descifrado."
+                .to_string(),
+        );
+    }
     validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
     let subclave_hex = sesion.subclave_hex()?;
@@ -5531,6 +5549,10 @@ fn main() {
 
     env_logger::init();
 
+    // Verificar integridad del binario antes de cualquier operación sensible.
+    // Si falla, INTEGRIDAD_OK queda en false y los comandos de cifrado lo comprueban.
+    integridad::verificar_integridad_binario();
+
     // Mata el proceso Python si la app peta antes del evento Destroyed
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -5934,6 +5956,7 @@ fn main() {
             rat_detector::confirmar_desbloqueo_rat_cmd,
             rat_detector::rechazar_solicitud_desbloqueo_rat,
             rat_detector::obtener_solicitud_desbloqueo_rat,
+            integridad::obtener_estado_integridad,
         ]);
     if let Err(e) = app.run(tauri::generate_context!()) {
         eprintln!("[!] Error crítico al iniciar Babel: {}", e);
