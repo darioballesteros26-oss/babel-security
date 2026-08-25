@@ -445,7 +445,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
     // Parsear: BABEL_SINC_REQ:{nombre}:{ip_remitente}:{ts}:{hmac8}[:{has_b2}[:{hw_id_A}]]
     let partes: Vec<&str> = linea.splitn(7, ':').collect();
     if partes.len() < 5 || partes[0] != "BABEL_SINC_REQ" {
-        log::warn!("[SINC] Mensaje inesperado de {}: {:.40}", ip_origen, linea);
+        log::warn!("[SINC] Mensaje inesperado de {}: {:?}", ip_origen, &linea[..linea.len().min(80)]);
         return;
     }
     let nombre_remoto: String = partes[1]

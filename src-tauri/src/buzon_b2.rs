@@ -55,13 +55,9 @@ pub fn guardar_config_raw(json: &str) -> Result<(), String> {
     if let Some(p) = ruta.parent() {
         let _ = std::fs::create_dir_all(p);
     }
-    std::fs::write(&ruta, json).map_err(|e| format!("Error guardando b2.json: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&ruta, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
+    // escribir_privado abre el archivo directamente con O_CREAT|0o600 (sin ventana TOCTOU).
+    crate::escribir_privado(&ruta, json.as_bytes())
+        .map_err(|e| format!("Error guardando b2.json: {e}"))
 }
 
 fn cargar_config() -> Result<ConfigB2, String> {
