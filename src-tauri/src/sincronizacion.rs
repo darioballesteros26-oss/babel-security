@@ -7,7 +7,7 @@
 //   B → A (rechaza):             BABEL_SINC_NO:{ts}\n
 //
 // La clave compartida se cifra con AES-256-GCM antes de enviarse (envelope):
-//   clave_envelope = HKDF(ikm=APP_SINC_KEY, salt=ts_bytes, info=b"sinc-envelope-v1")
+//   clave_envelope = HKDF(ikm=sinc_key(), salt=ts_bytes, info=b"sinc-envelope-v1")
 //   nonce12+ct_hex = hex(nonce || AES-GCM-encrypt(clave_hex, key=clave_envelope))
 //
 // Esto protege contra captura pasiva en LAN. La autenticación real sigue siendo
@@ -36,7 +36,17 @@ use zeroize::{Zeroize, Zeroizing};
 pub const PUERTO_SINC: u16 = 47826;
 pub const MAX_EMPAREJADOS: usize = 3;
 const TIMEOUT_HANDSHAKE_SECS: u64 = 30;
-const APP_SINC_KEY: &[u8] = b"babel-sinc-handshake-2026-v1";
+
+// Clave de sesión derivada del BUILD_FINGERPRINT en runtime.
+// No hardcodeada: el valor real no es visible con `strings` sobre el binario.
+// Esquema: SHA-256(BUILD_FINGERPRINT || ":sinc-key-v1:").
+fn sinc_key() -> [u8; 32] {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    h.update(env!("BABEL_BUILD_FINGERPRINT").as_bytes());
+    h.update(b":sinc-key-v1:");
+    h.finalize().into()
+}
 
 // ── Envelope AES-GCM para la clave compartida en tránsito ──────────────────
 
@@ -48,7 +58,7 @@ fn envelope_sinc_key(salt: &[u8; 16], ts: u64) -> [u8; 32] {
     let mut ikm = [0u8; 8 + 16];
     ikm[..8].copy_from_slice(&ts.to_le_bytes());
     ikm[8..].copy_from_slice(salt);
-    let hk = Hkdf::<Sha256H>::new(Some(APP_SINC_KEY), &ikm);
+    let hk = Hkdf::<Sha256H>::new(Some(&sinc_key()), &ikm);
     let mut key = [0u8; 32];
     let _ = hk.expand(b"sinc-envelope-v1", &mut key);
     key
@@ -87,7 +97,7 @@ fn envelope_descifrar(ts: u64, blob_hex: &str) -> Option<String> {
 
 fn hmac_sinc(dominio: &str, ts: u64) -> String {
     type HmacSha256 = Hmac<Sha256>;
-    let mut mac = HmacSha256::new_from_slice(APP_SINC_KEY).expect("HMAC any len");
+    let mut mac = HmacSha256::new_from_slice(&sinc_key()).expect("HMAC any len");
     mac.update(dominio.as_bytes());
     mac.update(b":");
     mac.update(ts.to_string().as_bytes());
