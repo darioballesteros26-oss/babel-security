@@ -13,7 +13,7 @@
 //
 // Limitación conocida: NAT simétrico puro sin TURN relay falla. Se informa al usuario.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -169,10 +169,12 @@ fn manejar_negociacion_receptor(stream: TcpStream, nombre_local: String) {
     // siquiera haya leído el request, reduciendo el margen disponible.
     let mut linea = String::new();
     {
-        let mut r = BufReader::new(&stream);
-        if let Err(e) = r.read_line(&mut linea) {
+        if let Err(e) = BufReader::new(&stream).take(4096).read_line(&mut linea) {
             log::warn!("[CONEX-R] read_line: {}", e); return;
         }
+    }
+    if linea.len() > 4095 {
+        log::warn!("[CONEX-R] Solicitud demasiado larga, descartando"); return;
     }
     let linea = linea.trim().to_string();
 
