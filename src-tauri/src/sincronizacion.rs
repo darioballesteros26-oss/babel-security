@@ -559,8 +559,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
         let mut b2_linea = String::new();
         {
-            let mut r = BufReader::new(&stream);
-            let _ = r.read_line(&mut b2_linea);
+            let _ = BufReader::new(&stream).take(4096).read_line(&mut b2_linea);
         }
         let b2_linea = b2_linea.trim();
 
@@ -659,8 +658,7 @@ pub fn solicitar_emparejamiento(
 
     let mut respuesta = String::new();
     {
-        let mut reader = BufReader::new(&stream);
-        reader
+        BufReader::new(&stream).take(4096)
             .read_line(&mut respuesta)
             .map_err(|_| "Sin respuesta en el tiempo esperado (30 s). El dispositivo puede no estar disponible.".to_string())?;
     }
@@ -744,8 +742,7 @@ pub fn solicitar_emparejamiento(
                     if stream.write_all(oferta.as_bytes()).is_ok() {
                         // Leer respuesta de B
                         let mut resp_b2 = String::new();
-                        let mut r = BufReader::new(&stream);
-                        let _ = r.read_line(&mut resp_b2);
+                        let _ = BufReader::new(&stream).take(4096).read_line(&mut resp_b2);
                         match resp_b2.trim() {
                             "BABEL_B2_OK"       => b2_enviado = true,
                             "BABEL_B2_CONFLICT"  => {
@@ -917,8 +914,7 @@ fn manejar_reintento_b2(stream: TcpStream, ip_origen: String, _nombre_local: &st
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let mut oferta_linea = String::new();
     {
-        let mut r = BufReader::new(&stream);
-        let _ = r.read_line(&mut oferta_linea);
+        let _ = BufReader::new(&stream).take(4096).read_line(&mut oferta_linea);
     }
     let oferta_linea = oferta_linea.trim();
 
@@ -1014,8 +1010,7 @@ pub fn reenviar_b2_si_pendiente(
 
     let mut resp = String::new();
     {
-        let mut r = BufReader::new(&stream);
-        let _ = r.read_line(&mut resp);
+        let _ = BufReader::new(&stream).take(4096).read_line(&mut resp);
     }
 
     match resp.trim() {
@@ -1033,8 +1028,7 @@ pub fn reenviar_b2_si_pendiente(
                     }
                     let mut resp2 = String::new();
                     {
-                        let mut r = BufReader::new(&stream);
-                        let _ = r.read_line(&mut resp2);
+                        let _ = BufReader::new(&stream).take(4096).read_line(&mut resp2);
                     }
                     match resp2.trim() {
                         "BABEL_B2_OK" => {

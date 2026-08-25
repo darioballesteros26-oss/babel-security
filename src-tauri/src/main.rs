@@ -734,8 +734,11 @@ fn verificar_login(
 
     // Comprobar si hay bloqueo activo
     if let Some(ts) = seguridad::leer_bloqueo() {
-        let restante = (ts + 600) - chrono::Local::now().timestamp();
-        if restante > 0 {
+        let ahora = chrono::Local::now().timestamp();
+        let expira = ts + 600;
+        if ahora < expira {
+            // cap a 600 s: evita bloqueo permanente si el reloj retrocede (NTP, ajuste manual)
+            let restante = (expira - ahora).min(600);
             return Err(format!("Bloqueado. Espera {} segundos.", restante));
         } else {
             let _ = fs::remove_file(&babel_path("bloqueo.tmp"));
@@ -4187,8 +4190,11 @@ fn recuperar_con_frase_interno(
     sesion: &tauri::State<SesionActiva>,
 ) -> Result<(String, String, String), String> {
     if let Some(ts) = seguridad::leer_bloqueo() {
-        let restante = (ts + 600) - chrono::Local::now().timestamp();
-        if restante > 0 {
+        let ahora = chrono::Local::now().timestamp();
+        let expira = ts + 600;
+        if ahora < expira {
+            // cap a 600 s: evita bloqueo permanente si el reloj retrocede (NTP, ajuste manual)
+            let restante = (expira - ahora).min(600);
             return Err(format!("Bloqueado. Espera {} segundos.", restante));
         } else {
             let _ = fs::remove_file(&babel_path("bloqueo.tmp"));
@@ -4323,8 +4329,11 @@ fn obtener_usuario_con_maestra(
 ) -> Result<String, String> {
     // Comprobar bloqueo activo antes de intentar cualquier descifrado
     if let Some(ts) = seguridad::leer_bloqueo() {
-        let restante = (ts + 600) - chrono::Local::now().timestamp();
-        if restante > 0 {
+        let ahora = chrono::Local::now().timestamp();
+        let expira = ts + 600;
+        if ahora < expira {
+            // cap a 600 s: evita bloqueo permanente si el reloj retrocede (NTP, ajuste manual)
+            let restante = (expira - ahora).min(600);
             return Err(format!("Bloqueado. Espera {} segundos.", restante));
         } else {
             let _ = fs::remove_file(&babel_path("bloqueo.tmp"));
