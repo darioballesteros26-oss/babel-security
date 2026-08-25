@@ -252,6 +252,9 @@ function activarEntradaSeguraEnPasswords(): void {
 // hay, cubre la app con un overlay difuminado (oculta el contenido al capturador) y
 // avisa. El contenido reaparece solo al cesar la captura.
 let _vigilanciaCapturaId: number | null = null;
+let _pollRatId: number | null = null;
+let _pollBadgeId: number | null = null;
+let _traduciendo = false;
 
 const PANTALLAS_SENSIBLES: Pantalla[] =
   ["principal", "traduccion", "archivos-guardados", "comunicacion", "frase", "ajustes", "registro"];
@@ -1409,7 +1412,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Poll cada 5 s: comprobar si llegó una solicitud de desbloqueo RAT desde un par
-  setInterval(async () => {
+  if (_pollRatId !== null) clearInterval(_pollRatId);
+  _pollRatId = window.setInterval(async () => {
     if (!_sesionActiva) return;
     try {
       const sol = await invoke<{ nombre: string; proceso: string; ip: string } | null>(
@@ -1465,7 +1469,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Badge servidor: monitoreo continuo cada 5 s (verde=activo, rojo=caído)
   const badge = document.getElementById("nllb-badge");
   let servidorEstabaActivo = false;
-  setInterval(async () => {
+  if (_pollBadgeId !== null) clearInterval(_pollBadgeId);
+  _pollBadgeId = window.setInterval(async () => {
     try {
       const res = await fetch("http://127.0.0.1:5002/ping", { signal: AbortSignal.timeout(2000) });
       if (res.ok) {
@@ -1654,10 +1659,12 @@ function toggleContraseña(id: string): void {
 // ============================================================
 
 async function enviarMensaje(): Promise<void> {
+  if (_traduciendo) return;
   const input = document.getElementById("chat-input") as HTMLTextAreaElement;
   const texto = input?.value?.trim() ?? "";
   if (!texto) return;
 
+  _traduciendo = true;
   añadirMensajeUsuario(texto);
 
   // Zeroize del input
@@ -1684,6 +1691,8 @@ async function enviarMensaje(): Promise<void> {
   } catch {
     mostrarProcesando(false);
     añadirMensajeBabel("Error al traducir. Verifica que hay sesión activa.", "BABEL · error");
+  } finally {
+    _traduciendo = false;
   }
 }
 
@@ -1693,6 +1702,8 @@ async function enviarMensaje(): Promise<void> {
 // El comando Rust emite "archivo-seleccionado" nada más elegir el archivo (antes de
 // traducir), y el listener de abajo lo usa para mostrar la burbuja "TÚ" y la barra.
 async function seleccionarArchivo(): Promise<void> {
+  if (_traduciendo) return;
+  _traduciendo = true;
   try {
     const ruta = await invoke<string | null>("traducir_documento_dialogo");
     if (!ruta) return;
@@ -1702,6 +1713,8 @@ async function seleccionarArchivo(): Promise<void> {
   } catch (error) {
     mostrarProcesando(false);
     añadirMensajeBabel("Error procesando archivo: " + String(error), "BABEL · error");
+  } finally {
+    _traduciendo = false;
   }
 }
 
@@ -1919,14 +1932,14 @@ async function cambiarIdiomaDesdeAjustes(): Promise<void> {
   guardarAjustesTraduccion().catch(() => {});
 }
 
-function swapIdiomaTraduccion(): void {
+async function swapIdiomaTraduccion(): Promise<void> {
   const sel1 = document.getElementById("selector-origen") as HTMLSelectElement;
   const sel2 = document.getElementById("selector-destino") as HTMLSelectElement;
   if (!sel1 || !sel2) return;
   const tmp = sel1.value;
   sel1.value = sel2.value;
   sel2.value = tmp;
-  cambiarIdiomaDesdeSelectores();
+  await cambiarIdiomaDesdeSelectores();
 }
 
 function actualizarContadorPalabras(texto: string): void {
@@ -2330,6 +2343,9 @@ function confirmarConCheckbox(cfg: {
     const noVolvEl  = document.getElementById("modal-confirmar-no-volver") as HTMLInputElement;
     const okBtn     = document.getElementById("modal-confirmar-ok")!;
     const cancelBtn = document.getElementById("modal-confirmar-cancelar")!;
+
+    // Evitar que dos llamadas concurrentes sobreescriban los handlers: la segunda se descarta.
+    if (!modal.classList.contains("hidden")) { resolve(false); return; }
 
     tituloEl.textContent = cfg.titulo;
     msgEl.textContent    = cfg.msg;
@@ -2770,7 +2786,9 @@ async function revelarEnFinder(): Promise<void> {
 function copiarPassCompartir(): void {
   const txt = document.getElementById("modal-compartir-pass-texto")?.textContent ?? "";
   if (!txt) return;
-  navigator.clipboard.writeText(txt).then(() => mostrarToast("Contraseña copiada", false));
+  navigator.clipboard.writeText(txt)
+    .then(() => mostrarToast("Contraseña copiada", false))
+    .catch(() => mostrarToast("No se pudo copiar al portapapeles", true));
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -4603,6 +4621,16 @@ function renderizarCuerpoEmail(contenedor: HTMLElement, cuerpo: string): void {
     const wrapper = document.createElement("div");
     wrapper.style.cssText = "background:#ffffff;color:#222222;padding:20px 24px;border-radius:6px;line-height:1.6;font-family:sans-serif;";
     wrapper.innerHTML = limpio;
+    // Bloquear tracking pixels: eliminar src de imágenes externas (solo data: permitido).
+    // Esto impide que un email malicioso filtre la IP del usuario al abrirlo.
+    wrapper.querySelectorAll("img").forEach(img => {
+      const src = img.getAttribute("src") ?? "";
+      if (!src.startsWith("data:image/")) {
+        img.removeAttribute("src");
+        img.setAttribute("alt", img.getAttribute("alt") || "[imagen externa bloqueada]");
+        img.style.display = "none";
+      }
+    });
     contenedor.appendChild(wrapper);
     // Interceptar clicks en links para abrirlos en el navegador externo
     wrapper.querySelectorAll("a[href]").forEach(el => {
@@ -4806,6 +4834,9 @@ async function iniciarOAuthGmail(): Promise<void> {
   progreso?.classList.remove("hidden");
   try {
     const url = await invoke<string>("iniciar_oauth_gmail_tauri");
+    if (!url.startsWith("https://accounts.google.com/")) {
+      throw new Error("URL OAuth inesperada — abortado por seguridad.");
+    }
     await openUrl(url);
   } catch (e) {
     progreso?.classList.add("hidden");
@@ -4967,7 +4998,8 @@ function textoPlanoDeEmail(cuerpo: string): string {
   // Extrae texto legible de HTML o devuelve el texto plano tal cual
   if (!cuerpo.trim().startsWith("<")) return cuerpo;
   const div = document.createElement("div");
-  div.innerHTML = cuerpo;
+  // Sanitizar antes de asignar: evita que imágenes externas del HTML carguen en el div temporal
+  div.innerHTML = DOMPurify.sanitize(cuerpo, { ALLOWED_TAGS: [], KEEP_CONTENT: true });
   return div.innerText;
 }
 
