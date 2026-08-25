@@ -4,8 +4,19 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="google-site-verification" content="-_GcZ2ksMzWEW6_l91u_XSraMxHqm_TmhCQtfetCTc4" />
-  <title>Security Babel</title>
-  <meta name="description" content="Software de traducción y gestión documental 100% local. Sin servidores, sin terceros. Diseñado para reducir el riesgo de incumplimiento GDPR." />
+  <title>Security Babel — Cifrado AES-256 y traducción local sin nube</title>
+  <meta name="description" content="Cifra, traduce y gestiona documentos 100% en tu dispositivo. AES-256-GCM, sin servidores externos, sin IA en la nube. 14 días gratis, sin tarjeta." />
+  <link rel="canonical" href="https://securitybabel.netlify.app/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://securitybabel.netlify.app/" />
+  <meta property="og:title" content="Security Babel — Cifrado y traducción 100% local" />
+  <meta property="og:description" content="Tus documentos nunca salen de tu dispositivo. AES-256-GCM, sin nube, cumplimiento GDPR. 14 días gratis sin tarjeta." />
+  <meta property="og:image" content="https://securitybabel.netlify.app/og-image.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Security Babel — Cifrado y traducción 100% local" />
+  <meta name="twitter:description" content="Tus documentos nunca salen de tu dispositivo. AES-256-GCM, sin nube, cumplimiento GDPR." />
+  <meta name="twitter:image" content="https://securitybabel.netlify.app/og-image.png" />
+  <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
@@ -1003,7 +1014,6 @@
           </li>
         </ul>
 
-        <!-- Más adelante se integrará Stripe para pago directo desde estos botones — por ahora dirigen al formulario de contacto para gestionar la compra manualmente. -->
         <a href="#contacto-ventas" class="block text-center w-full py-3.5 rounded-xl font-semibold text-sm c-gold glass border border-gold hover:bg-yellow-500/10 transition-all duration-200" data-i18n="pricing_pro_cta">
           Comenzar ahora
         </a>
@@ -1053,7 +1063,6 @@
         <!-- Diferenciador clave -->
         <p class="text-xs text-slate-500 italic mb-6 pl-3 leading-relaxed" style="border-left: 2px solid rgba(212,175,55,0.3);" data-i18n="pricing_mid_diff">Normal sincroniza vía buzón cifrado en la nube. Pro usa tu propio dispositivo físico — sin tocar ningún servidor externo.</p>
 
-        <!-- Más adelante se integrará Stripe para pago directo desde estos botones — por ahora dirigen al formulario de contacto para gestionar la compra manualmente. -->
         <a href="#contacto-ventas" class="block text-center w-full py-3.5 rounded-xl font-semibold text-sm c-gold glass border border-gold hover:bg-yellow-500/10 transition-all duration-200" data-i18n="pricing_mid_cta">
           Comenzar ahora
         </a>
@@ -1093,7 +1102,6 @@
           </li>
         </ul>
 
-        <!-- Más adelante se integrará Stripe para pago directo desde estos botones — por ahora dirigen al formulario de contacto para gestionar la compra manualmente. -->
         <a href="#contacto-ventas" class="btn-emerald pulse-cta block text-center w-full py-3.5 rounded-xl font-semibold text-sm text-white shadow-lg" data-i18n="pricing_ent_cta">
           Contactar con Ventas
         </a>
@@ -1458,7 +1466,7 @@ const translations = {
     how_step1_title: "Entorno aislado de internet",
     how_step1_desc:  "Security Babel opera en un contenedor completamente desconectado de la red. Ninguna información se transmite a servidores externos en ningún momento.",
     how_step2_title: "Motor de traducción local",
-    how_step2_desc:  "Los modelos MarianMT y Qwen corren directamente en tu CPU o GPU. Tus documentos se traducen con IA de calidad profesional sin salir de tu ordenador.",
+    how_step2_desc:  "El motor SMaLL-100 corre directamente en tu CPU. Tus documentos se traducen con IA de calidad profesional sin salir de tu ordenador.",
     how_step3_title: "Cifrado AES-256-GCM",
     how_step3_desc:  "Todos los archivos se almacenan cifrados con AES-256-GCM en tu disco local. Solo tú tienes la clave. Ni siquiera nosotros podemos acceder a tus datos.",
     how_coming_soon: "Envío seguro entre dispositivos — próximamente",
@@ -1553,7 +1561,7 @@ const translations = {
     dl_err_link: "Ver releases en GitHub →", dl_err_msg: "No se pudo cargar el enlace de descarga. Inténtalo desde GitHub.",
     dl_trial_note: "Incluye 14 días de acceso completo. Sin tarjeta.",
     cmp_trial_label: "PRUEBA GRATUITA", cmp_trial_price: "0 €", cmp_trial_duration: "14 días · sin tarjeta",
-    cmp_pro_label: "PRO", cmp_pro_rec: "RECOMENDADO", cmp_pro_price: "Próximamente", cmp_pro_duration: "acceso ilimitado",
+    cmp_pro_label: "PRO", cmp_pro_rec: "RECOMENDADO", cmp_pro_price: "35€/mes", cmp_pro_duration: "acceso ilimitado",
     cmp_feat1: "Cifrado AES-256-GCM", cmp_feat2: "Traducción IA local", cmp_feat3: "Email cifrado",
     cmp_feat4: "Chat P2P cifrado", cmp_feat5: "Actualizaciones automáticas",
     cmp_feat6_no: "Acceso tras 14 días", cmp_feat6_yes: "Acceso ilimitado",
@@ -1650,7 +1658,7 @@ const translations = {
     how_step1_title: "Internet-isolated environment",
     how_step1_desc:  "Security Babel operates in a container completely disconnected from the network. No information is ever transmitted to external servers.",
     how_step2_title: "Local translation engine",
-    how_step2_desc:  "MarianMT and Qwen models run directly on your CPU or GPU. Your documents are translated with professional-grade AI without leaving your computer.",
+    how_step2_desc:  "The SMaLL-100 engine runs directly on your CPU. Your documents are translated with professional-grade AI without leaving your computer.",
     how_step3_title: "AES-256-GCM Encryption",
     how_step3_desc:  "All files are stored encrypted with AES-256-GCM on your local disk. Only you hold the key. Not even we can access your data.",
     how_coming_soon: "Secure device-to-device transfer — coming soon",
@@ -1745,7 +1753,7 @@ const translations = {
     dl_err_link: "View releases on GitHub →", dl_err_msg: "Download link unavailable. Try from the GitHub releases page.",
     dl_trial_note: "Includes 14 days of full access. No credit card.",
     cmp_trial_label: "FREE TRIAL", cmp_trial_price: "€0", cmp_trial_duration: "14 days · no card",
-    cmp_pro_label: "PRO", cmp_pro_rec: "RECOMMENDED", cmp_pro_price: "Coming soon", cmp_pro_duration: "unlimited access",
+    cmp_pro_label: "PRO", cmp_pro_rec: "RECOMMENDED", cmp_pro_price: "€35/mo", cmp_pro_duration: "unlimited access",
     cmp_feat1: "AES-256-GCM encryption", cmp_feat2: "Local AI translation", cmp_feat3: "Encrypted email",
     cmp_feat4: "Encrypted P2P chat", cmp_feat5: "Automatic updates",
     cmp_feat6_no: "Access after 14 days", cmp_feat6_yes: "Unlimited access",
@@ -1837,7 +1845,7 @@ const translations = {
     how_step1_title: "Среда, изолированная от интернета",
     how_step1_desc:  "Security Babel работает в контейнере, полностью отключённом от сети. Никакая информация не передаётся на внешние серверы.",
     how_step2_title: "Локальный движок перевода",
-    how_step2_desc:  "Модели MarianMT и Qwen работают непосредственно на вашем процессоре или GPU. Ваши документы переводятся с помощью профессионального ИИ без выхода за пределы вашего компьютера.",
+    how_step2_desc:  "Движок SMaLL-100 работает непосредственно на вашем процессоре. Ваши документы переводятся с помощью профессионального ИИ без выхода за пределы вашего компьютера.",
     how_step3_title: "Шифрование AES-256-GCM",
     how_step3_desc:  "Все файлы хранятся зашифрованными с AES-256-GCM на вашем локальном диске. Только вы владеете ключом. Даже мы не можем получить доступ к вашим данным.",
     how_coming_soon: "Безопасная передача между устройствами — скоро",
@@ -1932,7 +1940,7 @@ const translations = {
     dl_err_link: "Посмотреть релизы на GitHub →", dl_err_msg: "Не удалось загрузить ссылку. Попробуйте с GitHub.",
     dl_trial_note: "14 дней полного доступа. Без карты.",
     cmp_trial_label: "БЕСПЛАТНО", cmp_trial_price: "€0", cmp_trial_duration: "14 дней · без карты",
-    cmp_pro_label: "ПРО", cmp_pro_rec: "РЕКОМЕНДУЕМ", cmp_pro_price: "Скоро", cmp_pro_duration: "неограниченный доступ",
+    cmp_pro_label: "ПРО", cmp_pro_rec: "РЕКОМЕНДУЕМ", cmp_pro_price: "35€/мес", cmp_pro_duration: "неограниченный доступ",
     cmp_feat1: "Шифрование AES-256-GCM", cmp_feat2: "Локальный ИИ-перевод", cmp_feat3: "Зашифрованная почта",
     cmp_feat4: "Зашифрованный P2P-чат", cmp_feat5: "Автоматические обновления",
     cmp_feat6_no: "Доступ после 14 дней", cmp_feat6_yes: "Неограниченный доступ",
@@ -2024,7 +2032,7 @@ const translations = {
     how_step1_title: "بيئة معزولة عن الإنترنت",
     how_step1_desc:  "يعمل Security Babel في حاوية منفصلة تماماً عن الشبكة. لا يتم نقل أي معلومات إلى خوادم خارجية في أي وقت.",
     how_step2_title: "محرك الترجمة المحلي",
-    how_step2_desc:  "تعمل نماذج MarianMT وQwen مباشرة على معالجك أو وحدة معالجة الرسومات. تُترجم مستنداتك بذكاء اصطناعي احترافي دون مغادرة جهازك.",
+    how_step2_desc:  "يعمل محرك SMaLL-100 مباشرة على معالجك. تُترجم مستنداتك بذكاء اصطناعي احترافي دون مغادرة جهازك.",
     how_step3_title: "تشفير AES-256-GCM",
     how_step3_desc:  "تُخزَّن جميع الملفات مشفرة بـ AES-256-GCM على قرصك المحلي. أنت وحدك تمتلك المفتاح. حتى نحن لا يمكننا الوصول إلى بياناتك.",
     how_coming_soon: "النقل الآمن بين الأجهزة — قريباً",
@@ -2119,7 +2127,7 @@ const translations = {
     dl_err_link: "عرض الإصدارات على GitHub →", dl_err_msg: "تعذّر تحميل الرابط. حاول من صفحة GitHub.",
     dl_trial_note: "يشمل ١٤ يومًا من الوصول الكامل. بدون بطاقة.",
     cmp_trial_label: "تجربة مجانية", cmp_trial_price: "€٠", cmp_trial_duration: "١٤ يومًا · بدون بطاقة",
-    cmp_pro_label: "برو", cmp_pro_rec: "موصى به", cmp_pro_price: "قريبًا", cmp_pro_duration: "وصول غير محدود",
+    cmp_pro_label: "برو", cmp_pro_rec: "موصى به", cmp_pro_price: "35€/شهر", cmp_pro_duration: "وصول غير محدود",
     cmp_feat1: "تشفير AES-256-GCM", cmp_feat2: "ترجمة ذكاء اصطناعي محلية", cmp_feat3: "بريد إلكتروني مشفّر",
     cmp_feat4: "دردشة P2P مشفّرة", cmp_feat5: "تحديثات تلقائية",
     cmp_feat6_no: "الوصول بعد ١٤ يومًا", cmp_feat6_yes: "وصول غير محدود",
