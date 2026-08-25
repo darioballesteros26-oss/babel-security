@@ -8,7 +8,7 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "opener:allow-open-path",
+    { "identifier": "opener:allow-open-path", "allow": [{"path": "$HOME/Babel/**"}] },
     "shell:allow-open",
     "dialog:default",
     "updater:default",

@@ -15,10 +15,24 @@
 //   → Es el único scope válido para IMAP/SMTP con XOAUTH2.
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CREDENCIALES GCP — RELLENA ANTES DE COMPILAR
+// CREDENCIALES GCP — nunca hardcodear aquí.
+// Definir en el entorno ANTES de compilar (o en .cargo/config.toml bajo [env],
+// asegurándose de que ese archivo NO esté versionado):
+//
+//   export BABEL_GOOGLE_CLIENT_ID="673788....apps.googleusercontent.com"
+//   export BABEL_GOOGLE_CLIENT_SECRET="GOCSPX-..."
+//
+// Si las variables no están definidas en tiempo de compilación, las constantes
+// quedan vacías y las funciones que las usan devuelven error descriptivo.
 // ──────────────────────────────────────────────────────────────────────────────
-pub const CLIENT_ID: &str = "673788639619-18fp4qa704t8umn4ben55o0p4d37dq2m.apps.googleusercontent.com";
-pub const CLIENT_SECRET: &str = "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";
+pub const CLIENT_ID: &str = match option_env!("BABEL_GOOGLE_CLIENT_ID") {
+    Some(v) => v,
+    None => "",
+};
+pub const CLIENT_SECRET: &str = match option_env!("BABEL_GOOGLE_CLIENT_SECRET") {
+    Some(v) => v,
+    None => "",
+};
 // ──────────────────────────────────────────────────────────────────────────────
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -95,6 +109,13 @@ pub struct FlujoPKCE {
 }
 
 pub fn construir_flujo(client_id: &str) -> Result<FlujoPKCE, String> {
+    if client_id.is_empty() {
+        return Err(
+            "Gmail OAuth no configurado. Define BABEL_GOOGLE_CLIENT_ID en el entorno \
+             de compilación (ver gmail_oauth.rs para instrucciones)."
+                .into(),
+        );
+    }
     let listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("No se pudo abrir servidor OAuth: {}", e))?;
     let puerto = listener

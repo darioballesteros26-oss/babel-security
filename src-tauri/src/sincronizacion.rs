@@ -210,9 +210,11 @@ pub fn limpiar_subclave_sesion() {
     }
 }
 
-/// Retorna una copia de la subclave de sesión actual (para uso en módulos hermanos).
-pub fn obtener_subclave_sesion_copy() -> Option<String> {
-    SUBCLAVE_SESION.lock().ok()?.as_deref().map(|s| s.to_string())
+/// Retorna una copia Zeroizing de la subclave de sesión actual.
+/// El caller debe retener el valor hasta terminar de usarlo; Zeroizing garantiza
+/// que la copia se borre de memoria al salir del scope.
+pub fn obtener_subclave_sesion_copy() -> Option<Zeroizing<String>> {
+    SUBCLAVE_SESION.lock().ok()?.as_deref().map(|s| Zeroizing::new(s.to_string()))
 }
 
 pub fn detener_servidor_sinc() {
@@ -338,11 +340,20 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             // ts <= ahora + 5 evita que timestamps futuros pasen por saturating_sub==0.
             let ts_valido = ts > 0 && ahora.saturating_sub(ts) <= 60 && ts <= ahora + 5;
             // Solo aceptar de un par emparejado conocido por IP.
+            // El HMAC se verifica con la clave compartida de ese par específico,
+            // no con una clave estática global.
             let subclave = obtener_subclave_sesion_copy().unwrap_or_default();
-            let es_par = !subclave.is_empty()
-                && cargar_emparejados(&subclave).iter().any(|d| d.ip_ultima == ip_origen);
-            if ts_valido && es_par
-                && crate::rat_detector::hmac_rat("rat_req", ts) == hmac_rx
+            let emparejados = if subclave.is_empty() {
+                vec![]
+            } else {
+                cargar_emparejados(&*subclave)
+            };
+            let par_opt = emparejados.iter().find(|d| d.ip_ultima == ip_origen);
+            let es_par = par_opt.is_some();
+            let hmac_esperado = par_opt
+                .map(|p| crate::rat_detector::hmac_rat_con_clave("rat_req", ts, p.clave_hex.as_bytes()))
+                .unwrap_or_default();
+            if ts_valido && es_par && hmac_esperado == hmac_rx
             {
                 if let Ok(mut slot) = SOLICITUD_DESBLOQUEO_RAT.lock() {
                     *slot = Some(SolicitudDesbloqueoRat {
@@ -375,11 +386,19 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             // ts <= ahora + 5 evita que timestamps futuros pasen por saturating_sub==0.
             let ts_valido = ts > 0 && ahora.saturating_sub(ts) <= 60 && ts <= ahora + 5;
             // Solo aceptar de un par emparejado conocido por IP.
+            // HMAC verificado con la clave del par específico.
             let subclave = obtener_subclave_sesion_copy().unwrap_or_default();
-            let es_par = !subclave.is_empty()
-                && cargar_emparejados(&subclave).iter().any(|d| d.ip_ultima == ip_origen);
-            if ts_valido && es_par
-                && crate::rat_detector::hmac_rat("rat_ok", ts) == hmac_rx
+            let emparejados = if subclave.is_empty() {
+                vec![]
+            } else {
+                cargar_emparejados(&*subclave)
+            };
+            let par_opt = emparejados.iter().find(|d| d.ip_ultima == ip_origen);
+            let es_par = par_opt.is_some();
+            let hmac_esperado = par_opt
+                .map(|p| crate::rat_detector::hmac_rat_con_clave("rat_ok", ts, p.clave_hex.as_bytes()))
+                .unwrap_or_default();
+            if ts_valido && es_par && hmac_esperado == hmac_rx
                 && crate::rat_detector::es_rat_bloqueado()
             {
                 crate::rat_detector::desbloquear_rat_desde_red();
@@ -876,7 +895,7 @@ fn manejar_reintento_b2(stream: TcpStream, ip_origen: String, _nombre_local: &st
 
     if let Some(hex_cifrado) = oferta_linea.strip_prefix("BABEL_B2_OFFER:") {
         let subclave = match SUBCLAVE_SESION.lock().ok()
-            .and_then(|g| g.as_deref().map(|s| s.to_string()))
+            .and_then(|g| g.as_deref().map(|s| Zeroizing::new(s.to_string())))
         {
             Some(s) => s,
             None => {
@@ -885,7 +904,7 @@ fn manejar_reintento_b2(stream: TcpStream, ip_origen: String, _nombre_local: &st
                 return;
             }
         };
-        let emparejados = cargar_emparejados(&subclave);
+        let emparejados = cargar_emparejados(&*subclave);
         let clave_hex = match emparejados.iter().find(|d| d.ip_ultima == ip_origen) {
             Some(d) => d.clave_hex.clone(),
             None => {

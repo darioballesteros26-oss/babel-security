@@ -326,17 +326,29 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
 
 // ── Protocolo TCP para desbloqueo remoto ──────────────────────────────────────
 
+// Clave estática legacy — usada solo en tests y como fallback cuando no hay
+// sesión activa (sin par emparejado). No proporciona autenticación fuerte porque
+// cualquiera que lea el binario la conoce. Para mensajes entre pares emparejados,
+// usar hmac_rat_con_clave con la clave compartida del par.
 const HMAC_RAT_KEY: &[u8] = b"babel-rat-unlock-2026-v1";
 
-pub fn hmac_rat(dominio: &str, ts: u64) -> String {
+/// Calcula el HMAC de un mensaje RAT usando la clave compartida con el par específico.
+/// La clave del par es la clave AES-256 generada aleatoriamente durante el emparejamiento
+/// y almacenada en dispositivos.babel. Es única por par y no está en el binario.
+pub fn hmac_rat_con_clave(dominio: &str, ts: u64, clave_par: &[u8]) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     type H = Hmac<Sha256>;
-    let mut mac = H::new_from_slice(HMAC_RAT_KEY).expect("clave HMAC válida");
+    let mut mac = H::new_from_slice(clave_par).expect("clave HMAC válida");
     mac.update(dominio.as_bytes());
     mac.update(b":");
     mac.update(ts.to_string().as_bytes());
     hex::encode(&mac.finalize().into_bytes()[..8])
+}
+
+/// Versión legacy con clave estática. Mantener para tests y fallback sin sesión.
+pub fn hmac_rat(dominio: &str, ts: u64) -> String {
+    hmac_rat_con_clave(dominio, ts, HMAC_RAT_KEY)
 }
 
 pub fn ahora_unix() -> u64 {
@@ -357,14 +369,17 @@ pub fn enviar_solicitud_desbloqueo_a_pares(subclave_hex: &str, nombre_local: &st
         .clone()
         .unwrap_or_else(|| "desconocido".to_string());
     let ts = ahora_unix();
-    let hmac = hmac_rat("rat_req", ts);
-    let msg = format!("BABEL_RAT_REQ:{}:{}:{}:{}\n", nombre_local, proceso, ts, hmac);
 
     let mut acks = 0u32;
     for disp in crate::sincronizacion::cargar_emparejados(subclave_hex) {
         if disp.ip_ultima.is_empty() {
             continue;
         }
+        // HMAC calculado con la clave compartida única de este par.
+        // Cada par usa una clave AES-256 distinta generada aleatoriamente al emparejar.
+        let hmac = hmac_rat_con_clave("rat_req", ts, disp.clave_hex.as_bytes());
+        let msg = format!("BABEL_RAT_REQ:{}:{}:{}:{}\n", nombre_local, proceso, ts, hmac);
+
         let addr = format!("{}:{}", disp.ip_ultima, crate::sincronizacion::PUERTO_SINC);
         let Ok(addr_parsed) = addr.parse() else { continue };
         let mut stream = match TcpStream::connect_timeout(&addr_parsed, Duration::from_secs(5)) {
@@ -391,8 +406,20 @@ pub fn enviar_confirmacion_desbloqueo(ip_bloqueado: &str, nombre_local: &str) ->
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpStream;
 
+    // Buscar la clave compartida con el dispositivo bloqueado para HMAC por-par.
+    let par_clave_hex: Option<String> =
+        crate::sincronizacion::obtener_subclave_sesion_copy().and_then(|subclave| {
+            crate::sincronizacion::cargar_emparejados(&*subclave)
+                .into_iter()
+                .find(|d| d.ip_ultima == ip_bloqueado)
+                .map(|d| d.clave_hex)
+        });
+
     let ts = ahora_unix();
-    let hmac = hmac_rat("rat_ok", ts);
+    let hmac = match &par_clave_hex {
+        Some(clave) => hmac_rat_con_clave("rat_ok", ts, clave.as_bytes()),
+        None => hmac_rat("rat_ok", ts), // fallback sin sesión activa
+    };
     let msg = format!("BABEL_RAT_OK:{}:{}:{}\n", nombre_local, ts, hmac);
 
     let addr = format!("{}:{}", ip_bloqueado, crate::sincronizacion::PUERTO_SINC);

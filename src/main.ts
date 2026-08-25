@@ -1339,6 +1339,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("modal-confirmar-rat")?.classList.add("hidden");
   }).catch(() => {});
 
+  listen("recuperacion-desactualizada", () => {
+    mostrarToast(
+      "Tu frase de recuperación usa un esquema antiguo. Regénerala en Configuración → Frase de recuperación para mayor seguridad.",
+      false
+    );
+  }).catch(() => {});
+
   // Botón: solicitar desbloqueo al par emparejado
   document.getElementById("rat-btn-solicitar")?.addEventListener("click", async () => {
     const statusEl = document.getElementById("rat-solicitud-status");

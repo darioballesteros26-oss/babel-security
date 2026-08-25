@@ -1699,9 +1699,13 @@ fn clave_hmac_bloqueo() -> Option<[u8; 32]> {
     if bytes.len() < 32 {
         return None;
     }
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&bytes[..32]);
-    Some(key)
+    // HKDF deriva una clave específica para bloqueo/intentos desde master.salt.
+    // Antes se usaban los bytes crudos de master.salt como clave HMAC directamente,
+    // lo que reutilizaba el mismo material como salt Argon2id y como clave MAC.
+    let hk = Hkdf::<Sha256>::new(None, &bytes[..32]);
+    let mut k = [0u8; 32];
+    hk.expand(b"babel-bloqueo-hmac-v2", &mut k).ok()?;
+    Some(k)
 }
 
 pub fn leer_bloqueo() -> Option<i64> {

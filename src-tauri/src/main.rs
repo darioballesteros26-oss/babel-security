@@ -20,6 +20,7 @@ mod rat_detector;
 mod registro_diario;
 mod seguridad;
 mod sincronizacion;
+mod nom_cifrado;
 mod traductor;
 
 use base64::Engine;
@@ -305,6 +306,79 @@ fn guardados_dir() -> std::path::PathBuf {
 
 fn guardados_path(nombre: &str) -> String {
     guardados_dir().join(nombre).to_string_lossy().to_string()
+}
+
+fn ruta_nomindex_guardados() -> String {
+    guardados_path(".nomindex.babel")
+}
+
+/// Lee la versión del esquema de recovery.babel desde el marcador ~/Babel/recovery_v.
+/// Devuelve 0 si el archivo no existe (vault antiguo sin marcador = v1 implícito).
+fn leer_version_recovery() -> u8 {
+    fs::read_to_string(babel_path("recovery_v"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u8>().ok())
+        .unwrap_or(0)
+}
+
+/// Escribe el marcador de versión de recovery.babel. Silencioso ante errores.
+fn escribir_version_recovery(v: u8) {
+    let _ = escribir_privado(babel_path("recovery_v"), v.to_string().as_bytes());
+}
+
+fn ruta_nomindex_archivos() -> String {
+    archivos_path(".nomindex.babel")
+}
+
+/// Renombra los archivos de salida del pipeline de traducción de
+/// `{id}_{par}_{stem}.babel` a un nombre opaco `{id}_{hex16}_{ts}.babel`
+/// y registra la correspondencia en el índice cifrado de `archivos/`.
+/// Devuelve la ruta completa del archivo traducido renombrado.
+fn renombrar_salida_traduccion(
+    id_usuario: &str,
+    par: &str,
+    nombre_base: &str,
+    subclave_hex: &str,
+) -> Result<String, String> {
+    let adir = archivos_dir();
+    let nomindex = ruta_nomindex_archivos();
+
+    let mut raw = [0u8; 8];
+    rand::rngs::OsRng.fill_bytes(&mut raw);
+    let hex_opaco = hex::encode(raw);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let viejo_trad = format!("{}_{}_{}.babel", id_usuario, par, nombre_base);
+    let nuevo_trad = format!("{}_{}_{}.babel", id_usuario, hex_opaco, ts);
+    let viejo_path = adir.join(&viejo_trad);
+    let nuevo_path = adir.join(&nuevo_trad);
+
+    if !viejo_path.exists() {
+        return Err(format!("Archivo de traducción no encontrado: {}", viejo_trad));
+    }
+    fs::rename(&viejo_path, &nuevo_path)
+        .map_err(|e| format!("Error renombrando archivo traducido: {}", e))?;
+    nom_cifrado::registrar(&nuevo_trad, nombre_base, &nomindex, subclave_hex)?;
+
+    // Renombrar __orig.babel si existe (fallo no es fatal)
+    let viejo_orig = format!("{}_{}_{}__orig.babel", id_usuario, par, nombre_base);
+    let nuevo_orig = format!("{}_{}_{}__orig.babel", id_usuario, hex_opaco, ts);
+    let viejo_orig_path = adir.join(&viejo_orig);
+    if viejo_orig_path.exists() {
+        if let Ok(()) = fs::rename(&viejo_orig_path, adir.join(&nuevo_orig)) {
+            let _ = nom_cifrado::registrar(
+                &nuevo_orig,
+                &format!("{} (original)", nombre_base),
+                &nomindex,
+                subclave_hex,
+            );
+        }
+    }
+
+    Ok(nuevo_path.to_string_lossy().to_string())
 }
 
 /// ~/Babel/tmp/ — temporales de traducción. Se borran tras cada uso.
@@ -692,6 +766,13 @@ fn verificar_login(
     // Guardar credenciales en el keychain del sistema para autologin en el próximo arranque
     guardar_credenciales_keychain(pass.as_str(), pass_usuario.as_str());
 
+    // Si recovery.babel existe pero el marcador de versión indica esquema antiguo
+    // (o no existe el marcador, lo que implica vault creado antes del sistema de versiones),
+    // avisar al usuario para que regenere su frase BIP39.
+    if std::path::Path::new(&babel_path("recovery.babel")).exists() && leer_version_recovery() < 3 {
+        let _ = app.emit("recuperacion-desactualizada", ());
+    }
+
     let mut json = Zeroizing::new(json);
     json.zeroize();
 
@@ -1018,10 +1099,6 @@ async fn traducir_documento(
         .and_then(|s| s.to_str())
         .unwrap_or(&nombre_archivo)
         .to_string();
-    // El pipeline guarda como {usuario}_{par}_{nombre}.babel — la ruta devuelta debe
-    // incluir el par de idioma o apuntaría a un archivo inexistente.
-    let nombre_resultado = archivos_path(&format!("{}_{}_{}.babel", id_usuario, par_doc, nombre_base));
-
     // spawn_blocking libera el event-loop → los eventos progreso-traduccion
     // llegan al webview en tiempo real mientras traduce.
     tauri::async_runtime::spawn_blocking(move || {
@@ -1038,7 +1115,9 @@ async fn traducir_documento(
             &id_usuario,
             &par_doc,
             &progreso,
-        ).map(|_| nombre_resultado)
+        )?;
+        // Renombrar los archivos de salida a nombres opacos y registrar en índice.
+        renombrar_salida_traduccion(&id_usuario, &par_doc, &nombre_base, &subclave_hex)
     }).await.map_err(|e| e.to_string())?
 }
 // ============================================================
@@ -1195,7 +1274,12 @@ fn cifrar_y_guardar_desde_bytes(
         .and_then(|s| s.to_str())
         .unwrap_or(nombre_archivo);
 
-    let nombre_cifrado = format!("{}_{}_{}.babel", id_usuario, nombre_base, ts);
+    // Nombre opaco en disco: 8 bytes aleatorios reemplazan el nombre original.
+    // El nombre visible se almacena en el índice cifrado .nomindex.babel.
+    let mut opaco_bytes = [0u8; 8];
+    rand::rngs::OsRng.fill_bytes(&mut opaco_bytes);
+    let opaco_hex = hex::encode(opaco_bytes);
+    let nombre_cifrado = format!("{}_{}_{}.babel", id_usuario, opaco_hex, ts);
     let ruta_cifrada = guardados_path(&nombre_cifrado);
 
     let contenido_b64 = traductor::comprimir_b64(contenido);
@@ -1203,6 +1287,14 @@ fn cifrar_y_guardar_desde_bytes(
         .map_err(|e| format!("Error cifrando: {}", e))?;
 
     escribir_privado(&ruta_cifrada, cifrado).map_err(|e| format!("Error guardando: {}", e))?;
+
+    // Registrar nombre_base → nombre_cifrado en el índice cifrado de nombres.
+    let _ = nom_cifrado::registrar(
+        &nombre_cifrado,
+        nombre_base,
+        &ruta_nomindex_guardados(),
+        subclave_hex,
+    );
 
     // Vincular el nuevo archivo al hardware de este dispositivo.
     custodia::registrar_archivo(&nombre_cifrado, subclave_hex);
@@ -1216,6 +1308,7 @@ fn guardar_documento_sin_traducir(
     ruta_completa: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     verificar_prueba_no_expirada()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
@@ -1241,6 +1334,7 @@ fn guardar_documento_desde_bytes(
     contenido_b64: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     verificar_prueba_no_expirada()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
@@ -1361,6 +1455,7 @@ async fn importar_archivo_dialogo(
     app: tauri::AppHandle,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<Option<ImportarDialogoResultado>, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     // Extraemos los datos de sesión ANTES de cruzar a otro hilo: tauri::State no es
     // Send y no puede sostenerse a través de un .await. subclave_hex es Zeroizing<String>,
     // así que sigue borrándose de memoria al soltarse dentro del closure.
@@ -1478,6 +1573,7 @@ async fn importar_carpeta_dialogo(
     app: tauri::AppHandle,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<Option<ImportarCarpetaResultado>, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -1520,7 +1616,7 @@ async fn importar_carpeta_dialogo(
             // filtros (extensión permitida, tamaño) los aplica cifrar_y_guardar_*.
             let nombre_base = std::path::Path::new(&nombre)
                 .file_stem().and_then(|s| s.to_str()).unwrap_or(&nombre);
-            if nombre.ends_with(".babel") || nombre_base_ya_guardado(nombre_base) {
+            if nombre.ends_with(".babel") || nombre_base_ya_guardado(nombre_base, Some(&subclave_hex)) {
                 omitidos += 1;
                 continue;
             }
@@ -1573,13 +1669,45 @@ fn borrar_archivo_original(token: String) -> Result<bool, String> {
 // ============================================================
 #[tauri::command]
 fn borrar_archivo_fuente(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<(), String> {
-    sesion.subclave_hex()?; // requiere sesión activa
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+    sesion.subclave_hex()?;
     let path = std::fs::canonicalize(&ruta)
         .map_err(|_| "Archivo no accesible.".to_string())?;
+
+    // Solo archivos regulares — nunca directorios ni symlinks a directorios.
+    let meta = std::fs::symlink_metadata(&path)
+        .map_err(|_| "Archivo no accesible.".to_string())?;
+    if !meta.file_type().is_file() {
+        return Err("Solo se pueden borrar archivos regulares.".into());
+    }
+
+    // Rutas internas de Babel: siempre bloqueadas.
     let babel = std::fs::canonicalize(babel_dir()).unwrap_or_else(|_| babel_dir());
     if path.starts_with(&babel) {
         return Err("No se puede borrar archivos internos de Babel.".into());
     }
+
+    // Temporales del drag & drop (preparar_temp_bytes): permitido directamente.
+    // Canonicalizamos tmp_dnd para que el starts_with funcione en macOS donde
+    // temp_dir() devuelve /var/folders/… y canonicalize resuelve a /private/var/…
+    let tmp_dnd_raw = std::env::temp_dir().join("babel_dnd");
+    let tmp_dnd = std::fs::canonicalize(&tmp_dnd_raw).unwrap_or(tmp_dnd_raw);
+    if path.starts_with(&tmp_dnd) {
+        borrar_seguro(path.to_str().unwrap_or(&ruta));
+        return Ok(());
+    }
+
+    // Para cualquier otra ruta: solo documentos que el pipeline de traducción
+    // acepta como entrada (pdf/docx/txt). Impide borrar ejecutables, configs,
+    // o rutas del sistema si algún path malicioso llegara a este comando.
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    if !["pdf", "docx", "txt"].contains(&ext.as_str()) {
+        return Err("Solo se pueden borrar documentos de traducción (pdf, docx, txt).".into());
+    }
+
     borrar_seguro(path.to_str().unwrap_or(&ruta));
     Ok(())
 }
@@ -1655,13 +1783,17 @@ fn procesar_finder_bloqueante(
     ok_count
 }
 
-/// Muestra una notificación nativa de macOS vía osascript (no requiere dependencia extra).
-/// Reemplaza comillas dobles por simples en el mensaje para evitar inyección en el script.
+/// Muestra una notificación nativa de macOS vía osascript.
+/// Filtra `"`, `\n` y `\r` para impedir inyección de sentencias AppleScript adicionales
+/// (en AppleScript un salto de línea dentro de un string literal termina el statement).
 #[cfg(target_os = "macos")]
 fn notificar_macos(titulo: &str, mensaje: &str) {
-    let msg_safe = mensaje.replace('"', "'");
-    let tit_safe = titulo.replace('"', "'");
-    let script = format!(r#"display notification "{}" with title "{}""#, msg_safe, tit_safe);
+    let limpiar = |s: &str| s.replace('"', "'").replace('\n', " ").replace('\r', "");
+    let script = format!(
+        r#"display notification "{}" with title "{}""#,
+        limpiar(mensaje),
+        limpiar(titulo),
+    );
     let _ = std::process::Command::new("osascript")
         .args(["-e", &script])
         .spawn();
@@ -1737,32 +1869,46 @@ fn manejar_url_babel(app: &tauri::AppHandle, urls: Vec<String>) {
 // ============================================================
 #[tauri::command]
 fn archivo_guardado_existe(nombre_base: String, sesion: tauri::State<SesionActiva>) -> bool {
-    let _ = sesion; // requiere sesión activa — si no hay sesión, devuelve false
-    nombre_base_ya_guardado(&nombre_base)
+    let subclave_hex = sesion.subclave_hex().unwrap_or_default();
+    let subclave = if subclave_hex.is_empty() { None } else { Some(subclave_hex.as_str()) };
+    nombre_base_ya_guardado(&nombre_base, subclave)
 }
 
-// Verifica contra el sistema de archivos real (guardados/ y archivos/) si ya hay un
-// .babel cuyo nombre base coincide (ignorando mayúsculas). Función libre para poder
-// reutilizarla desde la importación de carpetas, no solo desde el comando.
-fn nombre_base_ya_guardado(nombre_base: &str) -> bool {
+// Verifica si ya hay un .babel con ese nombre base (ignorando mayúsculas).
+// Con subclave disponible, consulta primero el índice cifrado (archivos nuevos con nombre opaco).
+// Sin subclave o para archivos legacy, escanea los nombres del sistema de archivos.
+fn nombre_base_ya_guardado(nombre_base: &str, subclave_hex: Option<&str>) -> bool {
     let nombre_base_lower = nombre_base.to_lowercase();
+
+    // 1. Consultar el índice cifrado si hay sesión activa (archivos con nombre opaco).
+    if let Some(subclave) = subclave_hex {
+        if !subclave.is_empty() {
+            let nom_g = nom_cifrado::leer(&ruta_nomindex_guardados(), subclave);
+            let nom_a = nom_cifrado::leer(&ruta_nomindex_archivos(), subclave);
+            if nom_g.values().any(|v| v.to_lowercase() == nombre_base_lower)
+                || nom_a.values().any(|v| v.to_lowercase() == nombre_base_lower)
+            {
+                return true;
+            }
+        }
+    }
+
+    // 2. Fallback legacy: escanear nombres en disco (archivos anteriores al índice cifrado).
     let carpetas = [guardados_dir(), archivos_dir()];
     for carpeta in &carpetas {
         if let Ok(entradas) = fs::read_dir(carpeta) {
             for entrada in entradas.flatten() {
                 let fname = entrada.file_name();
                 let fname_str = fname.to_string_lossy();
-                if fname_str.ends_with(".babel") {
-                    // Extraer el nombre base del archivo siguiendo limpiarNombre del frontend:
-                    // formato: {id_usuario}_{nombre_base}_{timestamp}.babel
-                    // → quitar prefijo usuario (hasta primer _), quitar sufijo _timestamp, quitar .babel
+                if fname_str.ends_with(".babel") && !fname_str.starts_with('.') {
                     let sin_ext = &fname_str[..fname_str.len() - 6];
                     let sin_prefix = sin_ext.splitn(2, '_').nth(1).unwrap_or(sin_ext);
                     let sin_ts = sin_prefix.rsplit_once('_').map(|(s, _)| s).unwrap_or(sin_prefix);
-                    // Quitar prefijo de idioma si existe (ej: es-en_)
-                    let sin_idioma = sin_ts.splitn(2, '_')
-                        .collect::<Vec<_>>();
-                    let base = if sin_idioma.len() == 2 && sin_idioma[0].len() == 5 && sin_idioma[0].chars().nth(2) == Some('-') {
+                    let sin_idioma = sin_ts.splitn(2, '_').collect::<Vec<_>>();
+                    let base = if sin_idioma.len() == 2
+                        && sin_idioma[0].len() == 5
+                        && sin_idioma[0].chars().nth(2) == Some('-')
+                    {
                         sin_idioma[1]
                     } else {
                         sin_ts
@@ -1821,6 +1967,10 @@ fn listar_archivos_guardados(
     let mut archivos = Vec::new();
     let prefijo = format!("{}_", id_usuario);
 
+    // Cargar índices de nombres cifrados para ambas colecciones.
+    let nomindex_g = nom_cifrado::leer(&ruta_nomindex_guardados(), &subclave_hex);
+    let nomindex_a = nom_cifrado::leer(&ruta_nomindex_archivos(), &subclave_hex);
+
     // Guardados sin traducir: idioma fijo "guardado" + fecha relativa por mtime.
     recolectar_metadatos(
         &guardados_dir(),
@@ -1828,7 +1978,11 @@ fn listar_archivos_guardados(
         &guardados_path(".buzones_guardados.babel"),
         &prefijo, &buzon, &subclave_hex, false, &mut archivos,
         |nombre, entry| {
-            let nombre_limpio = nombre.trim_start_matches(&prefijo).to_string();
+            // Archivos nuevos: obtener nombre original del índice cifrado.
+            // Archivos legacy: derivar del nombre en disco (compatibilidad).
+            let nombre_limpio = nomindex_g.get(nombre).cloned().unwrap_or_else(|| {
+                nombre.trim_start_matches(&prefijo).to_string()
+            });
             let fecha = entry
                 .metadata()
                 .ok()
@@ -1853,11 +2007,15 @@ fn listar_archivos_guardados(
         &archivos_path(".buzones.babel"),
         &prefijo, &buzon, &subclave_hex, true, &mut archivos,
         |nombre, _entry| {
-            let nombre_limpio = nombre.trim_start_matches(&prefijo).replace("__orig", "");
+            // Archivos nuevos: nombre original del índice cifrado.
+            // Archivos legacy: derivar del nombre en disco.
+            let nombre_limpio = nomindex_a.get(nombre).cloned().unwrap_or_else(|| {
+                nombre.trim_start_matches(&prefijo).replace("__orig", "")
+            });
             let idioma = if nombre.contains("__orig") {
                 "original".to_string()
             } else {
-                // Formato nuevo: {usuario}_{par}_{nombre}.babel — par en posición [1]
+                // El par de idioma (ej: "es-en") sigue en posición [1] del nombre en disco.
                 let seg = nombre.split('_').nth(1).unwrap_or("");
                 if seg.len() == 5 && seg.as_bytes().get(2) == Some(&b'-') {
                     seg.to_string()
@@ -1939,6 +2097,7 @@ fn mover_archivo_guardado(
     buzon_destino: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     validar_ruta_en(&ruta, guardados_dir())?;
 
     let subclave_hex = sesion.subclave_hex()?;
@@ -1998,6 +2157,7 @@ async fn traducir_documento_ruta(
     nombre_archivo: String,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     verificar_prueba_no_expirada()?;
     // Extraer datos de sesión ANTES de spawn_blocking — State no es Send.
     let subclave_hex = sesion.subclave_hex()?;
@@ -2064,9 +2224,7 @@ async fn traducir_documento_ruta(
             par,
             &progreso,
         )?;
-
-        let ruta_real = archivos_path(&format!("{}_{}_{}.babel", id_usuario, par, nombre_base));
-        Ok(ruta_real)
+        renombrar_salida_traduccion(&id_usuario, par, &nombre_base, &subclave_hex)
     })
     .await
     .map_err(|e| format!("Error interno al traducir: {}", e))?
@@ -2083,6 +2241,7 @@ async fn traducir_archivo_guardado(
     ruta: String,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     validar_ruta_en(&ruta, archivos_dir())
         .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
 
@@ -2108,13 +2267,24 @@ async fn traducir_archivo_guardado(
             return Err(format!("Tipo de archivo no soportado para traducción: .{}", ext));
         }
 
-        // Nombre base desde la ruta .babel interna
-        let nombre_base = nombre_exportacion(&ruta, ext);
-        let nombre_sin_ext = Path::new(&nombre_base)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("archivo")
-            .to_string();
+        // Nombre original del archivo fuente (del índice cifrado si es opaco, del disco si es legacy).
+        let nombre_disco_src = std::path::Path::new(&ruta)
+            .file_name().unwrap_or_default().to_string_lossy().to_string();
+        let nom_g = nom_cifrado::leer(&ruta_nomindex_guardados(), &subclave_hex);
+        let nom_a = nom_cifrado::leer(&ruta_nomindex_archivos(), &subclave_hex);
+        let nombre_original = nom_g.get(&nombre_disco_src)
+            .or_else(|| nom_a.get(&nombre_disco_src))
+            .cloned()
+            .unwrap_or_else(|| {
+                // Fallback legacy: derivar del nombre en disco.
+                let base = nombre_exportacion(&ruta, ext);
+                Path::new(&base).file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("archivo")
+                    .to_string()
+            });
+
+        let nombre_base = format!("{}.{}", nombre_original, ext);
 
         // Escribir a tmp/ y traducir
         let tmp_path = tmp_dir().join(&nombre_base);
@@ -2143,13 +2313,12 @@ async fn traducir_archivo_guardado(
 
         // El traductor siempre guarda un __orig.babel propio, pero aquí el original
         // ya está preservado en GUARDADO — eliminar la copia redundante.
-        let orig_redundante = archivos_path(&format!("{}_{}_{}__orig.babel", id_usuario, par, nombre_sin_ext));
+        let orig_redundante = archivos_path(&format!("{}_{}_{}__orig.babel", id_usuario, par, nombre_original));
         if std::path::Path::new(&orig_redundante).exists() {
             borrar_seguro(&orig_redundante);
         }
 
-        let ruta_resultado = archivos_path(&format!("{}_{}_{}.babel", id_usuario, par, nombre_sin_ext));
-        Ok(ruta_resultado)
+        renombrar_salida_traduccion(&id_usuario, par, &nombre_original, &subclave_hex)
     })
     .await
     .map_err(|e| format!("Error interno al traducir: {}", e))?
@@ -2167,6 +2336,7 @@ async fn traducir_documento_dialogo(
     app: tauri::AppHandle,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<Option<String>, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     verificar_prueba_no_expirada()?;
     // Extraer datos de sesión ANTES de cruzar a spawn_blocking (State no es Send).
     let subclave_hex = sesion.subclave_hex()?;
@@ -2366,6 +2536,22 @@ fn detectar_ext(bytes: &[u8]) -> &'static str {
         return "zip";
     }
     "txt"
+}
+
+// Devuelve el nombre de exportación consultando primero el índice cifrado.
+// Para archivos nuevos con nombre opaco, recupera el nombre original del índice.
+// Para archivos legacy, delega en nombre_exportacion() (parseo del nombre en disco).
+fn nombre_exportacion_idx(
+    ruta: &str,
+    ext: &str,
+    nomindex: &std::collections::HashMap<String, String>,
+) -> String {
+    if let Some(disk_name) = std::path::Path::new(ruta).file_name() {
+        if let Some(original) = nomindex.get(disk_name.to_string_lossy().as_ref()) {
+            return format!("{}.{}", original, ext);
+        }
+    }
+    nombre_exportacion(ruta, ext)
 }
 
 // Reconstruye un nombre de archivo limpio a partir de la ruta .babel interna.
@@ -2718,6 +2904,7 @@ fn set_modo_rapido(activado: bool) {
 
 #[tauri::command]
 fn leer_resultado(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Vec<u8>, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -2976,11 +3163,15 @@ async fn exportar_archivo(
         return Err("No hay sesión activa.".into());
     }
 
+    // Cargar índice cifrado fuera de spawn_blocking (State no es Send).
+    let mut nomindex = nom_cifrado::leer(&ruta_nomindex_guardados(), &subclave_hex);
+    nomindex.extend(nom_cifrado::leer(&ruta_nomindex_archivos(), &subclave_hex));
+
     tauri::async_runtime::spawn_blocking(move || {
         // Descifrar y reconstruir el documento original (valida ruta + zeroiza).
         let raw = abrir_descifrado_vault(&ruta, &subclave_hex)?;
         let ext = detectar_ext(&raw);
-        let nombre = nombre_exportacion(&ruta, ext);
+        let nombre = nombre_exportacion_idx(&ruta, ext, &nomindex);
 
         use tauri_plugin_dialog::DialogExt;
         let destino_opt = app
@@ -3010,10 +3201,14 @@ async fn exportar_archivos_a_carpeta(
     app: tauri::AppHandle,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<u32, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
+
+    let mut nomindex = nom_cifrado::leer(&ruta_nomindex_guardados(), &subclave_hex);
+    nomindex.extend(nom_cifrado::leer(&ruta_nomindex_archivos(), &subclave_hex));
 
     tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
@@ -3030,7 +3225,7 @@ async fn exportar_archivos_a_carpeta(
                 Err(_) => continue,
             };
             let ext = detectar_ext(&raw);
-            let nombre = nombre_exportacion(ruta, ext);
+            let nombre = nombre_exportacion_idx(ruta, ext, &nomindex);
             let destino = carpeta.join(&nombre);
             if fs::write(&destino, &*raw).is_ok() {
                 copiados += 1;
@@ -3051,6 +3246,7 @@ fn mover_archivo(
     buzon_destino: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     validar_ruta_en(&ruta, archivos_dir())?;
 
     let subclave_hex = sesion.subclave_hex()?;
@@ -3159,18 +3355,47 @@ fn renombrar_archivo(
         .to_string_lossy()
         .to_string();
 
-    // Nuevo nombre manteniendo prefijo de usuario y extensión
     let nombre_limpio = nombre_nuevo
         .trim()
         .replace(['\0', '\n', '\r', '/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
     if nombre_limpio.is_empty() {
         return Err("El nombre no puede estar vacío.".to_string());
     }
+
+    let ruta_nomindex = if es_guardado {
+        ruta_nomindex_guardados()
+    } else {
+        ruta_nomindex_archivos()
+    };
+
+    // Archivos con nombre opaco: actualizar solo el índice cifrado (el nombre en disco no cambia).
+    // Archivos legacy: renombrar físicamente en disco (comportamiento anterior).
+    let idx_actual = nom_cifrado::leer(&ruta_nomindex, &subclave_hex);
+    if idx_actual.contains_key(&nombre_viejo) {
+        // Comprobar colisión de nombre visible en el índice
+        let nombre_lower = nombre_limpio.to_lowercase();
+        let hay_colision = idx_actual.iter()
+            .any(|(k, v)| k != &nombre_viejo && v.to_lowercase() == nombre_lower);
+        if hay_colision {
+            return Err("Ya existe un archivo con ese nombre.".into());
+        }
+        // Actualizar nombre visible en índice cifrado; disco sin cambios.
+        nom_cifrado::actualizar(&nombre_viejo, &nombre_limpio, &ruta_nomindex, &subclave_hex)?;
+
+        // Actualizar también el __orig compañero si existe en el índice
+        let nombre_viejo_orig = format!("{}__orig.babel", nombre_viejo.trim_end_matches(".babel"));
+        if idx_actual.contains_key(&nombre_viejo_orig) {
+            nom_cifrado::actualizar(&nombre_viejo_orig, &nombre_limpio, &ruta_nomindex, &subclave_hex)?;
+        }
+
+        return Ok(ruta.clone());
+    }
+
+    // Ruta legacy: renombrar físicamente en disco.
     let nuevo_nombre_archivo = format!("{}_{}.babel", id_usuario, nombre_limpio);
     let nueva_ruta = dir.join(&nuevo_nombre_archivo);
 
-    // M5: no sobrescribir un archivo existente al renombrar (evita pérdida de datos silenciosa).
-    // Comparamos rutas canónicas para permitir renombrar al mismo archivo (no-op) sin error.
+    // M5: no sobrescribir un archivo existente al renombrar.
     let es_mismo = std::path::Path::new(&ruta).canonicalize().ok()
         == nueva_ruta.canonicalize().ok().filter(|_| nueva_ruta.exists());
     if nueva_ruta.exists() && !es_mismo {
@@ -3217,7 +3442,11 @@ fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
-    validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+    let en_guardados = validar_ruta_en(&ruta, guardados_dir()).is_ok();
+    let en_archivos = validar_ruta_en(&ruta, archivos_dir()).is_ok();
+    if !en_guardados && !en_archivos {
+        return Err("Ruta fuera del vault.".into());
+    }
 
     let meta_sym = fs::symlink_metadata(&ruta)
         .map_err(|e| format!("Error leyendo metadata: {}", e))?;
@@ -3227,6 +3456,21 @@ fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
 
     // 3 pasadas (0x00, 0xFF, 0xAA) + fsync + O_NOFOLLOW (igual que temporales)
     borrar_seguro(&ruta);
+
+    // Limpiar entrada del índice de nombres cifrado (silent on error).
+    let nombre_disco = std::path::Path::new(&ruta)
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    if en_guardados {
+        nom_cifrado::eliminar(&nombre_disco, &ruta_nomindex_guardados(), &subclave_hex);
+    } else {
+        nom_cifrado::eliminar(&nombre_disco, &ruta_nomindex_archivos(), &subclave_hex);
+        // Limpiar también la entrada __orig compañera si existe
+        let orig = format!("{}__orig.babel", nombre_disco.trim_end_matches(".babel"));
+        nom_cifrado::eliminar(&orig, &ruta_nomindex_archivos(), &subclave_hex);
+    }
 
     Ok(())
 }
@@ -3695,6 +3939,7 @@ fn generar_frase_recuperacion(
     datos_recovery.zeroize();
     escribir_privado(&babel_path("recovery.babel"), &cifrado_recuperacion)
         .map_err(|e| format!("Error guardando recovery.babel: {}", e))?;
+    escribir_version_recovery(3);
 
     let salt = traductor::cargar_o_crear_salt();
     let subclave = seguridad::derivar_subclave(maestra.as_bytes(), "babel-usuarios-v1", &salt)
@@ -3804,6 +4049,7 @@ fn recuperar_con_frase_interno(
             Ok(d) => {
                 if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
                     let _ = escribir_privado(babel_path("recovery.babel"), nuevo);
+                    escribir_version_recovery(3);
                 }
                 d
             }
@@ -3815,6 +4061,7 @@ fn recuperar_con_frase_interno(
                     Ok(d) => {
                         if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
                             let _ = escribir_privado(babel_path("recovery.babel"), nuevo);
+                            escribir_version_recovery(3);
                         }
                         d
                     }
@@ -3827,6 +4074,7 @@ fn recuperar_con_frase_interno(
                                 usado_v0 = true;
                                 if let Ok(nuevo) = seguridad::blindar_documento(&d, &key_v3_hex) {
                                     let _ = escribir_privado(babel_path("recovery.babel"), nuevo);
+                                    escribir_version_recovery(3);
                                 }
                                 d
                             }
@@ -3844,10 +4092,27 @@ fn recuperar_con_frase_interno(
     if let Ok(mut c) = sesion.contador.lock() { *c = 0; }
     seguridad::borrar_contador_intentos();
 
-    let json: serde_json::Value =
-        serde_json::from_str(&datos).map_err(|_| "Formato de recovery invalido.".to_string())?;
-    let maestra = json["m"].as_str().ok_or("Falta maestra".to_string())?.to_string();
-    let pass = json["p"].as_str().ok_or("Falta pass".to_string())?.to_string();
+    // Extraer maestra y pass directamente con regex mínimo en vez de serde_json::Value,
+    // ya que serde_json::Value no implementa Zeroize y dejaría las strings en el heap.
+    // Formato garantizado: {"m":"...","p":"..."} (generado por format! en generar_frase_recuperacion).
+    let extraer = |campo: &str| -> Option<String> {
+        let marca = format!("\"{}\":\"", campo);
+        let inicio = datos.find(&marca)? + marca.len();
+        let resto = &datos[inicio..];
+        // Desescapar \" dentro del valor
+        let mut valor = String::new();
+        let mut chars = resto.chars();
+        loop {
+            match chars.next()? {
+                '"' => break,
+                '\\' => { valor.push(chars.next()?); }
+                c => valor.push(c),
+            }
+        }
+        Some(valor)
+    };
+    let maestra = extraer("m").ok_or("Falta maestra")?;
+    let pass    = extraer("p").ok_or("Falta pass")?;
     datos.zeroize();
 
     let aviso = if usado_v0 {
@@ -3991,6 +4256,7 @@ fn guardar_config_email_tauri(
     firma: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
 
     let remitentes_autorizados: Vec<String> = remitentes
@@ -5059,6 +5325,7 @@ fn generar_archivo_compartir(
     contacto: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<compartir::ResultadoCompartir, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -5087,6 +5354,7 @@ async fn compartir_archivo_nativo(
     app: tauri::AppHandle,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<(), String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     // Verificar sesión
     let subclave = sesion.subclave_hex()?;
     if subclave.is_empty() {
@@ -5124,6 +5392,7 @@ async fn compartir_directo(
     app: tauri::AppHandle,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<(), String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         log::error!("[compartir_directo] No hay sesión activa");
