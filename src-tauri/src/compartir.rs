@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::sync::Mutex;
 use rand::{rngs::OsRng, RngCore};
 use base64::Engine;
 use serde::Serialize;
@@ -16,6 +17,11 @@ use zeroize::Zeroizing;
 
 use crate::{babel_path, seguridad};
 use crate::bip39_words::WORDLIST;
+
+// Serializa lectura-modificación-escritura de la tabla de contactos cifrada.
+// Sin este mutex, dos llamadas concurrentes pueden generar contraseñas distintas
+// para el mismo contacto y la segunda sobrescribe a la primera.
+static CONTACTOS_MUTEX: Mutex<()> = Mutex::new(());
 
 // ── Rutas ──────────────────────────────────────────────────────────────────
 
@@ -529,6 +535,7 @@ pub fn obtener_o_crear_password(
     contacto: &str,
     subclave_hex: &str,
 ) -> Result<(String, bool), String> {
+    let _guard = CONTACTOS_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let mut contactos = cargar_contactos(subclave_hex);
     if let Some(pwd) = contactos.get(contacto) {
         return Ok((pwd.clone(), false));

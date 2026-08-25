@@ -52,6 +52,10 @@ static FINDER_PROCESSING_MUTEX: Mutex<()> = Mutex::new(());
 // de ~/Babel/.finder_token e incluirlo en la URL como ?token=<hex>.
 static FINDER_TOKEN: Mutex<Option<String>> = Mutex::new(None);
 
+// Versión que se presentó al usuario para confirmar actualización.
+// Permite detectar si entre el check() y el install() se publicó una versión diferente.
+static UPDATE_VERSION_PENDIENTE: Mutex<Option<String>> = Mutex::new(None);
+
 // Proceso hijo del servidor de traducción (sidecar PyInstaller).
 // Módulo-nivel para poder matar desde el panic hook y desde on_window_event.
 static USB_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
@@ -1005,7 +1009,7 @@ fn obtener_estado_prueba() -> EstadoPrueba {
         if !path.exists() {
             let nuevo_inicio = ahora;
             if let Some(blob) = prueba_cifrar(nuevo_inicio, nuevo_inicio) {
-                let _ = escribir_privado(&path, &blob);
+                let _ = escribir_privado_atomico(&path, &blob);
             }
             (nuevo_inicio, nuevo_inicio)
         } else {
@@ -1023,7 +1027,7 @@ fn obtener_estado_prueba() -> EstadoPrueba {
     // Actualizar `ultimo` si el tiempo avanzó (guarda el progreso normal)
     if ahora > ultimo {
         if let Some(blob) = prueba_cifrar(inicio, ahora) {
-            let _ = escribir_privado(&path, &blob);
+            let _ = escribir_privado_atomico(&path, &blob);
         }
     }
 
@@ -3597,6 +3601,7 @@ fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
+    let _idx_guard = BUZON_INDEX_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let en_guardados = validar_ruta_en(&ruta, guardados_dir()).is_ok();
     let en_archivos = validar_ruta_en(&ruta, archivos_dir()).is_ok();
     if !en_guardados && !en_archivos {
@@ -5953,6 +5958,11 @@ async fn verificar_actualizacion(app: tauri::AppHandle) {
         .map(|w| w.is_focused().unwrap_or(false))
         .unwrap_or(false);
 
+    // Recordar la versión aprobada para verificar al instalar (TOCTOU entre check+install).
+    if let Ok(mut g) = UPDATE_VERSION_PENDIENTE.lock() {
+        *g = Some(update.version.clone());
+    }
+
     if ventana_activa {
         let _ = app.emit("actualizacion-disponible", &info);
     } else {
@@ -5979,6 +5989,19 @@ async fn instalar_actualizacion(app: tauri::AppHandle) -> Result<(), String> {
     let update  = updater.check().await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "No hay actualización disponible.".to_string())?;
+
+    // Verificar que la versión encontrada coincide con la que se mostró al usuario.
+    // Protege el caso raro de que se publique una versión diferente entre check y install.
+    if let Ok(g) = UPDATE_VERSION_PENDIENTE.lock() {
+        if let Some(ref v_aprobada) = *g {
+            if update.version != *v_aprobada {
+                return Err(format!(
+                    "La versión disponible cambió ({} → {}). Reinicia Babel para confirmar la nueva actualización.",
+                    v_aprobada, update.version
+                ));
+            }
+        }
+    }
 
     let _ = app.emit("actualizacion-progreso", serde_json::json!({"estado": "descargando"}));
 
