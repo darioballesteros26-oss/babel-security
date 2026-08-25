@@ -51,7 +51,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use zeroize::{Zeroize, Zeroizing};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -214,6 +214,99 @@ pub fn capturar_codigo(listener: TcpListener) -> Result<String, String> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// HTTPS CON RUSTLS + WEBPKI-ROOTS (sin confiar en el store del sistema)
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn crear_config_tls() -> Arc<rustls::ClientConfig> {
+    let root_store = rustls::RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    Arc::new(
+        rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth(),
+    )
+}
+
+// POST HTTPS usando rustls directamente, ignorando el CA store del sistema.
+// Previene MITM por CAs corporativas o comprometidas instaladas por el SO.
+fn post_https(host: &str, path: &str, body: &str, content_type: &str) -> Result<String, String> {
+    let config = crear_config_tls();
+    let server_name: rustls::pki_types::ServerName<'static> = host.to_owned()
+        .try_into()
+        .map_err(|_| format!("Hostname TLS inválido: {}", host))?;
+    let conn = rustls::ClientConnection::new(config, server_name)
+        .map_err(|e| format!("TLS init: {}", e))?;
+    let tcp = std::net::TcpStream::connect(format!("{}:443", host))
+        .map_err(|e| format!("TCP: {}", e))?;
+    tcp.set_read_timeout(Some(std::time::Duration::from_secs(30))).ok();
+    tcp.set_write_timeout(Some(std::time::Duration::from_secs(30))).ok();
+    let mut tls = rustls::StreamOwned::new(conn, tcp);
+
+    let peticion = format!(
+        "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        path, host, content_type, body.len(), body
+    );
+    tls.write_all(peticion.as_bytes())
+        .map_err(|e| format!("Error enviando: {}", e))?;
+
+    let mut respuesta = Vec::new();
+    tls.read_to_end(&mut respuesta)
+        .map_err(|e| format!("Error leyendo respuesta: {}", e))?;
+
+    let respuesta_str = String::from_utf8_lossy(&respuesta).to_string();
+    let status: u16 = respuesta_str.split_whitespace().nth(1)
+        .and_then(|s| s.parse().ok()).unwrap_or(0);
+    let body_inicio = respuesta_str.find("\r\n\r\n")
+        .ok_or_else(|| "Respuesta HTTP sin separador".to_string())? + 4;
+    let body_resp = respuesta_str[body_inicio..].to_string();
+
+    if (200..300).contains(&status) {
+        Ok(body_resp)
+    } else {
+        Err(format!("HTTP {}: {}", status, body_resp))
+    }
+}
+
+// GET HTTPS con Authorization Bearer usando rustls.
+fn get_https_bearer(host: &str, path: &str, token: &str) -> Result<String, String> {
+    let config = crear_config_tls();
+    let server_name: rustls::pki_types::ServerName<'static> = host.to_owned()
+        .try_into()
+        .map_err(|_| format!("Hostname TLS inválido: {}", host))?;
+    let conn = rustls::ClientConnection::new(config, server_name)
+        .map_err(|e| format!("TLS init: {}", e))?;
+    let tcp = std::net::TcpStream::connect(format!("{}:443", host))
+        .map_err(|e| format!("TCP: {}", e))?;
+    tcp.set_read_timeout(Some(std::time::Duration::from_secs(30))).ok();
+    let mut tls = rustls::StreamOwned::new(conn, tcp);
+
+    let peticion = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
+        path, host, token
+    );
+    tls.write_all(peticion.as_bytes())
+        .map_err(|e| format!("Error enviando: {}", e))?;
+
+    let mut respuesta = Vec::new();
+    tls.read_to_end(&mut respuesta)
+        .map_err(|e| format!("Error leyendo respuesta: {}", e))?;
+
+    let respuesta_str = String::from_utf8_lossy(&respuesta).to_string();
+    let status: u16 = respuesta_str.split_whitespace().nth(1)
+        .and_then(|s| s.parse().ok()).unwrap_or(0);
+    let body_inicio = respuesta_str.find("\r\n\r\n")
+        .ok_or_else(|| "Respuesta HTTP sin separador".to_string())? + 4;
+    let body_resp = respuesta_str[body_inicio..].to_string();
+
+    if (200..300).contains(&status) {
+        Ok(body_resp)
+    } else {
+        Err(format!("HTTP {}: {}", status, body_resp))
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // FLUJO PKCE — PASO 3: intercambiar código por tokens
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -252,20 +345,10 @@ pub fn intercambiar_codigo(
         pct(&redirect),
     );
 
-    let resp = match ureq::post(TOKEN_URL)
-        .set("Content-Type", "application/x-www-form-urlencoded")
-        .send_string(&cuerpo)
-    {
-        Ok(r) => r,
-        Err(ureq::Error::Status(_, r)) => {
-            let body = r.into_string().unwrap_or_default();
-            return Err(format!("Google rechazó el código OAuth: {}", body));
-        }
-        Err(e) => return Err(format!("Error de red en intercambio OAuth: {}", e)),
-    };
-
-    let tokens: RespToken = resp
-        .into_json()
+    let body_str = post_https("oauth2.googleapis.com", "/token", &cuerpo,
+        "application/x-www-form-urlencoded")
+        .map_err(|e| format!("Google rechazó el código OAuth: {}", e))?;
+    let tokens: RespToken = serde_json::from_str(&body_str)
         .map_err(|e| format!("Respuesta de token inválida: {}", e))?;
 
     let refresh = tokens.refresh_token.ok_or(
@@ -274,14 +357,10 @@ pub fn intercambiar_codigo(
             .to_string(),
     )?;
 
-    let email = ureq::get(USERINFO_URL)
-        .set(
-            "Authorization",
-            &format!("Bearer {}", tokens.access_token),
-        )
-        .call()
+    let email = get_https_bearer("www.googleapis.com", "/oauth2/v2/userinfo",
+        &tokens.access_token)
         .ok()
-        .and_then(|r| r.into_json::<UserInfo>().ok())
+        .and_then(|b| serde_json::from_str::<UserInfo>(&b).ok())
         .and_then(|u| u.email)
         .unwrap_or_default();
 
@@ -322,13 +401,10 @@ fn refrescar(
         pct(refresh_token),
     );
 
-    let resp = ureq::post(TOKEN_URL)
-        .set("Content-Type", "application/x-www-form-urlencoded")
-        .send_string(&cuerpo)
+    let body_str = post_https("oauth2.googleapis.com", "/token", &cuerpo,
+        "application/x-www-form-urlencoded")
         .map_err(|e| format!("Error refrescando access token: {}", e))?;
-
-    let tokens: RespToken = resp
-        .into_json()
+    let tokens: RespToken = serde_json::from_str(&body_str)
         .map_err(|e| format!("Respuesta de refresco inválida: {}", e))?;
 
     Ok((tokens.access_token, tokens.expires_in.unwrap_or(3600)))
@@ -407,9 +483,9 @@ pub fn revocar_oauth(_client_id: &str, _client_secret: &str, subclave_hex: &str)
     // usar el refresh_token es más robusto porque funciona aunque el access_token
     // haya expirado o no se pueda refrescar).
     if let Some(tokens) = cargar_tokens_oauth(subclave_hex) {
-        ureq::post(REVOKE_URL)
-            .set("Content-Type", "application/x-www-form-urlencoded")
-            .send_string(&format!("token={}", pct(&tokens.refresh_token)))
+        post_https("oauth2.googleapis.com", "/revoke",
+            &format!("token={}", pct(&tokens.refresh_token)),
+            "application/x-www-form-urlencoded")
             .map_err(|e| format!("Error revocando token en Google: {}", e))?;
     }
     let _ = std::fs::remove_file(crate::babel_dir().join(OAUTH_FILE));

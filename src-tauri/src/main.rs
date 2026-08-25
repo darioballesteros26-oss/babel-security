@@ -47,6 +47,10 @@ static PRUEBA_INIT_MUTEX: Mutex<()> = Mutex::new(());
 // Serializa los drenados de entrada_finder/: evita que manejar_url_babel y
 // procesar_entrada_finder (login/unlock) se solapen y cifren el mismo staged dos veces.
 static FINDER_PROCESSING_MUTEX: Mutex<()> = Mutex::new(());
+// Token CSRF efímero para el URL scheme babel://. Se genera al iniciar sesión y se
+// verifica en manejar_url_babel cuando hay sesión activa. El Quick Action debe leerlo
+// de ~/Babel/.finder_token e incluirlo en la URL como ?token=<hex>.
+static FINDER_TOKEN: Mutex<Option<String>> = Mutex::new(None);
 
 // Proceso hijo del servidor de traducción (sidecar PyInstaller).
 // Módulo-nivel para poder matar desde el panic hook y desde on_window_event.
@@ -63,6 +67,48 @@ static PENDING_BORRAR_ORIGINAL: Mutex<Option<HashMap<String, String>>> = Mutex::
 // Estado temporal del flujo PKCE Gmail OAuth en curso.
 // Contiene (code_verifier, puerto_callback) mientras el usuario autoriza en el browser.
 
+// ── Helpers CSRF token babel:// ───────────────────────────────────────────────
+
+fn generar_finder_token() {
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    let hex = hex::encode(bytes);
+    let ruta = babel_dir().join(".finder_token");
+    let _ = escribir_privado(&ruta, hex.as_bytes());
+    if let Ok(mut g) = FINDER_TOKEN.lock() {
+        *g = Some(hex);
+    }
+}
+
+fn limpiar_finder_token() {
+    if let Ok(mut g) = FINDER_TOKEN.lock() {
+        *g = None;
+    }
+    let _ = fs::remove_file(babel_dir().join(".finder_token"));
+}
+
+// Compara en tiempo constante el token de la URL contra el almacenado en memoria.
+// Solo aplica cuando hay sesión activa; sin sesión no hay token y se ignora la URL.
+fn verificar_finder_token(urls: &[String]) -> bool {
+    let esperado = match FINDER_TOKEN.lock().ok().and_then(|g| g.clone()) {
+        Some(t) => t,
+        None => return false,
+    };
+    urls.iter().any(|url| {
+        let qs = url.splitn(2, '?').nth(1).unwrap_or("");
+        qs.split('&').any(|par| {
+            if let Some(val) = par.strip_prefix("token=") {
+                val.len() == esperado.len()
+                    && val.as_bytes().iter().zip(esperado.as_bytes())
+                        .fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+            } else {
+                false
+            }
+        })
+    })
+}
+
+// ── Borrado seguro de archivos temporales ─────────────────────────────────────
 // HELPER — Borrado seguro de archivos temporales
 // Sobreescribe el archivo con ceros antes de borrarlo.
 // Así los bytes no quedan recuperables en disco aunque el SO
@@ -742,6 +788,7 @@ fn verificar_login(
     seguridad::borrar_contador_intentos();
     seguridad::resetear_amenazas_conocidas();
     crate::sincronizacion::establecer_subclave_sesion(&subclave_hex);
+    generar_finder_token(); // token CSRF para babel:// URL scheme
 
     // Custodia: eliminar silenciosamente copias no autorizadas y registrar sospechas.
     {
@@ -1888,6 +1935,13 @@ fn manejar_url_babel(app: &tauri::AppHandle, urls: Vec<String>) {
         return;
     }
 
+    // Con sesión activa: verificar token CSRF para que solo el Quick Action legítimo
+    // (que lee ~/Babel/.finder_token) pueda disparar el procesamiento inmediato.
+    if !verificar_finder_token(&urls) {
+        log::warn!("[finder] babel://guardar recibida con sesión activa pero sin token válido — ignorada");
+        return;
+    }
+
     let id_usuario = sesion.usuario.lock().map(|u| u.clone()).unwrap_or_default();
     let app2 = app.clone();
     // Hilo dedicado: el cifrado puede tardar y no debe bloquear el hilo principal.
@@ -2178,6 +2232,7 @@ fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
     babel_p2p::detener_servidor_p2p();
     crate::sincronizacion::limpiar_subclave_sesion();
     crate::conexion_directa::limpiar_subclave_servidor();
+    limpiar_finder_token(); // revocar token CSRF del URL scheme babel://
     sesion.limpiar();
     // Al cerrar sesión: borrar TODOS los archivos en claro de compartidos/ sin esperar 1h.
     compartir::barrer_plaintext_compartidos_logout();

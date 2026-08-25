@@ -23,11 +23,50 @@ use tauri::Emitter;
 
 // ── Persistencia del contador BIP39 ──────────────────────────────────────────
 //
-// El contador de intentos fallidos se persiste en ~/Babel/.bip39_intentos para
-// que reiniciar la app no permita al atacante recuperar los slots de brute-force.
-// Formato: 1 byte (contador) + 32 bytes (SHA-256 de integridad).
-// La tag usa BUILD_FINGERPRINT: conocerla requiere acceso al binario compilado.
-// Archivos corruptos o con tag inválida se tratan como contador máximo (bloqueado).
+// Almacenamiento dual: Keychain del sistema (macOS) + archivo ~Babel/.bip39_intentos.
+// Al leer se toma el MAX de ambas fuentes: borrar una no resetea el contador.
+// Al escribir se actualiza en ambas. Al limpiar se borran las dos.
+// Archivo: 1 byte (contador) + 32 bytes SHA-256(BUILD_FINGERPRINT + ".bip39-v1." + byte).
+// Tag inválida → tratado como MAX+1 (bloqueado).
+
+// ── Keychain (macOS) ──────────────────────────────────────────────────────────
+
+#[cfg(target_os = "macos")]
+fn leer_intentos_keychain() -> Option<u8> {
+    let out = std::process::Command::new("security")
+        .args(["find-generic-password", "-s", "com.babel-security.bip39",
+               "-a", "intentos", "-w"])
+        .output().ok()?;
+    if !out.status.success() { return None; }
+    std::str::from_utf8(&out.stdout).ok()?.trim().parse().ok()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn leer_intentos_keychain() -> Option<u8> { None }
+
+#[cfg(target_os = "macos")]
+fn guardar_intentos_keychain(v: u8) {
+    let _ = std::process::Command::new("security")
+        .args(["add-generic-password", "-s", "com.babel-security.bip39",
+               "-a", "intentos", "-w", &v.to_string(), "-U"])
+        .output();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn guardar_intentos_keychain(_v: u8) {}
+
+#[cfg(target_os = "macos")]
+fn borrar_intentos_keychain() {
+    let _ = std::process::Command::new("security")
+        .args(["delete-generic-password", "-s", "com.babel-security.bip39",
+               "-a", "intentos"])
+        .output();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn borrar_intentos_keychain() {}
+
+// ── Archivo firmado ───────────────────────────────────────────────────────────
 
 fn ruta_bip39_intentos() -> std::path::PathBuf {
     crate::babel_dir().join(".bip39_intentos")
@@ -41,7 +80,7 @@ fn tag_bip39_intentos(v: u8) -> [u8; 32] {
     h.finalize().into()
 }
 
-fn cargar_intentos_bip39_disco() -> u8 {
+fn cargar_intentos_archivo() -> u8 {
     let datos = match std::fs::read(ruta_bip39_intentos()) {
         Ok(d) => d,
         Err(_) => return 0,
@@ -53,14 +92,32 @@ fn cargar_intentos_bip39_disco() -> u8 {
     if datos[1..] == tag_bip39_intentos(v) { v } else { MAX_INTENTOS_BIP39 + 1 }
 }
 
-fn guardar_intentos_bip39_disco(v: u8) {
+fn guardar_intentos_archivo(v: u8) {
     let mut datos = vec![v];
     datos.extend_from_slice(&tag_bip39_intentos(v));
     let _ = crate::escribir_privado_atomico(&ruta_bip39_intentos(), &datos);
 }
 
-fn borrar_intentos_bip39_disco() {
+fn borrar_intentos_archivo() {
     let _ = std::fs::remove_file(ruta_bip39_intentos());
+}
+
+// ── API pública (dual) ────────────────────────────────────────────────────────
+
+fn cargar_intentos_bip39_disco() -> u8 {
+    let de_archivo = cargar_intentos_archivo();
+    let de_keychain = leer_intentos_keychain().unwrap_or(0);
+    de_archivo.max(de_keychain)
+}
+
+fn guardar_intentos_bip39_disco(v: u8) {
+    guardar_intentos_archivo(v);
+    guardar_intentos_keychain(v);
+}
+
+fn borrar_intentos_bip39_disco() {
+    borrar_intentos_archivo();
+    borrar_intentos_keychain();
 }
 
 /// Restaura el contador de intentos BIP39 desde disco al abrir sesión.
