@@ -99,7 +99,7 @@ def traducir(texto: str, par: str, beam: int = 0) -> str:
         result = _translator.translate_batch(
             [tokens],
             beam_size=beam or BEAM,
-            max_decoding_length=min(len(tokens) * 2 + 20, 350),
+            max_decoding_length=min(len(tokens) * 2 + 20, 512),
         )
     trad = _decodificar(result[0].hypotheses[0])
     return comun.quitar_punto_anadido(trad, se_anadio)
@@ -139,7 +139,7 @@ def traducir_batch(textos: list, par: str, beam: int = 0) -> list:
         results = _translator.translate_batch(
             src_batch,
             beam_size=beam or BEAM,
-            max_decoding_length=min(max_in * 2 + 20, 350),
+            max_decoding_length=min(max_in * 2 + 20, 512),
             max_batch_size=128,
         )
     for pos, i in enumerate(indices_validos):

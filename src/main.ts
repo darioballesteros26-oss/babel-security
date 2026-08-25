@@ -2086,7 +2086,7 @@ async function cargarArchivosGuardados(): Promise<void> {
           const ruta = card.dataset.ruta ?? "";
           const rutaOrig = card.dataset.rutaOrig ?? "";
           if (rutaOrig) verComparacionRutas(rutaOrig, ruta);
-          else verArchivo(ruta);
+          else verArchivo(ruta, card?.dataset.base);
         }
         return;
       }
@@ -2108,11 +2108,11 @@ async function cargarArchivosGuardados(): Promise<void> {
           verComparacionRutas(rutaOrig, ruta); break;
         case "ver":
           if (terminoBusquedaArchivos) { seleccionarBuzonGuardados(card.dataset.buzonId ?? "todos"); break; }
-          verArchivo(ruta); break;
-        case "traducir-guardado": traducirArchivoGuardado(ruta); break;
+          verArchivo(ruta, card.dataset.base); break;
+        case "traducir-guardado": traducirArchivoGuardado(ruta, card.dataset.base); break;
         case "exportar": exportarArchivo(ruta); break;
         case "exportar-con-opcion": mostrarPopupExportar(btn, ruta, rutaOrig); break;
-        case "mover": moverArchivoGuardadoPopup(ruta, e); break;
+        case "mover": moverArchivoGuardadoPopup(ruta, e, base2); break;
         case "enviar": enviarArchivoDesdeArchivos(ruta); break;
         case "renombrar": e.stopPropagation(); iniciarRenombradoArchivo(ruta, base2); break;
       }
@@ -2435,17 +2435,19 @@ function mostrarPopupImportar(ancla: HTMLElement): void {
     cerrarPopupImportar(); void abrirImportarCarpeta();
   });
   requestAnimationFrame(() => {
-    document.addEventListener("click", cerrarPopupImportarClick, { once: true });
+    document.addEventListener("click", cerrarPopupImportarClick);
   });
 }
 
 function cerrarPopupImportar(): void {
   _popupImportar?.remove();
   _popupImportar = null;
+  document.removeEventListener("click", cerrarPopupImportarClick);
 }
 
 function cerrarPopupImportarClick(e: MouseEvent): void {
-  if (_popupImportar && !_popupImportar.contains(e.target as Node)) cerrarPopupImportar();
+  if (!_popupImportar) { document.removeEventListener("click", cerrarPopupImportarClick); return; }
+  if (!_popupImportar.contains(e.target as Node)) cerrarPopupImportar();
 }
 
 // Importa una carpeta entera vía diálogo nativo. El backend cifra cada archivo y
@@ -2505,14 +2507,14 @@ async function verArchivoGuardado(): Promise<void> {
 
   try {
     const texto = await invoke<string>("ver_archivo", { ruta });
-    const nombre = ruta.split("/").pop() ?? ruta;
+    const nombre = card?.dataset.base ?? ruta.split("/").pop() ?? ruta;
 
     const modal = document.getElementById("modal-visor");
     const modalNombre = document.getElementById("modal-visor-nombre");
     const modalContenido = document.getElementById("modal-visor-contenido");
 
     if (!modal || !modalNombre || !modalContenido) return;
-    modalNombre.textContent = nombre;
+    modalNombre.textContent = escapeHTML(nombre);
     renderizarEnContenedor(texto, modalContenido);
     modal.classList.remove("hidden");
     invoke("registrar_evento_diario", { tipo: "ver_archivo", detalle: nombre.replace(/\.babel$/, "").replace(/^\d+_/, "") }).catch(() => {});
@@ -2542,7 +2544,7 @@ async function confirmarCompartir(): Promise<void> {
   const checked = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
   const checkedCard = checked?.closest(".archivo-card") as HTMLElement | null;
   const rutaCompartir = checkedCard?.dataset.ruta ?? "";
-  const nombreCompartir = rutaCompartir.split("/").pop() ?? rutaCompartir;
+  const nombreCompartir = checkedCard?.dataset.base ?? rutaCompartir.split("/").pop() ?? rutaCompartir;
   if (!rutaCompartir) return;
   try {
     const res = await invoke<ResultadoCompartir>("generar_archivo_compartir", {
@@ -2827,6 +2829,8 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   document.getElementById("btn-eliminar-sel-g")?.classList.add("hidden");
   document.getElementById("btn-compartir-sel-g")?.classList.add("hidden");
   document.getElementById("btn-mail-sel-g")?.classList.add("hidden");
+  document.getElementById("btn-unir-pdfs-g")?.classList.add("hidden");
+  document.getElementById("btn-convertir-img-pdf-g")?.classList.add("hidden");
   document.getElementById("ui-exportar-todo")?.classList.remove("hidden");
   document.getElementById("ui-finder")?.classList.remove("hidden");
   document.getElementById("ui-importar")?.classList.remove("hidden");
@@ -3375,8 +3379,10 @@ function cancelarBuzonGuardado(): void {
 async function borrarBuzonGuardado(id: string): Promise<void> {
   try {
     await invoke("eliminar_buzon_guardado", { id });
-    if (buzonActivoGuardados === id) buzonActivoGuardados = "todos";
+    const eraActivo = buzonActivoGuardados === id;
+    if (eraActivo) buzonActivoGuardados = "todos";
     await cargarBuzonesGuardados();
+    if (eraActivo) await cargarArchivosGuardados();
   } catch (error) {
     console.error("Error borrando buzón guardado:", error);
   }
@@ -3384,7 +3390,7 @@ async function borrarBuzonGuardado(id: string): Promise<void> {
 
 // MOVER ARCHIVOS GUARDADOS — popup selector de buzón destino
 
-async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent): Promise<void> {
+async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent, nombreDisplay?: string): Promise<void> {
   document.querySelectorAll(".selector-buzon-popup").forEach(el => el.remove());
   let nodos: BuzonNodo[];
   const cmdBuzones = ruta.includes("/guardados/") ? "listar_buzones_guardados" : "listar_buzones";
@@ -3424,7 +3430,7 @@ async function moverArchivoGuardadoPopup(ruta: string, event: MouseEvent): Promi
           await invoke(cmd, { ruta, buzonDestino: id });
           await cargarArchivosGuardados();
           mostrarToast(`Movido a ${label}`, false);
-          const nombreMov = ruta.split("/").pop()?.replace(/\.babel$/, "").replace(/^\d+_/, "") ?? ruta;
+          const nombreMov = nombreDisplay ?? ruta.split("/").pop()?.replace(/\.babel$/, "") ?? ruta;
           invoke("registrar_evento_diario", { tipo: "mover_archivo", detalle: `${nombreMov} → ${label}` }).catch(() => {});
         } catch (error) { mostrarToast("Error: " + String(error), true); }
       };
@@ -3533,17 +3539,22 @@ function mostrarPopupExportar(ancla: HTMLElement, rutaTrad: string, rutaOrig: st
   });
 
   requestAnimationFrame(() => {
-    document.addEventListener("click", cerrarPopupExportarClick, { once: true });
+    document.addEventListener("click", cerrarPopupExportarClick);
   });
 }
 
 function cerrarPopupExportar(): void {
   _popupExportar?.remove();
   _popupExportar = null;
+  document.removeEventListener("click", cerrarPopupExportarClick);
 }
 
 function cerrarPopupExportarClick(e: MouseEvent): void {
-  if (_popupExportar && !_popupExportar.contains(e.target as Node)) {
+  if (!_popupExportar) {
+    document.removeEventListener("click", cerrarPopupExportarClick);
+    return;
+  }
+  if (!_popupExportar.contains(e.target as Node)) {
     cerrarPopupExportar();
   }
 }
@@ -3742,10 +3753,10 @@ function desactivarTimerInactividad(): void {
 }
 // VISOR INDIVIDUAL — modal simple
 
-async function traducirArchivoGuardado(ruta: string): Promise<void> {
+async function traducirArchivoGuardado(ruta: string, nombreDisplay?: string): Promise<void> {
   irATraduccion();
   const nombreOrig = ruta.replace(/\\/g, "/").split("/").pop() ?? "archivo.babel";
-  const nombreMostrado = nombreOrig.replace(/\.babel$/, "").replace(/^\d+_/, "");
+  const nombreMostrado = nombreDisplay ?? nombreOrig.replace(/\.babel$/, "").replace(/^\d+_/, "");
   añadirMensajeArchivo(nombreMostrado, "GUARDADO · babel");
   mostrarProcesando(true);
   try {
@@ -3761,10 +3772,10 @@ async function traducirArchivoGuardado(ruta: string): Promise<void> {
   }
 }
 
-async function verArchivo(ruta: string): Promise<void> {
+async function verArchivo(ruta: string, nombreDisplay?: string): Promise<void> {
   try {
     const texto = await invoke<string>("ver_archivo", { ruta });
-    const nombre = ruta.split("/").pop() ?? ruta;
+    const nombre = nombreDisplay ?? ruta.split("/").pop() ?? ruta;
     const modal = document.getElementById("modal-visor");
     const modalNombre = document.getElementById("modal-visor-nombre");
     const modalContenido = document.getElementById("modal-visor-contenido");
@@ -4664,8 +4675,6 @@ async function seleccionarEmail(id: number): Promise<void> {
     if (metaEl) metaEl.textContent = `De: ${email.remitente} · ${formatearFechaEmail(email.fecha)}`;
     if (adjuntosEl) adjuntosEl.innerHTML = email.adjuntos.map(a => `<span class="email-adjunto-tag">📎 ${escapeHTML(a)}</span>`).join("");
     _cuerpoEmailOriginal = email.cuerpo;
-    const idiomaEl = document.getElementById("email-idioma") as HTMLSelectElement;
-    if (idiomaEl) idiomaEl.value = "ninguno";
     if (cuerpoEl) renderizarCuerpoEmail(cuerpoEl, email.cuerpo);
   } catch (error) {
     mostrarToast("Error cargando email: " + String(error), true);
@@ -5163,26 +5172,6 @@ async function toggleDestacadoActual(): Promise<void> {
 // Acciones rápidas desde los botones de la lista (sin abrir el email)
 
 
-async function cambiarIdiomaEmail(idioma: string): Promise<void> {
-  const cuerpoEl = document.getElementById("email-visor-cuerpo");
-  if (!cuerpoEl) return;
-  if (idioma === "ninguno") {
-    renderizarCuerpoEmail(cuerpoEl, _cuerpoEmailOriginal);
-    return;
-  }
-  if (!_cuerpoEmailOriginal) return;
-  cuerpoEl.innerHTML = '<div class="email-cargando">TRADUCIENDO...</div>';
-  try {
-    const textoPlano = _cuerpoEmailOriginal.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const [traducido] = await invoke<[string, number]>("traducir_texto", { texto: textoPlano, idioma });
-    cuerpoEl.textContent = traducido;
-  } catch (e) {
-    renderizarCuerpoEmail(cuerpoEl, _cuerpoEmailOriginal);
-    mostrarToast("Error al traducir: " + String(e), true);
-    const sel = document.getElementById("email-idioma") as HTMLSelectElement;
-    if (sel) sel.value = "ninguno";
-  }
-}
 
 function filtrarEmails(texto: string): void {
   const q = texto.toLowerCase();
@@ -5371,7 +5360,6 @@ async function aceptarTerminos(): Promise<void> {
 (window as any).cambiarCategoriaDiccionario = cambiarCategoriaDiccionario;
 
 (window as any).manejarSeleccionArchivoEmail = manejarSeleccionArchivoEmail;
-(window as any).cambiarIdiomaEmail = cambiarIdiomaEmail;
 (window as any).confirmarRenombrar = confirmarRenombrar;
 (window as any).cerrarModalRenombrar = cerrarModalRenombrar;
 (window as any).confirmarRenombrarArchivo = confirmarRenombrarArchivo;

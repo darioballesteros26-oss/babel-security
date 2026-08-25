@@ -44,6 +44,9 @@ const MAX_ARCHIVOS: usize = 1000;
 // pueden perder actualizaciones (last-write-wins sobre estado obsoleto).
 static BUZON_INDEX_MUTEX: Mutex<()> = Mutex::new(());
 static PRUEBA_INIT_MUTEX: Mutex<()> = Mutex::new(());
+// Serializa los drenados de entrada_finder/: evita que manejar_url_babel y
+// procesar_entrada_finder (login/unlock) se solapen y cifren el mismo staged dos veces.
+static FINDER_PROCESSING_MUTEX: Mutex<()> = Mutex::new(());
 
 // Proceso hijo del servidor de traducción (sidecar PyInstaller).
 // Módulo-nivel para poder matar desde el panic hook y desde on_window_event.
@@ -308,7 +311,7 @@ fn guardados_path(nombre: &str) -> String {
     guardados_dir().join(nombre).to_string_lossy().to_string()
 }
 
-fn ruta_nomindex_guardados() -> String {
+pub fn ruta_nomindex_guardados() -> String {
     guardados_path(".nomindex.babel")
 }
 
@@ -361,7 +364,7 @@ fn renombrar_salida_traduccion(
     }
     fs::rename(&viejo_path, &nuevo_path)
         .map_err(|e| format!("Error renombrando archivo traducido: {}", e))?;
-    nom_cifrado::registrar(&nuevo_trad, nombre_base, &nomindex, subclave_hex)?;
+    nom_cifrado::registrar(&nuevo_trad, nombre_base, ts, 0, &nomindex, subclave_hex)?;
 
     // Renombrar __orig.babel si existe (fallo no es fatal)
     let viejo_orig = format!("{}_{}_{}__orig.babel", id_usuario, par, nombre_base);
@@ -372,6 +375,8 @@ fn renombrar_salida_traduccion(
             let _ = nom_cifrado::registrar(
                 &nuevo_orig,
                 &format!("{} (original)", nombre_base),
+                ts,
+                0,
                 &nomindex,
                 subclave_hex,
             );
@@ -1067,7 +1072,7 @@ async fn traducir_documento(
     let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
     let dict = sesion.diccionario.lock().map_err(|_| "Error leyendo diccionario.".to_string())?.clone();
     let idioma_doc = sesion.idioma.lock().map_err(|_| "Error leyendo idioma.".to_string())?.clone();
-    let par_doc = idioma_a_par(&idioma_doc).to_string();
+    let par_doc = idioma_a_par(&idioma_doc)?.to_string();
 
     // Extraemos solo el nombre base para evitar path traversal.
     let nombre_solo = std::path::Path::new(&nombre_archivo)
@@ -1142,7 +1147,7 @@ fn traducir_texto(
         .map_err(|_| "Error leyendo diccionario.".to_string())?
         .clone();
 
-    let par = idioma_a_par(&idioma);
+    let par = idioma_a_par(&idioma)?;
 
     let (resultado, sin_traducir) =
         traductor::traducir_inteligente(&texto, &dict, &subclave_hex, par);
@@ -1309,6 +1314,8 @@ fn cifrar_y_guardar_desde_bytes(
     let _ = nom_cifrado::registrar(
         &nombre_cifrado,
         nombre_base,
+        ts,
+        contenido.len() as u64,
         &ruta_nomindex_guardados(),
         subclave_hex,
     );
@@ -1761,6 +1768,7 @@ fn procesar_finder_bloqueante(
     subclave_hex: &str,
     id_usuario: &str,
 ) -> usize {
+    let _finder_guard = FINDER_PROCESSING_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let dir = finder::entrada_finder_dir();
     let resultados = finder::procesar_entradas(&dir, |nombre, staged| {
         cifrar_y_guardar_desde_ruta(nombre, staged, subclave_hex, id_usuario)
@@ -1912,8 +1920,8 @@ fn nombre_base_ya_guardado(nombre_base: &str, subclave_hex: Option<&str>) -> boo
         if !subclave.is_empty() {
             let nom_g = nom_cifrado::leer(&ruta_nomindex_guardados(), subclave);
             let nom_a = nom_cifrado::leer(&ruta_nomindex_archivos(), subclave);
-            if nom_g.values().any(|v| v.to_lowercase() == nombre_base_lower)
-                || nom_a.values().any(|v| v.to_lowercase() == nombre_base_lower)
+            if nom_g.values().any(|v| v.nombre.to_lowercase() == nombre_base_lower)
+                || nom_a.values().any(|v| v.nombre.to_lowercase() == nombre_base_lower)
             {
                 return true;
             }
@@ -1998,32 +2006,31 @@ fn listar_archivos_guardados(
     let nomindex_g = nom_cifrado::leer(&ruta_nomindex_guardados(), &subclave_hex);
     let nomindex_a = nom_cifrado::leer(&ruta_nomindex_archivos(), &subclave_hex);
 
-    // Guardados sin traducir: idioma fijo "guardado" + fecha relativa por mtime.
+    // Guardados sin traducir: idioma fijo "guardado" + fecha/tamaño del índice cifrado.
     recolectar_metadatos(
         &guardados_dir(),
         &guardados_path(".buzon_index_guardados.babel"),
         &guardados_path(".buzones_guardados.babel"),
         &prefijo, &buzon, &subclave_hex, false, &mut archivos,
         |nombre, entry| {
-            // Archivos nuevos: obtener nombre original del índice cifrado.
-            // Archivos legacy: derivar del nombre en disco (compatibilidad).
-            let nombre_limpio = nomindex_g.get(nombre).cloned().unwrap_or_else(|| {
+            let meta = nomindex_g.get(nombre);
+            let nombre_limpio = meta.map(|m| m.nombre.clone()).unwrap_or_else(|| {
                 nombre.trim_start_matches(&prefijo).to_string()
             });
-            let fecha = entry
-                .metadata()
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .map(|t| {
-                    let dias = std::time::SystemTime::now()
-                        .duration_since(t).unwrap_or_default().as_secs() / 86400;
-                    if dias == 0 { "hoy".to_string() }
-                    else if dias == 1 { "ayer".to_string() }
-                    else if dias < 30 { format!("hace {} días", dias) }
-                    else { format!("hace {} meses", dias / 30) }
-                })
-                .unwrap_or_else(|| "—".to_string());
-            (nombre_limpio, "guardado".to_string(), fecha)
+            let bytes_orig = meta.map(|m| m.bytes).unwrap_or(0);
+            let ts_stored = meta.map(|m| m.ts).unwrap_or(0);
+            let fecha = dias_relativos_ts(ts_stored).unwrap_or_else(|| {
+                // Legacy: leer mtime del filesystem
+                entry.metadata().ok()
+                    .and_then(|m| m.modified().ok())
+                    .map(|t| {
+                        let dias = std::time::SystemTime::now()
+                            .duration_since(t).unwrap_or_default().as_secs() / 86400;
+                        dias_a_texto(dias)
+                    })
+                    .unwrap_or_else(|| "—".to_string())
+            });
+            (nombre_limpio, "guardado".to_string(), fecha, bytes_orig)
         },
     );
 
@@ -2033,11 +2040,22 @@ fn listar_archivos_guardados(
         &archivos_path(".buzon_index.babel"),
         &archivos_path(".buzones.babel"),
         &prefijo, &buzon, &subclave_hex, true, &mut archivos,
-        |nombre, _entry| {
-            // Archivos nuevos: nombre original del índice cifrado.
-            // Archivos legacy: derivar del nombre en disco.
-            let nombre_limpio = nomindex_a.get(nombre).cloned().unwrap_or_else(|| {
+        |nombre, entry| {
+            let meta = nomindex_a.get(nombre);
+            let nombre_limpio = meta.map(|m| m.nombre.clone()).unwrap_or_else(|| {
                 nombre.trim_start_matches(&prefijo).replace("__orig", "")
+            });
+            let bytes_orig = meta.map(|m| m.bytes).unwrap_or(0);
+            let ts_stored = meta.map(|m| m.ts).unwrap_or(0);
+            let fecha = dias_relativos_ts(ts_stored).unwrap_or_else(|| {
+                entry.metadata().ok()
+                    .and_then(|m| m.modified().ok())
+                    .map(|t| {
+                        let dias = std::time::SystemTime::now()
+                            .duration_since(t).unwrap_or_default().as_secs() / 86400;
+                        dias_a_texto(dias)
+                    })
+                    .unwrap_or_else(|| "—".to_string())
             });
             let idioma = if nombre.contains("__orig") {
                 "original".to_string()
@@ -2050,16 +2068,35 @@ fn listar_archivos_guardados(
                     String::new()
                 }
             };
-            (nombre_limpio, idioma, String::new())
+            (nombre_limpio, idioma, fecha, bytes_orig)
         },
     );
 
     Ok(archivos)
 }
 
+fn dias_a_texto(dias: u64) -> String {
+    if dias == 0 { "hoy".to_string() }
+    else if dias == 1 { "ayer".to_string() }
+    else if dias < 30 { format!("hace {} días", dias) }
+    else { format!("hace {} meses", dias / 30) }
+}
+
+/// Devuelve fecha relativa desde un timestamp Unix almacenado en el índice cifrado.
+/// Retorna None si ts == 0 (entrada legacy sin timestamp).
+fn dias_relativos_ts(ts: u64) -> Option<String> {
+    if ts == 0 { return None; }
+    let ahora = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let dias = ahora.saturating_sub(ts) / 86400;
+    Some(dias_a_texto(dias))
+}
+
 // Recorre `carpeta` recogiendo los .babel del usuario (prefijo) que casen con `buzon`,
 // resolviendo el nombre del buzón desde su índice/nodos cifrados. `por_entrada` aporta
-// los campos específicos de cada colección: (nombre_limpio, idioma, fecha).
+// los campos específicos de cada colección: (nombre_limpio, idioma, fecha, bytes_orig).
 #[allow(clippy::too_many_arguments)]
 fn recolectar_metadatos(
     carpeta: &std::path::Path,
@@ -2070,7 +2107,7 @@ fn recolectar_metadatos(
     subclave_hex: &str,
     es_traduccion: bool,
     archivos: &mut Vec<MetadatosArchivo>,
-    por_entrada: impl Fn(&str, &std::fs::DirEntry) -> (String, String, String),
+    por_entrada: impl Fn(&str, &std::fs::DirEntry) -> (String, String, String, u64),
 ) {
     let index: HashMap<String, String> = fs::read(ruta_index)
         .ok()
@@ -2104,11 +2141,12 @@ fn recolectar_metadatos(
                 .unwrap_or_else(|| "todos".to_string())
         };
 
-        let (nombre_limpio, idioma, fecha) = por_entrada(&nombre, &entry);
+        let (nombre_limpio, idioma, fecha, bytes_orig) = por_entrada(&nombre, &entry);
         archivos.push(MetadatosArchivo {
             nombre: nombre_limpio,
             ruta: entry.path().to_string_lossy().to_string(),
-            tamaño: entry.metadata().map(|m| m.len()).unwrap_or(0),
+            // Usar tamaño original cifrado en el índice; fallback al tamaño en disco.
+            tamaño: if bytes_orig > 0 { bytes_orig } else { entry.metadata().map(|m| m.len()).unwrap_or(0) },
             fecha,
             idioma,
             buzon: nombre_buzon,
@@ -2139,6 +2177,7 @@ fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
     crate::rat_detector::detener_monitor_rat();
     babel_p2p::detener_servidor_p2p();
     crate::sincronizacion::limpiar_subclave_sesion();
+    crate::conexion_directa::limpiar_subclave_servidor();
     sesion.limpiar();
     // Al cerrar sesión: borrar TODOS los archivos en claro de compartidos/ sin esperar 1h.
     compartir::barrer_plaintext_compartidos_logout();
@@ -2194,7 +2233,7 @@ async fn traducir_documento_ruta(
     let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
     let dict = sesion.diccionario.lock().map_err(|_| "Error leyendo diccionario.".to_string())?.clone();
     let idioma = sesion.idioma.lock().map_err(|_| "Error leyendo idioma.".to_string())?.clone();
-    let par = idioma_a_par(&idioma);
+    let par = idioma_a_par(&idioma)?;
 
     // La traducción de un documento puede tardar decenas de segundos.  Ejecutar en el
     // hilo principal bloquea el event-loop → la ventana deja de responder → macOS detecta
@@ -2279,7 +2318,7 @@ async fn traducir_archivo_guardado(
     let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
     let dict = sesion.diccionario.lock().map_err(|_| "Error leyendo diccionario.".to_string())?.clone();
     let idioma = sesion.idioma.lock().map_err(|_| "Error leyendo idioma.".to_string())?.clone();
-    let par = idioma_a_par(&idioma);
+    let par = idioma_a_par(&idioma)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         traductor::resetear_cancelacion();
@@ -2301,7 +2340,7 @@ async fn traducir_archivo_guardado(
         let nom_a = nom_cifrado::leer(&ruta_nomindex_archivos(), &subclave_hex);
         let nombre_original = nom_g.get(&nombre_disco_src)
             .or_else(|| nom_a.get(&nombre_disco_src))
-            .cloned()
+            .map(|m| m.nombre.clone())
             .unwrap_or_else(|| {
                 // Fallback legacy: derivar del nombre en disco.
                 let base = nombre_exportacion(&ruta, ext);
@@ -2381,7 +2420,7 @@ async fn traducir_documento_dialogo(
         .lock()
         .map_err(|_| "Error leyendo idioma.".to_string())?
         .clone();
-    let par = idioma_a_par(&idioma);
+    let par = idioma_a_par(&idioma)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
@@ -2571,11 +2610,11 @@ fn detectar_ext(bytes: &[u8]) -> &'static str {
 fn nombre_exportacion_idx(
     ruta: &str,
     ext: &str,
-    nomindex: &std::collections::HashMap<String, String>,
+    nomindex: &std::collections::HashMap<String, nom_cifrado::MetaEntrada>,
 ) -> String {
     if let Some(disk_name) = std::path::Path::new(ruta).file_name() {
-        if let Some(original) = nomindex.get(disk_name.to_string_lossy().as_ref()) {
-            return format!("{}.{}", original, ext);
+        if let Some(meta) = nomindex.get(disk_name.to_string_lossy().as_ref()) {
+            return format!("{}.{}", meta.nombre, ext);
         }
     }
     nombre_exportacion(ruta, ext)
@@ -2712,6 +2751,7 @@ async fn unir_pdfs(
     borrar_originales: bool,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -2796,6 +2836,9 @@ async fn unir_pdfs(
         // borra el resultado recién creado. Las rutas ya se validaron arriba como
         // dentro de guardados/archivos.
         if borrar_originales {
+            let nomindex_g = ruta_nomindex_guardados();
+            let nomindex_a = ruta_nomindex_archivos();
+            let gdir = guardados_dir();
             let mut no_borrados = 0u32;
             for ruta in &rutas {
                 if *ruta != ruta_cifrada {
@@ -2804,6 +2847,19 @@ async fn unir_pdfs(
                     // con el flujo de importación / clic derecho). Sin loguear la ruta.
                     if std::path::Path::new(ruta).exists() {
                         no_borrados += 1;
+                    } else {
+                        // Limpiar el nomindex para no dejar entradas huérfanas.
+                        let nombre_disco = std::path::Path::new(ruta)
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+                        let en_guardados = std::path::Path::new(ruta).starts_with(&gdir);
+                        if en_guardados {
+                            nom_cifrado::eliminar(&nombre_disco, &nomindex_g, &subclave_hex);
+                        } else {
+                            nom_cifrado::eliminar(&nombre_disco, &nomindex_a, &subclave_hex);
+                        }
                     }
                 }
             }
@@ -2843,6 +2899,7 @@ async fn convertir_imagenes_a_pdf(
     modo: String,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<Vec<String>, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -2854,6 +2911,9 @@ async fn convertir_imagenes_a_pdf(
         return Err("Modo no válido. Usa 'uno' o 'varios'.".into());
     }
     let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
+    // Cargar nomindex fuera de spawn_blocking (State no es Send) para recuperar nombres reales.
+    let mut nomindex = nom_cifrado::leer(&ruta_nomindex_guardados(), &subclave_hex);
+    nomindex.extend(nom_cifrado::leer(&ruta_nomindex_archivos(), &subclave_hex));
 
     tauri::async_runtime::spawn_blocking(move || {
         // Leer y descifrar cada imagen de Babel
@@ -2889,18 +2949,25 @@ async fn convertir_imagenes_a_pdf(
             }
             Ok(vec![ruta])
         } else {
-            // Un PDF por imagen
+            // Un PDF por imagen: recuperar nombre real desde nomindex.
             let mut rutas_out: Vec<String> = Vec::with_capacity(blobs.len());
             for (i, (ruta, blob)) in rutas.iter().zip(blobs.iter()).enumerate() {
                 let pdf = img_a_pdf::imagen_a_pdf(blob)
                     .map_err(|e| format!("Imagen {}: {}", i + 1, e))?;
-                // Nombre de salida: nombre base de la ruta cifrada de origen
-                let base = std::path::Path::new(ruta)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
+                let disco = std::path::Path::new(ruta)
+                    .file_name()
+                    .and_then(|n| n.to_str())
                     .unwrap_or("imagen");
-                // Quitar sufijo _ts si tiene formato usuario_nombre_ts.babel
-                let nombre_final = format!("{}.pdf", base);
+                let nombre_real = nomindex.get(disco)
+                    .map(|m| {
+                        let stem = std::path::Path::new(&m.nombre)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(&m.nombre);
+                        stem.to_string()
+                    })
+                    .unwrap_or_else(|| format!("imagen_{}", i + 1));
+                let nombre_final = format!("{}.pdf", nombre_real);
                 let ruta_out = cifrar_y_guardar_desde_bytes(
                     &nombre_final,
                     &pdf,
@@ -3297,7 +3364,10 @@ fn mover_archivo(
         .to_string();
     let nombre_orig = format!("{}__orig.babel", nombre_clave.trim_end_matches(".babel"));
     index.insert(nombre_clave, buzon_destino.clone());
-    index.insert(nombre_orig, buzon_destino);
+    // Solo mover el __orig si ya existe en el índice (no crear entradas fantasma para archivos sin traducción).
+    if index.contains_key(&nombre_orig) {
+        index.insert(nombre_orig, buzon_destino);
+    }
 
     let json = serde_json::to_string(&index).map_err(|e| format!("Error: {}", e))?;
     let cifrado =
@@ -3402,7 +3472,7 @@ fn renombrar_archivo(
         // Comprobar colisión de nombre visible en el índice
         let nombre_lower = nombre_limpio.to_lowercase();
         let hay_colision = idx_actual.iter()
-            .any(|(k, v)| k != &nombre_viejo && v.to_lowercase() == nombre_lower);
+            .any(|(k, v)| k != &nombre_viejo && v.nombre.to_lowercase() == nombre_lower);
         if hay_colision {
             return Err("Ya existe un archivo con ese nombre.".into());
         }
@@ -3497,6 +3567,25 @@ fn eliminar_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<
         // Limpiar también la entrada __orig compañera si existe
         let orig = format!("{}__orig.babel", nombre_disco.trim_end_matches(".babel"));
         nom_cifrado::eliminar(&orig, &ruta_nomindex_archivos(), &subclave_hex);
+    }
+
+    // Limpiar entrada del índice de carpetas (buzon_index) para no acumular entradas huérfanas.
+    let ruta_buzon_index = if en_guardados {
+        guardados_path(".buzon_index_guardados.babel")
+    } else {
+        archivos_path(".buzon_index.babel")
+    };
+    let mut buzon_idx: HashMap<String, String> = fs::read(&ruta_buzon_index)
+        .ok()
+        .and_then(|b| seguridad::descifrar_documento(b, &subclave_hex).ok())
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default();
+    if buzon_idx.remove(&nombre_disco).is_some() {
+        if let Ok(json) = serde_json::to_string(&buzon_idx) {
+            if let Ok(cifrado) = seguridad::blindar_documento(&json, &subclave_hex) {
+                let _ = escribir_privado_atomico(&ruta_buzon_index, &cifrado);
+            }
+        }
     }
 
     Ok(())
@@ -4748,7 +4837,7 @@ fn revocar_oauth_gmail_tauri(
     sesion: tauri::State<SesionActiva>,
 ) -> Result<(), String> {
     let subclave_hex = sesion.subclave_hex()?;
-    gmail_oauth::revocar_oauth(gmail_oauth::CLIENT_ID, gmail_oauth::CLIENT_SECRET, &subclave_hex);
+    gmail_oauth::revocar_oauth(gmail_oauth::CLIENT_ID, gmail_oauth::CLIENT_SECRET, &subclave_hex)?;
 
     // Volver a modo contraseña en la config de email
     if let Some(mut creds) = traductor::cargar_config_email(&subclave_hex) {
@@ -5233,19 +5322,20 @@ async fn aplicar_pendientes_buzon(
 // HELPER — Convierte código de idioma al par MarianMT
 // Centralizado aquí para no duplicar el match en cada comando.
 
-fn idioma_a_par(idioma: &str) -> &'static str {
+fn idioma_a_par(idioma: &str) -> Result<&'static str, String> {
     match idioma {
-        "es_en"=>"es-en","en_es"=>"en-es","es_fr"=>"es-fr","fr_es"=>"fr-es",
-        "es_ar"=>"es-ar","ar_es"=>"ar-es","fr_en"=>"fr-en","en_fr"=>"en-fr",
-        "en_ar"=>"en-ar","ar_en"=>"ar-en","fr_ar"=>"fr-ar","ar_fr"=>"ar-fr",
-        "es_de"=>"es-de","de_es"=>"de-es","fr_de"=>"fr-de","de_fr"=>"de-fr",
-        "ar_de"=>"ar-de","de_ar"=>"de-ar","es_ru"=>"es-ru","ru_es"=>"ru-es",
-        "fr_ru"=>"fr-ru","ru_fr"=>"ru-fr","ar_ru"=>"ar-ru","ru_ar"=>"ru-ar",
-        "es_zh"=>"es-zh","zh_es"=>"zh-es","fr_zh"=>"fr-zh","zh_fr"=>"zh-fr",
-        "ar_zh"=>"ar-zh","zh_ar"=>"zh-ar","de_ru"=>"de-ru","ru_de"=>"ru-de",
-        "de_zh"=>"de-zh","zh_de"=>"zh-de","ru_zh"=>"ru-zh","zh_ru"=>"zh-ru",
-        "en_de"=>"en-de","de_en"=>"de-en","en_ru"=>"en-ru","ru_en"=>"ru-en",
-        "en_zh"=>"en-zh","zh_en"=>"zh-en",_=>"es-en",
+        "es_en"=>Ok("es-en"),"en_es"=>Ok("en-es"),"es_fr"=>Ok("es-fr"),"fr_es"=>Ok("fr-es"),
+        "es_ar"=>Ok("es-ar"),"ar_es"=>Ok("ar-es"),"fr_en"=>Ok("fr-en"),"en_fr"=>Ok("en-fr"),
+        "en_ar"=>Ok("en-ar"),"ar_en"=>Ok("ar-en"),"fr_ar"=>Ok("fr-ar"),"ar_fr"=>Ok("ar-fr"),
+        "es_de"=>Ok("es-de"),"de_es"=>Ok("de-es"),"fr_de"=>Ok("fr-de"),"de_fr"=>Ok("de-fr"),
+        "ar_de"=>Ok("ar-de"),"de_ar"=>Ok("de-ar"),"es_ru"=>Ok("es-ru"),"ru_es"=>Ok("ru-es"),
+        "fr_ru"=>Ok("fr-ru"),"ru_fr"=>Ok("ru-fr"),"ar_ru"=>Ok("ar-ru"),"ru_ar"=>Ok("ru-ar"),
+        "es_zh"=>Ok("es-zh"),"zh_es"=>Ok("zh-es"),"fr_zh"=>Ok("fr-zh"),"zh_fr"=>Ok("zh-fr"),
+        "ar_zh"=>Ok("ar-zh"),"zh_ar"=>Ok("zh-ar"),"de_ru"=>Ok("de-ru"),"ru_de"=>Ok("ru-de"),
+        "de_zh"=>Ok("de-zh"),"zh_de"=>Ok("zh-de"),"ru_zh"=>Ok("ru-zh"),"zh_ru"=>Ok("zh-ru"),
+        "en_de"=>Ok("en-de"),"de_en"=>Ok("de-en"),"en_ru"=>Ok("en-ru"),"ru_en"=>Ok("ru-en"),
+        "en_zh"=>Ok("en-zh"),"zh_en"=>Ok("zh-en"),
+        _=>Err(format!("Par de idiomas no reconocido: '{idioma}'")),
     }
 }
 

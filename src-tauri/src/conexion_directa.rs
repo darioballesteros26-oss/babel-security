@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
+use zeroize::Zeroize;
 
 use hmac::{Hmac, Mac};
 use rand::RngCore;
@@ -112,10 +113,18 @@ fn ahora_unix() -> u64 {
         .as_secs()
 }
 
+/// Borra la clave de sesión de conexión directa de la memoria al cerrar sesión.
+pub fn limpiar_subclave_servidor() {
+    if let Ok(mut g) = SUBCLAVE_SERVIDOR.lock() {
+        g.zeroize();
+    }
+}
+
 // ── Servidor TCP de negociación (receptor B) ─────────────────────────────────
 
 pub fn iniciar_servidor_conex(subclave_hex: &str, nombre_local: String) {
     if let Ok(mut g) = SUBCLAVE_SERVIDOR.lock() {
+        g.zeroize(); // zeroiza el valor anterior antes de sobreescribir
         *g = subclave_hex.to_string();
     }
     if CONEX_SERVIDOR_ACTIVO.swap(true, Ordering::SeqCst) {

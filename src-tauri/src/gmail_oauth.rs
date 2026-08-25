@@ -65,8 +65,9 @@ pub struct TokensGmail {
 }
 
 // Caché de access token en memoria: (token, unix_ts_obtenido, expires_in_secs)
+// Zeroizing<String> garantiza que el token se borra de RAM al reemplazarlo o al salir.
 // No se persiste en disco — solo dura lo que dura el proceso.
-static TOKEN_CACHE: Mutex<Option<(String, u64, u64)>> = Mutex::new(None);
+static TOKEN_CACHE: Mutex<Option<(Zeroizing<String>, u64, u64)>> = Mutex::new(None);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // PKCE HELPERS
@@ -346,7 +347,7 @@ pub fn obtener_access_token(
         let cache = TOKEN_CACHE.lock().unwrap_or_else(|p| p.into_inner());
         if let Some((ref token, obtenido, expires)) = *cache {
             if ahora < obtenido + expires.saturating_sub(60) {
-                return Ok(token.clone());
+                return Ok(token.as_str().to_string());
             }
         }
     }
@@ -363,7 +364,7 @@ pub fn obtener_access_token(
         if let Some((ref mut old, _, _)) = *cache {
             old.zeroize();
         }
-        *cache = Some((nuevo_token.clone(), ahora, expires));
+        *cache = Some((Zeroizing::new(nuevo_token.clone()), ahora, expires));
     }
 
     Ok(nuevo_token)
@@ -401,16 +402,18 @@ pub fn tiene_oauth_guardado() -> bool {
     crate::babel_dir().join(OAUTH_FILE).exists()
 }
 
-pub fn revocar_oauth(_client_id: &str, _client_secret: &str, subclave_hex: &str) {
+pub fn revocar_oauth(_client_id: &str, _client_secret: &str, subclave_hex: &str) -> Result<(), String> {
     // Revocar el refresh_token directamente (la API de Google acepta ambos;
     // usar el refresh_token es más robusto porque funciona aunque el access_token
     // haya expirado o no se pueda refrescar).
     if let Some(tokens) = cargar_tokens_oauth(subclave_hex) {
-        let _ = ureq::post(REVOKE_URL)
+        ureq::post(REVOKE_URL)
             .set("Content-Type", "application/x-www-form-urlencoded")
-            .send_string(&format!("token={}", pct(&tokens.refresh_token)));
+            .send_string(&format!("token={}", pct(&tokens.refresh_token)))
+            .map_err(|e| format!("Error revocando token en Google: {}", e))?;
     }
     let _ = std::fs::remove_file(crate::babel_dir().join(OAUTH_FILE));
     invalidar_cache();
+    Ok(())
 }
 

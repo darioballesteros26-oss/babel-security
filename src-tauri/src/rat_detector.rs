@@ -18,7 +18,55 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 use serde::Serialize;
+use sha2::{Sha256, Digest};
 use tauri::Emitter;
+
+// ── Persistencia del contador BIP39 ──────────────────────────────────────────
+//
+// El contador de intentos fallidos se persiste en ~/Babel/.bip39_intentos para
+// que reiniciar la app no permita al atacante recuperar los slots de brute-force.
+// Formato: 1 byte (contador) + 32 bytes (SHA-256 de integridad).
+// La tag usa BUILD_FINGERPRINT: conocerla requiere acceso al binario compilado.
+// Archivos corruptos o con tag inválida se tratan como contador máximo (bloqueado).
+
+fn ruta_bip39_intentos() -> std::path::PathBuf {
+    crate::babel_dir().join(".bip39_intentos")
+}
+
+fn tag_bip39_intentos(v: u8) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(env!("BABEL_BUILD_FINGERPRINT").as_bytes());
+    h.update(b".bip39-v1.");
+    h.update([v]);
+    h.finalize().into()
+}
+
+fn cargar_intentos_bip39_disco() -> u8 {
+    let datos = match std::fs::read(ruta_bip39_intentos()) {
+        Ok(d) => d,
+        Err(_) => return 0,
+    };
+    if datos.len() != 33 {
+        return MAX_INTENTOS_BIP39 + 1;
+    }
+    let v = datos[0];
+    if datos[1..] == tag_bip39_intentos(v) { v } else { MAX_INTENTOS_BIP39 + 1 }
+}
+
+fn guardar_intentos_bip39_disco(v: u8) {
+    let mut datos = vec![v];
+    datos.extend_from_slice(&tag_bip39_intentos(v));
+    let _ = crate::escribir_privado_atomico(&ruta_bip39_intentos(), &datos);
+}
+
+fn borrar_intentos_bip39_disco() {
+    let _ = std::fs::remove_file(ruta_bip39_intentos());
+}
+
+/// Restaura el contador de intentos BIP39 desde disco al abrir sesión.
+pub fn init_contador_bip39() {
+    RAT_BIP39_INTENTOS.store(cargar_intentos_bip39_disco(), Ordering::Release);
+}
 
 // ── Estado global ─────────────────────────────────────────────────────────────
 
@@ -178,6 +226,7 @@ pub fn detectar_rat_activo() -> Option<String> {
 
 pub fn iniciar_monitor_rat(app: tauri::AppHandle) {
     registrar_app_handle(app.clone());
+    init_contador_bip39(); // restaurar intentos fallidos persistidos de sesiones anteriores
     if RAT_MONITOR_ACTIVO.swap(true, Ordering::SeqCst) {
         return; // ya corriendo
     }
@@ -212,6 +261,7 @@ pub fn detener_monitor_rat() {
     RAT_MONITOR_ACTIVO.store(false, Ordering::SeqCst);
     RAT_BLOQUEADO.store(false, Ordering::Release);
     RAT_BIP39_INTENTOS.store(0, Ordering::Release);
+    borrar_intentos_bip39_disco(); // logout limpia el contador persistido
     if let Ok(mut g) = RAT_PROCESO.lock() {
         *g = None;
     }
@@ -228,6 +278,7 @@ pub fn detener_monitor_rat() {
 fn activar_bloqueo_rat(proceso: &str, app: &tauri::AppHandle) {
     RAT_BLOQUEADO.store(true, Ordering::Release);
     RAT_BIP39_INTENTOS.store(0, Ordering::Release);
+    borrar_intentos_bip39_disco(); // nueva detección RAT = nueva oportunidad limpia
     if let Ok(mut g) = RAT_PROCESO.lock() {
         *g = Some(proceso.to_string());
     }
@@ -245,6 +296,7 @@ fn activar_bloqueo_rat(proceso: &str, app: &tauri::AppHandle) {
 pub fn desbloquear_rat_desde_red() {
     RAT_BLOQUEADO.store(false, Ordering::Release);
     RAT_BIP39_INTENTOS.store(0, Ordering::Release);
+    borrar_intentos_bip39_disco(); // desbloqueo por red limpia el contador
     if let Ok(mut g) = RAT_PROCESO.lock() {
         *g = None;
     }
@@ -263,9 +315,15 @@ pub fn desbloquear_rat_desde_red() {
 pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, String> {
     // Reservar un slot de intento de forma atómica: evita que un doble-clic o
     // llamadas concurrentes puedan superar el límite con una race condition.
+    // v <= MAX: permite un intento de verificación adicional al llegar al límite.
+    // Sin esto, una frase CORRECTA presentada justo después de 5 intentos erróneos
+    // sería rechazada antes de verificarse, bloqueando permanentemente al usuario legítimo
+    // hasta reiniciar la app. La protección real contra brute-force es el KDF Argon2id,
+    // no este contador (que se resetea al reiniciar). El slot extra no amplía la superficie
+    // de ataque de manera significativa.
     if RAT_BIP39_INTENTOS.fetch_update(
         Ordering::AcqRel, Ordering::Acquire,
-        |v| if v < MAX_INTENTOS_BIP39 { Some(v + 1) } else { None },
+        |v| if v <= MAX_INTENTOS_BIP39 { Some(v + 1) } else { None },
     ).is_err() {
         return Err("Máximo de intentos alcanzado. Usa el dispositivo emparejado para desbloquear.".into());
     }
@@ -296,6 +354,7 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado.clone(), &hex).is_ok() {
             RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
+            borrar_intentos_bip39_disco();
             return Ok(true);
         }
     }
@@ -303,6 +362,7 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado.clone(), &hex).is_ok() {
             RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
+            borrar_intentos_bip39_disco();
             return Ok(true);
         }
     }
@@ -310,6 +370,7 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado.clone(), &hex).is_ok() {
             RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
+            borrar_intentos_bip39_disco();
             return Ok(true);
         }
     }
@@ -317,11 +378,14 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado, &hex).is_ok() {
             RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
+            borrar_intentos_bip39_disco();
             return Ok(true);
         }
     }
 
-    Ok(false) // frase incorrecta: el slot ya está consumido
+    // Frase incorrecta: el slot ya está consumido. Persistir el contador.
+    guardar_intentos_bip39_disco(RAT_BIP39_INTENTOS.load(Ordering::Acquire));
+    Ok(false)
 }
 
 // ── Protocolo TCP para desbloqueo remoto ──────────────────────────────────────
@@ -635,7 +699,9 @@ mod tests {
     #[test]
     fn bloqueo_bip39_tras_max_intentos() {
         let _g = BIP39_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        RAT_BIP39_INTENTOS.store(MAX_INTENTOS_BIP39, Ordering::SeqCst);
+        // MAX+1 simula haber agotado todos los intentos (con <= en la guarda,
+        // v=MAX todavía es permitido como intento extra; v=MAX+1 es el bloqueo real).
+        RAT_BIP39_INTENTOS.store(MAX_INTENTOS_BIP39 + 1, Ordering::SeqCst);
         let palabras = vec!["abandon".to_string(); 12];
         let result = verificar_frase_bip39_para_rat(&palabras);
         assert!(result.is_err(), "debe retornar Err tras alcanzar MAX intentos");

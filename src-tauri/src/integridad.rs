@@ -157,7 +157,7 @@ fn verificar_huella_build() -> bool {
 /// Se llama al actualizar a una nueva versión o en el primer arranque.
 pub fn guardar_huella_build() {
     let ruta = ruta_huella();
-    if let Err(e) = std::fs::write(&ruta, BUILD_FINGERPRINT) {
+    if let Err(e) = crate::escribir_privado(&ruta, BUILD_FINGERPRINT.as_bytes()) {
         log::warn!("[INTEGRIDAD] No se pudo guardar huella de build: {}", e);
     } else {
         log::info!("[INTEGRIDAD] Huella de build guardada: {}", BUILD_FINGERPRINT);

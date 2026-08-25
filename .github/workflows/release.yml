@@ -19,6 +19,8 @@ jobs:
 
       - name: Instalar Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
 
       - name: Descargar PDFium (macOS arm64)
         run: |
@@ -30,16 +32,49 @@ jobs:
       - name: Instalar dependencias npm
         run: npm ci
 
-      - name: Build Mac (.dmg)
-        run: npm run tauri build
+      - name: Build Mac (.dmg) firmado para auto-update
+        run: npm run tauri build -- --target aarch64-apple-darwin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: Subir DMG
+      - name: Generar latest.json
+        run: |
+          DMG=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
+          SIG="${DMG}.sig"
+          if [ ! -f "$SIG" ]; then
+            echo "✗ No se generó la firma .sig — verifica que TAURI_SIGNING_PRIVATE_KEY está configurado en los Secrets del repositorio."
+            exit 1
+          fi
+          FIRMA=$(cat "$SIG")
+          FECHA=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          VER_NUM="${GITHUB_REF_NAME#v}"
+          DMG_NOMBRE=$(basename "$DMG" | sed 's/ /%20/g')
+          REPO="darioballesteros26-oss/babel-security"
+          cat > latest.json <<EOF
+          {
+            "version": "$VER_NUM",
+            "notes": "Ver notas en https://github.com/$REPO/releases/tag/$GITHUB_REF_NAME",
+            "pub_date": "$FECHA",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "$FIRMA",
+                "url": "https://github.com/$REPO/releases/download/$GITHUB_REF_NAME/$DMG_NOMBRE"
+              }
+            }
+          }
+          EOF
+          echo "latest.json generado:"
+          cat latest.json
+
+      - name: Subir artifacts Mac
         uses: actions/upload-artifact@v4
         with:
           name: mac-dmg
-          path: src-tauri/target/release/bundle/dmg/*.dmg
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            latest.json
 
   build-windows:
     runs-on: windows-latest
@@ -78,6 +113,8 @@ jobs:
         run: npm run tauri build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Subir instaladores Windows
         uses: actions/upload-artifact@v4
@@ -116,20 +153,21 @@ jobs:
 
             | Plataforma | Archivo |
             |---|---|
-            | macOS (Apple Silicon) | `Babel Security_*_aarch64.dmg` |
-            | Windows (64-bit) | `Babel Security_*_x64-setup.exe` o `.msi` |
+            | macOS (Apple Silicon) | `Security Babel_*_aarch64.dmg` |
+            | Windows (64-bit) | `Security Babel_*_x64-setup.exe` o `.msi` |
 
             ### Instalación Mac
             1. Descarga el `.dmg` y ábrelo
-            2. Arrastra **Babel Security** a Aplicaciones
+            2. Arrastra **Security Babel** a Aplicaciones
             3. En el primer arranque: clic derecho → Abrir (para pasar Gatekeeper)
 
             ### Instalación Windows
             1. Descarga el `.exe` (NSIS) o `.msi`
             2. Ejecuta el instalador como administrador
-            3. Abre **Babel Security** desde el menú inicio
+            3. Abre **Security Babel** desde el menú inicio
           files: |
             dist/mac/*.dmg
+            dist/mac/latest.json
             dist/win/*.msi
             dist/win/*.exe
           draft: false

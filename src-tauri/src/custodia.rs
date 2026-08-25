@@ -281,29 +281,44 @@ pub fn verificar_y_limpiar(subclave_hex: &str, hw_ids_pareados: &[String]) -> Ve
     }
 
     let guardados = crate::babel_dir().join("guardados");
+    let nomindex_ruta = crate::ruta_nomindex_guardados();
+    // Cargar nomindex una vez para obtener nombres originales legibles en el log de sospechas.
+    let nomindex = crate::nom_cifrado::leer(&nomindex_ruta, subclave_hex);
     let mut eliminados = Vec::new();
     let mut indice_modificado = false;
 
     for nombre in &no_autorizados {
         let ruta = guardados.join(nombre);
-        // remove_file es la única operación: evita TOCTOU de exists()+remove.
-        // NotFound = el archivo ya no estaba → limpiar entrada del índice igualmente.
-        // Cualquier otro error = el archivo sigue en disco → conservar la entrada
-        //   para que sea detectado de nuevo en la próxima sesión.
-        match fs::remove_file(&ruta) {
-            Ok(_) => {
-                eliminados.push(nombre.clone());
-                idx.quitar(nombre);
-                indice_modificado = true;
-                log::warn!("[CUSTODIA] Copia no autorizada eliminada: {}", nombre);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                idx.quitar(nombre);
-                indice_modificado = true;
-            }
-            Err(e) => {
-                log::error!("[CUSTODIA] No se pudo eliminar {}: {}", nombre, e);
-            }
+        // Comprobar existencia antes del borrado seguro para distinguir
+        // "eliminado por nosotros" de "ya no existía en disco".
+        let existia = ruta.exists();
+        // Borrado seguro (3 pasadas 0x00/0xFF/0xAA + fsync) — consistente con
+        // el resto del vault. El archivo ya va cifrado AES-256-GCM, pero
+        // sobreescribimos para evitar recuperación forense del ciphertext.
+        if let Some(s) = ruta.to_str() {
+            crate::borrar_seguro(s);
+        }
+        let sigue_existiendo = ruta.exists();
+
+        if existia && !sigue_existiendo {
+            // Usar el nombre original visible (del nomindex) en el log de sospechas
+            // en vez del nombre opaco en disco, para que el usuario lo entienda.
+            let nombre_legible = nomindex.get(nombre)
+                .map(|m| m.nombre.clone())
+                .unwrap_or_else(|| nombre.clone());
+            eliminados.push(nombre_legible);
+            idx.quitar(nombre);
+            indice_modificado = true;
+            crate::nom_cifrado::eliminar(nombre, &nomindex_ruta, subclave_hex);
+            log::warn!("[CUSTODIA] Copia no autorizada eliminada: {}", nombre);
+        } else if !existia {
+            // El archivo ya no estaba en disco (eliminado manualmente u otro proceso).
+            idx.quitar(nombre);
+            indice_modificado = true;
+            crate::nom_cifrado::eliminar(nombre, &nomindex_ruta, subclave_hex);
+        } else {
+            // borrar_seguro no pudo eliminar el archivo (permisos?).
+            log::error!("[CUSTODIA] No se pudo eliminar {}: archivo sigue en disco", nombre);
         }
     }
 

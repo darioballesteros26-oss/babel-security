@@ -521,7 +521,7 @@ pub fn guardar_contactos(
     let json = serde_json::to_string(contactos).map_err(|e| format!("Error: {}", e))?;
     let cifrado = seguridad::blindar_documento(&json, subclave_hex)
         .map_err(|e| format!("Error cifrando contactos: {}", e))?;
-    crate::escribir_privado(contactos_path(), cifrado).map_err(|e| format!("Error guardando contactos: {}", e))
+    crate::escribir_privado_atomico(contactos_path(), cifrado).map_err(|e| format!("Error guardando contactos: {}", e))
 }
 
 /// Devuelve (password, es_nuevo). Si el contacto ya existe reutiliza su contraseña.
