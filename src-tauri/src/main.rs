@@ -1158,6 +1158,13 @@ fn traducir_texto(
 // Límite de tamaño por archivo importado (bytes). Debe coincidir con el del frontend.
 const LIMITE_IMPORT_BYTES: u64 = 150 * 1024 * 1024;
 
+// Comunica si la última llamada a cifrar_y_guardar_desde_bytes aplicó compresión
+// con pérdida de resolución (JPEG downsampling o raw→JPEG). Se usa para emitir
+// el evento "compresion-lossy" desde los comandos de importación interactiva.
+thread_local! {
+    static ULTIMA_IMPORTACION_LOSSY: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
 // Núcleo compartido: lee un archivo en claro desde una ruta del sistema, lo cifra
 // con AES-256-GCM y lo guarda en ~/Babel/guardados/. Lo usan tanto la importación
 // por drag-and-drop (guardar_documento_sin_traducir) como la importación por diálogo
@@ -1236,19 +1243,29 @@ fn cifrar_y_guardar_desde_bytes(
     //      color/gris: JPEG q85 (DCTDecode, sin pérdida perceptible).
     //   5. comprimir_streams: FlateDecode nivel 9 sobre streams sin filtro
     //      (streams de contenido, fuentes subsetadas, ToUnicode, perfiles ICC…).
+    // Resetear flag lossy al inicio de cada importación.
+    ULTIMA_IMPORTACION_LOSSY.with(|c| c.set(false));
+
     let reducido: Option<Vec<u8>> = if detectar_ext(contenido) == "docx"
         || detectar_ext(contenido) == "pptx"
         || detectar_ext(contenido) == "xlsx"
     {
-        pdf_reducir::reducir_docx(contenido)
+        let r = pdf_reducir::reducir_docx(contenido);
+        // DOCX: downsampling JPEG/PNG es siempre lossy en resolución.
+        if r.is_some() { ULTIMA_IMPORTACION_LOSSY.with(|c| c.set(true)); }
+        r
     } else if detectar_ext(contenido) == "pdf" {
         let tras_reducir = pdf_reducir::reducir(contenido);
+        // reducir: downsampling JPEG = lossy.
+        if tras_reducir.is_some() { ULTIMA_IMPORTACION_LOSSY.with(|c| c.set(true)); }
         let base1: &[u8] = tras_reducir.as_deref().unwrap_or(contenido);
         let tras_dedup = pdf_reducir::deduplicar_imagenes(base1);
         let base2: &[u8] = tras_dedup.as_deref().unwrap_or(base1);
         let tras_subset = pdf_reducir::subset_fuentes(base2);
         let base3: &[u8] = tras_subset.as_deref().unwrap_or(base2);
         let tras_comprimir = pdf_reducir::comprimir_imagenes(base3);
+        // comprimir_imagenes: puede aplicar JPEG q85 a imágenes color/gris = lossy.
+        if tras_comprimir.is_some() { ULTIMA_IMPORTACION_LOSSY.with(|c| c.set(true)); }
         let base4: &[u8] = tras_comprimir.as_deref().unwrap_or(base3);
         let tras_streams = pdf_reducir::comprimir_streams(base4);
         // Prioridad: salida más compacta (etapa posterior gana porque acumula todas las anteriores).
@@ -1304,6 +1321,7 @@ fn cifrar_y_guardar_desde_bytes(
 
 #[tauri::command]
 fn guardar_documento_sin_traducir(
+    app: tauri::AppHandle,
     nombre_archivo: String,
     ruta_completa: String,
     sesion: tauri::State<SesionActiva>,
@@ -1321,7 +1339,11 @@ fn guardar_documento_sin_traducir(
         .map_err(|_| "Error".to_string())?
         .clone();
 
-    cifrar_y_guardar_desde_ruta(&nombre_archivo, &ruta_completa, &subclave_hex, &id_usuario)
+    let ruta = cifrar_y_guardar_desde_ruta(&nombre_archivo, &ruta_completa, &subclave_hex, &id_usuario)?;
+    if ULTIMA_IMPORTACION_LOSSY.with(|c| c.get()) {
+        let _ = app.emit("compresion-lossy", ());
+    }
+    Ok(ruta)
 }
 
 // COMANDO — Igual que guardar_documento_sin_traducir pero recibe el contenido en
@@ -1330,6 +1352,7 @@ fn guardar_documento_sin_traducir(
 // reciente aborta el proceso por un unwrap sobre el pasteboard).
 #[tauri::command]
 fn guardar_documento_desde_bytes(
+    app: tauri::AppHandle,
     nombre_archivo: String,
     contenido_b64: String,
     sesion: tauri::State<SesionActiva>,
@@ -1354,7 +1377,11 @@ fn guardar_documento_desde_bytes(
         return Err("El archivo supera el límite de 150 MB.".into());
     }
 
-    cifrar_y_guardar_desde_bytes(&nombre_archivo, &bytes, &subclave_hex, &id_usuario)
+    let ruta = cifrar_y_guardar_desde_bytes(&nombre_archivo, &bytes, &subclave_hex, &id_usuario)?;
+    if ULTIMA_IMPORTACION_LOSSY.with(|c| c.get()) {
+        let _ = app.emit("compresion-lossy", ());
+    }
+    Ok(ruta)
 }
 
 // Borrado seguro de temporales de arrastre viejos (>1h) que hayan quedado de un

@@ -1346,6 +1346,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     );
   }).catch(() => {});
 
+  listen("compresion-lossy", () => {
+    mostrarToast(
+      "Las imágenes del documento se recomprimieron automáticamente al importarlo (resolución reducida a ~170 DPI). El contenido es visualmente idéntico.",
+      false
+    );
+  }).catch(() => {});
+
   // Botón: solicitar desbloqueo al par emparejado
   document.getElementById("rat-btn-solicitar")?.addEventListener("click", async () => {
     const statusEl = document.getElementById("rat-solicitud-status");

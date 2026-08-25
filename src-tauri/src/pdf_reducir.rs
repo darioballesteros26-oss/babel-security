@@ -74,7 +74,7 @@ pub fn reducir(bytes: &[u8]) -> Option<Vec<u8>> {
         let factor = CAP_PX as f32 / maxdim as f32;
         let nw = ((w as f32 * factor).round() as u32).max(1);
         let nh = ((h as f32 * factor).round() as u32).max(1);
-        let peq = img.resize_exact(nw, nh, FilterType::Lanczos3);
+        let peq = img.resize_exact(nw, nh, FilterType::CatmullRom);
 
         // Conservar gris vs color para no triplicar el tamaño de un escaneo en gris.
         let gris = matches!(
@@ -948,34 +948,48 @@ pub fn reducir_docx(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut cambiado = false;
 
     for i in 0..archivo.len() {
-        // Leer nombre y, si es JPEG media, el contenido — en un solo borrow del archivo.
-        let (nombre, contenido_jpeg) = {
+        // Leer nombre y contenido de imágenes media en un solo borrow del archivo.
+        // ZipFile se libera al salir del bloque para poder volver a indexar con raw_copy.
+        let (nombre, contenido_jpeg, contenido_png) = {
             let mut entrada = archivo.by_index(i).ok()?;
             let nombre = entrada.name().to_string();
-            let contenido = if es_jpeg_media(&nombre) {
+            let (jpeg, png) = if es_jpeg_media(&nombre) {
                 let mut c = Vec::new();
                 entrada.read_to_end(&mut c).ok()?;
-                Some(c)
+                (Some(c), None)
+            } else if es_png_media(&nombre) {
+                let mut c = Vec::new();
+                entrada.read_to_end(&mut c).ok()?;
+                (None, Some(c))
             } else {
-                None
+                (None, None)
             };
-            (nombre, contenido)
+            (nombre, jpeg, png)
         }; // ZipFile liberado aquí → archivo libre de nuevo
+
+        let opciones_stored = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
 
         if let Some(jpeg) = contenido_jpeg {
             let datos: Vec<u8> = match reducir_jpeg_raw(&jpeg) {
                 Some(c) if c.len() + 32 < jpeg.len() => { cambiado = true; c }
                 _ => jpeg,
             };
-            // JPEG ya está comprimido: guardarlo como Stored en el ZIP evita la
-            // doble compresión y es lo que hace Office por defecto con imágenes.
-            let opciones = zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Stored);
-            escritor.start_file(&nombre, opciones).ok()?;
+            // JPEG ya está comprimido: Stored evita la doble compresión.
+            escritor.start_file(&nombre, opciones_stored).ok()?;
+            escritor.write_all(&datos).ok()?;
+        } else if let Some(png) = contenido_png {
+            // PNG: downsample si supera CAP_PX, re-encoda como PNG (lossless en color,
+            // lossy en resolución). PNG incluye su propia compresión DEFLATE, así que
+            // se guarda como Stored en el ZIP para evitar doble compresión.
+            let datos: Vec<u8> = match reducir_png_raw(&png) {
+                Some(c) if c.len() + 32 < png.len() => { cambiado = true; c }
+                _ => png,
+            };
+            escritor.start_file(&nombre, opciones_stored).ok()?;
             escritor.write_all(&datos).ok()?;
         } else {
-            // Copiar el resto de archivos en crudo sin re-comprimir: más rápido y
-            // preserva metadatos, fechas y la compresión original del ZIP.
+            // Copiar el resto de archivos en crudo sin re-comprimir.
             let entrada_raw = archivo.by_index_raw(i).ok()?;
             escritor.raw_copy_file(entrada_raw).ok()?;
         }
@@ -1004,6 +1018,38 @@ fn es_jpeg_media(nombre: &str) -> bool {
         && (n.ends_with(".jpg") || n.ends_with(".jpeg"))
 }
 
+fn es_png_media(nombre: &str) -> bool {
+    let n = nombre.to_ascii_lowercase();
+    (n.starts_with("word/media/") || n.starts_with("ppt/media/") || n.starts_with("xl/media/"))
+        && n.ends_with(".png")
+}
+
+/// Intenta reducir bytes PNG crudos: downsample Lanczos a CAP_PX si el lado mayor
+/// lo supera, y re-encoda como PNG (lossless en cuanto al espacio de color, lossy
+/// en resolución). Devuelve `None` si la imagen ya es pequeña o no se puede parsear.
+fn reducir_png_raw(png: &[u8]) -> Option<Vec<u8>> {
+    use image::ImageFormat;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(png));
+    reader.set_format(ImageFormat::Png);
+    let mut limites = image::Limits::default();
+    limites.max_image_width = Some(20_000);
+    limites.max_image_height = Some(20_000);
+    limites.max_alloc = Some(512 * 1024 * 1024);
+    reader.limits(limites);
+    let img = reader.decode().ok()?;
+    let (w, h) = img.dimensions();
+    if w.max(h) <= CAP_PX {
+        return None;
+    }
+    let factor = CAP_PX as f32 / w.max(h) as f32;
+    let nw = ((w as f32 * factor).round() as u32).max(1);
+    let nh = ((h as f32 * factor).round() as u32).max(1);
+    let peq = img.resize_exact(nw, nh, FilterType::CatmullRom);
+    let mut buf = Vec::new();
+    peq.write_to(&mut std::io::Cursor::new(&mut buf), ImageFormat::Png).ok()?;
+    Some(buf)
+}
+
 /// Intenta reducir bytes JPEG crudos usando la misma lógica que `reducir`:
 /// downsampling Lanczos3 a CAP_PX si el lado mayor supera ese límite, calidad q82.
 /// Devuelve `None` si no es posible decodificar o si la imagen ya es pequeña.
@@ -1023,7 +1069,7 @@ fn reducir_jpeg_raw(jpeg: &[u8]) -> Option<Vec<u8>> {
     let factor = CAP_PX as f32 / w.max(h) as f32;
     let nw = ((w as f32 * factor).round() as u32).max(1);
     let nh = ((h as f32 * factor).round() as u32).max(1);
-    let peq = img.resize_exact(nw, nh, FilterType::Lanczos3);
+    let peq = img.resize_exact(nw, nh, FilterType::CatmullRom);
     let gris = matches!(
         img.color(),
         ColorType::L8 | ColorType::La8 | ColorType::L16 | ColorType::La16
@@ -2644,6 +2690,73 @@ mod tests {
         assert!(
             reducir_docx(&docx).is_none(),
             "DOCX con JPEG ≤ CAP_PX no debe modificarse"
+        );
+    }
+
+    // Helper: crea un DOCX (ZIP) con un PNG en word/media/.
+    fn docx_con_png(png: &[u8], nombre_imagen: &str) -> Vec<u8> {
+        use std::io::Write;
+        let mut buf = Vec::new();
+        {
+            let cursor = std::io::Cursor::new(&mut buf);
+            let mut w = zip::ZipWriter::new(cursor);
+            w.start_file(
+                format!("word/media/{}", nombre_imagen),
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            ).unwrap();
+            w.write_all(png).unwrap();
+            w.start_file(
+                "[Content_Types].xml",
+                zip::write::SimpleFileOptions::default(),
+            ).unwrap();
+            w.write_all(b"<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"></Types>").unwrap();
+            w.finish().unwrap();
+        }
+        buf
+    }
+
+    // Helper: genera un PNG RGB de dimensiones dadas (imagen sintética con gradiente).
+    fn png_grande(lado: u32) -> Vec<u8> {
+        use image::ImageBuffer;
+        let img = ImageBuffer::from_fn(lado, lado, |x, y| {
+            image::Rgb([((x * 7 + y * 13) % 256) as u8, ((x * 3 + y * 5) % 256) as u8, ((x ^ y) % 256) as u8])
+        });
+        let mut buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png).unwrap();
+        buf
+    }
+
+    // TEST: DOCX con PNG de 3000px → reducir_docx lo baja a ≤CAP_PX y produce un ZIP más pequeño.
+    #[test]
+    fn docx_png_grande_se_reduce() {
+        let png = png_grande(3000);
+        let docx = docx_con_png(&png, "image1.png");
+
+        let reducido = reducir_docx(&docx)
+            .expect("debe reducir DOCX con PNG de 3000px");
+
+        assert!(
+            reducido.len() < docx.len(),
+            "DOCX reducido ({} B) no es menor que el original ({} B)",
+            reducido.len(), docx.len()
+        );
+
+        let mut archivo = zip::ZipArchive::new(std::io::Cursor::new(&reducido)).unwrap();
+        assert!(
+            archivo.by_name("word/media/image1.png").is_ok(),
+            "la imagen debe seguir presente como PNG en el DOCX reducido"
+        );
+    }
+
+    // TEST: DOCX con PNG pequeño (<= CAP_PX) → reducir_docx devuelve None.
+    #[test]
+    fn docx_png_pequeno_no_se_toca() {
+        let png = png_grande(800); // 800px < CAP_PX=2000
+        let docx = docx_con_png(&png, "image1.png");
+        assert!(
+            reducir_docx(&docx).is_none(),
+            "DOCX con PNG ≤ CAP_PX no debe modificarse"
         );
     }
 
