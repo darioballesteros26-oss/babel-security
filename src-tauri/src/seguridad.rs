@@ -169,9 +169,10 @@ pub fn blindar_documento(texto: &str, clave_hex: &str) -> Result<Vec<u8>, String
     // Reutilizar un nonce con AES-GCM destruye completamente la seguridad.
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
-    // Nonce degenerado (todos los bytes iguales) indica fallo catastrófico del RNG.
-    let primer_byte = nonce_bytes[0];
-    if nonce_bytes.iter().all(|&b| b == primer_byte) {
+    // Nonce todo-ceros indica fallo catastrófico del RNG (único valor que AES-GCM
+    // prohíbe reutilizar de forma crítica y que un RNG roto podría producir).
+    // No rechazar otros valores "uniformes" como [1,1,...,1]: son nonces válidos.
+    if nonce_bytes == [0u8; 12] {
         return Err("Fallo del generador de entropía del sistema".to_string());
     }
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -1487,6 +1488,12 @@ impl AntiSandbox {
 // pueden intercalarse y corromper el archivo.
 static AUDIT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+// Serializa las llamadas a registrar_evento_seguridad (principal + backup).
+// AUDIT_MUTEX protege cada archivo individualmente, pero sin este mutex externo
+// dos eventos concurrentes pueden escribirse en orden distinto en principal y backup,
+// rompiendo la garantía de que ambos logs son idénticos (integridad forense dual).
+static EVENTO_SEG_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const AUDIT_MAX_BYTES: u64 = 2 * 1024 * 1024; // 2 MB
 
 // C4: El .tip se guarda con HMAC-SHA256 usando master.salt como clave.
@@ -1599,6 +1606,7 @@ fn escribir_evento_cifrado(evento: &str, clave_hex: &str, ruta: &str) {
 /// Registra un evento de seguridad en auditoria.babel (principal) y su backup.
 /// Pública para que otros módulos puedan registrar eventos desde fuera.
 pub fn registrar_evento_seguridad(evento: &str, clave_hex: &str) {
+    let _g = EVENTO_SEG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let ruta_principal = babel_path("auditoria.babel");
     escribir_evento_cifrado(evento, clave_hex, &ruta_principal);
     let ruta_bck = babel_path("auditoria.bck");

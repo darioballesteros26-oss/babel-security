@@ -17,7 +17,7 @@
 // Timeout del handshake: 30 s de espera en cada lado.
 
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -93,6 +93,18 @@ fn hmac_sinc(dominio: &str, ts: u64) -> String {
     mac.update(ts.to_string().as_bytes());
     let tag = mac.finalize().into_bytes();
     hex::encode(&tag[..8])
+}
+
+/// Compara en tiempo constante el HMAC calculado con el recibido (16 chars hex).
+/// Previene timing attacks: el XOR-fold no hace cortocircuito ante el primer byte diferente.
+fn hmac_sinc_eq(dominio: &str, ts: u64, recibido_hex: &str) -> bool {
+    let esperado = hmac_sinc(dominio, ts);
+    if esperado.len() != recibido_hex.len() { return false; }
+    esperado.as_bytes()
+        .iter()
+        .zip(recibido_hex.as_bytes())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
 }
 
 fn ahora_unix() -> u64 {
@@ -306,11 +318,18 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
 
     let mut linea = String::new();
     {
-        let mut reader = BufReader::new(&stream);
-        if let Err(e) = reader.read_line(&mut linea) {
+        // Límite de 4 KB para prevenir DoS por OOM: un atacante en LAN podría
+        // enviar líneas de cientos de MB en el timeout de 10 s sin este cap.
+        // Take<BufReader<R>> implementa BufRead, por lo que read_line está disponible.
+        let mut limitado = BufReader::new(&stream).take(4096);
+        if let Err(e) = limitado.read_line(&mut linea) {
             log::warn!("[SINC] Error leyendo solicitud de {}: {}", ip_origen, e);
             return;
         }
+    }
+    if linea.len() > 4095 {
+        log::warn!("[SINC] Línea entrante demasiado larga de {}, descartando", ip_origen);
+        return;
     }
     let linea = linea.trim().to_string();
 
@@ -430,11 +449,11 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
     let hw_id_solicitante: String = partes.get(6).map(|s| s.trim().to_string()).unwrap_or_default();
 
     let ahora = ahora_unix();
-    if ts == 0 || ahora.saturating_sub(ts) > 60 {
-        log::warn!("[SINC] Solicitud expirada de {}", ip_origen);
+    if ts == 0 || ahora.saturating_sub(ts) > 60 || ts > ahora + 5 {
+        log::warn!("[SINC] Solicitud expirada o con timestamp futuro de {}", ip_origen);
         return;
     }
-    if hmac_sinc("req", ts) != hmac_rx {
+    if !hmac_sinc_eq("req", ts, hmac_rx) {
         log::warn!("[SINC] HMAC inválido en solicitud de {}", ip_origen);
         return;
     }
@@ -658,7 +677,7 @@ pub fn solicitar_emparejamiento(
         if ts_resp == 0 || ahora.saturating_sub(ts_resp) > 120 {
             return Err("Respuesta expirada".into());
         }
-        if hmac_sinc("resp_ok", ts_resp) != hmac_resp {
+        if !hmac_sinc_eq("resp_ok", ts_resp, hmac_resp) {
             return Err("HMAC de respuesta inválido — posible manipulación".into());
         }
         // Descifrar la clave compartida del envelope AES-GCM
@@ -863,11 +882,11 @@ fn manejar_reintento_b2(stream: TcpStream, ip_origen: String, _nombre_local: &st
     let ts: u64 = partes[2].parse().unwrap_or(0);
     let hmac_rx = partes[3];
     let ahora = ahora_unix();
-    if ts == 0 || ahora.saturating_sub(ts) > 60 {
-        log::warn!("[SINC] BABEL_B2_REINTENTO expirado de {}", ip_origen);
+    if ts == 0 || ahora.saturating_sub(ts) > 60 || ts > ahora + 5 {
+        log::warn!("[SINC] BABEL_B2_REINTENTO expirado o timestamp futuro de {}", ip_origen);
         return;
     }
-    if hmac_sinc("b2_reintento", ts) != hmac_rx {
+    if !hmac_sinc_eq("b2_reintento", ts, hmac_rx) {
         log::warn!("[SINC] BABEL_B2_REINTENTO HMAC inválido de {}", ip_origen);
         return;
     }

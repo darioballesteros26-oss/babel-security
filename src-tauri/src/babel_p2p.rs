@@ -132,7 +132,7 @@ fn guardar_peers_trusted(peers: &HashMap<String, String>, subclave_hex: &str) {
     }
     if let Ok(json) = serde_json::to_string(peers) {
         if let Ok(cifrado) = crate::seguridad::blindar_documento(&json, subclave_hex) {
-            let _ = crate::escribir_privado(ruta_peers_trusted(), &cifrado);
+            let _ = crate::escribir_privado_atomico(&ruta_peers_trusted(), &cifrado);
         }
     }
 }

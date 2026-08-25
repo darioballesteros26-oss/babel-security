@@ -16,7 +16,16 @@
 //   Entradas legacy (valor = String plana) se leen como MetaEntrada con ts=0/bytes=0.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 use crate::seguridad;
+
+// Serializa todas las mutaciones del nomindex (registrar/actualizar/eliminar).
+// Cada función hace un read-modify-write sobre el mismo archivo cifrado; sin este
+// mutex dos llamadas concurrentes leen el mismo JSON obsoleto y la que escribe
+// segunda sobreescribe los cambios de la primera, perdiendo entradas silenciosamente.
+// Un mutex por proceso es suficiente porque todos los archivos .nomindex.babel se
+// acceden desde el mismo proceso.
+static NOMINDEX_MUTEX: Mutex<()> = Mutex::new(());
 
 /// Una entrada en el índice cifrado de nombres.
 #[derive(serde::Serialize, Clone, Default)]
@@ -67,7 +76,6 @@ fn guardar(idx: &HashMap<String, MetaEntrada>, ruta: &str, subclave_hex: &str) -
 }
 
 /// Registra nombre_disco → (nombre_visible, ts_importacion, bytes_originales).
-/// Llamar mientras se mantiene BUZON_INDEX_MUTEX para serializar con otras mutaciones de índices.
 pub fn registrar(
     nombre_disco: &str,
     nombre_visible: &str,
@@ -76,6 +84,7 @@ pub fn registrar(
     ruta: &str,
     subclave_hex: &str,
 ) -> Result<(), String> {
+    let _g = NOMINDEX_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let mut idx = leer(ruta, subclave_hex);
     idx.insert(nombre_disco.to_string(), MetaEntrada {
         nombre: nombre_visible.to_string(),
@@ -92,6 +101,7 @@ pub fn actualizar(
     ruta: &str,
     subclave_hex: &str,
 ) -> Result<(), String> {
+    let _g = NOMINDEX_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let mut idx = leer(ruta, subclave_hex);
     let entrada = idx.entry(nombre_disco.to_string()).or_default();
     entrada.nombre = nombre_nuevo.to_string();
@@ -101,6 +111,7 @@ pub fn actualizar(
 /// Elimina la entrada para un nombre en disco (al borrar el archivo).
 /// Silencioso ante errores — la limpieza del índice no debe bloquear al usuario.
 pub fn eliminar(nombre_disco: &str, ruta: &str, subclave_hex: &str) {
+    let _g = NOMINDEX_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let mut idx = leer(ruta, subclave_hex);
     if idx.remove(nombre_disco).is_some() {
         let _ = guardar(&idx, ruta, subclave_hex);
