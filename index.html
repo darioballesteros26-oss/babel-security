@@ -940,31 +940,6 @@
         </div>
 
         <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-          <div class="ajuste-label">IDIOMA DE TRADUCCIÓN</div>
-          <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
-            <select id="ajuste-idioma-origen" class="input-vip" style="flex:1;" onchange="cambiarIdiomaDesdeAjustes()">
-              <option value="es">Español</option>
-              <option value="en">English</option>
-              <option value="fr">Français</option>
-              <option value="ar">Árabe</option>
-              <option value="de">Deutsch</option>
-              <option value="ru">Русский</option>
-              <option value="zh">中文</option>
-            </select>
-            <span style="color:var(--dorado);font-size:1rem;opacity:0.8;">→</span>
-            <select id="ajuste-idioma-destino" class="input-vip" style="flex:1;" onchange="cambiarIdiomaDesdeAjustes()">
-              <option value="en">English</option>
-              <option value="es">Español</option>
-              <option value="fr">Français</option>
-              <option value="ar">Árabe</option>
-              <option value="de">Deutsch</option>
-              <option value="ru">Русский</option>
-              <option value="zh">中文</option>
-            </select>
-          </div>
-        </div>
-
-        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
           <div class="ajuste-label" id="ui-timeout-label">BLOQUEO AUTOMÁTICO POR INACTIVIDAD</div>
           <select id="selector-timeout" class="input-vip" style="margin-top:12px;width:100%;"
             onchange="guardarTimeoutSesion(this.value)">
@@ -991,7 +966,7 @@
             style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
             12 palabras que permiten recuperar el acceso si olvidas la contraseña. No hagas capturas.
           </div>
-          <button type="button" data-action="ver-frase-app" class="btn-vip" style="width:100%;padding:12px 0;">
+          <button type="button" data-action="ver-frase-app" class="btn-secundario-oro" style="width:100%;padding:12px 0;">
             VER FRASE DE RECUPERACIÓN
           </button>
         </div>
@@ -1128,6 +1103,84 @@
         </div>
       </div>
     </div>
+    <!-- MODAL FINDER IN-APP — explorador de archivos cifrados dentro de Babel -->
+    <div id="modal-finder-inapp" class="hidden" style="
+      position:fixed;inset:0;z-index:3500;background:rgba(0,0,0,0.92);
+      display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div style="width:100%;max-width:680px;max-height:85vh;background:var(--fondo-panel,#0d0d0d);
+        border:1px solid var(--borde-dorado);border-radius:4px;display:flex;flex-direction:column;overflow:hidden;">
+        <!-- Cabecera -->
+        <div style="display:flex;align-items:center;justify-content:space-between;
+          padding:14px 20px;border-bottom:1px solid var(--borde);flex-shrink:0;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;
+              letter-spacing:3px;color:var(--dorado);">◫ ARCHIVOS BABEL</span>
+            <span id="finder-ruta-label" style="font-size:0.58rem;color:var(--texto-secundario);
+              opacity:0.5;letter-spacing:1px;"></span>
+          </div>
+          <button type="button" data-action="cerrar-finder-inapp" style="background:transparent;
+            border:none;color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
+        </div>
+        <!-- Lista de archivos -->
+        <div id="finder-inapp-lista" style="flex:1;overflow-y:auto;padding:12px;
+          display:flex;flex-direction:column;gap:6px;
+          scrollbar-width:thin;scrollbar-color:var(--borde) transparent;"></div>
+        <!-- Pie -->
+        <div style="flex-shrink:0;padding:12px 20px;border-top:1px solid var(--borde);
+          display:flex;justify-content:space-between;align-items:center;">
+          <span id="finder-conteo" style="font-size:0.58rem;color:var(--texto-secundario);
+            opacity:0.5;letter-spacing:1px;"></span>
+          <button type="button" data-action="cerrar-finder-inapp" class="btn-link"
+            style="font-size:0.6rem;letter-spacing:2px;">CERRAR</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL CONTRASEÑA RECUPERADA — muestra la contraseña del búnker tras recuperación BIP39 -->
+    <div id="modal-pass-recuperado" class="hidden" style="
+      position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.97);
+      display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:460px;background:#0d0d0d;
+        border:2px solid var(--dorado);border-radius:6px;overflow:hidden;">
+        <div style="background:rgba(197,160,89,0.08);padding:18px 24px;border-bottom:1px solid rgba(197,160,89,0.25);">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;letter-spacing:3px;color:var(--dorado);margin-bottom:6px;">
+            CONTRASEÑA DEL BÚNKER RECUPERADA
+          </div>
+          <div style="font-size:0.58rem;color:#ef4444;letter-spacing:1.5px;font-weight:600;">
+            ⚠ ATENCIÓN — GUÁRDALA AHORA
+          </div>
+        </div>
+        <div style="padding:24px;">
+          <div style="background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.35);
+            border-radius:4px;padding:14px 16px;margin-bottom:20px;">
+            <p style="font-family:'Times New Roman',Times,serif;font-size:0.64rem;
+              color:#fca5a5;line-height:1.7;margin:0;letter-spacing:0.5px;">
+              ⚠ <strong style="color:#ef4444;">IMPORTANTÍSIMO:</strong> Esta es tu contraseña de usuario.
+              Guárdala en un lugar seguro fuera del dispositivo. Si la pierdes,
+              necesitarás usar tu frase BIP39 de nuevo para recuperar el acceso.
+              <strong style="color:#ef4444;">No hagas capturas de pantalla.</strong>
+            </p>
+          </div>
+          <div style="margin-bottom:20px;text-align:center;">
+            <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+              letter-spacing:2px;color:var(--texto-secundario);opacity:0.6;margin-bottom:8px;">
+              TU CONTRASEÑA
+            </div>
+            <div id="pass-recuperado-valor" style="font-family:monospace;font-size:1.2rem;
+              color:var(--dorado);letter-spacing:3px;word-break:break-all;padding:12px;
+              background:rgba(197,160,89,0.06);border:1px solid var(--borde-dorado);
+              border-radius:4px;user-select:all;"></div>
+          </div>
+          <button type="button" data-action="cerrar-pass-recuperado"
+            style="width:100%;padding:13px;background:var(--dorado);border:none;
+            color:#09090b;font-family:'Times New Roman',Times,serif;font-size:0.75rem;
+            font-weight:700;letter-spacing:3px;cursor:pointer;border-radius:3px;">
+            HE GUARDADO MI CONTRASEÑA
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- MODAL TÉRMINOS DE USO — primera vez -->
     <div id="modal-terminos" class="hidden" style="
   position:fixed;inset:0;z-index:2000;
@@ -1644,10 +1697,13 @@
       <button type="button" data-action="abrir-filtro-registro" id="btn-filtro-registro" class="btn-link" style="font-size:0.65rem;letter-spacing:1px;" title="Filtrar tipos de evento">⚙ FILTRAR</button>
     </div>
     <!-- Navegación de días -->
-    <div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:12px 20px;flex-shrink:0;border-bottom:1px solid var(--borde);width:100%;">
+    <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:10px 20px;flex-shrink:0;border-bottom:1px solid var(--borde);width:100%;flex-wrap:wrap;">
       <button type="button" data-action="registro-dia-anterior" style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:4px 10px;opacity:0.8;" title="Día anterior">◀</button>
-      <span id="registro-fecha-label" style="font-family:'Times New Roman',Times,serif;font-size:0.8rem;letter-spacing:3px;color:var(--dorado);min-width:120px;text-align:center;">HOY</span>
+      <span id="registro-fecha-label" style="font-family:'Times New Roman',Times,serif;font-size:0.8rem;letter-spacing:3px;color:var(--dorado);min-width:100px;text-align:center;">HOY</span>
       <button type="button" data-action="registro-dia-siguiente" id="btn-registro-siguiente" style="background:transparent;border:none;color:var(--dorado);font-size:1rem;cursor:pointer;padding:4px 10px;opacity:0.8;" title="Día siguiente">▶</button>
+      <input type="date" id="registro-buscar-fecha"
+        style="background:transparent;border:1px solid var(--borde-dorado);color:var(--dorado);padding:4px 8px;font-family:'Times New Roman',Times,serif;font-size:0.65rem;letter-spacing:1px;border-radius:2px;outline:none;cursor:pointer;"
+        title="Ir a una fecha" onchange="irAFechaRegistro(this.value)">
     </div>
     <!-- Resumen del día -->
     <div id="registro-resumen" style="flex-shrink:0;padding:12px 20px;border-bottom:1px solid var(--borde);width:100%;"></div>

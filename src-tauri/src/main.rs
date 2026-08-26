@@ -4136,14 +4136,21 @@ fn generar_frase_recuperacion(
 // ============================================================
 // COMANDO — Recuperar Y autenticar en un solo paso (B7/S2)
 // Las credenciales (maestra, pass) se derivan y verifican íntegramente en Rust.
-// El frontend solo recibe un aviso opcional — ningún secreto cruza el IPC.
+// El frontend recibe el aviso opcional y la contraseña recuperada para que el
+// usuario pueda guardarla (la muestra una vez y luego la descarta del DOM).
 // ============================================================
+#[derive(serde::Serialize)]
+struct RecuperacionResult {
+    aviso: String,
+    pass_recuperado: String,
+}
+
 #[tauri::command]
 fn recuperar_y_autenticar(
     palabras: Vec<String>,
     sesion: tauri::State<SesionActiva>,
     app: tauri::AppHandle,
-) -> Result<String, String> {
+) -> Result<RecuperacionResult, String> {
     // Reutilizar la misma lógica de recuperación para obtener las credenciales
     let (maestra, pass, aviso) = recuperar_con_frase_interno(&palabras, &sesion)?;
     let maestra = Zeroizing::new(maestra);
@@ -4186,7 +4193,8 @@ fn recuperar_y_autenticar(
     // Arrancar el monitor RAT igual que en verificar_login.
     crate::rat_detector::iniciar_monitor_rat(app);
 
-    Ok(aviso)
+    let pass_para_mostrar = pass.to_string();
+    Ok(RecuperacionResult { aviso, pass_recuperado: pass_para_mostrar })
 }
 
 // Lógica interna de recuperación compartida por recuperar_con_frase y recuperar_y_autenticar.

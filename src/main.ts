@@ -110,6 +110,13 @@ function renderArbolBuzones(
 // UTILIDADES UI
 
 function mostrarPantalla(nombre: Pantalla): void {
+  // Guardar selección al salir de la pantalla de archivos guardados
+  const pantallaActual = document.querySelector<HTMLElement>(".pantalla:not(.hidden)");
+  if (pantallaActual?.id === "pantalla-archivos-guardados" && nombre !== "archivos-guardados") {
+    _seleccionGuardadosGuardada = Array.from(
+      document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked")
+    ).map(cb => (cb.closest(".archivo-card") as HTMLElement | null)?.dataset.ruta ?? "").filter(Boolean);
+  }
   document.querySelectorAll<HTMLElement>(".pantalla")
     .forEach(p => p.classList.add("hidden"));
   document.getElementById(`pantalla-${nombre}`)?.classList.remove("hidden");
@@ -576,7 +583,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "revelar-en-finder": revelarEnFinder(); break;
     case "copiar-pass-compartir": copiarPassCompartir(); break;
     case "eliminar-sel-guardados": eliminarSeleccionadosGuardados(); break;
-    case "abrir-carpeta-guardados": abrirCarpetaBabelGuardados(); break;
+    case "abrir-carpeta-guardados": void abrirFinderInApp(); break;
     case "exportar-todo": exportarTodo(); break;
     case "abrir-importar-guardado": mostrarPopupImportar(el); break;
     case "mostrar-input-buzon-guardado": mostrarInputBuzonGuardado(); break;
@@ -708,6 +715,10 @@ document.addEventListener("click", (e: MouseEvent) => {
       document.getElementById("modal-ajustes-registro")?.classList.add("hidden");
       break;
     case "guardar-ajustes-registro": void guardarAjustesRegistro(); break;
+    // Finder in-app
+    case "cerrar-finder-inapp": document.getElementById("modal-finder-inapp")?.classList.add("hidden"); break;
+    // Modal contraseña recuperada BIP39
+    case "cerrar-pass-recuperado": cerrarPassRecuperado(); break;
     // Modal de actualización automática
     case "instalar-actualizacion": void instalarActualizacion(); break;
     case "cerrar-modal-actualizacion":
@@ -780,6 +791,7 @@ function tipoLabelRegistro(tipo: string): string {
     traducir: "Traducción",
     descargar: "Descarga",
     importar: "Importación",
+    eliminar: "Archivo eliminado",
     cerrar_sesion: "Sesión cerrada",
     sospecha_hw: "Copia no autorizada bloqueada",
     sospecha_rat: "Acceso remoto bloqueado",
@@ -1112,6 +1124,17 @@ async function iniciarRegistroDiario(): Promise<void> {
   invoke("registrar_evento_diario", { tipo: "login", detalle: "" }).catch(() => {});
   try {
     const prefs = await invoke<PreferenciasRegistro>("obtener_preferencias_registro");
+    // Aviso si se inicia sesión después de la hora programada para el registro
+    if (!prefs.primera_vez) {
+      const ahora = new Date();
+      const horaConfig = prefs.hora * 60 + prefs.minuto;
+      const horaActual = ahora.getHours() * 60 + ahora.getMinutes();
+      if (horaActual > horaConfig) {
+        const hStr = String(prefs.hora).padStart(2, "0");
+        const mStr = String(prefs.minuto).padStart(2, "0");
+        setTimeout(() => mostrarToast(`⚠ Acceso tardío — programado para las ${hStr}:${mStr}`, false), 1500);
+      }
+    }
     if (prefs.primera_vez) {
       const horaEl = document.getElementById("rp-hora") as HTMLInputElement | null;
       const minEl = document.getElementById("rp-minuto") as HTMLInputElement | null;
@@ -1976,6 +1999,7 @@ async function cambiarIdioma(idioma: string): Promise<void> {
 let buzonActivoGuardados: string = "todos";
 let terminoBusquedaArchivos = "";
 let terminoBusquedaBuzones = "";
+let _seleccionGuardadosGuardada: string[] = [];
 let _smtpConfigurado: boolean = false;
 // true cuando hay tokens OAuth de Gmail guardados y activos para esta sesión.
 // Distinto de _smtpConfigurado: puede haber config SMTP manual sin OAuth.
@@ -2136,6 +2160,17 @@ async function cargarArchivosGuardados(): Promise<void> {
       _rutaArrastrada = card.dataset.ruta ?? "";
       _esGuardadoArrastrado = card.dataset.guardado === "true";
     };
+
+    // Restaurar selección guardada
+    if (_seleccionGuardadosGuardada.length > 0) {
+      const set = new Set(_seleccionGuardadosGuardada);
+      document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g").forEach(cb => {
+        const card = cb.closest(".archivo-card") as HTMLElement | null;
+        if (card?.dataset.ruta && set.has(card.dataset.ruta)) cb.checked = true;
+      });
+      _seleccionGuardadosGuardada = [];
+      actualizarSeleccionGuardados();
+    }
 
   } catch (error) {
     mostrarToast("Error cargando lista: " + String(error), true);
@@ -2837,10 +2872,12 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   const checkboxes = document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked");
   if (!checkboxes.length || !await confirmarEliminar(checkboxes.length)) return;
   const rutas: string[] = [];
+  const nombres: string[] = [];
   checkboxes.forEach(cb => {
     const card = cb.closest(".archivo-card") as HTMLElement;
     if (card?.dataset.ruta) rutas.push(card.dataset.ruta);
     if (card?.dataset.rutaOrig) rutas.push(card.dataset.rutaOrig);
+    if (card?.dataset.base) nombres.push(card.dataset.base.replace(/\.babel$/, "").replace(/^\d+_/, ""));
   });
   const errores = await borrarRutas(rutas);
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
@@ -2853,6 +2890,7 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   document.getElementById("ui-finder")?.classList.remove("hidden");
   document.getElementById("ui-importar")?.classList.remove("hidden");
   mostrarToast(errores ? `${errores} errores al eliminar` : "✓ Destruido de forma segura — irrecuperable", errores > 0);
+  nombres.forEach(n => invoke("registrar_evento_diario", { tipo: "eliminar", detalle: n }).catch(() => {}));
   await cargarArchivosGuardados();
 }
 
@@ -3321,14 +3359,15 @@ async function guardarArchivoDesdeFile(
 }
 // NAVEGACIÓN — ENTRE PANTALLAS Y ACCIONES DE ARCHIVO
 
-// Abre en Finder la carpeta de archivos guardados cifrados
-async function abrirCarpetaBabelGuardados(): Promise<void> {
+// Abre la carpeta de guardados en el Finder del sistema (acceso directo interno)
+async function abrirFinderSistema(): Promise<void> {
   try {
     await invoke("abrir_carpeta_guardados");
   } catch (e) {
     mostrarToast("Error abriendo Finder: " + e, true);
   }
 }
+(window as any).abrirFinderSistema = abrirFinderSistema;
 
 function irATraduccion(): void {
   mostrarPantalla("traduccion");
@@ -3351,9 +3390,12 @@ async function cargarBuzonesGuardados(): Promise<void> {
     _buzonesCache = nodos;
     const lista = document.getElementById("lista-buzones-g");
     if (!lista) return;
+    const idiomaUI = localStorage.getItem("babel-idioma-ui") ?? "es";
+    const tUI = TRADUCCIONES_UI[idiomaUI] ?? TRADUCCIONES_UI["es"];
+    const labelTodos = (tUI.todos as string | undefined) ?? "TODOS";
     lista.innerHTML = `
       <div class="buzon-item ${buzonActivoGuardados === "todos" ? "activo" : ""}" data-action="seleccionar-buzon-guardados" data-buzon="todos">
-        <span class="buzon-icono">◫</span><span class="buzon-nombre">TODOS</span>
+        <span class="buzon-icono">◫</span><span class="buzon-nombre">${escapeHTML(labelTodos)}</span>
       </div>` + renderArbolBuzones(nodos, null, 0, buzonActivoGuardados, "guard");
     if (terminoBusquedaBuzones) filtrarBuzonesGuardados(terminoBusquedaBuzones);
   } catch (error) {
@@ -3783,6 +3825,10 @@ async function traducirArchivoGuardado(ruta: string, nombreDisplay?: string): Pr
     const nombreTrad = rutaResultado.replace(/\\/g, "/").split("/").pop() ?? rutaResultado;
     añadirResultadoArchivo(nombreTrad, rutaResultado);
     scrollAlFinal();
+    // Mover el resultado al buzon donde estaba el original (si no es "todos")
+    if (buzonActivoGuardados !== "todos") {
+      invoke("mover_archivo_guardado", { ruta: rutaResultado, buzonDestino: buzonActivoGuardados }).catch(() => {});
+    }
     invoke("registrar_evento_diario", { tipo: "traducir", detalle: nombreMostrado }).catch(() => {});
   } catch (error) {
     mostrarProcesando(false);
@@ -5294,11 +5340,13 @@ async function intentarRecuperacion(): Promise<void> {
   mostrarMensaje("recovery-msg", "VERIFICANDO FRASE...", false);
 
   try {
-    const aviso = await invoke<string>("recuperar_y_autenticar", { palabras });
+    const resultado = await invoke<{ aviso: string; pass_recuperado: string }>("recuperar_y_autenticar", { palabras });
     for (let i = 1; i <= 12; i++) {
       const el = document.getElementById(`rec-palabra-${i}`) as HTMLInputElement | null;
       if (el) { el.value = "0".repeat(el.value.length); el.value = ""; }
     }
+    const aviso = resultado.aviso;
+    const passRecuperado = resultado.pass_recuperado;
     mostrarMensaje("recovery-msg",
       aviso ? `⚠ ${aviso} — Accediendo...` : `✓ FRASE VERIFICADA — ACCESO CONCEDIDO`, false);
 
@@ -5308,6 +5356,9 @@ async function intentarRecuperacion(): Promise<void> {
       _smtpConfigurado = ok;
       if (ok) invoke<string>("obtener_firma_email").then(f => { _firmaEmail = f; }).catch(() => {});
     }).catch(() => {});
+
+    // Mostrar la contraseña recuperada antes de entrar al panel
+    if (passRecuperado) mostrarPassRecuperado(passRecuperado);
 
     setTimeout(() => {
       const nombreGuardado = localStorage.getItem("babel-nombre-display");
@@ -5326,6 +5377,94 @@ async function intentarRecuperacion(): Promise<void> {
     mostrarMensaje("recovery-msg", String(error), true);
   }
 }
+
+function mostrarPassRecuperado(pass: string): void {
+  const modal = document.getElementById("modal-pass-recuperado");
+  const valor = document.getElementById("pass-recuperado-valor");
+  if (!modal || !valor) return;
+  valor.textContent = pass;
+  modal.classList.remove("hidden");
+}
+
+function cerrarPassRecuperado(): void {
+  const modal = document.getElementById("modal-pass-recuperado");
+  const valor = document.getElementById("pass-recuperado-valor");
+  if (valor) { valor.textContent = "0".repeat(valor.textContent?.length ?? 0); valor.textContent = ""; }
+  modal?.classList.add("hidden");
+}
+
+function irAFechaRegistro(fechaISO: string): void {
+  if (!fechaISO) return;
+  const [y, m, d] = fechaISO.split("-").map(Number);
+  const objetivo = new Date(y, m - 1, d);
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const diff = Math.round((objetivo.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
+  _registroFechaOffset = Math.min(0, diff);
+  _registroFiltroIPs.clear();
+  cargarRegistroDia().catch(() => {});
+}
+(window as any).irAFechaRegistro = irAFechaRegistro;
+
+async function abrirFinderInApp(): Promise<void> {
+  const modal = document.getElementById("modal-finder-inapp");
+  const lista = document.getElementById("finder-inapp-lista");
+  const conteo = document.getElementById("finder-conteo");
+  const rutaLabel = document.getElementById("finder-ruta-label");
+  if (!modal || !lista) return;
+  lista.innerHTML = `<p style="text-align:center;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);padding:20px;opacity:0.5;">CARGANDO…</p>`;
+  modal.classList.remove("hidden");
+  try {
+    const archivos = await invoke<MetadatosArchivo[]>("listar_archivos_guardados", { buzon: "todos" });
+    if (rutaLabel) rutaLabel.textContent = `~/Babel/guardados · ${buzonActivoGuardados.toUpperCase()}`;
+    if (conteo) conteo.textContent = `${archivos.length} archivo${archivos.length !== 1 ? "s" : ""}`;
+    if (archivos.length === 0) {
+      lista.innerHTML = `<p style="text-align:center;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);padding:30px;opacity:0.5;">SIN ARCHIVOS</p>`;
+      return;
+    }
+    lista.innerHTML = archivos.map(a => {
+      const nombre = a.nombre.replace(/\.babel$/, "").replace(/^\d+_/, "");
+      const peso = a.tamaño ? `${Math.round(a.tamaño / 1024)} KB` : "";
+      const buzon = a.buzon && a.buzon !== "todos" ? a.buzon : "";
+      return `
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--borde);
+          border-radius:3px;cursor:pointer;transition:border-color 0.15s;"
+          onmouseenter="this.style.borderColor='var(--borde-dorado)'"
+          onmouseleave="this.style.borderColor='var(--borde)'"
+          onclick="verArchivoDesdeFinderInApp('${escapeHTML(a.ruta ?? "")}')">
+          <span style="font-size:1.2rem;flex-shrink:0;opacity:0.6;">◫</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;letter-spacing:1px;
+              color:var(--texto-principal);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+              title="${escapeHTML(nombre)}">${escapeHTML(nombre)}</div>
+            <div style="font-size:0.58rem;color:var(--texto-secundario);opacity:0.5;letter-spacing:0.5px;margin-top:2px;">
+              ${escapeHTML(peso)}${buzon ? ` · ${escapeHTML(buzon)}` : ""} · AES-256-GCM
+            </div>
+          </div>
+        </div>`;
+    }).join("");
+  } catch (e) {
+    lista.innerHTML = `<p style="text-align:center;font-size:0.65rem;color:#ef4444;padding:20px;">${escapeHTML(String(e))}</p>`;
+  }
+}
+
+async function verArchivoDesdeFinderInApp(ruta: string): Promise<void> {
+  document.getElementById("modal-finder-inapp")?.classList.add("hidden");
+  try {
+    const texto = await invoke<string>("ver_archivo", { ruta });
+    const modal = document.getElementById("modal-visor");
+    const modalContenido = document.getElementById("modal-visor-contenido");
+    const modalNombre = document.getElementById("modal-visor-nombre");
+    if (!modal || !modalContenido) return;
+    const nombre = ruta.split("/").pop()?.replace(/\.babel$/, "") ?? ruta;
+    if (modalNombre) modalNombre.textContent = nombre;
+    renderizarEnContenedor(texto, modalContenido);
+    modal.classList.remove("hidden");
+  } catch (e) {
+    mostrarToast("Error abriendo archivo: " + String(e), true);
+  }
+}
+(window as any).verArchivoDesdeFinderInApp = verArchivoDesdeFinderInApp;
 
 // Ver la frase desde dentro de la app (pantalla principal o configuración)
 async function verFraseApp(): Promise<void> {
@@ -5464,7 +5603,7 @@ async function soltarEnBuzon(event: DragEvent, buzonId: string): Promise<void> {
 
 // AJUSTES — Tema, Idioma UI, Ver Contraseña
 
-const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
+const TRADUCCIONES_UI: Record<string, Record<string, string | Record<string, string>>> = {
   es: {
     traducir: "TRADUCIR", archivos: "ARCHIVOS", p2p: "P2P", ajustes: "⚙ AJUSTES", cerrarSesion: "CERRAR SESIÓN",
     borrarChat: "BORRAR CHAT", configuracion: "CONFIGURACIÓN", borrarAlSalir: "BORRAR AL SALIR",
@@ -5475,9 +5614,10 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     bienvenido: "BIENVENIDO AL SISTEMA", bienvenidoSistema: "BIENVENIDO AL SISTEMA", accederBunker: "ACCEDER A BÚNKER EXISTENTE",
     autenticacion: "AUTENTICACIÓN REQUERIDA", ajustesTitulo: "AJUSTES", volverPanel: "← VOLVER AL PANEL",
     fraseRecuperacion: "FRASE DE RECUPERACIÓN", recuperarBunker: "RECUPERAR BÚNKER",
-    traducidosGuardados: "TRADUCIDOS Y GUARDADOS", buzones: "BUZONES", archivosTitulo: "ARCHIVOS",
+    traducidosGuardados: "TRADUCIDOS Y GUARDADOS", buzones: "CARPETAS", archivosTitulo: "ARCHIVOS",
     noArchivos: "No hay archivos guardados", arrastra: "Arrastra documentos aquí para cifrarlos",
-    buzonesTord: "BUZONES", finder: "◫ FINDER",
+    buzonesTord: "CARPETAS", finder: "◫ FINDER", todos: "TODOS",
+    idiomaNames: { es: "Español", en: "Inglés", fr: "Francés", ar: "Árabe", de: "Alemán", ru: "Ruso", zh: "Chino" },
     modalEmailTitulo: "CONFIGURAR CORREO",
     modalEmailDesc: "Para leer y enviar correos desde Babel, conecta tu cuenta de Gmail.",
     modalEmailBtnConectar: "CONECTAR CON GMAIL",
@@ -5496,7 +5636,8 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     fraseRecuperacion: "RECOVERY PHRASE", recuperarBunker: "RECOVER VAULT",
     traducidosGuardados: "TRANSLATED & SAVED", buzones: "FOLDERS", archivosTitulo: "FILES",
     noArchivos: "No saved files", arrastra: "Drag documents here to encrypt them",
-    buzonesTord: "FOLDERS", finder: "◫ FINDER",
+    buzonesTord: "FOLDERS", finder: "◫ FINDER", todos: "ALL",
+    idiomaNames: { es: "Spanish", en: "English", fr: "French", ar: "Arabic", de: "German", ru: "Russian", zh: "Chinese" },
     modalEmailTitulo: "SET UP EMAIL",
     modalEmailDesc: "To read and send emails from Babel, connect your Gmail account.",
     modalEmailBtnConectar: "CONNECT WITH GMAIL",
@@ -5515,7 +5656,8 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     fraseRecuperacion: "PHRASE DE RÉCUPÉRATION", recuperarBunker: "RÉCUPÉRER LE COFFRE",
     traducidosGuardados: "TRADUITS ET SAUVEGARDÉS", buzones: "DOSSIERS", archivosTitulo: "FICHIERS",
     noArchivos: "Aucun fichier sauvegardé", arrastra: "Faites glisser des documents ici pour les chiffrer",
-    buzonesTord: "DOSSIERS", finder: "◫ FINDER",
+    buzonesTord: "DOSSIERS", finder: "◫ FINDER", todos: "TOUS",
+    idiomaNames: { es: "Espagnol", en: "Anglais", fr: "Français", ar: "Arabe", de: "Allemand", ru: "Russe", zh: "Chinois" },
     modalEmailTitulo: "CONFIGURER LE COURRIER",
     modalEmailDesc: "Pour lire et envoyer des courriels depuis Babel, connectez votre compte Gmail.",
     modalEmailBtnConectar: "CONNECTER AVEC GMAIL",
@@ -5534,7 +5676,8 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
     fraseRecuperacion: "عبارة الاسترداد", recuperarBunker: "استرداد الخزنة",
     traducidosGuardados: "مترجم ومحفوظ", buzones: "المجلدات", archivosTitulo: "الملفات",
     noArchivos: "لا توجد ملفات محفوظة", arrastra: "اسحب المستندات هنا لتشفيرها",
-    buzonesTord: "المجلدات", finder: "◫ FINDER",
+    buzonesTord: "المجلدات", finder: "◫ FINDER", todos: "الكل",
+    idiomaNames: { es: "الإسبانية", en: "الإنجليزية", fr: "الفرنسية", ar: "العربية", de: "الألمانية", ru: "الروسية", zh: "الصينية" },
     modalEmailTitulo: "إعداد البريد الإلكتروني",
     modalEmailDesc: "لقراءة رسائلك وإرسالها من بابل، اربط حساب Gmail الخاص بك.",
     modalEmailBtnConectar: "ربط حساب Gmail",
@@ -5545,35 +5688,55 @@ const TRADUCCIONES_UI: Record<string, Record<string, string>> = {
 
 function cambiarIdiomaUI(idioma: string): void {
   const t = TRADUCCIONES_UI[idioma] ?? TRADUCCIONES_UI["es"];
+  const s = (v: string | Record<string, string> | undefined): string => (typeof v === "string" ? v : "");
   localStorage.setItem("babel-idioma-ui", idioma);
   const mapa: Record<string, string> = {
-    "pantalla-texto-traducir": t.traducir, "pantalla-texto-archivos": t.archivos,
-    "pantalla-texto-p2p": t.p2p, "pantalla-texto-ajustes": t.ajustes,
-    "pantalla-texto-cerrar": t.cerrarSesion, "ui-borrar-chat": t.borrarChat,
-    "ui-configuracion": t.configuracion, "ui-borrar-al-salir": t.borrarAlSalir,
-    "ui-borrar-al-salir-desc": t.borrarAlSalirDesc, "ui-email-auto": t.emailAuto,
-    "ui-proximamente": t.proximamente, "ui-diccionario": t.diccionario,
-    "ui-vocabulario-activo": t.vocabularioActivo, "ui-volver-archivos": t.volver,
-    "btn-ver-sel-g": t.verArchivo, "btn-compartir-sel-g": t.compartir, "btn-eliminar-sel-g": t.eliminar,
-    "btn-unir-pdfs-g": t.unirPdfs,
-    "ui-exportar-todo": t.exportarTodo, "ui-importar": t.importar, "ui-tema": t.tema,
-    "ui-idioma-interfaz": t.idiomaInterfaz, "ui-bienvenido-sistema": t.bienvenidoSistema,
-    "ui-acceder-bunker": t.accederBunker, "ui-autenticacion-requerida": t.autenticacion,
-    "ui-ajustes-titulo": t.ajustesTitulo, "ui-volver-panel": t.volverPanel,
-    "ui-frase-recuperacion": t.fraseRecuperacion, "ui-recuperar-bunker": t.recuperarBunker,
-    "ui-traducidos-guardados": t.traducidosGuardados, "ui-buzones": t.buzones,
-    "ui-finder": t.finder, "ui-archivos-titulo": t.archivosTitulo,
-    "ui-no-archivos": t.noArchivos, "ui-arrastra": t.arrastra,
-    "modal-email-titulo": t.modalEmailTitulo,
-    "modal-email-desc": t.modalEmailDesc,
-    "modal-email-btn-conectar": t.modalEmailBtnConectar,
-    "modal-email-aviso": t.modalEmailAviso,
-    "modal-email-btn-posponer": t.modalEmailBtnPosponer,
+    "pantalla-texto-traducir": s(t.traducir), "pantalla-texto-archivos": s(t.archivos),
+    "pantalla-texto-p2p": s(t.p2p), "pantalla-texto-ajustes": s(t.ajustes),
+    "pantalla-texto-cerrar": s(t.cerrarSesion), "ui-borrar-chat": s(t.borrarChat),
+    "ui-configuracion": s(t.configuracion), "ui-borrar-al-salir": s(t.borrarAlSalir),
+    "ui-borrar-al-salir-desc": s(t.borrarAlSalirDesc), "ui-email-auto": s(t.emailAuto),
+    "ui-proximamente": s(t.proximamente), "ui-diccionario": s(t.diccionario),
+    "ui-vocabulario-activo": s(t.vocabularioActivo), "ui-volver-archivos": s(t.volver),
+    "btn-ver-sel-g": s(t.verArchivo), "btn-compartir-sel-g": s(t.compartir), "btn-eliminar-sel-g": s(t.eliminar),
+    "btn-unir-pdfs-g": s(t.unirPdfs),
+    "ui-exportar-todo": s(t.exportarTodo), "ui-importar": s(t.importar), "ui-tema": s(t.tema),
+    "ui-idioma-interfaz": s(t.idiomaInterfaz), "ui-bienvenido-sistema": s(t.bienvenidoSistema),
+    "ui-acceder-bunker": s(t.accederBunker), "ui-autenticacion-requerida": s(t.autenticacion),
+    "ui-ajustes-titulo": s(t.ajustesTitulo), "ui-volver-panel": s(t.volverPanel),
+    "ui-frase-recuperacion": s(t.fraseRecuperacion), "ui-recuperar-bunker": s(t.recuperarBunker),
+    "ui-traducidos-guardados": s(t.traducidosGuardados), "ui-buzones": s(t.buzones),
+    "ui-finder": s(t.finder), "ui-archivos-titulo": s(t.archivosTitulo),
+    "ui-no-archivos": s(t.noArchivos), "ui-arrastra": s(t.arrastra),
+    "modal-email-titulo": s(t.modalEmailTitulo),
+    "modal-email-desc": s(t.modalEmailDesc),
+    "modal-email-btn-conectar": s(t.modalEmailBtnConectar),
+    "modal-email-aviso": s(t.modalEmailAviso),
+    "modal-email-btn-posponer": s(t.modalEmailBtnPosponer),
   };
   for (const [id, texto] of Object.entries(mapa)) {
     const el = document.getElementById(id);
     if (el) el.textContent = texto;
   }
+  // Actualizar opciones de selectores de idioma con nombres en el idioma de la IU
+  const nombres = (t.idiomaNames ?? {}) as Record<string, string>;
+  const ordenOpciones = ["es", "en", "fr", "ar", "de", "ru", "zh"];
+  for (const selId of ["selector-origen", "selector-destino"]) {
+    const sel = document.getElementById(selId) as HTMLSelectElement | null;
+    if (!sel) continue;
+    const valorActual = sel.value;
+    sel.innerHTML = ordenOpciones.map(cod => {
+      const nombre = nombres[cod] ?? cod;
+      return `<option value="${cod}">${nombre}</option>`;
+    }).join("");
+    sel.value = valorActual;
+  }
+  // Actualizar el elemento TODOS en los buzones
+  document.querySelectorAll<HTMLElement>(".buzon-nombre").forEach(el => {
+    if (el.textContent === "TODOS" || el.textContent === "ALL" || el.textContent === "TOUS" || el.textContent === "الكل") {
+      el.textContent = s(t.todos) || "TODOS";
+    }
+  });
   // RTL para árabe
   document.documentElement.setAttribute("dir", idioma === "ar" ? "rtl" : "ltr");
 }
