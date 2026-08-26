@@ -1,0 +1,11 @@
+{
+  "version": "0.2.2",
+  "notes": "Fix permanente integridad binario; 13 mejoras UX: carpetas, historial, traductor, BIP39, Finder in-app",
+  "pub_date": "2026-08-26T17:03:18Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTJzK3B0dWNINlo3RmM4ZkRGODdoOGpMN3NyUlB2WGx3eWJPWTZ2K0RGanVGMVVqQzE3eDBncllsd3NUM1o1TWZ3ZGxFUGdURzMrOWRIMU44WEY0b21EVllmNjBma0E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NzYzNzY4CWZpbGU6U2VjdXJpdHkgQmFiZWxfMC4yLjJfYWFyY2g2NC5kbWcKbGtUeXFRN2xaK0lqOHhvcys1K3QrSS81VlNia0t1K2ZXMVkrQWxkbGJFVjgxaDVSNFZGRmplQ1B0M1pmYi82dDVHS1BvWXkyODZiZXdES1luWER3QlE9PQo=",
+      "url": "https://github.com/darioballesteros26/babel-security/releases/download/v0.2.2/Security.Babel_0.2.2_aarch64.dmg"
+    }
+  }
+}

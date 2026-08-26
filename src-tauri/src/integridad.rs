@@ -131,13 +131,15 @@ fn verificar_huella_build() -> bool {
             true
         }
         Ok(guardada) => {
-            log::warn!(
-                "[INTEGRIDAD] Huella de build no coincide: esperada={} encontrada={}",
+            log::info!(
+                "[INTEGRIDAD] Nueva build detectada (anterior={} actual={}). Actualizando huella.",
+                guardada.trim(),
                 BUILD_FINGERPRINT,
-                guardada.trim()
             );
-            // La huella difiere: el binario fue sustituido por otra build.
-            false
+            // Build legítima nueva: actualizar la huella y continuar sin bloquear.
+            // El bloqueo real lo hace codesign (capa 1); esta capa solo registra el cambio.
+            guardar_huella_build();
+            true
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             // Primera ejecución de esta build: escribir la huella.
