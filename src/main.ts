@@ -1483,10 +1483,30 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
   // ── Fin RAT ────────────────────────────────────────────────────────────────
 
-  // Ocultar sidebar en fullscreen nativo (botón verde macOS)
+  // Gestionar sidebar en fullscreen nativo (botón verde macOS)
+  let _eraFullscreen = false;
   getCurrentWindow().onResized(async () => {
     const fs = await getCurrentWindow().isFullscreen().catch(() => false);
     document.body.classList.toggle("es-fullscreen", fs);
+    const sidebar = document.getElementById("chat-sidebar");
+    if (!sidebar) return;
+    if (fs && !_eraFullscreen) {
+      // Al entrar en fullscreen: ocultar sidebar para vista inmersiva
+      sidebar.classList.add("hidden");
+      localStorage.setItem("babel-sidebar", "0");
+    } else if (!fs && _eraFullscreen) {
+      // Al salir de fullscreen: restaurar estado previo
+      const guardado = localStorage.getItem("babel-sidebar-prefullscreen");
+      if (guardado === "1") {
+        sidebar.classList.remove("hidden");
+        localStorage.setItem("babel-sidebar", "1");
+      }
+    }
+    if (!_eraFullscreen && fs) {
+      // Guardar estado antes de entrar en fullscreen
+      localStorage.setItem("babel-sidebar-prefullscreen", localStorage.getItem("babel-sidebar") ?? "1");
+    }
+    _eraFullscreen = fs;
   }).catch(() => {});
 
   // Badge servidor: monitoreo continuo cada 5 s (verde=activo, rojo=caído)
@@ -5397,12 +5417,20 @@ function irAFechaRegistro(fechaISO: string): void {
   if (!fechaISO) return;
   const [y, m, d] = fechaISO.split("-").map(Number);
   const objetivo = new Date(y, m - 1, d);
+  objetivo.setHours(0, 0, 0, 0);
   const hoy = new Date();
   hoy.setHours(0, 0, 0, 0);
   const diff = Math.round((objetivo.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
-  _registroFechaOffset = Math.min(0, diff);
+  if (diff > 0) {
+    mostrarToast("No puedes navegar a fechas futuras.", false);
+    return;
+  }
+  _registroFechaOffset = diff;
   _registroFiltroIPs.clear();
   cargarRegistroDia().catch(() => {});
+  // Limpiar el input para que se pueda seleccionar la misma fecha otra vez
+  const inp = document.getElementById("registro-buscar-fecha") as HTMLInputElement | null;
+  if (inp) inp.value = "";
 }
 (window as any).irAFechaRegistro = irAFechaRegistro;
 
@@ -5796,6 +5824,11 @@ function guardarNombreDisplay(): void {
 document.addEventListener("DOMContentLoaded", () => {
   cargarAjustesGuardados();
   cargarAjustesTraduccion().catch(() => {});
+
+  // Listener seguro para el buscador de fechas del historial (backup del onchange inline)
+  document.getElementById("registro-buscar-fecha")?.addEventListener("change", (e) => {
+    irAFechaRegistro((e.target as HTMLInputElement).value);
+  });
 
   document.getElementById("btn-cancelar-traduccion")?.addEventListener("click", async () => {
     try {
