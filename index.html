@@ -140,13 +140,6 @@
         style="position:absolute;top:16px;right:16px;width:8px;height:8px;border-radius:50%;background:#f59e0b;opacity:0.7;transition:background 0.5s,opacity 0.5s;">
       </div>
 
-      <!-- Banner prueba gratuita — visible solo en modo trial -->
-      <div id="banner-prueba" style="display:none;width:100%;box-sizing:border-box;padding:8px 16px;background:rgba(212,175,55,0.12);border-bottom:1px solid rgba(212,175,55,0.3);text-align:center;font-size:0.62rem;letter-spacing:1.5px;color:var(--dorado);">
-        PRUEBA GRATUITA — <strong id="banner-dias-texto">14 días</strong> restantes
-        <a id="banner-activar-link" href="https://securitybabel.netlify.app#prueba-gratis" target="_blank" rel="noopener noreferrer"
-          style="color:var(--dorado);margin-left:12px;text-decoration:underline;cursor:pointer;">ACTIVAR LICENCIA →</a>
-      </div>
-
       <div class="logo-babel small">BABEL</div>
       <p class="descripcion" id="bienvenida-usuario">Bienvenido</p>
       <div class="panel-botones">
@@ -170,59 +163,26 @@
       <button type="button" data-action="cerrar-sesion" class="btn-link" style="margin-top:8px"
         id="pantalla-texto-cerrar">CERRAR SESIÓN</button>
 
-      <!-- Overlay prueba expirada — cubre toda la pantalla principal -->
-      <div id="overlay-trial-expirado" style="display:none;position:absolute;inset:0;background:rgba(9,9,11,0.97);z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:32px;text-align:center;">
-        <div style="font-family:'Times New Roman',Times,serif;font-size:1.1rem;letter-spacing:3px;color:var(--dorado);">BABEL</div>
-        <div style="font-size:0.72rem;letter-spacing:2px;color:#f1f5f9;margin-top:4px;">TU PRUEBA GRATUITA HA TERMINADO</div>
-        <div style="font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);max-width:280px;line-height:1.7;">
-          Activa tu licencia para seguir usando Babel Security.<br>Tus datos están a salvo — puedes exportarlos en cualquier momento.
-        </div>
-        <a href="https://securitybabel.netlify.app#prueba-gratis" target="_blank" rel="noopener noreferrer"
-          style="display:inline-block;margin-top:8px;padding:14px 32px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;text-decoration:none;font-weight:bold;">
-          OBTENER LICENCIA
-        </a>
-        <button type="button" data-action="exportar-datos-trial"
-          style="padding:10px 24px;border:1px solid rgba(197,160,89,0.4);background:transparent;color:var(--texto-secundario);font-family:'Times New Roman',Times,serif;font-size:0.6rem;letter-spacing:2px;cursor:pointer;margin-top:4px;">
-          EXPORTAR MIS DATOS
-        </button>
-      </div>
-    </div>
-
-    <!-- Modal aviso 3 días restantes -->
-    <div id="modal-trial-aviso" class="hidden" style="position:fixed;inset:0;background:rgba(9,9,11,0.85);z-index:300;display:flex;align-items:center;justify-content:center;">
-      <div style="background:#111115;border:1px solid rgba(212,175,55,0.35);padding:36px 32px;max-width:340px;width:90%;text-align:center;">
-        <div style="font-size:0.65rem;letter-spacing:2.5px;color:var(--dorado);margin-bottom:16px;">PRUEBA GRATUITA</div>
-        <div style="font-size:0.72rem;letter-spacing:1px;color:#f1f5f9;margin-bottom:10px;" id="modal-trial-aviso-titulo">Tu prueba termina pronto</div>
-        <div style="font-size:0.58rem;letter-spacing:0.5px;color:var(--texto-secundario);line-height:1.7;margin-bottom:24px;" id="modal-trial-aviso-cuerpo">
-          Te quedan pocos días. Activa tu licencia para no perder el acceso.
-        </div>
-        <a href="https://securitybabel.netlify.app#prueba-gratis" target="_blank" rel="noopener noreferrer"
-          style="display:block;margin-bottom:10px;padding:12px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;font-size:0.62rem;letter-spacing:2px;text-decoration:none;font-weight:bold;">
-          ACTIVAR AHORA
-        </a>
-        <button type="button" data-action="cerrar-modal-trial-aviso"
-          style="padding:10px;width:100%;border:1px solid rgba(197,160,89,0.3);background:transparent;color:var(--texto-secundario);font-size:0.58rem;letter-spacing:1.5px;cursor:pointer;font-family:'Times New Roman',Times,serif;">
-          CONTINUAR CON LA PRUEBA
-        </button>
-      </div>
     </div>
 
     <!-- MODAL — CONFIGURAR AUTOLOGIN (se muestra una vez tras el primer login manual) -->
-    <div id="modal-autologin-config" class="hidden" style="position:fixed;inset:0;background:rgba(9,9,11,0.88);z-index:400;display:flex;align-items:center;justify-content:center;">
-      <div style="background:#111115;border:1px solid rgba(212,175,55,0.35);padding:36px 32px;max-width:360px;width:90%;text-align:center;">
-        <div style="font-size:0.62rem;letter-spacing:2.5px;color:var(--dorado);margin-bottom:16px;">INICIO AUTOMÁTICO</div>
-        <div style="font-size:0.72rem;letter-spacing:1px;color:#f1f5f9;margin-bottom:14px;">¿Entrar sin contraseña?</div>
-        <div style="font-size:0.58rem;letter-spacing:0.4px;color:var(--texto-secundario);line-height:1.8;margin-bottom:26px;">
-          Babel puede recordar tus credenciales en este Mac y abrirse solo.<br><br>
-          Cada <strong style="color:#f1f5f9;">3 días</strong> te pedirá la contraseña para confirmar que sigues siendo tú.
+    <div id="modal-autologin-config" class="hidden" style="position:fixed;inset:0;background:rgba(9,9,11,0.92);z-index:400;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);">
+      <div style="background:linear-gradient(150deg,#0e0e0f,#09090b);border:1px solid rgba(197,160,89,0.45);padding:48px 40px 40px;max-width:380px;width:90%;text-align:center;box-shadow:0 32px 80px rgba(0,0,0,0.85),0 0 0 1px rgba(197,160,89,0.06);">
+        <div style="width:56px;height:56px;margin:0 auto 28px;background:rgba(212,175,55,0.08);border:1px solid rgba(212,175,55,0.3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.5rem;">🔐</div>
+        <div style="font-size:0.82rem;letter-spacing:1px;color:#f1f5f9;margin-bottom:12px;font-weight:600;">Acceso automático</div>
+        <div style="font-size:0.59rem;color:var(--texto-secundario);line-height:1.9;margin-bottom:10px;">
+          Babel guarda tus credenciales en este Mac y se abre solo.
+        </div>
+        <div style="display:inline-block;margin-bottom:32px;padding:5px 14px;background:rgba(212,175,55,0.07);border:1px solid rgba(212,175,55,0.22);font-size:0.55rem;letter-spacing:1.5px;color:var(--dorado);">
+          CONTRASEÑA CADA 3 DÍAS
         </div>
         <button id="autologin-btn-activar" type="button"
-          style="display:block;width:100%;margin-bottom:10px;padding:13px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;font-size:0.62rem;letter-spacing:2px;font-weight:bold;border:none;cursor:pointer;font-family:'Times New Roman',Times,serif;">
+          style="display:block;width:100%;margin-bottom:12px;padding:15px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;font-size:0.64rem;letter-spacing:2.5px;font-weight:700;border:none;cursor:pointer;font-family:'Times New Roman',Times,serif;">
           ACTIVAR
         </button>
         <button id="autologin-btn-no" type="button"
-          style="display:block;width:100%;padding:11px;border:1px solid rgba(197,160,89,0.3);background:transparent;color:var(--texto-secundario);font-size:0.58rem;letter-spacing:1.5px;cursor:pointer;font-family:'Times New Roman',Times,serif;">
-          NO, GRACIAS
+          style="background:none;border:none;color:var(--texto-secundario);font-size:0.56rem;letter-spacing:1.5px;cursor:pointer;padding:8px;width:100%;font-family:'Times New Roman',Times,serif;opacity:0.65;">
+          No, gracias
         </button>
       </div>
     </div>
