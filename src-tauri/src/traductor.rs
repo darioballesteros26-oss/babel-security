@@ -1,7 +1,6 @@
 use base64;
 use base64::Engine;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tesseract::Tesseract;
 
 // Flag global para cancelar la traducción en curso.
 // El frontend lo activa via `cancelar_traduccion()`; los bucles de traducción
@@ -1144,58 +1143,6 @@ pub fn clonar_y_traducir(
     Ok(())
 }
 
-fn ocr_pagina_pdf(ruta_pdf: &str, pagina: u32) -> String {
-    use rand::{rngs::OsRng, RngCore};
-    let tmp_dir = crate::babel_dir().join("tmp");
-    let _ = std::fs::create_dir_all(&tmp_dir);
-    let mut rand_bytes = [0u8; 4];
-    OsRng.fill_bytes(&mut rand_bytes);
-    let tmp_base = tmp_dir.join(format!("ocr_{}_{}", pagina, hex::encode(rand_bytes)));
-    let tmp_img = format!("{}.png", tmp_base.to_string_lossy());
-
-    let pdftoppm = resolver_binario(RUTAS_PDFTOPPM, "pdftoppm");
-
-    let ok = std::process::Command::new(pdftoppm)
-        .args([
-            "-r",
-            "300",
-            "-f",
-            &pagina.to_string(),
-            "-l",
-            &pagina.to_string(),
-            "-png",
-            "-singlefile",
-            ruta_pdf,
-            &tmp_base.to_string_lossy(),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-
-    if !ok {
-        if std::path::Path::new(&tmp_img).exists() {
-            let tam = std::fs::metadata(&tmp_img).map(|m| m.len() as usize).unwrap_or(0);
-            if tam > 0 { let _ = crate::escribir_privado(&tmp_img, vec![0u8; tam]); }
-            let _ = fs::remove_file(&tmp_img);
-        }
-        return String::new();
-    }
-
-    let resultado = match Tesseract::new(None, Some("spa+eng+fra+deu+ara+rus+chi_sim")) {
-        Ok(t) => match t.set_image(&tmp_img) {
-            Ok(mut t2) => t2.get_text().unwrap_or_default(),
-            Err(_) => String::new(),
-        },
-        Err(_) => String::new(),
-    };
-
-    let tam = std::fs::metadata(&tmp_img)
-        .map(|m| m.len() as usize)
-        .unwrap_or(0);
-    let _ = crate::escribir_privado(&tmp_img, vec![0u8; tam]);
-    let _ = fs::remove_file(&tmp_img);
-    resultado
-}
 
 // M6: delega en crate::borrar_seguro, que aplica O_NOFOLLOW + symlink_metadata para evitar
 // TOCTOU por symlink (los temporales viven en ~/Babel/tmp, potencialmente compartido) además
@@ -1668,18 +1615,9 @@ pub fn procesar_pdf(
                 break 'extraccion texto_pdftotext;
             }
 
-            // PASO 5: Tesseract OCR — último recurso para PDFs completamente escaneados
-            progreso(13, "OCR PÁGINA A PÁGINA...");
-            let mut ocr_total = String::new();
-            for pag in 1u32..=50 {
-                let pag_text = ocr_pagina_pdf(ruta, pag);
-                if pag_text.trim().is_empty() {
-                    break;
-                }
-                ocr_total.push_str(&pag_text);
-                ocr_total.push('\n');
-            }
-            ocr_total
+            // PDFs completamente escaneados sin texto extraíble: PaddleOCR-VL (paso 3)
+            // es el método correcto; si llegamos aquí sin texto, devolvemos vacío.
+            String::new()
         };
 
         // Bucle de traducción por lotes (batch HTTP) para máxima velocidad
