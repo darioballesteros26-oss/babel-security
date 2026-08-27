@@ -1672,6 +1672,13 @@ async function intentarAcceso(): Promise<void> {
         cargarAjustesTraduccion().catch(() => {});
       }
 
+      // Mostrar popup de autologin si el usuario aún no ha elegido
+      invoke<boolean | null>("leer_preferencia_autologin").then(pref => {
+        if (pref === null) {
+          document.getElementById("modal-autologin-config")?.classList.remove("hidden");
+        }
+      }).catch(() => {});
+
     } else {
       mostrarMensaje("login-msg", "CREDENCIALES INCORRECTAS", true);
       limpiarCampo("login-pass");
@@ -5824,6 +5831,17 @@ function guardarNombreDisplay(): void {
 document.addEventListener("DOMContentLoaded", () => {
   cargarAjustesGuardados();
   cargarAjustesTraduccion().catch(() => {});
+
+  // Modal autologin — activar
+  document.getElementById("autologin-btn-activar")?.addEventListener("click", () => {
+    invoke("guardar_preferencia_autologin", { activo: true }).catch(() => {});
+    document.getElementById("modal-autologin-config")?.classList.add("hidden");
+  });
+  // Modal autologin — rechazar
+  document.getElementById("autologin-btn-no")?.addEventListener("click", () => {
+    invoke("guardar_preferencia_autologin", { activo: false }).catch(() => {});
+    document.getElementById("modal-autologin-config")?.classList.add("hidden");
+  });
 
   // Listener seguro para el buscador de fechas del historial (backup del onchange inline)
   document.getElementById("registro-buscar-fecha")?.addEventListener("change", (e) => {

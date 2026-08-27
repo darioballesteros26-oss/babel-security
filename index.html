@@ -207,6 +207,26 @@
       </div>
     </div>
 
+    <!-- MODAL — CONFIGURAR AUTOLOGIN (se muestra una vez tras el primer login manual) -->
+    <div id="modal-autologin-config" class="hidden" style="position:fixed;inset:0;background:rgba(9,9,11,0.88);z-index:400;display:flex;align-items:center;justify-content:center;">
+      <div style="background:#111115;border:1px solid rgba(212,175,55,0.35);padding:36px 32px;max-width:360px;width:90%;text-align:center;">
+        <div style="font-size:0.62rem;letter-spacing:2.5px;color:var(--dorado);margin-bottom:16px;">INICIO AUTOMÁTICO</div>
+        <div style="font-size:0.72rem;letter-spacing:1px;color:#f1f5f9;margin-bottom:14px;">¿Entrar sin contraseña?</div>
+        <div style="font-size:0.58rem;letter-spacing:0.4px;color:var(--texto-secundario);line-height:1.8;margin-bottom:26px;">
+          Babel puede recordar tus credenciales en este Mac y abrirse solo.<br><br>
+          Cada <strong style="color:#f1f5f9;">3 días</strong> te pedirá la contraseña para confirmar que sigues siendo tú.
+        </div>
+        <button id="autologin-btn-activar" type="button"
+          style="display:block;width:100%;margin-bottom:10px;padding:13px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;font-size:0.62rem;letter-spacing:2px;font-weight:bold;border:none;cursor:pointer;font-family:'Times New Roman',Times,serif;">
+          ACTIVAR
+        </button>
+        <button id="autologin-btn-no" type="button"
+          style="display:block;width:100%;padding:11px;border:1px solid rgba(197,160,89,0.3);background:transparent;color:var(--texto-secundario);font-size:0.58rem;letter-spacing:1.5px;cursor:pointer;font-family:'Times New Roman',Times,serif;">
+          NO, GRACIAS
+        </button>
+      </div>
+    </div>
+
     <!-- PANTALLA 6 — TRADUCCIÓN CHAT -->
     <div id="pantalla-traduccion" class="pantalla pantalla-chat hidden">
 

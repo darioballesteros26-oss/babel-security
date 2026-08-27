@@ -726,10 +726,10 @@ fn cargar_settings_timeout(subclave_hex: &str) -> u32 {
         .unwrap_or(60)
 }
 
-#[tauri::command]
-fn verificar_login(
+fn verificar_login_interno(
     pass: String,
     pass_usuario: String,
+    guardar_fecha: bool,
     sesion: tauri::State<SesionActiva>,
     app: tauri::AppHandle,
 ) -> Result<bool, String> {
@@ -824,6 +824,9 @@ fn verificar_login(
 
     // Guardar credenciales en el keychain del sistema para autologin en el próximo arranque
     guardar_credenciales_keychain(pass.as_str(), pass_usuario.as_str());
+    if guardar_fecha {
+        guardar_fecha_login_manual();
+    }
 
     // Si recovery.babel existe pero el marcador de versión indica esquema antiguo
     // (o no existe el marcador, lo que implica vault creado antes del sistema de versiones),
@@ -925,6 +928,79 @@ fn borrar_credenciales_keychain() {
     if let Some(path) = autologin_babel_path() {
         let _ = std::fs::remove_file(path);
     }
+}
+
+// ── FECHA ÚLTIMO LOGIN MANUAL (para forzar contraseña cada 3 días) ───────────
+
+const DIAS_FORZAR_LOGIN: u64 = 3 * 24 * 60 * 60;
+
+fn autologin_fecha_path() -> Option<std::path::PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join("Babel").join("autologin_fecha.babel"))
+}
+
+fn guardar_fecha_login_manual() {
+    use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, OsRng, rand_core::RngCore}};
+    let Some(path) = autologin_fecha_path() else { return };
+    let now = prueba_ahora_unix().to_string();
+    let key = autologin_machine_key();
+    let cipher = Aes256Gcm::new((&key).into());
+    let mut nonce_bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+    let Ok(ct) = cipher.encrypt(nonce, now.as_bytes()) else { return };
+    let mut blob = Vec::with_capacity(12 + ct.len());
+    blob.extend_from_slice(&nonce_bytes);
+    blob.extend_from_slice(&ct);
+    let _ = escribir_privado(&path, &blob);
+}
+
+fn cargar_fecha_login_manual() -> Option<u64> {
+    use aes_gcm::{Aes256Gcm, KeyInit, aead::Aead};
+    let path = autologin_fecha_path()?;
+    let blob = std::fs::read(&path).ok()?;
+    if blob.len() < 13 { return None; }
+    let key = autologin_machine_key();
+    let cipher = Aes256Gcm::new((&key).into());
+    let nonce = aes_gcm::Nonce::from_slice(&blob[..12]);
+    let plain = cipher.decrypt(nonce, &blob[12..]).ok()?;
+    std::str::from_utf8(&plain).ok()?.parse::<u64>().ok()
+}
+
+// ── PREFERENCIA DE AUTOLOGIN ─────────────────────────────────────────────────
+
+fn autologin_pref_path() -> Option<std::path::PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join("Babel").join("autologin_pref.babel"))
+}
+
+#[tauri::command]
+fn guardar_preferencia_autologin(activo: bool) {
+    if let Some(path) = autologin_pref_path() {
+        let _ = escribir_privado(&path, if activo { b"1" } else { b"0" });
+    }
+}
+
+#[tauri::command]
+fn leer_preferencia_autologin() -> Option<bool> {
+    let path = autologin_pref_path()?;
+    let bytes = std::fs::read(&path).ok()?;
+    match bytes.first() {
+        Some(b'1') => Some(true),
+        Some(b'0') => Some(false),
+        _ => None,
+    }
+}
+
+// Wrapper Tauri: el login manual siempre actualiza la fecha.
+#[tauri::command]
+fn verificar_login(
+    pass: String,
+    pass_usuario: String,
+    sesion: tauri::State<SesionActiva>,
+    app: tauri::AppHandle,
+) -> Result<bool, String> {
+    verificar_login_interno(pass, pass_usuario, true, sesion, app)
 }
 
 // ── SISTEMA DE PRUEBA GRATUITA (14 días) ─────────────────────────────────────
@@ -1054,6 +1130,20 @@ fn autologin_tauri(
     sesion: tauri::State<SesionActiva>,
     app: tauri::AppHandle,
 ) -> Result<bool, String> {
+    // Si la preferencia no está configurada o el usuario la desactivó, no hacer autologin.
+    match leer_preferencia_autologin() {
+        Some(true) => {}
+        _ => return Ok(false),
+    }
+    // Forzar login manual si han pasado más de 3 días sin introducir la contraseña.
+    match cargar_fecha_login_manual() {
+        None => return Ok(false),
+        Some(ultimo) => {
+            if prueba_ahora_unix().saturating_sub(ultimo) > DIAS_FORZAR_LOGIN {
+                return Ok(false);
+            }
+        }
+    }
     let (maestra, pass_usuario) = match cargar_credenciales_keychain() {
         Some(c) => c,
         None => return Ok(false),
@@ -1061,7 +1151,7 @@ fn autologin_tauri(
     // Si las credenciales guardadas ya no son válidas (contraseña cambiada, etc.),
     // limpiamos el keychain y reseteamos el contador para que el fallo automático
     // no consuma intentos manuales del usuario.
-    match verificar_login(maestra.to_string(), pass_usuario.to_string(), sesion, app) {
+    match verificar_login_interno(maestra.to_string(), pass_usuario.to_string(), false, sesion, app) {
         Ok(true) => Ok(true),
         Ok(false) => {
             borrar_credenciales_keychain();
@@ -6406,6 +6496,8 @@ fn main() {
             seleccionar_archivo_email_dialogo,
             autologin_tauri,
             olvidar_sesion_tauri,
+            guardar_preferencia_autologin,
+            leer_preferencia_autologin,
             obtener_estado_prueba,
             instalar_actualizacion,
             iniciar_oauth_gmail_tauri,
