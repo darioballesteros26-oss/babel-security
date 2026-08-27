@@ -787,6 +787,7 @@ body {
 /* Sidebar oculta en pantalla pequeña */
 @media (max-width: 680px) { .chat-sidebar { display: none !important; } }
 /* En fullscreen: el JS oculta/muestra la sidebar vía clase .hidden — no forzar aquí */
+.es-fullscreen .chat-sidebar { width: 300px; }
 
 /* Pantalla completa: más espacio y texto más legible */
 :-webkit-full-screen .chat-mensajes,

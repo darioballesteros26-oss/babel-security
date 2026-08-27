@@ -1427,20 +1427,17 @@ window.addEventListener("DOMContentLoaded", async () => {
     const sidebar = document.getElementById("chat-sidebar");
     if (!sidebar) return;
     if (fs && !_eraFullscreen) {
-      // Al entrar en fullscreen: ocultar sidebar para vista inmersiva
-      sidebar.classList.add("hidden");
-      localStorage.setItem("babel-sidebar", "0");
+      // Guardar estado previo y abrir sidebar al entrar en fullscreen
+      localStorage.setItem("babel-sidebar-prefullscreen", localStorage.getItem("babel-sidebar") ?? "0");
+      sidebar.classList.remove("hidden");
+      localStorage.setItem("babel-sidebar", "1");
     } else if (!fs && _eraFullscreen) {
       // Al salir de fullscreen: restaurar estado previo
       const guardado = localStorage.getItem("babel-sidebar-prefullscreen");
-      if (guardado === "1") {
-        sidebar.classList.remove("hidden");
-        localStorage.setItem("babel-sidebar", "1");
+      if (guardado !== "1") {
+        sidebar.classList.add("hidden");
+        localStorage.setItem("babel-sidebar", "0");
       }
-    }
-    if (!_eraFullscreen && fs) {
-      // Guardar estado antes de entrar en fullscreen
-      localStorage.setItem("babel-sidebar-prefullscreen", localStorage.getItem("babel-sidebar") ?? "1");
     }
     _eraFullscreen = fs;
   }).catch(() => {});
@@ -5773,16 +5770,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const badge = document.getElementById("autologin-estado-badge");
     if (badge) badge.textContent = activo ? "ACTIVO" : "DESACTIVADO";
   }
-  document.getElementById("autologin-btn-activar")?.addEventListener("click", () => {
-    invoke("guardar_preferencia_autologin", { activo: true }).catch(() => {});
+  function cerrarAutologinModal(activo: boolean) {
+    invoke("guardar_preferencia_autologin", { activo }).catch(() => {});
     document.getElementById("modal-autologin-config")?.classList.add("hidden");
-    actualizarBadgeAutologin(true);
-  });
-  document.getElementById("autologin-btn-no")?.addEventListener("click", () => {
-    invoke("guardar_preferencia_autologin", { activo: false }).catch(() => {});
-    document.getElementById("modal-autologin-config")?.classList.add("hidden");
-    actualizarBadgeAutologin(false);
-  });
+    actualizarBadgeAutologin(activo);
+  }
+  document.getElementById("autologin-btn-activar")?.addEventListener("click", () => cerrarAutologinModal(true));
+  document.getElementById("autologin-btn-no")?.addEventListener("click", () => cerrarAutologinModal(false));
+  document.getElementById("autologin-btn-no-alt")?.addEventListener("click", () => cerrarAutologinModal(false));
 
   // Listener seguro para el buscador de fechas del historial (backup del onchange inline)
   document.getElementById("registro-buscar-fecha")?.addEventListener("change", (e) => {

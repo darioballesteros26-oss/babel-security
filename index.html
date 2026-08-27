@@ -165,29 +165,32 @@
 
     </div>
 
-    <!-- MODAL — CONFIGURAR AUTOLOGIN (se muestra una vez tras el primer login manual) -->
-    <div id="modal-autologin-config" class="hidden" style="position:fixed;inset:0;background:rgba(9,9,11,0.92);z-index:400;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);">
-      <div style="background:linear-gradient(150deg,#0e0e0f,#09090b);border:1px solid rgba(197,160,89,0.45);padding:48px 40px 40px;max-width:380px;width:90%;text-align:center;box-shadow:0 32px 80px rgba(0,0,0,0.85),0 0 0 1px rgba(197,160,89,0.06);">
-        <div style="width:48px;height:48px;margin:0 auto 28px;border:1px solid rgba(197,160,89,0.4);display:flex;align-items:center;justify-content:center;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c5a059" stroke-width="1.5" stroke-linecap="square">
-            <rect x="3" y="11" width="18" height="11" rx="0"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-          </svg>
+    <!-- MODAL — CONFIGURAR AUTOLOGIN -->
+    <div id="modal-autologin-config" class="hidden" style="position:fixed;inset:0;z-index:400;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:420px;background:var(--fondo-panel,#0d0d0d);border:1px solid var(--dorado);border-radius:4px;display:flex;flex-direction:column;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid rgba(197,160,89,0.2);">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--dorado)" stroke-width="1.5" stroke-linecap="square">
+              <rect x="3" y="11" width="18" height="11" rx="0"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            <span style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;letter-spacing:3px;color:var(--dorado);">ACCESO AUTOMÁTICO</span>
+          </div>
+          <button id="autologin-btn-no" type="button" style="background:transparent;border:none;color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
         </div>
-        <div style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;letter-spacing:2px;color:var(--texto-principal);margin-bottom:12px;">ACCESO AUTOMÁTICO</div>
-        <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:0.5px;color:var(--texto-secundario);line-height:1.9;margin-bottom:10px;">
-          Babel guarda tus credenciales en este Mac y se abre solo.
+        <div style="padding:28px 24px 24px;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.6rem;letter-spacing:1px;color:var(--texto-secundario);line-height:1.9;margin-bottom:8px;">
+            Babel puede guardar tus credenciales en este Mac y abrirse sin pedir contraseña.
+          </div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1.5px;color:var(--dorado);opacity:0.75;margin-bottom:24px;">
+            — Cada 3 días te pedirá la contraseña para confirmar que eres tú.
+          </div>
+          <button id="autologin-btn-activar" type="button" class="btn-secundario-oro" style="width:100%;padding:13px 0;margin-bottom:10px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;border:none;">
+            ACTIVAR
+          </button>
+          <button id="autologin-btn-no-alt" type="button" class="btn-secundario-oro" style="width:100%;padding:11px 0;opacity:0.5;">
+            NO, GRACIAS
+          </button>
         </div>
-        <div style="display:inline-block;margin-bottom:32px;padding:5px 14px;background:rgba(197,160,89,0.07);border:1px solid rgba(197,160,89,0.22);font-family:'Times New Roman',Times,serif;font-size:0.55rem;letter-spacing:1.5px;color:var(--dorado);">
-          CONTRASEÑA CADA 3 DÍAS
-        </div>
-        <button id="autologin-btn-activar" type="button"
-          style="display:block;width:100%;margin-bottom:12px;padding:14px;background:linear-gradient(135deg,#D4AF37,#A8860C);color:#0B0F19;font-family:'Times New Roman',Times,serif;font-size:0.62rem;letter-spacing:2px;border:none;cursor:pointer;">
-          ACTIVAR
-        </button>
-        <button id="autologin-btn-no" type="button"
-          style="background:none;border:none;color:var(--texto-secundario);font-family:'Times New Roman',Times,serif;font-size:0.56rem;letter-spacing:1.5px;cursor:pointer;padding:8px;width:100%;opacity:0.6;">
-          NO, GRACIAS
-        </button>
       </div>
     </div>
 
