@@ -485,11 +485,6 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "intentar-recuperacion": intentarRecuperacion(); break;
     case "aceptar-terminos": aceptarTerminos(); break;
     case "ver-terminos": mostrarModalTerminos(); break;
-    case "olvidar-sesion-guardada":
-      invoke("olvidar_sesion_tauri")
-        .then(() => mostrarToast("Sesión olvidada. La próxima vez deberás introducir la contraseña.", false))
-        .catch((e: unknown) => mostrarToast("Error: " + String(e), true));
-      break;
     // UI
     case "toggle-sidebar": toggleSidebar(); break;
     case "toggle-contrasena": toggleContraseña(el.dataset.campo!); break;

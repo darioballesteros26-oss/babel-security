@@ -1091,7 +1091,6 @@ async fn traducir_documento(
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
     crate::rat_detector::verificar_no_bloqueado_rat()?;
-    // Verificar que la prueba no ha expirado antes de procesar (enforcement backend).
 
     // Extraer datos de sesión ANTES de spawn_blocking — State no es Send.
     let subclave_hex = sesion.subclave_hex()?;
