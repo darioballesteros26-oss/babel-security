@@ -130,6 +130,10 @@ function mostrarPantalla(nombre: Pantalla): void {
   }
   if (nombre === "ajustes") {
     cargarListaEmparejados().catch(() => {});
+    invoke<boolean | null>("leer_preferencia_autologin").then(pref => {
+      const badge = document.getElementById("autologin-estado-badge");
+      if (badge) badge.textContent = pref === true ? "ACTIVO" : pref === false ? "DESACTIVADO" : "NO CONFIGURADO";
+    }).catch(() => {});
   }
   if (nombre === "registro") {
     _modoSospechas = false;
@@ -491,6 +495,10 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "toggle-contrasena": toggleContraseña(el.dataset.campo!); break;
     case "cambiar-tema": cambiarTema(el.dataset.tema!); break;
     case "ver-frase-app": verFraseApp(); break;
+    case "reconfigurar-autologin":
+      invoke("guardar_preferencia_autologin", { activo: false }).catch(() => {});
+      document.getElementById("modal-autologin-config")?.classList.remove("hidden");
+      break;
     case "cerrar-frase": cerrarFrase(); break;
     case "imprimir-frase": imprimirFrase(); break;
     case "cerrar-ver-frase": cerrarVerFrase(); break;
@@ -5761,14 +5769,19 @@ document.addEventListener("DOMContentLoaded", () => {
   cargarAjustesTraduccion().catch(() => {});
 
   // Modal autologin — activar
+  function actualizarBadgeAutologin(activo: boolean) {
+    const badge = document.getElementById("autologin-estado-badge");
+    if (badge) badge.textContent = activo ? "ACTIVO" : "DESACTIVADO";
+  }
   document.getElementById("autologin-btn-activar")?.addEventListener("click", () => {
     invoke("guardar_preferencia_autologin", { activo: true }).catch(() => {});
     document.getElementById("modal-autologin-config")?.classList.add("hidden");
+    actualizarBadgeAutologin(true);
   });
-  // Modal autologin — rechazar
   document.getElementById("autologin-btn-no")?.addEventListener("click", () => {
     invoke("guardar_preferencia_autologin", { activo: false }).catch(() => {});
     document.getElementById("modal-autologin-config")?.classList.add("hidden");
+    actualizarBadgeAutologin(false);
   });
 
   // Listener seguro para el buscador de fechas del historial (backup del onchange inline)
