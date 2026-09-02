@@ -5971,10 +5971,11 @@ async fn verificar_actualizacion(app: tauri::AppHandle) {
         *g = Some(update.version.clone());
     }
 
-    if ventana_activa {
-        let _ = app.emit("actualizacion-disponible", &info);
-    } else {
-        // Notificación nativa macOS cuando Babel está en segundo plano
+    // Siempre emitir el evento — el frontend mostrará el modal en cuanto tenga foco.
+    let _ = app.emit("actualizacion-disponible", &info);
+
+    // Además, si la ventana no está en foco, enviar notificación nativa para llamar la atención.
+    if !ventana_activa {
         let version_raw = update.version.clone();
         let version_safe: String = version_raw.chars()
             .filter(|c| c.is_alphanumeric() || ".-+".contains(*c))
