@@ -53,7 +53,82 @@ pub fn imagenes_a_pdf_unico(imagenes: &[Vec<u8>]) -> Result<Vec<u8>, String> {
 
 /// Decodifica y recomprime una imagen a JPEG con los mismos parámetros que
 /// `pdf_reducir::reducir` (CAP_PX, CALIDAD). Preserva gris vs color.
+/// Añade soporte HEIC en macOS vía `sips` (herramienta del sistema).
 fn comprimir_imagen(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if es_heic(bytes) {
+        let png = heic_a_png(bytes)?;
+        return comprimir_imagen_interna(&png);
+    }
+    comprimir_imagen_interna(bytes)
+}
+
+/// Detecta HEIC/HEIF por la firma del contenedor ISO Base Media File Format:
+/// bytes[4..8] == "ftyp" y el brand (bytes[8..12]) corresponde a HEIC/HEIF.
+fn es_heic(bytes: &[u8]) -> bool {
+    if bytes.len() < 12 { return false; }
+    if &bytes[4..8] != b"ftyp" { return false; }
+    matches!(&bytes[8..12],
+        b"heic" | b"heix" | b"hevc" | b"hevx" |
+        b"heim" | b"heis" | b"hevm" | b"hevs" |
+        b"mif1" | b"msf1"
+    )
+}
+
+/// Convierte HEIC a PNG en macOS usando `sips` (incluido en todas las instalaciones).
+/// En otras plataformas devuelve un error claro.
+#[cfg(target_os = "macos")]
+fn heic_a_png(heic_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let dir = std::env::temp_dir();
+    let nonce = format!("{}_{}", std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos());
+    let heic_tmp = dir.join(format!("babel_heic_{nonce}.heic"));
+    let png_tmp  = dir.join(format!("babel_heic_{nonce}.png"));
+
+    // Escribir con permisos 0600 (solo propietario)
+    let mut f = std::fs::OpenOptions::new()
+        .write(true).create(true).truncate(true).mode(0o600)
+        .open(&heic_tmp)
+        .map_err(|e| format!("Error creando temporal HEIC: {e}"))?;
+    f.write_all(heic_bytes).map_err(|e| format!("Error escribiendo temporal HEIC: {e}"))?;
+    drop(f);
+
+    let salida = std::process::Command::new("sips")
+        .args(["-s", "format", "png",
+               heic_tmp.to_str().unwrap_or(""),
+               "--out", png_tmp.to_str().unwrap_or("")])
+        .output();
+
+    let _ = std::fs::remove_file(&heic_tmp);
+
+    let out = salida.map_err(|e| format!("sips no disponible: {e}"))?;
+    if !out.status.success() {
+        let _ = std::fs::remove_file(&png_tmp);
+        return Err(format!(
+            "sips falló convirtiendo HEIC: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+
+    let png = std::fs::read(&png_tmp)
+        .map_err(|e| format!("Error leyendo PNG convertido: {e}"))?;
+    let _ = std::fs::remove_file(&png_tmp);
+    Ok(png)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn heic_a_png(_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    Err("La conversión de archivos HEIC solo está disponible en macOS.".into())
+}
+
+/// Decodifica bytes de imagen (cualquier formato soportado por `image`) y
+/// recomprime a JPEG. No acepta HEIC (usar `comprimir_imagen` que lo detecta primero).
+fn comprimir_imagen_interna(bytes: &[u8]) -> Result<Vec<u8>, String> {
     // Detectar formato para que `image` no intente JPEG en un PNG (etc.)
     let fmt = image::guess_format(bytes).ok();
 
@@ -315,5 +390,71 @@ mod tests {
         let multi = imagenes_a_pdf_unico(&[img]).unwrap();
         assert_eq!(n_paginas(&solo), 1);
         assert_eq!(n_paginas(&multi), 1);
+    }
+
+    #[test]
+    fn gif_no_detectado_como_heic() {
+        // Un GIF no es HEIC aunque tenga bytes en posiciones similares
+        let gif_bytes = b"GIF89a\x01\x00\x01\x00\x00\x00\x00;";
+        assert!(!es_heic(gif_bytes), "GIF no debe ser detectado como HEIC");
+    }
+
+    #[test]
+    fn bytes_con_ftyp_heic_detectados() {
+        // Simula la cabecera ftyp de un archivo HEIC
+        let mut cabecera = vec![0u8; 12];
+        cabecera[4..8].copy_from_slice(b"ftyp");
+        cabecera[8..12].copy_from_slice(b"heic");
+        assert!(es_heic(&cabecera), "ftyp+heic debe ser detectado como HEIC");
+    }
+
+    #[test]
+    fn bytes_con_ftyp_mif1_detectados() {
+        let mut cabecera = vec![0u8; 12];
+        cabecera[4..8].copy_from_slice(b"ftyp");
+        cabecera[8..12].copy_from_slice(b"mif1");
+        assert!(es_heic(&cabecera), "ftyp+mif1 (HEIF) debe ser detectado");
+    }
+
+    #[test]
+    fn png_no_detectado_como_heic() {
+        let png = png_rgb(100);
+        assert!(!es_heic(&png), "PNG no debe ser detectado como HEIC");
+    }
+
+    // Prueba de integración: genera archivos PDF reales en disco y los verifica.
+    #[test]
+    fn integracion_jpeg_y_png_a_pdf_en_disco() {
+        let dir = std::env::temp_dir();
+        let jpeg = jpeg_rgb(640);
+        let png  = png_rgb(480);
+
+        // JPEG → PDF de 1 página
+        let pdf_jpeg = imagen_a_pdf(&jpeg).expect("debe convertir JPEG");
+        let ruta_j = dir.join("babel_test_jpeg.pdf");
+        std::fs::write(&ruta_j, &pdf_jpeg).expect("debe escribir el PDF de JPEG");
+        assert!(ruta_j.exists(), "el PDF de JPEG debe existir en disco");
+        assert!(pdf_jpeg.len() > 100, "el PDF de JPEG debe tener contenido");
+        assert_eq!(n_paginas(&pdf_jpeg), 1, "el PDF de JPEG debe tener 1 página");
+        assert!(pdf_jpeg.starts_with(b"%PDF"), "debe comenzar con cabecera PDF");
+
+        // PNG → PDF de 1 página
+        let pdf_png = imagen_a_pdf(&png).expect("debe convertir PNG");
+        let ruta_p = dir.join("babel_test_png.pdf");
+        std::fs::write(&ruta_p, &pdf_png).expect("debe escribir el PDF de PNG");
+        assert!(ruta_p.exists(), "el PDF de PNG debe existir en disco");
+        assert_eq!(n_paginas(&pdf_png), 1, "el PDF de PNG debe tener 1 página");
+        assert!(pdf_png.starts_with(b"%PDF"), "debe comenzar con cabecera PDF");
+
+        // JPEG + PNG → PDF multi-página
+        let pdf_multi = imagenes_a_pdf_unico(&[jpeg, png]).expect("debe unir JPEG+PNG");
+        let ruta_m = dir.join("babel_test_multi.pdf");
+        std::fs::write(&ruta_m, &pdf_multi).expect("debe escribir el PDF multi-página");
+        assert_eq!(n_paginas(&pdf_multi), 2, "el PDF multi-página debe tener 2 páginas");
+        assert!(pdf_multi.starts_with(b"%PDF"), "debe comenzar con cabecera PDF");
+
+        eprintln!("PDF JPEG ({} B): {}", pdf_jpeg.len(), ruta_j.display());
+        eprintln!("PDF PNG  ({} B): {}", pdf_png.len(),  ruta_p.display());
+        eprintln!("PDF multi ({} B, 2 págs): {}", pdf_multi.len(), ruta_m.display());
     }
 }

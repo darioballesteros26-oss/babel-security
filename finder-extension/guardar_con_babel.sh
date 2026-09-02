@@ -72,8 +72,15 @@ fi
 
 # Disparar Babel una sola vez; escaneará toda la carpeta de staging. Si Babel está
 # cerrado, `open` lo lanza; si la sesión está bloqueada, mostrará el login.
+# Incluir el token CSRF si la sesión está activa (Babel lo escribe en .finder_token).
 if [ "$algo" = "1" ]; then
-  open "babel://guardar"
+  TOKEN_FILE="$HOME/Babel/.finder_token"
+  if [ -f "$TOKEN_FILE" ]; then
+    TOKEN="$(cat "$TOKEN_FILE" 2>/dev/null)"
+    open "babel://guardar?token=${TOKEN}"
+  else
+    open "babel://guardar"
+  fi
 fi
 
 exit 0

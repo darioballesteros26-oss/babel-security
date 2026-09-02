@@ -2142,7 +2142,7 @@ function actualizarSeleccionGuardados(): void {
     const card = cb.closest(".archivo-card") as HTMLElement | null;
     return (card?.dataset.base ?? "").toLowerCase();
   });
-  const todasImagenes = hay && bases.every(b => /\.(png|jpe?g|webp|bmp|gif|tiff?)$/.test(b));
+  const todasImagenes = hay && bases.every(b => /\.(png|jpe?g|webp|bmp|tiff?|heic)$/i.test(b));
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.toggle("hidden", !hay);
   document.getElementById("btn-compartir-sel-g")?.classList.toggle("hidden", !unico);
@@ -3016,9 +3016,10 @@ async function convertirImagenesAPdf(modo: "uno" | "varios"): Promise<void> {
       nombreSalida,
       buzonId: buzonActivoGuardados,
       modo,
+      borrarOriginales: true,
     });
     const n = resultado.length;
-    mostrarToast(n === 1 ? "✓ PDF generado y guardado" : `✓ ${n} PDFs generados y guardados`, false);
+    mostrarToast(n === 1 ? "✓ PDF generado — imagen original eliminada" : `✓ ${n} PDFs generados — imágenes originales eliminadas`, false);
     await cargarArchivosGuardados();
   } catch (e) {
     mostrarToast("Error al convertir: " + String(e), true);
@@ -3754,6 +3755,11 @@ function activarTimerInactividad(): void {
   // Pausar al salir de la ventana, reanudar al volver — no bloquear por usar otra app
   window.addEventListener("blur", pausarTimerInactividad);
   window.addEventListener("focus", resetearTimerInactividad);
+  // Procesar archivos pendientes del Quick Action al volver a Babel (fallback para
+  // dev mode donde babel:// no está registrado en Launch Services).
+  window.addEventListener("focus", () => {
+    if (_sesionActiva) invoke("procesar_entrada_finder").catch(() => {});
+  });
   resetearTimerInactividad();
 }
 

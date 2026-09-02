@@ -1338,10 +1338,12 @@ fn cifrar_y_guardar_desde_bytes(
 
     escribir_privado(&ruta_cifrada, cifrado).map_err(|e| format!("Error guardando: {}", e))?;
 
-    // Registrar nombre_base → nombre_cifrado en el índice cifrado de nombres.
+    // Registrar nombre completo (con extensión) → nombre_cifrado en el índice cifrado.
+    // Usar nombre_seguro (incluye extensión) para que la pantalla de archivos pueda
+    // detectar el tipo por extensión (p. ej. imagen vs PDF).
     let _ = nom_cifrado::registrar(
         &nombre_cifrado,
-        nombre_base,
+        &nombre_seguro,
         ts,
         contenido.len() as u64,
         &ruta_nomindex_guardados(),
@@ -2929,6 +2931,7 @@ async fn convertir_imagenes_a_pdf(
     nombre_salida: String,
     buzon_id: String,
     modo: String,
+    borrar_originales: bool,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<Vec<String>, String> {
     crate::rat_detector::verificar_no_bloqueado_rat()?;
@@ -2962,8 +2965,8 @@ async fn convertir_imagenes_a_pdf(
             blobs.push(bytes);
         }
 
-        if modo == "uno" {
-            // Todas las imágenes → un PDF multi-página
+        // Generar PDFs (uno o varios) y recoger rutas de salida.
+        let rutas_out: Vec<String> = if modo == "uno" {
             let pdf = img_a_pdf::imagenes_a_pdf_unico(&blobs)?;
             let base = std::path::Path::new(&nombre_salida)
                 .file_stem()
@@ -2979,10 +2982,10 @@ async fn convertir_imagenes_a_pdf(
             if buzon_id != "todos" && !buzon_id.is_empty() {
                 let _ = asignar_buzon_guardado(&ruta, &buzon_id, &subclave_hex);
             }
-            Ok(vec![ruta])
+            vec![ruta]
         } else {
             // Un PDF por imagen: recuperar nombre real desde nomindex.
-            let mut rutas_out: Vec<String> = Vec::with_capacity(blobs.len());
+            let mut out: Vec<String> = Vec::with_capacity(blobs.len());
             for (i, (ruta, blob)) in rutas.iter().zip(blobs.iter()).enumerate() {
                 let pdf = img_a_pdf::imagen_a_pdf(blob)
                     .map_err(|e| format!("Imagen {}: {}", i + 1, e))?;
@@ -3009,10 +3012,37 @@ async fn convertir_imagenes_a_pdf(
                 if buzon_id != "todos" && !buzon_id.is_empty() {
                     let _ = asignar_buzon_guardado(&ruta_out, &buzon_id, &subclave_hex);
                 }
-                rutas_out.push(ruta_out);
+                out.push(ruta_out);
             }
-            Ok(rutas_out)
+            out
+        };
+
+        // Borrado seguro de las imágenes originales, solo tras éxito completo.
+        // Mismo patrón que unir_pdfs: borrar_seguro + limpiar nomindex.
+        if borrar_originales {
+            let nomindex_g = ruta_nomindex_guardados();
+            let nomindex_a = ruta_nomindex_archivos();
+            let gdir = guardados_dir();
+            for ruta in &rutas {
+                if rutas_out.contains(ruta) { continue; }
+                borrar_seguro(ruta);
+                if !std::path::Path::new(ruta).exists() {
+                    let nombre_disco = std::path::Path::new(ruta)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    let en_guardados = std::path::Path::new(ruta).starts_with(&gdir);
+                    if en_guardados {
+                        nom_cifrado::eliminar(&nombre_disco, &nomindex_g, &subclave_hex);
+                    } else {
+                        nom_cifrado::eliminar(&nombre_disco, &nomindex_a, &subclave_hex);
+                    }
+                }
+            }
         }
+
+        Ok(rutas_out)
     })
     .await
     .map_err(|e| format!("Error interno: {}", e))?

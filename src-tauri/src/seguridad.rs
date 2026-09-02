@@ -1935,7 +1935,10 @@ pub struct EstadoCaptura {
 /// compartiendo (la utilidad de captura de macOS, el daemon de compartición remota,
 /// o una herramienta dedicada de grabación como OBS).
 fn apps_captura_alta() -> &'static [&'static str] {
-    &["screencaptureui", "screensharingd", "obs"]
+    // screencaptureui es la herramienta nativa de macOS (Cmd+Shift+3/4/5).
+    // La ventana ya está excluida con setSharingType(.none), así que no puede
+    // capturar nada — no tiene sentido bloquear al usuario con el overlay.
+    &["screensharingd", "obs"]
 }
 
 /// Baja confianza: apps de videoconferencia o edición que pueden estar abiertas sin
