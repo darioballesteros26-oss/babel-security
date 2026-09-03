@@ -1,11 +1,11 @@
 {
-  "version": "0.2.2",
-  "notes": "Fix permanente integridad binario; 13 mejoras UX: carpetas, historial, traductor, BIP39, Finder in-app",
-  "pub_date": "2026-08-26T17:03:18Z",
+  "version": "0.2.5",
+  "notes": "Sistema de actualizaciones mejorado: progreso real de descarga, rediseño de ajustes con tarjetas, corrección de nombres en unir PDFs.",
+  "pub_date": "2026-09-03T00:00:00Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTJzK3B0dWNINlo3RmM4ZkRGODdoOGpMN3NyUlB2WGx3eWJPWTZ2K0RGanVGMVVqQzE3eDBncllsd3NUM1o1TWZ3ZGxFUGdURzMrOWRIMU44WEY0b21EVllmNjBma0E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NzYzNzY4CWZpbGU6U2VjdXJpdHkgQmFiZWxfMC4yLjJfYWFyY2g2NC5kbWcKbGtUeXFRN2xaK0lqOHhvcys1K3QrSS81VlNia0t1K2ZXMVkrQWxkbGJFVjgxaDVSNFZGRmplQ1B0M1pmYi82dDVHS1BvWXkyODZiZXdES1luWER3QlE9PQo=",
-      "url": "https://github.com/darioballesteros26/babel-security/releases/download/v0.2.2/Security.Babel_0.2.2_aarch64.dmg"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTJzK3B0dWNINlFRekhoZWI5aVZROHlpODZIYlRqM2VFY1F1NklaTXN5ZjdPNkkzelI1TTQrTFZjQ1JkMndJa2lnZTNOU2RKQmF0TG5kM0ZublNpVVR0QXhqVjBHY1E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NDY2OTE2CWZpbGU6U2VjdXJpdHkgQmFiZWxfMC4yLjVfYWFyY2g2NC5hcHAudGFyLmd6Cmkra2NnUFVqaldSNXZZb3NzOVJxTmorVEltbXo1RWFBcXNEdis3NWFZeHUrWFhZeU1DbVJlM0hjVS9BaytkSlQwdEhYUm43RlNTNnRaVWRpTDhXYURBPT0K",
+      "url": "https://github.com/darioballesteros26-oss/babel-security/releases/download/v0.2.5/Security.Babel_0.2.5_aarch64.app.tar.gz"
     }
   }
 }
