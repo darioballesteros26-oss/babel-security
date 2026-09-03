@@ -30,6 +30,8 @@ type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" |
 // (mlock + zeroize). Aquí basta un flag de "sesión activa" para la lógica de la UI.
 let _sesionActiva = false;
 let _sesionUsuario = "";
+let _updVersionDismissed = ""; // versión que el usuario descartó con "MÁS TARDE"
+let _updInstalando = false;    // evita doble clic en "ACTUALIZAR AHORA"
 // Escapa caracteres HTML para prevenir XSS en innerHTML
 // Úsala siempre que metas datos de usuario o de red en el DOM
 function escapeHTML(s: string): string {
@@ -666,9 +668,14 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "cerrar-pass-recuperado": cerrarPassRecuperado(); break;
     // Modal de actualización automática
     case "instalar-actualizacion": void instalarActualizacion(); break;
-    case "cerrar-modal-actualizacion":
-      document.getElementById("modal-actualizacion")?.classList.add("hidden");
+    case "cerrar-modal-actualizacion": {
+      const modalUpd = document.getElementById("modal-actualizacion");
+      if (modalUpd) {
+        _updVersionDismissed = (modalUpd as any)._updVersion ?? "";
+        modalUpd.classList.add("hidden");
+      }
       break;
+    }
   }
 });
 
@@ -1247,9 +1254,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     getCurrentWindow().setFocus().catch(() => {});
   }).catch(() => {});
 
-  // Actualización disponible → mostrar popup
+  // Actualización disponible → mostrar popup (solo si el usuario no la descartó ya)
   listen<{ version: string; notas: string; fecha: string }>("actualizacion-disponible", (ev) => {
     const { version, notas } = ev.payload;
+    if (version === _updVersionDismissed) return; // ya descartada esta versión
+    if (!_sesionActiva) return; // no mostrar antes de hacer login
+    if (!document.getElementById("pantalla-bloqueo-rat")?.classList.contains("hidden")) return; // no mostrar si RAT activo
     const el = document.getElementById("modal-actualizacion");
     const elVer = document.getElementById("upd-version");
     const elNotas = document.getElementById("upd-notas");
@@ -1257,20 +1267,30 @@ window.addEventListener("DOMContentLoaded", async () => {
     elVer.textContent = `Versión ${version}`;
     elNotas.textContent = notas || "Nueva versión disponible.";
     document.getElementById("upd-progreso")?.classList.add("hidden");
+    (document.getElementById("upd-barra-fill") as HTMLElement | null)?.style.setProperty("width", "0%");
+    const pctEl2 = document.getElementById("upd-progreso-pct");
+    if (pctEl2) pctEl2.textContent = "";
     document.getElementById("upd-botones")?.removeAttribute("style");
     el.classList.remove("hidden");
+    // Guardar versión actual para el dismiss
+    (el as any)._updVersion = version;
   }).catch(() => {});
 
   // Progreso de descarga/instalación
-  listen<{ estado: string }>("actualizacion-progreso", (ev) => {
+  listen<{ estado: string; pct?: number }>("actualizacion-progreso", (ev) => {
     const prog = document.getElementById("upd-progreso");
     const texto = document.getElementById("upd-progreso-texto");
     const botones = document.getElementById("upd-botones");
-    if (prog && texto && botones) {
-      prog.classList.remove("hidden");
-      botones.style.display = "none";
-      texto.textContent = ev.payload.estado === "instalando" ? "INSTALANDO..." : "DESCARGANDO...";
-    }
+    const barra = document.getElementById("upd-barra-fill") as HTMLElement | null;
+    const pctEl = document.getElementById("upd-progreso-pct");
+    if (!prog || !texto || !botones) return;
+    prog.classList.remove("hidden");
+    botones.style.display = "none";
+    const instalando = ev.payload.estado === "instalando";
+    texto.textContent = instalando ? "INSTALANDO..." : "DESCARGANDO...";
+    const pct = ev.payload.pct ?? 0;
+    if (barra) barra.style.width = `${pct}%`;
+    if (pctEl) pctEl.textContent = pct > 0 ? `${pct}%` : "";
   }).catch(() => {});
 
   // ── Detección RAT ─────────────────────────────────────────────────────────
@@ -3694,6 +3714,7 @@ function pausarTimerInactividad(): void {
 async function bloquearPantalla(): Promise<void> {
   desactivarTimerInactividad();
   _sesionActiva = false;
+  document.getElementById("modal-actualizacion")?.classList.add("hidden");
   try { await invoke("cerrar_sesion_rust"); } catch { /* continúa bloqueando aunque falle */ }
   const overlay = document.getElementById("pantalla-bloqueo");
   if (overlay) {
@@ -5739,10 +5760,17 @@ function cargarAjustesGuardados(): void {
 (window as any).enviarMensajeP2P = enviarMensajeP2P;
 
 async function instalarActualizacion(): Promise<void> {
+  if (_updInstalando) return;
+  _updInstalando = true;
   try {
     await invoke("instalar_actualizacion");
+    // Si llega aquí sin reiniciar (no debería), resetear
+    _updInstalando = false;
   } catch (e) {
-    console.error("Error al instalar actualización:", e);
+    _updInstalando = false;
+    mostrarToast("Error al actualizar: " + String(e), true);
+    document.getElementById("upd-progreso")?.classList.add("hidden");
+    document.getElementById("upd-botones")?.removeAttribute("style");
   }
 }
 (window as any).instalarActualizacion = instalarActualizacion;

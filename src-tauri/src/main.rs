@@ -2742,10 +2742,12 @@ async fn preparar_union_pdfs(
 
     tauri::async_runtime::spawn_blocking(move || {
         let pdfium = pdf_union::pdfium(&dirs)?;
+        let mut nomindex = nom_cifrado::leer(&ruta_nomindex_guardados(), &subclave_hex);
+        nomindex.extend(nom_cifrado::leer(&ruta_nomindex_archivos(), &subclave_hex));
         let mut infos: Vec<PdfUnionInfo> = Vec::with_capacity(rutas.len());
 
         for ruta in &rutas {
-            let nombre = nombre_exportacion(ruta, "pdf");
+            let nombre = nombre_exportacion_idx(ruta, "pdf", &nomindex);
             let res = validar_ruta_en(ruta, guardados_dir())
                 .or_else(|_| validar_ruta_en(ruta, archivos_dir()))
                 .and_then(|_| descifrar_a_bytes(ruta, &subclave_hex));
@@ -6012,11 +6014,20 @@ async fn instalar_actualizacion(app: tauri::AppHandle) -> Result<(), String> {
         }
     }
 
-    let _ = app.emit("actualizacion-progreso", serde_json::json!({"estado": "descargando"}));
+    let _ = app.emit("actualizacion-progreso", serde_json::json!({"estado": "descargando", "pct": 0}));
 
+    let app2 = app.clone();
+    let mut descargado: u64 = 0;
     update.download_and_install(
-        |_chunk, _total| {},
-        || { let _ = app.emit("actualizacion-progreso", serde_json::json!({"estado": "instalando"})); },
+        move |chunk, total| {
+            descargado += chunk as u64;
+            let pct = total
+                .filter(|&t| t > 0)
+                .map(|t| ((descargado * 100) / t).min(99) as u8)
+                .unwrap_or(0);
+            let _ = app2.emit("actualizacion-progreso", serde_json::json!({"estado": "descargando", "pct": pct}));
+        },
+        || { let _ = app.emit("actualizacion-progreso", serde_json::json!({"estado": "instalando", "pct": 100})); },
     ).await.map_err(|e| e.to_string())?;
 
     app.restart();

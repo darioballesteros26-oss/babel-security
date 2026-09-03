@@ -888,37 +888,53 @@
 
     <!-- PANTALLA AJUSTES -->
     <div id="pantalla-ajustes" class="pantalla hidden"
-      style="position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--fondo);z-index:100;padding:40px 20px;">
-      <div class="logo-babel small" style="text-align:center;width:100%;">BABEL</div>
-      <h2 class="subtitulo-babel" style="text-align:center;width:100%;" id="ui-ajustes-titulo">AJUSTES</h2>
-      <div style="width:100%;max-width:560px;display:flex;flex-direction:column;gap:0;">
+      style="position:fixed;top:0;left:0;width:100vw;height:100vh;overflow-y:auto;
+             display:flex;flex-direction:column;align-items:center;
+             background:var(--fondo);z-index:100;padding:48px 24px 72px;">
 
-        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-          <div class="ajuste-label" id="ui-tema">TEMA</div>
-          <div style="display:flex;gap:8px;margin-top:12px;">
+      <!-- Cabecera -->
+      <div class="logo-babel small" style="text-align:center;margin-bottom:6px;">BABEL</div>
+      <h2 class="subtitulo-babel" style="text-align:center;margin-bottom:40px;" id="ui-ajustes-titulo">AJUSTES</h2>
+
+      <!-- Bloque superior -->
+      <div style="width:520px;max-width:calc(100vw - 48px);background:rgba(255,255,255,0.025);
+                  border:1px solid rgba(197,160,89,0.18);border-radius:14px;
+                  padding:32px 32px;margin:0 auto 36px;">
+
+        <!-- TEMA -->
+        <div style="margin-bottom:32px;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:3px;
+                      color:var(--dorado);font-weight:700;margin-bottom:16px;text-align:center;"
+               id="ui-tema">TEMA</div>
+          <div style="display:flex;gap:10px;">
             <button type="button" id="tema-negro" data-action="cambiar-tema" data-tema="negro"
-              style="flex:1;padding:16px 4px;border:1px solid #c5a059;background:#09090b;color:#c5a059;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
-              NEGRO / DORADO
-            </button>
+              style="flex:1;padding:18px 4px;border:1px solid #c5a059;background:#09090b;color:#c5a059;
+                     font-family:'Times New Roman',Times,serif;letter-spacing:1px;font-size:0.6rem;
+                     cursor:pointer;border-radius:8px;">NEGRO<br>DORADO</button>
             <button type="button" id="tema-blanco2" data-action="cambiar-tema" data-tema="blanco-dorado"
-              style="flex:1;padding:16px 4px;border:1px solid #b8972e;background:#ffffff;color:#b8972e;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
-              BLANCO / DORADO
-            </button>
+              style="flex:1;padding:18px 4px;border:1px solid #b8972e;background:#ffffff;color:#b8972e;
+                     font-family:'Times New Roman',Times,serif;letter-spacing:1px;font-size:0.6rem;
+                     cursor:pointer;border-radius:8px;">BLANCO<br>DORADO</button>
             <button type="button" id="tema-crema" data-action="cambiar-tema" data-tema="crema"
-              style="flex:1;padding:16px 4px;border:1px solid #ffffff;background:#1a1a1a;color:#ffffff;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
-              NEGRO / BLANCO
-            </button>
+              style="flex:1;padding:18px 4px;border:1px solid #ffffff;background:#1a1a1a;color:#ffffff;
+                     font-family:'Times New Roman',Times,serif;letter-spacing:1px;font-size:0.6rem;
+                     cursor:pointer;border-radius:8px;">NEGRO<br>BLANCO</button>
             <button type="button" id="tema-blanco-negro" data-action="cambiar-tema" data-tema="blanco-negro"
-              style="flex:1;padding:16px 4px;border:1px solid #1a1a1a;background:#ffffff;color:#1a1a1a;font-family:'Times New Roman', Times, serif,sans-serif;letter-spacing:1px;font-size:0.6rem;cursor:pointer;">
-              BLANCO / NEGRO
-            </button>
+              style="flex:1;padding:18px 4px;border:1px solid #1a1a1a;background:#ffffff;color:#1a1a1a;
+                     font-family:'Times New Roman',Times,serif;letter-spacing:1px;font-size:0.6rem;
+                     cursor:pointer;border-radius:8px;">BLANCO<br>NEGRO</button>
           </div>
         </div>
 
-        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-          <div class="ajuste-label" id="ui-idioma-interfaz">IDIOMA DE LA INTERFAZ</div>
-          <select id="selector-idioma-ui" class="input-vip" style="margin-top:12px;width:100%;"
-            onchange="cambiarIdiomaUI(this.value)">
+        <!-- Separador -->
+        <div style="border-top:1px solid rgba(197,160,89,0.12);margin-bottom:32px;"></div>
+
+        <!-- IDIOMA -->
+        <div style="margin-bottom:32px;">
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:3px;
+                      color:var(--dorado);font-weight:700;margin-bottom:16px;text-align:center;"
+               id="ui-idioma-interfaz">IDIOMA DE LA INTERFAZ</div>
+          <select id="selector-idioma-ui" class="input-vip" style="width:100%;" onchange="cambiarIdiomaUI(this.value)">
             <option value="es">Español</option>
             <option value="en">English</option>
             <option value="fr">Français</option>
@@ -926,10 +942,15 @@
           </select>
         </div>
 
-        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-          <div class="ajuste-label" id="ui-timeout-label">BLOQUEO AUTOMÁTICO POR INACTIVIDAD</div>
-          <select id="selector-timeout" class="input-vip" style="margin-top:12px;width:100%;"
-            onchange="guardarTimeoutSesion(this.value)">
+        <!-- Separador -->
+        <div style="border-top:1px solid rgba(197,160,89,0.12);margin-bottom:32px;"></div>
+
+        <!-- BLOQUEO -->
+        <div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:3px;
+                      color:var(--dorado);font-weight:700;margin-bottom:16px;text-align:center;"
+               id="ui-timeout-label">BLOQUEO AUTOMÁTICO</div>
+          <select id="selector-timeout" class="input-vip" style="width:100%;" onchange="guardarTimeoutSesion(this.value)">
             <option value="2">2 minutos</option>
             <option value="5">5 minutos</option>
             <option value="10">10 minutos</option>
@@ -941,68 +962,71 @@
             <option value="90">90 minutos</option>
             <option value="120">120 minutos</option>
           </select>
-          <div
-            style="margin-top:8px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
+          <div style="margin-top:10px;text-align:center;font-family:'Times New Roman',Times,serif;
+                      font-size:0.57rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.5;">
             Sin actividad durante este tiempo → pantalla de acceso
           </div>
         </div>
 
-        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-          <div style="display:flex;align-items:center;justify-content:space-between;">
-            <div class="ajuste-label">ACCESO AUTOMÁTICO</div>
-            <span id="autologin-estado-badge" style="font-family:'Times New Roman',Times,serif;font-size:0.54rem;letter-spacing:1.5px;padding:3px 10px;border:1px solid rgba(197,160,89,0.3);color:var(--texto-secundario);">—</span>
+      </div>
+
+      <!-- Grid 2×2 -->
+      <div style="width:480px;max-width:calc(100vw - 48px);display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 auto 40px;">
+
+        <div class="ajuste-card" data-action="reconfigurar-autologin" id="ajuste-autologin-btn" role="button" tabindex="0">
+          <div class="ajuste-card-icono">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+            </svg>
           </div>
-          <div style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
-            Entra sin contraseña. Cada 3 días se confirma tu identidad.
+          <div class="ajuste-card-titulo" id="ui-ajustes-configurar">CONFIGURAR</div>
+          <div class="ajuste-card-desc">
+            <span id="autologin-estado-badge">—</span><br>Acceso automático
           </div>
-          <button type="button" id="ajuste-autologin-btn" data-action="reconfigurar-autologin" class="btn-secundario-oro" style="width:100%;padding:12px 0;">
-            CONFIGURAR
-          </button>
         </div>
 
-        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-          <div class="ajuste-label">CLAVE DE RECUPERACIÓN BIP39</div>
-          <div
-            style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
-            12 palabras que permiten recuperar el acceso si olvidas la contraseña. No hagas capturas.
+        <div class="ajuste-card" data-action="ver-frase-app" role="button" tabindex="0">
+          <div class="ajuste-card-icono">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+            </svg>
           </div>
-          <button type="button" data-action="ver-frase-app" class="btn-secundario-oro" style="width:100%;padding:12px 0;">
-            VER FRASE DE RECUPERACIÓN
-          </button>
+          <div class="ajuste-card-titulo">RECUPERACIÓN</div>
+          <div class="ajuste-card-desc">Frase BIP39<br>de 12 palabras</div>
         </div>
 
-        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-          <div class="ajuste-label">DISPOSITIVOS EMPAREJADOS</div>
-          <div style="margin-top:8px;margin-bottom:12px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
-            Máximo 3 dispositivos. La clave compartida se genera al emparejar y no cambia.
+        <div class="ajuste-card" data-action="abrir-sinc-dispositivos" role="button" tabindex="0">
+          <div class="ajuste-card-icono">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 0 1-15.357-2m15.357 2H15"/>
+            </svg>
           </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-            <span style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.75;">SINCRONIZACIÓN ACTIVA</span>
-            <label class="toggle-switch">
+          <div class="ajuste-card-titulo">SINCRONIZAR</div>
+          <div class="ajuste-card-desc" style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+            <label class="toggle-switch" style="margin:0;" onclick="event.stopPropagation()">
               <input type="checkbox" id="toggle-sinc" checked onchange="toggleSincronizacion(this.checked)">
               <span class="toggle-slider"></span>
             </label>
+            <span>Dispositivos</span>
           </div>
-          <div id="sinc-lista-emparejados" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;"></div>
-          <button type="button" data-action="abrir-sinc-dispositivos" class="btn-secundario-oro" style="width:100%;padding:12px 0;">
-            SINCRONIZAR DISPOSITIVOS
-          </button>
+          <div id="sinc-lista-emparejados" style="display:flex;flex-direction:column;gap:3px;width:100%;"></div>
         </div>
 
-        <div style="padding:20px 0;border-bottom:1px solid rgba(197,160,89,0.12);">
-          <div class="ajuste-label">TÉRMINOS DE USO</div>
-          <div style="margin-top:8px;margin-bottom:14px;font-family:'Times New Roman',Times,serif;font-size:0.58rem;letter-spacing:1px;color:var(--texto-secundario);opacity:0.6;">
-            Consulta la política de privacidad y los términos que rigen el uso de Babel Security.
+        <div class="ajuste-card" data-action="ver-terminos" role="button" tabindex="0">
+          <div class="ajuste-card-icono">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z"/>
+            </svg>
           </div>
-          <button type="button" data-action="ver-terminos" class="btn-secundario-oro" style="padding:6px 16px;font-size:0.62rem;letter-spacing:1.5px;">
-            VER TÉRMINOS DE USO
-          </button>
+          <div class="ajuste-card-titulo">TÉRMINOS</div>
+          <div class="ajuste-card-desc">Privacidad<br>y condiciones</div>
         </div>
 
-
-        <button type="button" data-action="mostrar-pantalla" data-pantalla="principal" class="btn-link"
-          style="margin-top:28px;text-align:center;" id="ui-volver-panel">← VOLVER AL PANEL</button>
       </div>
+
+      <button type="button" data-action="mostrar-pantalla" data-pantalla="principal" class="btn-link"
+        style="text-align:center;" id="ui-volver-panel">← VOLVER AL PANEL</button>
+
     </div>
 
     <!-- ============================================================ -->
@@ -1733,7 +1757,7 @@
 
   <!-- PANTALLA BLOQUEO RAT — overlay fijo, distinto del bloqueo por inactividad -->
   <div id="pantalla-bloqueo-rat" class="hidden"
-    style="position:fixed;inset:0;z-index:10000;background:#0d0000;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:24px;">
+    style="position:fixed;inset:0;z-index:10010;background:#0d0000;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:24px;">
     <div style="text-align:center;margin-bottom:20px;">
       <div style="font-family:'Times New Roman',Times,serif;font-size:1.8rem;letter-spacing:8px;color:#ef4444;margin-bottom:6px;">BABEL</div>
       <p style="letter-spacing:4px;font-size:0.6rem;color:#ef4444;margin-bottom:4px;">ACCESO BLOQUEADO</p>
@@ -1791,7 +1815,7 @@
 
   <!-- MODAL CONFIRMAR DESBLOQUEO RAT (mostrado en el par B) -->
   <div id="modal-confirmar-rat" class="hidden"
-    style="position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;">
+    style="position:fixed;inset:0;z-index:10011;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;">
     <div style="background:#0d0000;border:1px solid #ef4444;border-radius:6px;padding:28px 28px 22px;min-width:300px;max-width:380px;">
       <p style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;letter-spacing:3px;color:#ef4444;margin-bottom:14px;">
         SOLICITUD DE DESBLOQUEO RAT
@@ -2265,16 +2289,16 @@
 <!-- ── MODAL ACTUALIZACIÓN ──────────────────────────────────────────────── -->
 <div id="modal-actualizacion" class="hidden" style="
   position:fixed;inset:0;z-index:10002;
-  background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);
+  background:rgba(0,0,0,0.82);backdrop-filter:blur(8px);
   display:flex;align-items:center;justify-content:center;padding:20px;">
   <div style="
-    background:#0F1525;border:1px solid rgba(212,175,55,0.35);
+    background:#111111;border:1px solid rgba(212,175,55,0.35);
     border-radius:16px;max-width:440px;width:100%;padding:32px;
-    box-shadow:0 0 60px rgba(212,175,55,0.12);">
+    box-shadow:0 0 60px rgba(212,175,55,0.10);">
 
     <!-- Icono + título -->
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-      <div style="width:42px;height:42px;border-radius:10px;background:rgba(212,175,55,0.12);
+      <div style="width:42px;height:42px;border-radius:10px;background:rgba(212,175,55,0.10);
         border:1px solid rgba(212,175,55,0.25);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--dorado)" stroke-width="2">
           <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
@@ -2282,23 +2306,26 @@
         </svg>
       </div>
       <div>
-        <div style="color:var(--dorado);font-size:0.6rem;letter-spacing:3px;font-weight:700;margin-bottom:3px;">ACTUALIZACIÓN DISPONIBLE</div>
-        <div id="upd-version" style="color:#F1F5F9;font-size:1rem;font-weight:700;">Nueva versión</div>
+        <div style="color:var(--dorado);font-size:0.6rem;letter-spacing:3px;font-weight:700;margin-bottom:3px;font-family:'Times New Roman',Times,serif;">ACTUALIZACIÓN DISPONIBLE</div>
+        <div id="upd-version" style="color:#E8E8E8;font-size:1.05rem;font-weight:700;font-family:'Times New Roman',Times,serif;">Nueva versión</div>
       </div>
     </div>
 
     <!-- Notas del release -->
     <div id="upd-notas" style="
-      background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);
+      background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);
       border-radius:8px;padding:14px;margin-bottom:24px;
-      color:#94A3B8;font-size:0.75rem;line-height:1.65;
+      color:#A0A0A0;font-size:0.8rem;line-height:1.7;font-family:'Times New Roman',Times,serif;
       max-height:160px;overflow-y:auto;white-space:pre-wrap;"></div>
 
     <!-- Barra de progreso (oculta hasta que empieza la descarga) -->
     <div id="upd-progreso" class="hidden" style="margin-bottom:20px;">
-      <div style="color:#94A3B8;font-size:0.65rem;letter-spacing:2px;margin-bottom:8px;" id="upd-progreso-texto">DESCARGANDO...</div>
-      <div style="height:3px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden;">
-        <div style="height:100%;background:var(--dorado);width:100%;animation:shimmer 1.2s ease-in-out infinite;"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="color:#888;font-size:0.65rem;letter-spacing:2px;font-family:'Times New Roman',Times,serif;" id="upd-progreso-texto">DESCARGANDO...</div>
+        <div id="upd-progreso-pct" style="color:var(--dorado);font-size:0.65rem;font-weight:700;font-family:'Times New Roman',Times,serif;"></div>
+      </div>
+      <div style="height:4px;background:rgba(255,255,255,0.07);border-radius:2px;overflow:hidden;">
+        <div id="upd-barra-fill" style="height:100%;background:var(--dorado);width:0%;transition:width 0.3s ease;"></div>
       </div>
     </div>
 
@@ -2307,13 +2334,13 @@
       <button id="upd-btn-ahora" data-action="instalar-actualizacion" style="
         flex:1;background:linear-gradient(135deg,var(--dorado),#A8860C);
         border:none;color:#0B0F19;padding:12px;border-radius:8px;
-        font-size:0.65rem;letter-spacing:2px;font-weight:700;cursor:pointer;">
+        font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:2px;font-weight:700;cursor:pointer;">
         ACTUALIZAR AHORA
       </button>
       <button id="upd-btn-tarde" data-action="cerrar-modal-actualizacion" style="
         background:transparent;border:1px solid rgba(255,255,255,0.1);
-        color:#64748B;padding:12px 16px;border-radius:8px;
-        font-size:0.65rem;letter-spacing:2px;cursor:pointer;">
+        color:#666;padding:12px 16px;border-radius:8px;
+        font-family:'Times New Roman',Times,serif;font-size:0.75rem;letter-spacing:2px;cursor:pointer;">
         MÁS TARDE
       </button>
     </div>

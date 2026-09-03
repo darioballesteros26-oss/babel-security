@@ -2594,3 +2594,71 @@ body {
   height: 14px;
   cursor: pointer;
 }
+
+/* ── Tarjetas 2×2 pantalla de ajustes ─────────────────────────── */
+.ajuste-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 14px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(197,160,89,0.22);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: center;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  user-select: none;
+  aspect-ratio: 1 / 1;
+}
+.ajuste-card:hover {
+  transform: scale(1.07);
+  border-color: rgba(197,160,89,0.65);
+  background: rgba(197,160,89,0.05);
+}
+.ajuste-card:active {
+  transform: scale(0.97);
+}
+.ajuste-card-icono {
+  color: var(--dorado);
+  opacity: 0.8;
+}
+.ajuste-card-titulo {
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.58rem;
+  letter-spacing: 2px;
+  color: var(--dorado);
+  font-weight: 700;
+}
+.ajuste-card-desc {
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.54rem;
+  letter-spacing: 0.8px;
+  color: var(--texto-secundario);
+  opacity: 0.65;
+  line-height: 1.5;
+}
+
+/* ── Bloque superior ajustes (tema / idioma / timeout) ─────────── */
+.ajuste-bloque-top {
+  width: 100%;
+  max-width: 560px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(197,160,89,0.18);
+  border-radius: 14px;
+  padding: 24px 28px;
+  margin-bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.ajuste-bloque-top-label {
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.58rem;
+  letter-spacing: 2.5px;
+  color: var(--dorado);
+  opacity: 0.75;
+  margin-bottom: 10px;
+  font-weight: 700;
+}

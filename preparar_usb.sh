@@ -309,7 +309,7 @@ if [[ -n "$_paddle_lm_src" && -n "$_paddle_mm_src" ]]; then
 else
   echo ""
   echo "  PaddleOCR-VL no presente localmente — descargando (~1.1 GB, solo 1ª vez)..."
-  if "$BABEL/babel_env/bin/python3" -c "
+  if python3 -c "
 from huggingface_hub import hf_hub_download
 DEST = r'$PADDLE_DEST'
 # LM: Q4_K_M local preferido; si no hay, descargar BF16 oficial
