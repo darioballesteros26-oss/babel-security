@@ -1,11 +1,11 @@
 {
-  "version": "0.2.5",
-  "notes": "Sistema de actualizaciones mejorado: progreso real de descarga, rediseño de ajustes con tarjetas, corrección de nombres en unir PDFs.",
-  "pub_date": "2026-09-03T00:00:00Z",
+  "version": "0.2.6",
+  "notes": "Seguridad y correcciones en el editor de documentos.",
+  "pub_date": "2026-09-07T15:26:43Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTJzK3B0dWNINlFRekhoZWI5aVZROHlpODZIYlRqM2VFY1F1NklaTXN5ZjdPNkkzelI1TTQrTFZjQ1JkMndJa2lnZTNOU2RKQmF0TG5kM0ZublNpVVR0QXhqVjBHY1E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NDY2OTE2CWZpbGU6U2VjdXJpdHkgQmFiZWxfMC4yLjVfYWFyY2g2NC5hcHAudGFyLmd6Cmkra2NnUFVqaldSNXZZb3NzOVJxTmorVEltbXo1RWFBcXNEdis3NWFZeHUrWFhZeU1DbVJlM0hjVS9BaytkSlQwdEhYUm43RlNTNnRaVWRpTDhXYURBPT0K",
-      "url": "https://github.com/darioballesteros26-oss/babel-security/releases/download/v0.2.5/Security.Babel_0.2.5_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTJzK3B0dWNINmRxNjBmUjc4VS9LRUhwUTFqdVozMXJ5bGgweUlDS25INzNxbEpybkJKVW01QzB0VkdRQlZkbDV1NEZZODdwL2tzQXAxTVZoZzdjN1pLRzZIMW05V2dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4Nzk0NzgzCWZpbGU6U2VjdXJpdHkgQmFiZWxfMC4yLjZfYWFyY2g2NC5hcHAudGFyLmd6CnV0cmtQMU1uMmZ4VFVMMmw0ME1WVzRmZ3lnekh1QVkzbVQwL0xKc3VjaWYzQzNqRWU4VTBoMXdBWUN3K3lYOEtIcGZPOWVrOTNoSE43dTc3RUJaYUNnPT0K",
+      "url": "https://github.com/darioballesteros26-oss/babel-security/releases/download/v0.2.6/Security.Babel_0.2.6_aarch64.app.tar.gz"
     }
   }
 }
