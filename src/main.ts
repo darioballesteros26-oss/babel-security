@@ -69,6 +69,7 @@ let _sesionActiva = false;
 let _sesionUsuario = "";
 let _updVersionDismissed = ""; // versión que el usuario descartó con "MÁS TARDE"
 let _updInstalando = false;    // evita doble clic en "ACTUALIZAR AHORA"
+let _updCompletado = false;    // instalación terminada — bloquea nuevos popups
 // Escapa caracteres HTML para prevenir XSS en innerHTML
 // Úsala siempre que metas datos de usuario o de red en el DOM
 function escapeHTML(s: string): string {
@@ -1314,11 +1315,24 @@ window.addEventListener("DOMContentLoaded", async () => {
   }).catch(() => {});
 
   // Actualización disponible → mostrar popup (solo si el usuario no la descartó ya)
+  listen<null>("actualizacion-completa", () => {
+    const texto = document.getElementById("upd-progreso-texto");
+    const pctEl = document.getElementById("upd-progreso-pct");
+    const barra = document.getElementById("upd-barra-fill") as HTMLElement | null;
+    if (texto) texto.textContent = "REINICIANDO...";
+    if (pctEl) pctEl.textContent = "";
+    if (barra) barra.style.width = "100%";
+    // Solo aquí sabemos que la instalación terminó bien (Rust emite esto justo antes de restart)
+    _updCompletado = true;
+  }).catch(() => {});
+
   listen<{ version: string; notas: string; fecha: string }>("actualizacion-disponible", (ev) => {
     const { version, notas } = ev.payload;
-    if (version === _updVersionDismissed) return; // ya descartada esta versión
-    if (!_sesionActiva) return; // no mostrar antes de hacer login
-    if (!document.getElementById("pantalla-bloqueo-rat")?.classList.contains("hidden")) return; // no mostrar si RAT activo
+    if (_updCompletado) return;   // ya instalado — no molestar hasta el restart
+    if (_updInstalando) return;   // descarga en curso — no superponer popup
+    if (version === _updVersionDismissed) return;
+    if (!_sesionActiva) return;
+    if (!document.getElementById("pantalla-bloqueo-rat")?.classList.contains("hidden")) return;
     const el = document.getElementById("modal-actualizacion");
     const elVer = document.getElementById("upd-version");
     const elNotas = document.getElementById("upd-notas");
@@ -1345,11 +1359,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!prog || !texto || !botones) return;
     prog.classList.remove("hidden");
     botones.style.display = "none";
-    const instalando = ev.payload.estado === "instalando";
-    texto.textContent = instalando ? "INSTALANDO..." : "DESCARGANDO...";
-    const pct = ev.payload.pct ?? 0;
+    const { estado, pct: pctRaw } = ev.payload;
+    const pct = pctRaw ?? 0;
     if (barra) barra.style.width = `${pct}%`;
-    if (pctEl) pctEl.textContent = pct > 0 ? `${pct}%` : "";
+    if (estado === "instalando") {
+      texto.textContent = "INSTALANDO...";
+      if (pctEl) pctEl.textContent = "";
+      // NO ponemos _updCompletado aquí — esto se emite ANTES de instalar (on_before_install).
+      // Si la instalación falla después, el usuario debe poder reintentar.
+    } else {
+      texto.textContent = "DESCARGANDO...";
+      if (pctEl) pctEl.textContent = pct > 0 ? `${pct}%` : "";
+    }
   }).catch(() => {});
 
   // ── Detección RAT ─────────────────────────────────────────────────────────
@@ -6248,6 +6269,7 @@ async function instalarActualizacion(): Promise<void> {
     _updInstalando = false;
   } catch (e) {
     _updInstalando = false;
+    _updCompletado = false; // instalación fallida — permitir reintentar
     mostrarToast("Error al actualizar: " + String(e), true);
     document.getElementById("upd-progreso")?.classList.add("hidden");
     document.getElementById("upd-botones")?.removeAttribute("style");

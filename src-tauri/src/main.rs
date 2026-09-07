@@ -6030,6 +6030,10 @@ async fn instalar_actualizacion(app: tauri::AppHandle) -> Result<(), String> {
         || { let _ = app.emit("actualizacion-progreso", serde_json::json!({"estado": "instalando", "pct": 100})); },
     ).await.map_err(|e| e.to_string())?;
 
+    // Notificar al frontend que la instalación terminó y dar tiempo a que lo procese
+    // antes de que el proceso muera con restart().
+    let _ = app.emit("actualizacion-completa", ());
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
     app.restart();
 }
 
