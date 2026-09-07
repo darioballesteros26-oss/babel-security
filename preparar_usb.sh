@@ -139,13 +139,19 @@ mkdir -p "$USB" "$CACHE_DIR"
 # ── 1. App compilada ─────────────────────────────────────────────────────
 echo ""
 echo "┌─ [1/7] Buscando app compilada..."
-APP_SRC=$(find "$INTERFAZ/src-tauri/target/release/bundle/macos" \
-            -name "*.app" 2>/dev/null | head -1)
+# Busca primero el build con target explícito (aarch64-apple-darwin), luego el genérico
+APP_SRC=$(find "$INTERFAZ/src-tauri/target/aarch64-apple-darwin/release/bundle/macos" \
+            -name "*.app" -maxdepth 1 2>/dev/null | head -1)
+if [[ -z "$APP_SRC" ]]; then
+  APP_SRC=$(find "$INTERFAZ/src-tauri/target/release/bundle/macos" \
+              -name "*.app" -maxdepth 1 2>/dev/null | head -1)
+fi
 
 if [[ -z "$APP_SRC" ]]; then
   echo ""
   echo "  ✗ No hay build de release. Compila con:"
-  echo "    cd $INTERFAZ && npm run tauri -- build"
+  echo "    TAURI_SIGNING_PRIVATE_KEY=\$(cat ~/.babel-update-key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\"\" \\"
+  echo "      npm run tauri build -- --target aarch64-apple-darwin"
   exit 1
 fi
 
