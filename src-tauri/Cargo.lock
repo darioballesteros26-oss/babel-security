@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "babel-interfaz"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "aes-gcm",
  "argon2",

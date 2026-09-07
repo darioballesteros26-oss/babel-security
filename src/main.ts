@@ -4,6 +4,20 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import DOMPurify from "dompurify";
+import { Editor } from "@tiptap/core";
+import StarterKit from "@tiptap/starter-kit";
+import { Table } from "@tiptap/extension-table";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableHeader } from "@tiptap/extension-table-header";
+import { TableCell } from "@tiptap/extension-table-cell";
+import { Underline } from "@tiptap/extension-underline";
+import { TextAlign } from "@tiptap/extension-text-align";
+import { Image as TiptapImage } from "@tiptap/extension-image";
+import {
+  Document as DocxDocument, Paragraph, TextRun, HeadingLevel,
+  Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell,
+  WidthType, BorderStyle, AlignmentType, Packer, ImageRun,
+} from "docx";
 
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (node.tagName === "A") {
@@ -47,6 +61,11 @@ let _renombraViejo = "";
 let _renombraViejoG = "";
 let _renombraArchivoRuta = "";
 let _renombraEsGuardado = false;
+
+// Editor Tiptap
+let _tiptapEditor: Editor | null = null;
+let _editorRutaCifrada: string | null = null;
+let _carpetaEditorSeleccionada: string = "todos";
 let buzonParentPendienteG: string | null = null;
 
 // Tipo compartido para nodos de buzón con árbol jerárquico
@@ -467,6 +486,15 @@ document.addEventListener("click", (e: MouseEvent) => {
     }
   }
 
+  // Cerrar menú extra del editor si click fuera
+  const menuExtra = document.getElementById("editor-menu-extra");
+  if (menuExtra && !menuExtra.classList.contains("hidden")) {
+    const target = e.target as Element;
+    if (!target.closest("#editor-menu-extra") && !target.closest("[data-action='toggle-menu-extra-editor']")) {
+      menuExtra.classList.add("hidden");
+    }
+  }
+
   const el = (e.target as Element).closest<HTMLElement>("[data-action]");
   if (!el) return;
   const action = el.dataset.action!;
@@ -530,9 +558,19 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "revelar-en-finder": revelarEnFinder(); break;
     case "copiar-pass-compartir": copiarPassCompartir(); break;
     case "eliminar-sel-guardados": eliminarSeleccionadosGuardados(); break;
-    case "abrir-carpeta-guardados": void abrirFinderInApp(); break;
     case "exportar-todo": exportarTodo(); break;
     case "abrir-importar-guardado": mostrarPopupImportar(el); break;
+    case "abrir-crear-archivo": abrirEditorTiptap(); break;
+    case "cerrar-editor-tiptap": cerrarEditorTiptap(); break;
+    case "guardar-documento-editor": void guardarDocumentoEditor(e); break;
+    case "tiptap-cmd": ejecutarComandoTiptap(el.dataset.cmd ?? ""); break;
+    case "toggle-menu-extra-editor": toggleMenuExtraEditor(); break;
+    case "abrir-imagen-editor": abrirImagenEditor(); break;
+    case "confirmar-carpeta-editor": void confirmarCarpetaEditor(); break;
+    case "cancelar-carpeta-editor": cancelarCarpetaEditor(); break;
+    case "seleccionar-carpeta-editor":
+      seleccionarCarpetaEnSelector(el.dataset.carpeta ?? "todos", el.dataset.nombre ?? "TODOS");
+      break;
     case "mostrar-input-buzon-guardado": mostrarInputBuzonGuardado(); break;
     case "confirmar-buzon-guardado": confirmarBuzonGuardado(); break;
     case "cancelar-buzon-guardado": cancelarBuzonGuardado(); break;
@@ -662,8 +700,6 @@ document.addEventListener("click", (e: MouseEvent) => {
       document.getElementById("modal-ajustes-registro")?.classList.add("hidden");
       break;
     case "guardar-ajustes-registro": void guardarAjustesRegistro(); break;
-    // Finder in-app
-    case "cerrar-finder-inapp": document.getElementById("modal-finder-inapp")?.classList.add("hidden"); break;
     // Modal contraseña recuperada BIP39
     case "cerrar-pass-recuperado": cerrarPassRecuperado(); break;
     // Modal de actualización automática
@@ -2170,8 +2206,8 @@ function actualizarSeleccionGuardados(): void {
   document.getElementById("btn-unir-pdfs-g")?.classList.toggle("hidden", seleccionados.length < 2);
   document.getElementById("btn-convertir-img-pdf-g")?.classList.toggle("hidden", !todasImagenes);
   document.getElementById("ui-exportar-todo")?.classList.toggle("hidden", hay);
-  document.getElementById("ui-finder")?.classList.toggle("hidden", hay);
   document.getElementById("ui-importar")?.classList.toggle("hidden", hay);
+  document.getElementById("ui-crear-archivo")?.classList.toggle("hidden", hay);
 }
 
 function actualizarBadgeEmail(n: number): void {
@@ -2862,8 +2898,8 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   document.getElementById("btn-unir-pdfs-g")?.classList.add("hidden");
   document.getElementById("btn-convertir-img-pdf-g")?.classList.add("hidden");
   document.getElementById("ui-exportar-todo")?.classList.remove("hidden");
-  document.getElementById("ui-finder")?.classList.remove("hidden");
   document.getElementById("ui-importar")?.classList.remove("hidden");
+  document.getElementById("ui-crear-archivo")?.classList.remove("hidden");
   mostrarToast(errores ? `${errores} errores al eliminar` : "✓ Destruido de forma segura — irrecuperable", errores > 0);
   nombres.forEach(n => invoke("registrar_evento_diario", { tipo: "eliminar", detalle: n }).catch(() => {}));
   await cargarArchivosGuardados();
@@ -3344,6 +3380,377 @@ async function abrirFinderSistema(): Promise<void> {
   }
 }
 (window as any).abrirFinderSistema = abrirFinderSistema;
+
+// ── EDITOR TIPTAP ────────────────────────────────────────────────────────────
+
+function abrirEditorTiptap(): void {
+  const pantalla = document.getElementById("editor-tiptap");
+  const tituloInput = document.getElementById("editor-titulo") as HTMLInputElement | null;
+  const contenedor = document.getElementById("editor-contenido");
+  if (!pantalla || !contenedor) return;
+
+  _editorRutaCifrada = null;
+  _carpetaEditorSeleccionada = "todos";
+  if (tituloInput) tituloInput.value = "";
+
+  if (_tiptapEditor) { _tiptapEditor.destroy(); _tiptapEditor = null; }
+  contenedor.innerHTML = "";
+
+  // Mostrar primero para que autofocus y medidas de layout funcionen
+  pantalla.classList.remove("hidden");
+
+  _tiptapEditor = new Editor({
+    element: contenedor,
+    extensions: [
+      StarterKit,
+      Underline,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      TiptapImage.configure({ inline: false, allowBase64: true }),
+    ],
+    content: "<p></p>",
+    autofocus: "end",
+    onTransaction: () => actualizarToolbarEditor(),
+    onSelectionUpdate: () => actualizarToolbarEditor(),
+  });
+
+  actualizarToolbarEditor();
+}
+
+function cerrarEditorTiptap(): void {
+  document.getElementById("editor-tiptap")?.classList.add("hidden");
+  document.getElementById("modal-selector-carpeta-editor")?.classList.add("hidden");
+  if (_tiptapEditor) { _tiptapEditor.destroy(); _tiptapEditor = null; }
+  _editorRutaCifrada = null;
+}
+
+function actualizarToolbarEditor(): void {
+  if (!_tiptapEditor) return;
+  const ed = _tiptapEditor;
+  const mapa: Record<string, boolean> = {
+    bold:        ed.isActive("bold"),
+    italic:      ed.isActive("italic"),
+    underline:   ed.isActive("underline"),
+    strike:      ed.isActive("strike"),
+    h1:          ed.isActive("heading", { level: 1 }),
+    h2:          ed.isActive("heading", { level: 2 }),
+    h3:          ed.isActive("heading", { level: 3 }),
+    bulletList:  ed.isActive("bulletList"),
+    orderedList: ed.isActive("orderedList"),
+    blockquote:  ed.isActive("blockquote"),
+    code:        ed.isActive("code"),
+    codeBlock:   ed.isActive("codeBlock"),
+    alignLeft:   ed.isActive({ textAlign: "left" }),
+    alignCenter: ed.isActive({ textAlign: "center" }),
+    alignRight:  ed.isActive({ textAlign: "right" }),
+  };
+  document.querySelectorAll<HTMLElement>(".editor-tb-btn[data-cmd]").forEach(btn => {
+    const cmd = btn.dataset.cmd ?? "";
+    btn.classList.toggle("is-active", mapa[cmd] ?? false);
+  });
+}
+
+function toggleMenuExtraEditor(): void {
+  document.getElementById("editor-menu-extra")?.classList.toggle("hidden");
+}
+
+function abrirImagenEditor(): void {
+  const input = document.getElementById("editor-img-input") as HTMLInputElement | null;
+  if (!input) return;
+  input.value = "";
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (!file || !_tiptapEditor) return;
+    if (file.size > 10 * 1024 * 1024) {
+      mostrarToast("La imagen no puede superar 10 MB", true);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const src = ev.target?.result as string;
+      if (src) _tiptapEditor!.chain().focus().setImage({ src }).run();
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+function ejecutarComandoTiptap(cmd: string): void {
+  if (!_tiptapEditor) return;
+  const ed = _tiptapEditor.chain().focus();
+  switch (cmd) {
+    case "bold":          ed.toggleBold().run(); break;
+    case "italic":        ed.toggleItalic().run(); break;
+    case "underline":     ed.toggleUnderline().run(); break;
+    case "strike":        ed.toggleStrike().run(); break;
+    case "h1":            ed.toggleHeading({ level: 1 }).run(); break;
+    case "h2":            ed.toggleHeading({ level: 2 }).run(); break;
+    case "h3":            ed.toggleHeading({ level: 3 }).run(); break;
+    case "bulletList":    ed.toggleBulletList().run(); break;
+    case "orderedList":   ed.toggleOrderedList().run(); break;
+    case "blockquote":    ed.toggleBlockquote().run(); break;
+    case "code":          ed.toggleCode().run(); break;
+    case "codeBlock":     ed.toggleCodeBlock().run(); break;
+    case "alignLeft":     ed.setTextAlign("left").run(); break;
+    case "alignCenter":   ed.setTextAlign("center").run(); break;
+    case "alignRight":    ed.setTextAlign("right").run(); break;
+    case "horizontalRule": ed.setHorizontalRule().run(); break;
+    case "insertTable":   ed.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(); break;
+    case "addColAfter":   ed.addColumnAfter().run(); break;
+    case "addRowAfter":   ed.addRowAfter().run(); break;
+    case "deleteTable":   ed.deleteTable().run(); break;
+    case "undo":          ed.undo().run(); break;
+    case "redo":          ed.redo().run(); break;
+  }
+  document.getElementById("editor-menu-extra")?.classList.add("hidden");
+  actualizarToolbarEditor();
+}
+
+async function guardarDocumentoEditor(_e: Event): Promise<void> {
+  if (!_tiptapEditor) return;
+  const tituloInput = document.getElementById("editor-titulo") as HTMLInputElement | null;
+  const titulo = tituloInput?.value.trim() ?? "";
+  if (!titulo) {
+    mostrarToast("Escribe un título para el documento", true);
+    tituloInput?.focus();
+    return;
+  }
+  const nombreArchivo = titulo.endsWith(".docx") ? titulo : titulo + ".docx";
+
+  const btn = document.getElementById("editor-btn-guardar") as HTMLButtonElement | null;
+  if (btn) btn.disabled = true;
+  try {
+    const bytes = await tiptapADocx(_tiptapEditor.getJSON());
+    const b64 = bytesABase64(bytes);
+    const ruta = await invoke<string>("guardar_documento_desde_bytes", {
+      nombreArchivo,
+      contenidoB64: b64,
+    });
+    _editorRutaCifrada = ruta;
+    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreArchivo }).catch(() => {});
+    await abrirSelectorCarpetaEditor(ruta, nombreArchivo);
+  } catch (err) {
+    mostrarToast("Error al guardar: " + String(err), true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function abrirSelectorCarpetaEditor(ruta: string, _nombre: string): Promise<void> {
+  _editorRutaCifrada = ruta;
+  _carpetaEditorSeleccionada = "todos";
+  let nodos: BuzonNodo[] = [];
+  try { nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados"); } catch { /* sin carpetas */ }
+
+  const lista = document.getElementById("selector-carpeta-lista");
+  if (lista) {
+    lista.innerHTML = renderSelectorCarpetaEditorHTML(nodos, null, 0);
+  }
+  document.getElementById("modal-selector-carpeta-editor")?.classList.remove("hidden");
+}
+
+function renderSelectorCarpetaEditorHTML(nodos: BuzonNodo[], parentId: string | null, depth: number): string {
+  const items = nodos.filter(n => n.parent === parentId).map(n => {
+    const indent = 24 + depth * 14;
+    const hijos = renderSelectorCarpetaEditorHTML(nodos, n.id, depth + 1);
+    return `
+      <div class="selector-carpeta-item" data-action="seleccionar-carpeta-editor"
+        data-carpeta="${escapeHTML(n.id)}" data-nombre="${escapeHTML(n.nombre)}"
+        style="padding-left:${indent}px;">
+        <span style="margin-right:6px;font-size:0.6rem;opacity:0.5;">◫</span>
+        ${escapeHTML(n.nombre.toUpperCase())}
+      </div>${hijos}`;
+  }).join("");
+
+  if (parentId === null) {
+    return `<div class="selector-carpeta-item seleccionado" data-action="seleccionar-carpeta-editor"
+      data-carpeta="todos" data-nombre="TODOS" style="padding-left:24px;">
+      <span style="margin-right:6px;font-size:0.6rem;opacity:0.5;">◫</span> TODOS
+    </div>${items}`;
+  }
+  return items;
+}
+
+function seleccionarCarpetaEnSelector(carpetaId: string, _nombre: string): void {
+  _carpetaEditorSeleccionada = carpetaId;
+  document.querySelectorAll(".selector-carpeta-item").forEach(el => {
+    el.classList.toggle("seleccionado", (el as HTMLElement).dataset.carpeta === carpetaId);
+  });
+}
+
+async function confirmarCarpetaEditor(): Promise<void> {
+  const ruta = _editorRutaCifrada;
+  if (!ruta) { cancelarCarpetaEditor(); return; }
+  if (_carpetaEditorSeleccionada && _carpetaEditorSeleccionada !== "todos") {
+    try {
+      await invoke("mover_archivo_guardado", { ruta, buzonDestino: _carpetaEditorSeleccionada });
+    } catch (e) {
+      mostrarToast("Error moviendo a carpeta: " + String(e), true);
+    }
+  }
+  document.getElementById("modal-selector-carpeta-editor")?.classList.add("hidden");
+  cerrarEditorTiptap();
+  mostrarToast("✓ Documento guardado y cifrado", false);
+  await cargarArchivosGuardados();
+}
+
+function cancelarCarpetaEditor(): void {
+  document.getElementById("modal-selector-carpeta-editor")?.classList.add("hidden");
+  cerrarEditorTiptap();
+  mostrarToast("✓ Documento guardado en TODOS y cifrado", false);
+  cargarArchivosGuardados().catch(() => {});
+}
+
+// ── CONVERSIÓN TIPTAP → DOCX ─────────────────────────────────────────────────
+
+type TiptapNode = {
+  type: string;
+  attrs?: Record<string, unknown>;
+  content?: TiptapNode[];
+  text?: string;
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
+};
+
+function tiptapRunsFromNode(node: TiptapNode): TextRun[] {
+  if (node.type === "text") {
+    const marks = node.marks ?? [];
+    return [new TextRun({
+      text: node.text ?? "",
+      bold:    marks.some(m => m.type === "bold"),
+      italics: marks.some(m => m.type === "italic"),
+      underline: marks.some(m => m.type === "underline") ? {} : undefined,
+      strike:  marks.some(m => m.type === "strike"),
+      font:    marks.some(m => m.type === "code") ? "Courier New" : undefined,
+    })];
+  }
+  if (node.type === "hardBreak") return [new TextRun({ text: "", break: 1 })];
+  return (node.content ?? []).flatMap(tiptapRunsFromNode);
+}
+
+function tiptapAlign(node: TiptapNode): (typeof AlignmentType)[keyof typeof AlignmentType] {
+  const a = node.attrs?.textAlign;
+  if (a === "center") return AlignmentType.CENTER;
+  if (a === "right")  return AlignmentType.RIGHT;
+  if (a === "justify") return AlignmentType.BOTH;
+  return AlignmentType.LEFT;
+}
+
+function tiptapNodosADocx(
+  nodes: TiptapNode[],
+  listCtx?: { bullet: boolean; level: number; counter: number[] }
+): (Paragraph | DocxTable)[] {
+  const out: (Paragraph | DocxTable)[] = [];
+  for (const node of nodes) {
+    switch (node.type) {
+      case "paragraph": {
+        const runs = (node.content ?? []).flatMap(tiptapRunsFromNode);
+        if (listCtx) {
+          const prefix = listCtx.bullet
+            ? new TextRun("• ")
+            : (() => {
+                listCtx.counter[listCtx.level] = (listCtx.counter[listCtx.level] ?? 0) + 1;
+                return new TextRun(`${listCtx.counter[listCtx.level]}. `);
+              })();
+          out.push(new Paragraph({
+            children: [prefix, ...runs],
+            indent: { left: (listCtx.level + 1) * 480 },
+            alignment: tiptapAlign(node),
+          }));
+        } else {
+          out.push(new Paragraph({ children: runs.length ? runs : [new TextRun("")], alignment: tiptapAlign(node) }));
+        }
+        break;
+      }
+      case "heading": {
+        const lvl = (node.attrs?.level as number) ?? 1;
+        const hdMap: Record<number, (typeof HeadingLevel)[keyof typeof HeadingLevel]> = {
+          1: HeadingLevel.HEADING_1, 2: HeadingLevel.HEADING_2, 3: HeadingLevel.HEADING_3,
+          4: HeadingLevel.HEADING_4, 5: HeadingLevel.HEADING_5, 6: HeadingLevel.HEADING_6,
+        };
+        out.push(new Paragraph({ children: (node.content ?? []).flatMap(tiptapRunsFromNode), heading: hdMap[lvl] ?? HeadingLevel.HEADING_1 }));
+        break;
+      }
+      case "blockquote":
+        for (const inner of (node.content ?? [])) {
+          const runs = (inner.content ?? []).flatMap(tiptapRunsFromNode);
+          out.push(new Paragraph({ children: [new TextRun("│ "), ...runs], indent: { left: 720 } }));
+        }
+        break;
+      case "codeBlock": {
+        const code = (node.content ?? []).map(n => n.text ?? "").join("");
+        for (const line of code.split("\n")) {
+          out.push(new Paragraph({ children: [new TextRun({ text: line, font: "Courier New" })], indent: { left: 720 } }));
+        }
+        break;
+      }
+      case "bulletList": {
+        const counter: number[] = [];
+        for (const item of (node.content ?? []))
+          for (const para of (item.content ?? []))
+            out.push(...tiptapNodosADocx([para], { bullet: true, level: 0, counter }));
+        break;
+      }
+      case "orderedList": {
+        const counter: number[] = [];
+        for (const item of (node.content ?? []))
+          for (const para of (item.content ?? []))
+            out.push(...tiptapNodosADocx([para], { bullet: false, level: 0, counter }));
+        break;
+      }
+      case "horizontalRule":
+        out.push(new Paragraph({
+          children: [],
+          border: { bottom: { style: BorderStyle.SINGLE, size: 1, color: "A8860C" } },
+        }));
+        break;
+      case "table": {
+        const rows = (node.content ?? []).map(row =>
+          new DocxTableRow({
+            children: (row.content ?? []).map(cell => {
+              const cellParas = tiptapNodosADocx(cell.content ?? []).filter(c => c instanceof Paragraph) as Paragraph[];
+              return new DocxTableCell({ children: cellParas.length ? cellParas : [new Paragraph("")] });
+            }),
+          })
+        );
+        if (rows.length) out.push(new DocxTable({ rows, width: { size: 100, type: WidthType.PERCENTAGE } }));
+        break;
+      }
+      case "image": {
+        const src: string = (node.attrs?.src as string | undefined) ?? "";
+        if (src.startsWith("data:image/")) {
+          try {
+            const [header, b64] = src.split(",");
+            const mimeMatch = header.match(/data:image\/(\w+);base64/);
+            const rawExt = mimeMatch?.[1] ?? "png";
+            const ext = (rawExt === "jpeg" ? "jpg" : rawExt) as "png" | "jpg" | "gif" | "bmp";
+            const binary = atob(b64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            out.push(new Paragraph({
+              children: [new ImageRun({ type: ext, data: bytes, transformation: { width: 400, height: 300 } })],
+            }));
+          } catch {
+            out.push(new Paragraph({ children: [new TextRun("[imagen]")] }));
+          }
+        }
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+async function tiptapADocx(json: TiptapNode): Promise<Uint8Array> {
+  const children = tiptapNodosADocx(json.content ?? []);
+  const doc = new DocxDocument({
+    sections: [{ children: children.length ? children : [new Paragraph("")] }],
+  });
+  const blob = await Packer.toBlob(doc);
+  return new Uint8Array(await blob.arrayBuffer());
+}
 
 function irATraduccion(): void {
   mostrarPantalla("traduccion");
@@ -5396,65 +5803,6 @@ function irAFechaRegistro(fechaISO: string): void {
 }
 (window as any).irAFechaRegistro = irAFechaRegistro;
 
-async function abrirFinderInApp(): Promise<void> {
-  const modal = document.getElementById("modal-finder-inapp");
-  const lista = document.getElementById("finder-inapp-lista");
-  const conteo = document.getElementById("finder-conteo");
-  const rutaLabel = document.getElementById("finder-ruta-label");
-  if (!modal || !lista) return;
-  lista.innerHTML = `<p style="text-align:center;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);padding:20px;opacity:0.5;">CARGANDO…</p>`;
-  modal.classList.remove("hidden");
-  try {
-    const archivos = await invoke<MetadatosArchivo[]>("listar_archivos_guardados", { buzon: "todos" });
-    if (rutaLabel) rutaLabel.textContent = `~/Babel/guardados · ${buzonActivoGuardados.toUpperCase()}`;
-    if (conteo) conteo.textContent = `${archivos.length} archivo${archivos.length !== 1 ? "s" : ""}`;
-    if (archivos.length === 0) {
-      lista.innerHTML = `<p style="text-align:center;font-size:0.65rem;letter-spacing:1px;color:var(--texto-secundario);padding:30px;opacity:0.5;">SIN ARCHIVOS</p>`;
-      return;
-    }
-    lista.innerHTML = archivos.map(a => {
-      const nombre = a.nombre.replace(/\.babel$/, "").replace(/^\d+_/, "");
-      const peso = a.tamaño ? `${Math.round(a.tamaño / 1024)} KB` : "";
-      const buzon = a.buzon && a.buzon !== "todos" ? a.buzon : "";
-      return `
-        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--borde);
-          border-radius:3px;cursor:pointer;transition:border-color 0.15s;"
-          onmouseenter="this.style.borderColor='var(--borde-dorado)'"
-          onmouseleave="this.style.borderColor='var(--borde)'"
-          onclick="verArchivoDesdeFinderInApp('${escapeHTML(a.ruta ?? "")}')">
-          <span style="font-size:1.2rem;flex-shrink:0;opacity:0.6;">◫</span>
-          <div style="flex:1;min-width:0;">
-            <div style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;letter-spacing:1px;
-              color:var(--texto-principal);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-              title="${escapeHTML(nombre)}">${escapeHTML(nombre)}</div>
-            <div style="font-size:0.58rem;color:var(--texto-secundario);opacity:0.5;letter-spacing:0.5px;margin-top:2px;">
-              ${escapeHTML(peso)}${buzon ? ` · ${escapeHTML(buzon)}` : ""} · AES-256-GCM
-            </div>
-          </div>
-        </div>`;
-    }).join("");
-  } catch (e) {
-    lista.innerHTML = `<p style="text-align:center;font-size:0.65rem;color:#ef4444;padding:20px;">${escapeHTML(String(e))}</p>`;
-  }
-}
-
-async function verArchivoDesdeFinderInApp(ruta: string): Promise<void> {
-  document.getElementById("modal-finder-inapp")?.classList.add("hidden");
-  try {
-    const texto = await invoke<string>("ver_archivo", { ruta });
-    const modal = document.getElementById("modal-visor");
-    const modalContenido = document.getElementById("modal-visor-contenido");
-    const modalNombre = document.getElementById("modal-visor-nombre");
-    if (!modal || !modalContenido) return;
-    const nombre = ruta.split("/").pop()?.replace(/\.babel$/, "") ?? ruta;
-    if (modalNombre) modalNombre.textContent = nombre;
-    renderizarEnContenedor(texto, modalContenido);
-    modal.classList.remove("hidden");
-  } catch (e) {
-    mostrarToast("Error abriendo archivo: " + String(e), true);
-  }
-}
-(window as any).verArchivoDesdeFinderInApp = verArchivoDesdeFinderInApp;
 
 // Ver la frase desde dentro de la app (pantalla principal o configuración)
 async function verFraseApp(): Promise<void> {

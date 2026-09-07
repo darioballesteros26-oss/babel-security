@@ -394,10 +394,7 @@
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
             onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
-          <button type="button" data-action="abrir-carpeta-guardados" class="btn-secundario-oro"
-            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;opacity:0.7;"
-            title="Abrir carpeta Guardados en Finder" id="ui-finder">◫ FINDER</button>
-          <button type="button" data-action="exportar-todo" class="btn-secundario-oro"
+<button type="button" data-action="exportar-todo" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
             title="Exportar todos los archivos a Descargas" id="ui-exportar-todo">↓ EXPORTAR TODO</button>
           <button type="button" data-action="enviar-email-seleccion" id="btn-mail-sel-g"
@@ -405,6 +402,9 @@
             title="Enviar archivo por email">✉ ENVIAR POR MAIL</button>
           <button type="button" data-action="abrir-importar-guardado" id="ui-importar" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;">+ IMPORTAR</button>
+          <button type="button" data-action="abrir-crear-archivo" id="ui-crear-archivo" class="btn-secundario-oro"
+            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
+            title="Crear un archivo de texto cifrado">+ CREAR ARCHIVO</button>
         </div>
       </div>
 
@@ -1115,40 +1115,8 @@
         </div>
       </div>
     </div>
-    <!-- MODAL FINDER IN-APP — explorador de archivos cifrados dentro de Babel -->
-    <div id="modal-finder-inapp" class="hidden" style="
-      position:fixed;inset:0;z-index:3500;background:rgba(0,0,0,0.92);
-      display:flex;align-items:center;justify-content:center;padding:20px;">
-      <div style="width:100%;max-width:680px;max-height:85vh;background:var(--fondo-panel,#0d0d0d);
-        border:1px solid var(--borde-dorado);border-radius:4px;display:flex;flex-direction:column;overflow:hidden;">
-        <!-- Cabecera -->
-        <div style="display:flex;align-items:center;justify-content:space-between;
-          padding:14px 20px;border-bottom:1px solid var(--borde);flex-shrink:0;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;
-              letter-spacing:3px;color:var(--dorado);">◫ ARCHIVOS BABEL</span>
-            <span id="finder-ruta-label" style="font-size:0.58rem;color:var(--texto-secundario);
-              opacity:0.5;letter-spacing:1px;"></span>
-          </div>
-          <button type="button" data-action="cerrar-finder-inapp" style="background:transparent;
-            border:none;color:var(--dorado);font-size:1.2rem;cursor:pointer;opacity:0.7;">✕</button>
-        </div>
-        <!-- Lista de archivos -->
-        <div id="finder-inapp-lista" style="flex:1;overflow-y:auto;padding:12px;
-          display:flex;flex-direction:column;gap:6px;
-          scrollbar-width:thin;scrollbar-color:var(--borde) transparent;"></div>
-        <!-- Pie -->
-        <div style="flex-shrink:0;padding:12px 20px;border-top:1px solid var(--borde);
-          display:flex;justify-content:space-between;align-items:center;">
-          <span id="finder-conteo" style="font-size:0.58rem;color:var(--texto-secundario);
-            opacity:0.5;letter-spacing:1px;"></span>
-          <button type="button" data-action="cerrar-finder-inapp" class="btn-link"
-            style="font-size:0.6rem;letter-spacing:2px;">CERRAR</button>
-        </div>
-      </div>
-    </div>
 
-    <!-- MODAL CONTRASEÑA RECUPERADA — muestra la contraseña del búnker tras recuperación BIP39 -->
+<!-- MODAL CONTRASEÑA RECUPERADA — muestra la contraseña del búnker tras recuperación BIP39 -->
     <div id="modal-pass-recuperado" class="hidden" style="
       position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.97);
       display:flex;align-items:center;justify-content:center;padding:24px;">
@@ -2345,6 +2313,137 @@
       </button>
     </div>
 
+  </div>
+</div>
+
+<!-- ── EDITOR TIPTAP ──────────────────────────────────────────────────── -->
+<div id="editor-tiptap" class="hidden" style="
+  position:fixed;inset:0;z-index:9000;background:var(--fondo);
+  display:flex;flex-direction:column;font-family:'Times New Roman',Times,serif;">
+
+  <!-- Cabecera -->
+  <div style="display:flex;align-items:center;gap:16px;padding:12px 24px;
+    border-bottom:1px solid rgba(212,175,55,0.2);background:var(--fondo);flex-shrink:0;">
+    <div style="color:var(--dorado);font-size:0.55rem;letter-spacing:3px;font-weight:700;flex-shrink:0;">
+      EDITOR BABEL
+    </div>
+    <input id="editor-titulo" type="text" placeholder="Título del documento..."
+      maxlength="120"
+      style="flex:1;background:transparent;border:none;border-bottom:1px solid rgba(212,175,55,0.25);
+      color:#E8E8E8;font-family:'Times New Roman',Times,serif;font-size:0.9rem;
+      letter-spacing:1px;padding:4px 0;outline:none;min-width:0;" />
+    <button type="button" id="editor-btn-guardar" data-action="guardar-documento-editor"
+      style="background:linear-gradient(135deg,var(--dorado),#A8860C);border:none;color:#0B0F19;
+      padding:8px 18px;border-radius:6px;font-family:'Times New Roman',Times,serif;
+      font-size:0.68rem;letter-spacing:2px;font-weight:700;cursor:pointer;flex-shrink:0;">
+      GUARDAR
+    </button>
+    <button type="button" data-action="cerrar-editor-tiptap"
+      style="background:transparent;border:1px solid rgba(255,255,255,0.1);color:#555;
+      padding:8px 12px;border-radius:6px;font-size:0.8rem;cursor:pointer;flex-shrink:0;">
+      ✕
+    </button>
+  </div>
+
+  <!-- Cuerpo: sidebar izquierda + área de edición -->
+  <div style="flex:1;display:flex;overflow:hidden;">
+
+    <!-- Barra de herramientas vertical (izquierda) -->
+    <div id="editor-toolbar" style="position:relative;display:flex;flex-direction:column;
+      align-items:center;gap:4px;padding:14px 6px;
+      border-right:1px solid rgba(255,255,255,0.06);
+      background:rgba(255,255,255,0.015);flex-shrink:0;width:50px;">
+
+      <!-- Formato texto -->
+      <button type="button" class="editor-tb-btn editor-tb-sq" data-action="tiptap-cmd" data-cmd="bold" title="Negrita"><strong>N</strong></button>
+      <button type="button" class="editor-tb-btn editor-tb-sq" data-action="tiptap-cmd" data-cmd="italic" title="Cursiva"><em>K</em></button>
+      <button type="button" class="editor-tb-btn editor-tb-sq" data-action="tiptap-cmd" data-cmd="underline" title="Subrayado"><u>S</u></button>
+      <button type="button" class="editor-tb-btn editor-tb-sq" data-action="tiptap-cmd" data-cmd="strike" title="Tachado"><s>T</s></button>
+
+      <div class="editor-tb-sep-h"></div>
+
+      <!-- Insertar imagen -->
+      <button type="button" class="editor-tb-btn editor-tb-sq editor-tb-plus" data-action="abrir-imagen-editor" title="Insertar imagen">+</button>
+      <input type="file" id="editor-img-input" accept="image/png,image/jpeg,image/gif,image/bmp" style="display:none;">
+
+      <div class="editor-tb-sep-h"></div>
+
+      <!-- Más opciones -->
+      <button type="button" class="editor-tb-btn editor-tb-sq editor-tb-menu" id="editor-btn-menu"
+        data-action="toggle-menu-extra-editor" title="Más opciones">☰</button>
+
+      <!-- Dropdown menú extra (se abre a la derecha) -->
+      <div id="editor-menu-extra" class="hidden" style="position:absolute;left:calc(100% + 4px);top:0;
+        z-index:200;background:#0f0f11;border:1px solid rgba(212,175,55,0.2);
+        border-radius:8px;box-shadow:8px 8px 32px rgba(0,0,0,0.7);
+        padding:10px 12px;min-width:300px;display:grid;grid-template-columns:1fr 1fr;gap:3px;">
+
+        <div class="editor-mb-label" style="grid-column:1/-1;">TÍTULOS</div>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="h1">H1 — Título grande</button>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="h2">H2 — Título medio</button>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="h3" style="grid-column:1/-1;">H3 — Subtítulo</button>
+
+        <div class="editor-mb-label" style="grid-column:1/-1;">LISTAS</div>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="bulletList">• Lista con viñetas</button>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="orderedList">1. Lista numerada</button>
+
+        <div class="editor-mb-label" style="grid-column:1/-1;">ALINEACIÓN</div>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="alignLeft">← Izquierda</button>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="alignCenter">↔ Centrar</button>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="alignRight" style="grid-column:1/-1;">→ Alinear a la derecha</button>
+
+        <div class="editor-mb-label" style="grid-column:1/-1;">BLOQUES</div>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="blockquote">" Cita destacada</button>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="horizontalRule">── Línea divisoria</button>
+
+        <div class="editor-mb-label" style="grid-column:1/-1;">TABLA</div>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="insertTable">⊞ Insertar tabla</button>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="addColAfter">+ Añadir columna</button>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="addRowAfter">+ Añadir fila</button>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="deleteTable">✕ Eliminar tabla</button>
+
+        <div class="editor-mb-label" style="grid-column:1/-1;">HISTORIAL</div>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="undo">↩ Deshacer</button>
+        <button type="button" class="editor-tb-btn editor-mb-btn" data-action="tiptap-cmd" data-cmd="redo">↪ Rehacer</button>
+      </div>
+    </div>
+
+    <!-- Área de edición -->
+    <div style="flex:1;overflow-y:auto;padding:40px 32px;
+      scrollbar-width:thin;scrollbar-color:rgba(212,175,55,0.3) transparent;">
+      <div style="max-width:760px;margin:0 auto;">
+        <div id="editor-contenido"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── MODAL SELECTOR CARPETA (dentro del editor) ───────────────────── -->
+<div id="modal-selector-carpeta-editor" class="hidden" style="
+  position:fixed;inset:0;z-index:9500;
+  background:rgba(0,0,0,0.88);backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#111;border:1px solid rgba(212,175,55,0.35);border-radius:12px;
+    max-width:380px;width:100%;box-shadow:0 0 40px rgba(212,175,55,0.08);">
+    <div style="padding:20px 24px;border-bottom:1px solid rgba(212,175,55,0.12);">
+      <div style="color:var(--dorado);font-size:0.58rem;letter-spacing:3px;font-weight:700;
+        font-family:'Times New Roman',Times,serif;">GUARDAR EN CARPETA</div>
+      <div style="color:#555;font-size:0.62rem;margin-top:5px;font-family:'Times New Roman',Times,serif;
+        letter-spacing:1px;">Elige dónde guardar el documento</div>
+    </div>
+    <div id="selector-carpeta-lista" style="max-height:300px;overflow-y:auto;padding:6px 0;
+      scrollbar-width:thin;scrollbar-color:rgba(212,175,55,0.2) transparent;"></div>
+    <div style="padding:14px 24px;border-top:1px solid rgba(255,255,255,0.05);display:flex;gap:10px;">
+      <button type="button" data-action="confirmar-carpeta-editor" style="
+        flex:1;background:linear-gradient(135deg,var(--dorado),#A8860C);border:none;color:#0B0F19;
+        padding:10px;border-radius:6px;font-family:'Times New Roman',Times,serif;
+        font-size:0.68rem;letter-spacing:2px;font-weight:700;cursor:pointer;">CONFIRMAR</button>
+      <button type="button" data-action="cancelar-carpeta-editor" style="
+        background:transparent;border:1px solid rgba(255,255,255,0.1);color:#555;
+        padding:10px 14px;border-radius:6px;font-family:'Times New Roman',Times,serif;
+        font-size:0.68rem;letter-spacing:2px;cursor:pointer;">EN TODOS</button>
+    </div>
   </div>
 </div>
 
