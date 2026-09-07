@@ -2712,6 +2712,38 @@ body {
   margin: 0 4px; flex-shrink: 0;
 }
 
+/* Barra horizontal — tooltips nativos mejorados */
+#editor-hbar [title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a1e;
+  color: #e8e0cc;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.58rem;
+  letter-spacing: 0.5px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(212,175,55,0.2);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 400;
+}
+#editor-hbar [title] { position: relative; }
+
+/* Barra horizontal — botones de color de paleta */
+#editor-color-palette button,
+#editor-highlight-palette button {
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+#editor-color-palette button:hover,
+#editor-highlight-palette button:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 6px rgba(255,255,255,0.3);
+}
+
 /* Contenido Tiptap */
 .tiptap {
   color: #DCDCDC;

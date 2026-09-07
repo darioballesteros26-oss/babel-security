@@ -1,11 +1,11 @@
 {
-  "version": "0.2.6",
-  "notes": "Seguridad y correcciones en el editor de documentos.",
-  "pub_date": "2026-09-07T15:26:43Z",
+  "version": "0.2.7",
+  "notes": "Barra de formato en el editor: tamaño de letra, color de texto, resaltado y contador de palabras.",
+  "pub_date": "2026-09-07T18:11:04Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTJzK3B0dWNINmRxNjBmUjc4VS9LRUhwUTFqdVozMXJ5bGgweUlDS25INzNxbEpybkJKVW01QzB0VkdRQlZkbDV1NEZZODdwL2tzQXAxTVZoZzdjN1pLRzZIMW05V2dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4Nzk0NzgzCWZpbGU6U2VjdXJpdHkgQmFiZWxfMC4yLjZfYWFyY2g2NC5hcHAudGFyLmd6CnV0cmtQMU1uMmZ4VFVMMmw0ME1WVzRmZ3lnekh1QVkzbVQwL0xKc3VjaWYzQzNqRWU4VTBoMXdBWUN3K3lYOEtIcGZPOWVrOTNoSE43dTc3RUJaYUNnPT0K",
-      "url": "https://github.com/darioballesteros26-oss/babel-security/releases/download/v0.2.6/Security.Babel_0.2.6_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTJzK3B0dWNINlFnSVpHNU9uMWdpL2VFQnplQllRa0diemRBT3dnVVJBZHplay9kY3NtOHM3UDFhYmVscVBNTXFZT0dBWVNFWW5vZFVDY3pFYmpDMTg3NTh6YW5JYUFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODA0NjU1CWZpbGU6U2VjdXJpdHkgQmFiZWxfMC4yLjdfYWFyY2g2NC5hcHAudGFyLmd6ClJVK2tYWjVxVUdaZEZLalpPZXpnQzlFV3ZuR0MwTmFaSTlYWGpCaGwzc24yb00wRUhaN0p1VjEyTDJHZmFqQy9Jc3Q0eFhXa2dHMzRTWGhEVkMvZkF3PT0K",
+      "url": "https://github.com/darioballesteros26-oss/babel-security/releases/download/v0.2.7/Security.Babel_0.2.7_aarch64.app.tar.gz"
     }
   }
 }

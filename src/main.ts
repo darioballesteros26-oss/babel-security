@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import DOMPurify from "dompurify";
-import { Editor } from "@tiptap/core";
+import { Editor, Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
@@ -13,6 +13,29 @@ import { TableCell } from "@tiptap/extension-table-cell";
 import { Underline } from "@tiptap/extension-underline";
 import { TextAlign } from "@tiptap/extension-text-align";
 import { Image as TiptapImage } from "@tiptap/extension-image";
+import { TextStyle } from "@tiptap/extension-text-style";
+import { Color } from "@tiptap/extension-color";
+import { Highlight } from "@tiptap/extension-highlight";
+
+// Extensión personalizada de tamaño de fuente (sobre TextStyle)
+const FontSize = Extension.create({
+  name: "fontSize",
+  addGlobalAttributes() {
+    return [{ types: ["textStyle"], attributes: { fontSize: {
+      default: null,
+      parseHTML: el => el.style.fontSize?.replace("px","") ?? null,
+      renderHTML: attrs => attrs.fontSize ? { style: `font-size:${attrs.fontSize}px` } : {},
+    }}}];
+  },
+  addCommands() {
+    return {
+      setFontSize: (size: string) => ({ chain }: any) =>
+        chain().setMark("textStyle", { fontSize: size }).run(),
+      unsetFontSize: () => ({ chain }: any) =>
+        chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run(),
+    } as any;
+  },
+});
 import {
   Document as DocxDocument, Paragraph, TextRun, HeadingLevel,
   Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell,
@@ -3410,22 +3433,93 @@ function abrirEditorTiptap(): void {
       TableHeader,
       TableCell,
       TiptapImage.configure({ inline: false, allowBase64: true }),
+      TextStyle,
+      Color,
+      FontSize,
+      Highlight.configure({ multicolor: true }),
     ],
     content: "<p></p>",
     autofocus: "end",
-    onTransaction: () => actualizarToolbarEditor(),
+    onTransaction: () => { actualizarToolbarEditor(); actualizarContadorEditor(); },
     onSelectionUpdate: () => actualizarToolbarEditor(),
   });
 
   actualizarToolbarEditor();
+  actualizarContadorEditor();
+
+  // Cerrar paletas de color al hacer clic fuera
+  document.addEventListener("click", _cerrarPaletasEditor, { capture: true, once: false });
+}
+
+function _cerrarPaletasEditor(e: Event): void {
+  const target = e.target as HTMLElement;
+  if (!target.closest("#editor-color-palette") && !target.closest("[onclick*='editor-color-palette']") &&
+      !target.closest("[onclick*='color-palette']")) {
+    document.getElementById("editor-color-palette")?.classList.add("hidden");
+  }
+  if (!target.closest("#editor-highlight-palette") && !target.closest("[onclick*='editor-highlight-palette']") &&
+      !target.closest("[onclick*='highlight-palette']")) {
+    document.getElementById("editor-highlight-palette")?.classList.add("hidden");
+  }
 }
 
 function cerrarEditorTiptap(): void {
   document.getElementById("editor-tiptap")?.classList.add("hidden");
   document.getElementById("modal-selector-carpeta-editor")?.classList.add("hidden");
+  document.removeEventListener("click", _cerrarPaletasEditor, true);
   if (_tiptapEditor) { _tiptapEditor.destroy(); _tiptapEditor = null; }
   _editorRutaCifrada = null;
 }
+
+function actualizarContadorEditor(): void {
+  if (!_tiptapEditor) return;
+  const texto = _tiptapEditor.getText();
+  const palabras = texto.trim() ? texto.trim().split(/\s+/).length : 0;
+  const chars = texto.length;
+  const el = document.getElementById("editor-contador");
+  if (el) el.textContent = `${palabras} palabras · ${chars} caracteres`;
+}
+
+function aplicarColorTexto(color: string): void {
+  if (!_tiptapEditor) return;
+  if (color === "none") {
+    (_tiptapEditor.chain().focus() as any).unsetColor().run();
+  } else {
+    (_tiptapEditor.chain().focus() as any).setColor(color).run();
+  }
+  document.getElementById("editor-color-palette")?.classList.add("hidden");
+}
+
+function aplicarResaltado(color: string): void {
+  if (!_tiptapEditor) return;
+  if (color === "none") {
+    (_tiptapEditor.chain().focus() as any).unsetHighlight().run();
+  } else {
+    (_tiptapEditor.chain().focus() as any).setHighlight({ color }).run();
+  }
+  document.getElementById("editor-highlight-palette")?.classList.add("hidden");
+}
+
+function aplicarTamañoFuente(size: string): void {
+  if (!_tiptapEditor) return;
+  const sel = document.getElementById("editor-font-size") as HTMLSelectElement | null;
+  if (size === "") {
+    (_tiptapEditor.chain().focus() as any).unsetFontSize().run();
+  } else {
+    (_tiptapEditor.chain().focus() as any).setFontSize(size).run();
+  }
+  if (sel) sel.value = size;
+}
+
+function limpiarFormatoEditor(): void {
+  if (!_tiptapEditor) return;
+  _tiptapEditor.chain().focus().clearNodes().unsetAllMarks().run();
+}
+
+(window as any).aplicarColorTexto = aplicarColorTexto;
+(window as any).aplicarResaltado = aplicarResaltado;
+(window as any).aplicarTamañoFuente = aplicarTamañoFuente;
+(window as any).limpiarFormatoEditor = limpiarFormatoEditor;
 
 function actualizarToolbarEditor(): void {
   if (!_tiptapEditor) return;
@@ -3451,6 +3545,29 @@ function actualizarToolbarEditor(): void {
     const cmd = btn.dataset.cmd ?? "";
     btn.classList.toggle("is-active", mapa[cmd] ?? false);
   });
+
+  // Actualizar indicador de color activo en el botón
+  const colorBtn = document.getElementById("editor-color-indicator");
+  if (colorBtn) {
+    const activeColor = (ed.getAttributes("textStyle") as any)?.color ?? null;
+    colorBtn.style.background = activeColor ?? "transparent";
+    colorBtn.style.border = activeColor ? "none" : "1px solid rgba(255,255,255,0.3)";
+  }
+
+  // Actualizar indicador de resaltado activo
+  const hlBtn = document.getElementById("editor-highlight-indicator");
+  if (hlBtn) {
+    const activeHl = (ed.getAttributes("highlight") as any)?.color ?? null;
+    hlBtn.style.background = activeHl ?? "transparent";
+    hlBtn.style.border = activeHl ? "none" : "1px solid rgba(255,255,255,0.3)";
+  }
+
+  // Actualizar selector de tamaño de fuente
+  const fsSel = document.getElementById("editor-font-size") as HTMLSelectElement | null;
+  if (fsSel) {
+    const activeSize = (ed.getAttributes("textStyle") as any)?.fontSize ?? "";
+    fsSel.value = activeSize;
+  }
 }
 
 function toggleMenuExtraEditor(): void {
@@ -3614,16 +3731,31 @@ type TiptapNode = {
   marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
 };
 
+function hexColorToDocx(hex: string | undefined): string | undefined {
+  if (!hex) return undefined;
+  return hex.startsWith("#") ? hex.slice(1).toUpperCase() : hex.toUpperCase();
+}
+
 function tiptapRunsFromNode(node: TiptapNode): TextRun[] {
   if (node.type === "text") {
     const marks = node.marks ?? [];
+    const textStyleMark = marks.find(m => m.type === "textStyle");
+    const colorHex = hexColorToDocx(textStyleMark?.attrs?.color as string | undefined);
+    const fontSizePx = textStyleMark?.attrs?.fontSize as string | undefined;
+    const highlightMark = marks.find(m => m.type === "highlight");
+    const highlightColor = hexColorToDocx(highlightMark?.attrs?.color as string | undefined);
+    // font size: Tiptap usa px, docx usa half-points (1pt = 2 half-points, 1px ≈ 0.75pt)
+    const sizeHalfPt = fontSizePx ? Math.round(parseFloat(fontSizePx) * 0.75 * 2) : undefined;
     return [new TextRun({
       text: node.text ?? "",
-      bold:    marks.some(m => m.type === "bold"),
-      italics: marks.some(m => m.type === "italic"),
+      bold:      marks.some(m => m.type === "bold"),
+      italics:   marks.some(m => m.type === "italic"),
       underline: marks.some(m => m.type === "underline") ? {} : undefined,
-      strike:  marks.some(m => m.type === "strike"),
-      font:    marks.some(m => m.type === "code") ? "Courier New" : undefined,
+      strike:    marks.some(m => m.type === "strike"),
+      font:      marks.some(m => m.type === "code") ? "Courier New" : undefined,
+      color:     colorHex,
+      size:      sizeHalfPt,
+      highlight: highlightColor ? "yellow" : undefined,
     })];
   }
   if (node.type === "hardBreak") return [new TextRun({ text: "", break: 1 })];
