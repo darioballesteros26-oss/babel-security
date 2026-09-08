@@ -1,11 +1,11 @@
 {
-  "version": "0.2.7",
-  "notes": "Barra de formato en el editor: tamaño de letra, color de texto, resaltado y contador de palabras.",
-  "pub_date": "2026-09-07T18:11:04Z",
+  "version": "0.2.8",
+  "notes": "Fix sistema de actualización: la app ya no muestra el popup de nuevo al terminar la descarga.",
+  "pub_date": "2026-09-08T09:10:55Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTJzK3B0dWNINlFnSVpHNU9uMWdpL2VFQnplQllRa0diemRBT3dnVVJBZHplay9kY3NtOHM3UDFhYmVscVBNTXFZT0dBWVNFWW5vZFVDY3pFYmpDMTg3NTh6YW5JYUFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODA0NjU1CWZpbGU6U2VjdXJpdHkgQmFiZWxfMC4yLjdfYWFyY2g2NC5hcHAudGFyLmd6ClJVK2tYWjVxVUdaZEZLalpPZXpnQzlFV3ZuR0MwTmFaSTlYWGpCaGwzc24yb00wRUhaN0p1VjEyTDJHZmFqQy9Jc3Q0eFhXa2dHMzRTWGhEVkMvZkF3PT0K",
-      "url": "https://github.com/darioballesteros26-oss/babel-security/releases/download/v0.2.7/Security.Babel_0.2.7_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTJzK3B0dWNINlZaU2hRaDhkSmp4K21Qcnkxc3BkN0ZjOW1FU01PU2VwcWRZVUhkLzkwZEpnR2QyUnNITmVHYjNaL2x1L3FwWktqNE1vM1JPS096UEl1eGx0N0xhWkFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODU4NjQ0CWZpbGU6U2VjdXJpdHkgQmFiZWxfMC4yLjhfYWFyY2g2NC5hcHAudGFyLmd6CktTelI1Z3F2MHRlVUpwalI1bmNMNXFsZkRVK2o3bUJUc0FvTlpvMzBMaDBWMkUvS3dldFZsYVFqZ1FZVzJXM3FIVndFUFFSRisyeExZWW1LNmlPOEN3PT0K",
+      "url": "https://github.com/darioballesteros26-oss/babel-security/releases/download/v0.2.8/Security.Babel_0.2.8_aarch64.app.tar.gz"
     }
   }
 }
