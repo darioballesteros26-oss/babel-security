@@ -394,9 +394,30 @@
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
             onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
-<button type="button" data-action="exportar-todo" class="btn-secundario-oro"
-            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
-            title="Exportar todos los archivos a Descargas" id="ui-exportar-todo">↓ EXPORTAR TODO</button>
+          <!-- REDACTAR — aparece al seleccionar un único archivo -->
+          <div id="wrap-redactar-g" class="hidden" style="position:relative;display:inline-block;">
+            <button type="button" id="btn-redactar-g" data-action="toggle-menu-redactar"
+              style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;display:flex;align-items:center;gap:6px;"
+              onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+              onmouseleave="this.style.background='transparent'">✍ REDACTAR <span style="font-size:0.5rem;opacity:0.7;">▾</span></button>
+            <div id="menu-redactar" class="hidden" style="position:absolute;top:calc(100% + 6px);right:0;
+              z-index:500;background:#0d0d0d;border:1px solid rgba(212,175,55,0.35);border-radius:6px;
+              padding:4px 0;min-width:210px;box-shadow:0 8px 28px rgba(0,0,0,0.8);">
+              <button type="button" data-action="redactar-tu-mismo"
+                style="display:block;width:100%;text-align:left;padding:10px 18px;background:transparent;border:none;
+                font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:1.5px;color:#e8e0d0;
+                cursor:pointer;transition:background 0.15s;"
+                onmouseenter="this.style.background='rgba(212,175,55,0.08)'"
+                onmouseleave="this.style.background='transparent'">✍ Redactar tú mismo</button>
+              <div style="height:1px;background:rgba(212,175,55,0.1);margin:2px 0;"></div>
+              <button type="button" data-action="redactar-con-babel"
+                style="display:block;width:100%;text-align:left;padding:10px 18px;background:transparent;border:none;
+                font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:1.5px;color:#e8e0d0;
+                cursor:pointer;transition:background 0.15s;"
+                onmouseenter="this.style.background='rgba(212,175,55,0.08)'"
+                onmouseleave="this.style.background='transparent'">◈ Redactar con Babel</button>
+            </div>
+          </div>
           <button type="button" data-action="enviar-email-seleccion" id="btn-mail-sel-g"
             class="btn-secundario-oro hidden" style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
             title="Enviar archivo por email">✉ ENVIAR POR MAIL</button>
@@ -2544,6 +2565,305 @@
     </div>
   </div>
 </div>
+
+<!-- ── PANTALLA REDACCIÓN — vista dividida con separador arrastrable ──── -->
+<div id="pantalla-redaccion" class="hidden" style="
+  position:fixed;inset:0;z-index:8500;background:var(--fondo);
+  display:flex;flex-direction:column;font-family:'Times New Roman',Times,serif;">
+
+  <!-- Cabecera -->
+  <div style="display:flex;align-items:center;gap:12px;padding:10px 20px;
+    border-bottom:1px solid rgba(212,175,55,0.2);background:var(--fondo);flex-shrink:0;">
+    <button type="button" data-action="cerrar-redaccion"
+      style="background:transparent;border:none;color:var(--dorado);font-family:'Times New Roman',Times,serif;
+      font-size:0.65rem;letter-spacing:2px;cursor:pointer;flex-shrink:0;padding:4px 0;">← ARCHIVOS</button>
+    <div style="width:1px;height:16px;background:rgba(212,175,55,0.2);flex-shrink:0;"></div>
+    <div style="color:var(--dorado);font-size:0.55rem;letter-spacing:3px;font-weight:700;flex-shrink:0;">BABEL</div>
+    <span id="redaccion-nombre" style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;
+      color:var(--texto-secundario);letter-spacing:0.05em;opacity:0.65;min-width:0;overflow:hidden;
+      text-overflow:ellipsis;white-space:nowrap;flex:1;"></span>
+    <span id="redaccion-modo-badge" style="font-family:'Times New Roman',Times,serif;font-size:0.52rem;
+      letter-spacing:2px;color:var(--dorado);opacity:0.5;flex-shrink:0;"></span>
+    <button type="button" id="redaccion-btn-guardar" data-action="guardar-redaccion"
+      style="background:linear-gradient(135deg,var(--dorado),#A8860C);border:none;color:#0B0F19;
+      padding:7px 16px;border-radius:5px;font-family:'Times New Roman',Times,serif;
+      font-size:0.62rem;letter-spacing:2px;font-weight:700;cursor:pointer;flex-shrink:0;">GUARDAR</button>
+    <button type="button" data-action="cerrar-redaccion"
+      style="background:transparent;border:1px solid rgba(255,255,255,0.1);color:#555;
+      padding:6px 10px;border-radius:5px;font-size:0.8rem;cursor:pointer;flex-shrink:0;">✕</button>
+  </div>
+
+  <!-- Cuerpo: panel izquierdo + separador arrastrable + panel derecho -->
+  <div id="redaccion-body" style="flex:1;display:flex;overflow:hidden;min-height:0;">
+
+    <!-- PANEL IZQUIERDO: visor del archivo original (descifrado) -->
+    <div id="redaccion-izq" style="flex-basis:50%;min-width:80px;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="padding:8px 20px;border-bottom:1px solid rgba(212,175,55,0.1);flex-shrink:0;
+        font-family:'Times New Roman',Times,serif;font-size:0.55rem;letter-spacing:3px;color:var(--dorado);opacity:0.6;">
+        ARCHIVO ORIGINAL
+      </div>
+      <div id="redaccion-contenido-izq" style="flex:1;overflow-y:auto;padding:32px 40px;
+        font-family:'Times New Roman',Times,serif;font-size:1rem;color:var(--texto-principal,#e8e0d0);
+        line-height:1.9;word-break:break-word;
+        scrollbar-width:thin;scrollbar-color:rgba(212,175,55,0.3) transparent;"></div>
+    </div>
+
+    <!-- SEPARADOR ARRASTRABLE -->
+    <div id="redaccion-sep" style="width:5px;cursor:col-resize;flex-shrink:0;
+      background:rgba(212,175,55,0.13);transition:background 0.15s;position:relative;"
+      onmouseenter="this.style.background='rgba(212,175,55,0.38)'"
+      onmouseleave="if(!window._redaccionDragging)this.style.background='rgba(212,175,55,0.13)'">
+    </div>
+
+    <!-- PANEL DERECHO: editor manual o panel IA -->
+    <div id="redaccion-der" style="flex-basis:50%;min-width:80px;display:flex;flex-direction:column;overflow:hidden;">
+
+      <!-- ── MODO "REDACTAR TÚ MISMO": editor Tiptap embebido ── -->
+      <div id="redaccion-editor-wrap" class="hidden" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+
+        <!-- Barra horizontal de formato -->
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 12px;flex-shrink:0;flex-wrap:wrap;
+          border-bottom:1px solid rgba(212,175,55,0.1);background:rgba(255,255,255,0.02);">
+
+          <select id="redaccion-font-size" title="Tamaño de letra"
+            onchange="aplicarFSRedaccion(this.value)"
+            style="background:#0f0f11;border:1px solid rgba(255,255,255,0.12);color:#ccc;
+            border-radius:4px;padding:3px 6px;font-size:0.68rem;cursor:pointer;
+            font-family:'Times New Roman',Times,serif;">
+            <option value="">Tamaño</option>
+            <option value="10">10</option><option value="12">12</option>
+            <option value="14">14</option><option value="16">16</option>
+            <option value="18">18</option><option value="20">20</option>
+            <option value="24">24</option><option value="32">32</option>
+            <option value="48">48</option>
+          </select>
+
+          <div style="width:1px;height:18px;background:rgba(255,255,255,0.1);flex-shrink:0;"></div>
+
+          <!-- Color de texto -->
+          <div style="position:relative;">
+            <button type="button" title="Color de texto"
+              onclick="document.getElementById('rd-color-palette').classList.toggle('hidden');document.getElementById('rd-highlight-palette').classList.add('hidden')"
+              style="display:flex;flex-direction:column;align-items:center;gap:2px;
+              background:transparent;border:none;cursor:pointer;padding:2px 5px;border-radius:4px;">
+              <span style="font-size:0.75rem;color:#ccc;font-family:'Times New Roman',Times,serif;line-height:1;">A</span>
+              <span id="rd-color-indicator" style="width:18px;height:3px;border-radius:2px;
+                background:transparent;border:1px solid rgba(255,255,255,0.3);display:block;"></span>
+            </button>
+            <div id="rd-color-palette" class="hidden" style="position:absolute;top:calc(100% + 4px);left:0;
+              z-index:300;background:#0f0f11;border:1px solid rgba(212,175,55,0.2);border-radius:8px;
+              padding:8px;box-shadow:4px 4px 20px rgba(0,0,0,0.6);display:grid;grid-template-columns:repeat(6,20px);gap:4px;min-width:160px;">
+              <div style="grid-column:1/-1;font-size:0.55rem;color:#888;letter-spacing:1px;margin-bottom:2px;">COLOR TEXTO</div>
+              <button onclick="aplicarColorRedaccion('#ffffff')" style="width:20px;height:20px;border-radius:3px;background:#ffffff;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarColorRedaccion('#e8e0cc')" style="width:20px;height:20px;border-radius:3px;background:#e8e0cc;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarColorRedaccion('#d4af37')" style="width:20px;height:20px;border-radius:3px;background:#d4af37;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarColorRedaccion('#60a5fa')" style="width:20px;height:20px;border-radius:3px;background:#60a5fa;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarColorRedaccion('#34d399')" style="width:20px;height:20px;border-radius:3px;background:#34d399;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarColorRedaccion('#f87171')" style="width:20px;height:20px;border-radius:3px;background:#f87171;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarColorRedaccion('#a78bfa')" style="width:20px;height:20px;border-radius:3px;background:#a78bfa;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarColorRedaccion('#fb923c')" style="width:20px;height:20px;border-radius:3px;background:#fb923c;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarColorRedaccion('none')" title="Sin color" style="width:20px;height:20px;border-radius:3px;background:transparent;border:1px dashed #555;cursor:pointer;font-size:0.5rem;color:#888;">✕</button>
+              <div style="grid-column:1/-1;margin-top:4px;">
+                <input type="color" onchange="aplicarColorRedaccion(this.value)"
+                  style="width:100%;height:22px;border:none;border-radius:4px;cursor:pointer;background:transparent;">
+              </div>
+            </div>
+          </div>
+
+          <!-- Resaltado -->
+          <div style="position:relative;">
+            <button type="button" title="Resaltar texto"
+              onclick="document.getElementById('rd-highlight-palette').classList.toggle('hidden');document.getElementById('rd-color-palette').classList.add('hidden')"
+              style="display:flex;flex-direction:column;align-items:center;gap:2px;
+              background:transparent;border:none;cursor:pointer;padding:2px 5px;border-radius:4px;">
+              <span style="font-size:0.75rem;color:#ccc;font-family:'Times New Roman',Times,serif;line-height:1;">ab</span>
+              <span id="rd-highlight-indicator" style="width:18px;height:3px;border-radius:2px;
+                background:transparent;border:1px solid rgba(255,255,255,0.3);display:block;"></span>
+            </button>
+            <div id="rd-highlight-palette" class="hidden" style="position:absolute;top:calc(100% + 4px);left:0;
+              z-index:300;background:#0f0f11;border:1px solid rgba(212,175,55,0.2);border-radius:8px;
+              padding:8px;box-shadow:4px 4px 20px rgba(0,0,0,0.6);display:grid;grid-template-columns:repeat(6,20px);gap:4px;min-width:160px;">
+              <div style="grid-column:1/-1;font-size:0.55rem;color:#888;letter-spacing:1px;margin-bottom:2px;">RESALTADO</div>
+              <button onclick="aplicarResaltadoRedaccion('#fef08a')" style="width:20px;height:20px;border-radius:3px;background:#fef08a;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarResaltadoRedaccion('#bbf7d0')" style="width:20px;height:20px;border-radius:3px;background:#bbf7d0;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarResaltadoRedaccion('#bfdbfe')" style="width:20px;height:20px;border-radius:3px;background:#bfdbfe;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarResaltadoRedaccion('#fecaca')" style="width:20px;height:20px;border-radius:3px;background:#fecaca;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarResaltadoRedaccion('#e9d5ff')" style="width:20px;height:20px;border-radius:3px;background:#e9d5ff;border:none;cursor:pointer;"></button>
+              <button onclick="aplicarResaltadoRedaccion('none')" style="width:20px;height:20px;border-radius:3px;background:transparent;border:1px dashed #555;cursor:pointer;font-size:0.5rem;color:#888;">✕</button>
+            </div>
+          </div>
+
+          <div style="width:1px;height:18px;background:rgba(255,255,255,0.1);flex-shrink:0;"></div>
+
+          <button type="button" title="Limpiar formato" onclick="limpiarFmtRedaccion()"
+            style="background:transparent;border:1px solid rgba(255,255,255,0.1);color:#888;
+            border-radius:4px;padding:3px 7px;font-size:0.65rem;cursor:pointer;letter-spacing:0.5px;">
+            ✕ formato
+          </button>
+
+          <span id="redaccion-contador" style="margin-left:auto;font-size:0.55rem;
+            color:rgba(255,255,255,0.25);letter-spacing:0.5px;white-space:nowrap;">0 palabras · 0 caracteres</span>
+
+          <!-- Botón ≡ + dropdown derecho -->
+          <div style="position:relative;flex-shrink:0;">
+            <button type="button" title="Más opciones de formato"
+              onclick="toggleMenuExtraRedaccion()"
+              style="background:transparent;border:1px solid rgba(212,175,55,0.18);color:rgba(212,175,55,0.7);
+              border-radius:4px;padding:3px 8px;font-size:0.85rem;cursor:pointer;letter-spacing:1px;
+              transition:background 0.15s,color 0.15s;"
+              onmouseenter="this.style.background='rgba(212,175,55,0.1)';this.style.color='rgba(212,175,55,1)'"
+              onmouseleave="this.style.background='transparent';this.style.color='rgba(212,175,55,0.7)'">☰</button>
+
+            <div id="rd-menu-extra" class="hidden" style="position:absolute;top:calc(100% + 6px);right:0;
+              z-index:400;background:#0f0f11;border:1px solid rgba(212,175,55,0.2);
+              border-radius:8px;box-shadow:8px 8px 32px rgba(0,0,0,0.7);
+              padding:10px 12px;min-width:260px;display:grid;grid-template-columns:1fr 1fr;gap:3px;">
+
+              <div style="grid-column:1/-1;font-size:0.5rem;color:rgba(212,175,55,0.5);
+                letter-spacing:2px;margin-bottom:4px;padding-bottom:4px;
+                border-bottom:1px solid rgba(255,255,255,0.05);">FORMATO</div>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="bold"><strong>N</strong> — Negrita</button>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="italic"><em>K</em> — Cursiva</button>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="underline"><u>S</u> — Subrayado</button>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="strike"><s>T</s> — Tachado</button>
+
+              <div style="grid-column:1/-1;font-size:0.5rem;color:rgba(212,175,55,0.5);
+                letter-spacing:2px;margin:6px 0 4px;padding-bottom:4px;
+                border-bottom:1px solid rgba(255,255,255,0.05);">TÍTULOS</div>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="h1">H1 — Título grande</button>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="h2">H2 — Título medio</button>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="h3" style="grid-column:1/-1;">H3 — Subtítulo</button>
+
+              <div style="grid-column:1/-1;font-size:0.5rem;color:rgba(212,175,55,0.5);
+                letter-spacing:2px;margin:6px 0 4px;padding-bottom:4px;
+                border-bottom:1px solid rgba(255,255,255,0.05);">LISTAS</div>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="bulletList">• Lista con viñetas</button>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="orderedList">1. Lista numerada</button>
+
+              <div style="grid-column:1/-1;font-size:0.5rem;color:rgba(212,175,55,0.5);
+                letter-spacing:2px;margin:6px 0 4px;padding-bottom:4px;
+                border-bottom:1px solid rgba(255,255,255,0.05);">ALINEACIÓN</div>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="alignLeft">← Izquierda</button>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="alignCenter">↔ Centrar</button>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="alignRight" style="grid-column:1/-1;">→ Derecha</button>
+
+              <div style="grid-column:1/-1;font-size:0.5rem;color:rgba(212,175,55,0.5);
+                letter-spacing:2px;margin:6px 0 4px;padding-bottom:4px;
+                border-bottom:1px solid rgba(255,255,255,0.05);">HISTORIAL</div>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="undo">↩ Deshacer</button>
+              <button type="button" class="editor-tb-btn editor-mb-btn" data-action="redaccion-cmd" data-cmd="redo">↪ Rehacer</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cuerpo del editor: toolbar vertical + área de texto -->
+        <div style="flex:1;display:flex;overflow:hidden;min-height:0;">
+
+          <!-- Toolbar vertical -->
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:14px 6px;
+            border-right:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.015);
+            flex-shrink:0;width:50px;">
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="bold" title="Negrita (Ctrl+B)"><strong>N</strong></button>
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="italic" title="Cursiva (Ctrl+I)"><em>K</em></button>
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="underline" title="Subrayado (Ctrl+U)"><u>S</u></button>
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="strike" title="Tachado — tachar texto seleccionado"><s>T</s></button>
+            <div class="editor-tb-sep-h"></div>
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="bulletList" title="Lista con viñetas">•</button>
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="orderedList" title="Lista numerada">1.</button>
+            <div class="editor-tb-sep-h"></div>
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="h1" title="Título H1 — Encabezado grande" style="font-size:0.55rem;">H1</button>
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="h2" title="Título H2 — Encabezado medio" style="font-size:0.55rem;">H2</button>
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="h3" title="Título H3 — Subtítulo" style="font-size:0.55rem;">H3</button>
+            <div class="editor-tb-sep-h"></div>
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="undo" title="Deshacer (Ctrl+Z)">↩</button>
+            <button type="button" class="editor-tb-btn editor-tb-sq" data-action="redaccion-cmd" data-cmd="redo" title="Rehacer (Ctrl+Y)">↪</button>
+          </div>
+
+          <!-- Área de edición -->
+          <div style="flex:1;overflow-y:auto;padding:32px 28px;
+            scrollbar-width:thin;scrollbar-color:rgba(212,175,55,0.3) transparent;">
+            <div style="max-width:700px;margin:0 auto;">
+              <div id="redaccion-contenido"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ── MODO "REDACTAR CON BABEL": panel IA ── -->
+      <div id="redaccion-ia-wrap" class="hidden" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+
+        <!-- Mini panel (cerrado) -->
+        <div id="redaccion-ia-mini" style="flex:1;display:flex;flex-direction:column;
+          align-items:center;justify-content:center;gap:18px;padding:40px 32px;
+          background:rgba(212,175,55,0.015);">
+          <div style="width:48px;height:48px;border-radius:50%;border:1px solid rgba(212,175,55,0.3);
+            display:flex;align-items:center;justify-content:center;
+            font-family:'Times New Roman',Times,serif;font-size:1.2rem;color:var(--dorado);opacity:0.5;">◈</div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.6rem;letter-spacing:3px;
+            color:var(--dorado);opacity:0.5;text-align:center;">ASISTENTE BABEL</div>
+          <button type="button" data-action="abrir-chat-ia-redaccion"
+            style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;
+            padding:10px 24px;background:transparent;border:1px solid rgba(212,175,55,0.4);
+            color:var(--dorado);cursor:pointer;border-radius:3px;transition:all 0.2s;"
+            onmouseenter="this.style.background='rgba(212,175,55,0.08)';this.style.borderColor='rgba(212,175,55,0.8)'"
+            onmouseleave="this.style.background='transparent';this.style.borderColor='rgba(212,175,55,0.4)'">
+            INICIAR ASISTENTE
+          </button>
+          <p style="font-family:'Times New Roman',Times,serif;font-size:0.65rem;letter-spacing:0.5px;
+            color:var(--texto-secundario);opacity:0.4;text-align:center;max-width:240px;line-height:1.7;margin:0;">
+            El asistente te ayuda a redactar el documento nuevo basándose en el original
+          </p>
+        </div>
+
+        <!-- Chat IA expandido -->
+        <div id="redaccion-ia-chat" class="hidden" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+          <div style="padding:10px 16px;border-bottom:1px solid rgba(212,175,55,0.12);flex-shrink:0;
+            display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-family:'Times New Roman',Times,serif;font-size:0.55rem;
+                letter-spacing:3px;color:var(--dorado);">ASISTENTE BABEL</span>
+              <span style="font-size:0.5rem;letter-spacing:1px;color:var(--texto-secundario);
+                opacity:0.35;">· IA LOCAL</span>
+            </div>
+            <button type="button" data-action="cerrar-chat-ia-redaccion"
+              style="background:transparent;border:none;color:var(--texto-secundario);
+              font-size:0.9rem;cursor:pointer;opacity:0.5;padding:2px 4px;">✕</button>
+          </div>
+
+          <!-- Mensajes (generados dinámicamente por iniciarAsistenteIa) -->
+          <div id="redaccion-ia-mensajes" style="flex:1;overflow-y:auto;padding:16px 16px;
+            display:flex;flex-direction:column;gap:12px;
+            scrollbar-width:thin;scrollbar-color:rgba(212,175,55,0.2) transparent;"></div>
+
+          <!-- Input -->
+          <div style="padding:10px 12px;border-top:1px solid rgba(212,175,55,0.08);
+            display:flex;gap:8px;align-items:flex-end;flex-shrink:0;">
+            <textarea id="redaccion-ia-input" placeholder="Escribe instrucciones para el asistente..."
+              style="flex:1;background:transparent;border:1px solid rgba(212,175,55,0.18);border-radius:2px;
+              color:var(--texto-principal);font-family:'Times New Roman',Times,serif;font-size:0.72rem;
+              letter-spacing:0.5px;padding:8px 12px;resize:none;min-height:52px;max-height:120px;outline:none;
+              scrollbar-width:thin;"></textarea>
+            <button type="button" id="redaccion-ia-btn-enviar" disabled
+              onclick="enviarMensajeIa()"
+              style="font-family:'Times New Roman',Times,serif;font-size:0.62rem;letter-spacing:2px;
+              padding:9px 14px;background:rgba(212,175,55,0.15);border:1px solid rgba(212,175,55,0.25);
+              color:var(--dorado);border-radius:3px;cursor:not-allowed;opacity:0.5;flex-shrink:0;
+              align-self:flex-end;">ENVIAR</button>
+          </div>
+        </div>
+
+      </div>
+      <!-- fin panel derecho -->
+
+    </div>
+    <!-- fin redaccion-der -->
+
+  </div>
+  <!-- fin redaccion-body -->
+
+</div>
+<!-- fin pantalla-redaccion -->
 
 </body>
 

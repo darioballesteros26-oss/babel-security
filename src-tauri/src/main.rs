@@ -22,6 +22,7 @@ mod seguridad;
 mod sincronizacion;
 mod nom_cifrado;
 mod traductor;
+mod ia_redaccion;
 
 use base64::Engine;
 use chrono;
@@ -6325,6 +6326,7 @@ fn main() {
             }
         })
         .manage(SesionActiva::nueva())
+        .manage(ia_redaccion::IaRedaccionState::nueva())
         .invoke_handler(tauri::generate_handler![
             verificar_entorno_seguro,
             activar_entrada_segura,
@@ -6455,6 +6457,10 @@ fn main() {
             rat_detector::rechazar_solicitud_desbloqueo_rat,
             rat_detector::obtener_solicitud_desbloqueo_rat,
             integridad::obtener_estado_integridad,
+            ia_redaccion::iniciar_ia_redaccion,
+            ia_redaccion::parar_ia_redaccion,
+            ia_redaccion::estado_ia_redaccion,
+            ia_redaccion::enviar_mensaje_ia,
         ]);
     if let Err(e) = app.run(tauri::generate_context!()) {
         eprintln!("[!] Error crítico al iniciar Babel: {}", e);

@@ -90,6 +90,12 @@ let _renombraEsGuardado = false;
 let _tiptapEditor: Editor | null = null;
 let _editorRutaCifrada: string | null = null;
 let _carpetaEditorSeleccionada: string = "todos";
+
+// Editor de redacción (vista dividida)
+let _tiptapRedaccion: Editor | null = null;
+let _nombreArchivoRedaccion = "";
+declare global { interface Window { _redaccionDragging: boolean; } }
+window._redaccionDragging = false;
 let buzonParentPendienteG: string | null = null;
 
 // Tipo compartido para nodos de buzón con árbol jerárquico
@@ -253,6 +259,7 @@ let _vigilanciaCapturaId: number | null = null;
 let _pollRatId: number | null = null;
 let _pollBadgeId: number | null = null;
 let _traduciendo = false;
+let _iaEnviando = false;
 
 const PANTALLAS_SENSIBLES: Pantalla[] =
   ["principal", "traduccion", "archivos-guardados", "comunicacion", "frase", "ajustes", "registro"];
@@ -582,12 +589,20 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "revelar-en-finder": revelarEnFinder(); break;
     case "copiar-pass-compartir": copiarPassCompartir(); break;
     case "eliminar-sel-guardados": eliminarSeleccionadosGuardados(); break;
-    case "exportar-todo": exportarTodo(); break;
     case "abrir-importar-guardado": mostrarPopupImportar(el); break;
     case "abrir-crear-archivo": abrirEditorTiptap(); break;
     case "cerrar-editor-tiptap": cerrarEditorTiptap(); break;
     case "guardar-documento-editor": void guardarDocumentoEditor(e); break;
     case "tiptap-cmd": ejecutarComandoTiptap(el.dataset.cmd ?? ""); break;
+    // Redacción — vista dividida
+    case "toggle-menu-redactar":     toggleMenuRedactar(); break;
+    case "redactar-tu-mismo":        void abrirRedaccion("manual"); break;
+    case "redactar-con-babel":       void abrirRedaccion("babel"); break;
+    case "cerrar-redaccion":         cerrarPantallaRedaccion(); break;
+    case "guardar-redaccion":        void guardarRedaccion(); break;
+    case "redaccion-cmd":            ejecutarCmdRedaccion(el.dataset.cmd ?? ""); break;
+    case "abrir-chat-ia-redaccion":  abrirChatIaRedaccion(); break;
+    case "cerrar-chat-ia-redaccion": void cerrarChatIaRedaccion(); break;
     case "toggle-menu-extra-editor": toggleMenuExtraEditor(); break;
     case "abrir-imagen-editor": abrirImagenEditor(); break;
     case "confirmar-carpeta-editor": void confirmarCarpetaEditor(); break;
@@ -2249,7 +2264,7 @@ function actualizarSeleccionGuardados(): void {
   document.getElementById("btn-mail-sel-g")?.classList.toggle("hidden", !unico);
   document.getElementById("btn-unir-pdfs-g")?.classList.toggle("hidden", seleccionados.length < 2);
   document.getElementById("btn-convertir-img-pdf-g")?.classList.toggle("hidden", !todasImagenes);
-  document.getElementById("ui-exportar-todo")?.classList.toggle("hidden", hay);
+  document.getElementById("wrap-redactar-g")?.classList.toggle("hidden", !unico);
   document.getElementById("ui-importar")?.classList.toggle("hidden", hay);
   document.getElementById("ui-crear-archivo")?.classList.toggle("hidden", hay);
 }
@@ -2941,7 +2956,7 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   document.getElementById("btn-mail-sel-g")?.classList.add("hidden");
   document.getElementById("btn-unir-pdfs-g")?.classList.add("hidden");
   document.getElementById("btn-convertir-img-pdf-g")?.classList.add("hidden");
-  document.getElementById("ui-exportar-todo")?.classList.remove("hidden");
+  document.getElementById("wrap-redactar-g")?.classList.add("hidden");
   document.getElementById("ui-importar")?.classList.remove("hidden");
   document.getElementById("ui-crear-archivo")?.classList.remove("hidden");
   mostrarToast(errores ? `${errores} errores al eliminar` : "✓ Destruido de forma segura — irrecuperable", errores > 0);
@@ -3492,6 +3507,397 @@ function cerrarEditorTiptap(): void {
   _editorRutaCifrada = null;
 }
 
+// ── REDACCIÓN — vista dividida ────────────────────────────────────────────────
+
+function toggleMenuRedactar(): void {
+  const menu = document.getElementById("menu-redactar");
+  if (!menu) return;
+  const abierto = !menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", abierto);
+  if (!abierto) {
+    const cerrarFuera = (ev: MouseEvent) => {
+      if (!(ev.target as HTMLElement).closest("#wrap-redactar-g")) {
+        menu.classList.add("hidden");
+        document.removeEventListener("click", cerrarFuera, true);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", cerrarFuera, { capture: true, once: false }), 0);
+  }
+}
+
+async function abrirRedaccion(modo: "manual" | "babel"): Promise<void> {
+  document.getElementById("menu-redactar")?.classList.add("hidden");
+
+  const cb = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
+  if (!cb) return;
+  const card = cb.closest(".archivo-card") as HTMLElement | null;
+  const ruta = card?.dataset.ruta;
+  if (!ruta) return;
+  const nombre = card?.dataset.base ?? ruta.split("/").pop() ?? ruta;
+
+  // Cargar contenido del original (descifrado)
+  let texto = "";
+  try {
+    texto = await invoke<string>("ver_archivo", { ruta });
+  } catch (e) {
+    mostrarToast("Error abriendo archivo: " + e, true);
+    return;
+  }
+
+  _nombreArchivoRedaccion = nombre;
+
+  // Rellenar panel izquierdo
+  const contenidoIzq = document.getElementById("redaccion-contenido-izq");
+  if (contenidoIzq) renderizarEnContenedor(texto, contenidoIzq, "100%");
+
+  // Nombre y badge
+  const elNombre = document.getElementById("redaccion-nombre");
+  if (elNombre) elNombre.textContent = nombre.replace(/\.babel$/, "").replace(/^\d+_/, "");
+  const badge = document.getElementById("redaccion-modo-badge");
+  if (badge) badge.textContent = modo === "manual" ? "REDACCIÓN MANUAL" : "REDACCIÓN CON IA";
+
+  // Panel derecho
+  const editorWrap = document.getElementById("redaccion-editor-wrap");
+  const iaWrap = document.getElementById("redaccion-ia-wrap");
+  editorWrap?.classList.toggle("hidden", modo !== "manual");
+  iaWrap?.classList.toggle("hidden", modo !== "babel");
+
+  // Si es modo manual: inicializar Tiptap
+  if (modo === "manual") {
+    const contenedorEd = document.getElementById("redaccion-contenido");
+    if (contenedorEd) {
+      if (_tiptapRedaccion) { _tiptapRedaccion.destroy(); _tiptapRedaccion = null; }
+      contenedorEd.innerHTML = "";
+      _tiptapRedaccion = new Editor({
+        element: contenedorEd,
+        extensions: [
+          StarterKit,
+          Underline,
+          TextAlign.configure({ types: ["heading", "paragraph"] }),
+          Table.configure({ resizable: true }),
+          TableRow,
+          TableHeader,
+          TableCell,
+          TiptapImage.configure({ inline: false, allowBase64: true }),
+          TextStyle,
+          Color,
+          FontSize,
+          Highlight.configure({ multicolor: true }),
+        ],
+        content: "<p></p>",
+        autofocus: "end",
+        onTransaction: () => actualizarContadorRedaccion(),
+      });
+      actualizarContadorRedaccion();
+    }
+    document.getElementById("redaccion-btn-guardar")?.removeAttribute("hidden");
+  } else {
+    // Babel: ocultar botón guardar (no hay editor)
+    document.getElementById("redaccion-btn-guardar")?.setAttribute("style",
+      document.getElementById("redaccion-btn-guardar")!.getAttribute("style") ?? "");
+  }
+
+  // Mostrar la pantalla
+  document.getElementById("pantalla-redaccion")?.classList.remove("hidden");
+}
+
+function cerrarPantallaRedaccion(): void {
+  document.getElementById("pantalla-redaccion")?.classList.add("hidden");
+  if (_tiptapRedaccion) { _tiptapRedaccion.destroy(); _tiptapRedaccion = null; }
+  const ci = document.getElementById("redaccion-contenido-izq");
+  if (ci) {
+    const prev = (ci as any)._blobUrl as string | undefined;
+    if (prev) URL.revokeObjectURL(prev);
+    (ci as any)._blobUrl = undefined;
+    ci.innerHTML = "";
+  }
+  const cd = document.getElementById("redaccion-contenido");
+  if (cd) cd.innerHTML = "";
+  // Resetear chat IA (void: no esperamos a que el modelo se detenga, se hace en background)
+  void cerrarChatIaRedaccion();
+  _nombreArchivoRedaccion = "";
+}
+
+async function guardarRedaccion(): Promise<void> {
+  if (!_tiptapRedaccion) return;
+  const nombre = _nombreArchivoRedaccion.replace(/\.babel$/, "").replace(/^\d+_/, "") || "Documento redactado";
+  const nombreArchivo = nombre.endsWith(".docx") ? nombre : nombre + ".docx";
+  const btn = document.getElementById("redaccion-btn-guardar") as HTMLButtonElement | null;
+  if (btn) btn.disabled = true;
+  try {
+    const bytes = await tiptapADocx(_tiptapRedaccion.getJSON());
+    const b64 = bytesABase64(bytes);
+    await invoke<string>("guardar_documento_desde_bytes", { nombreArchivo, contenidoB64: b64 });
+    mostrarToast("✓ Documento guardado y cifrado", false);
+    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreArchivo }).catch(() => {});
+    cargarArchivosGuardados().catch(() => {});
+  } catch (err) {
+    mostrarToast("Error al guardar: " + String(err), true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function ejecutarCmdRedaccion(cmd: string): void {
+  if (!_tiptapRedaccion) return;
+  document.getElementById("rd-menu-extra")?.classList.add("hidden");
+  const ed = _tiptapRedaccion.chain().focus();
+  switch (cmd) {
+    case "bold":         ed.toggleBold().run(); break;
+    case "italic":       ed.toggleItalic().run(); break;
+    case "underline":    ed.toggleUnderline().run(); break;
+    case "strike":       ed.toggleStrike().run(); break;
+    case "h1":           ed.toggleHeading({ level: 1 }).run(); break;
+    case "h2":           ed.toggleHeading({ level: 2 }).run(); break;
+    case "h3":           ed.toggleHeading({ level: 3 }).run(); break;
+    case "bulletList":   ed.toggleBulletList().run(); break;
+    case "orderedList":  ed.toggleOrderedList().run(); break;
+    case "alignLeft":    (ed as any).setTextAlign("left").run(); break;
+    case "alignCenter":  (ed as any).setTextAlign("center").run(); break;
+    case "alignRight":   (ed as any).setTextAlign("right").run(); break;
+    case "undo":         ed.undo().run(); break;
+    case "redo":         ed.redo().run(); break;
+  }
+}
+
+function toggleMenuExtraRedaccion(): void {
+  const menu = document.getElementById("rd-menu-extra");
+  if (!menu) return;
+  const abierto = !menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", abierto);
+  if (!abierto) {
+    const cerrar = (ev: MouseEvent) => {
+      if (!(ev.target as HTMLElement).closest("#rd-menu-extra") &&
+          !(ev.target as HTMLElement).closest("button[onclick*='toggleMenuExtraRedaccion']")) {
+        menu.classList.add("hidden");
+        document.removeEventListener("click", cerrar, true);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", cerrar, { capture: true, once: false }), 0);
+  }
+}
+
+function aplicarFSRedaccion(val: string): void {
+  if (!_tiptapRedaccion || !val) return;
+  _tiptapRedaccion.chain().focus().setFontSize(val + "px").run();
+}
+
+function aplicarColorRedaccion(color: string): void {
+  if (!_tiptapRedaccion) return;
+  document.getElementById("rd-color-palette")?.classList.add("hidden");
+  if (color === "none") {
+    _tiptapRedaccion.chain().focus().unsetColor().run();
+    const ind = document.getElementById("rd-color-indicator");
+    if (ind) { ind.style.background = "transparent"; ind.style.border = "1px solid rgba(255,255,255,0.3)"; }
+  } else {
+    _tiptapRedaccion.chain().focus().setColor(color).run();
+    const ind = document.getElementById("rd-color-indicator");
+    if (ind) { ind.style.background = color; ind.style.border = "none"; }
+  }
+}
+
+function aplicarResaltadoRedaccion(color: string): void {
+  if (!_tiptapRedaccion) return;
+  document.getElementById("rd-highlight-palette")?.classList.add("hidden");
+  if (color === "none") {
+    _tiptapRedaccion.chain().focus().unsetHighlight().run();
+    const ind = document.getElementById("rd-highlight-indicator");
+    if (ind) { ind.style.background = "transparent"; ind.style.border = "1px solid rgba(255,255,255,0.3)"; }
+  } else {
+    _tiptapRedaccion.chain().focus().setHighlight({ color }).run();
+    const ind = document.getElementById("rd-highlight-indicator");
+    if (ind) { ind.style.background = color; ind.style.border = "none"; }
+  }
+}
+
+function limpiarFmtRedaccion(): void {
+  if (!_tiptapRedaccion) return;
+  _tiptapRedaccion.chain().focus().clearNodes().unsetAllMarks().run();
+}
+
+function actualizarContadorRedaccion(): void {
+  if (!_tiptapRedaccion) return;
+  const texto = _tiptapRedaccion.getText();
+  const palabras = texto.trim() ? texto.trim().split(/\s+/).length : 0;
+  const chars = texto.length;
+  const el = document.getElementById("redaccion-contador");
+  if (el) el.textContent = `${palabras} palabras · ${chars} caracteres`;
+}
+
+// ── IA REDACCIÓN — Qwen3-4B via llama-server ─────────────────────────────────
+
+async function iniciarAsistenteIa(): Promise<void> {
+  const mini = document.getElementById("redaccion-ia-mini");
+  const chat = document.getElementById("redaccion-ia-chat");
+  const btnEnviar = document.getElementById("redaccion-ia-btn-enviar") as HTMLButtonElement | null;
+  if (!mini || !chat) return;
+
+  // Si ya está activo, solo mostrar el panel (no relanzar) y asegurar botón habilitado
+  try {
+    const est = await invoke<string>("estado_ia_redaccion");
+    if (est === "activo") {
+      mini.classList.add("hidden");
+      chat.classList.remove("hidden");
+      if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
+      return;
+    }
+    if (est === "cargando") return; // ya está cargando, no lanzar otra instancia
+  } catch { /* continuar */ }
+
+  // Limpiar mensajes anteriores y mostrar panel
+  _iaEnviando = false;
+  const msgs = document.getElementById("redaccion-ia-mensajes");
+  if (msgs) msgs.innerHTML = "";
+  mini.classList.add("hidden");
+  chat.classList.remove("hidden");
+  if (btnEnviar) { btnEnviar.disabled = true; btnEnviar.style.opacity = "0.5"; btnEnviar.style.cursor = "not-allowed"; }
+
+  iaRedaccionAppendMensaje("sistema", "Cargando modelo Qwen3-4B... esto puede tardar hasta 1 minuto la primera vez.");
+
+  try {
+    const resultado = await invoke<string>("iniciar_ia_redaccion");
+    const msgsEl = document.getElementById("redaccion-ia-mensajes");
+    msgsEl?.querySelector(".ia-burbuja-pensando")?.remove();
+    if (resultado === "activo") {
+      iaRedaccionAppendMensaje("babel", "Listo. ¿Qué necesitas redactar?");
+      if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
+    } else {
+      // "parado" u otro resultado inesperado — resetear UI
+      iaRedaccionAppendMensaje("sistema", "Carga cancelada.");
+    }
+  } catch (e) {
+    document.getElementById("redaccion-ia-mensajes")?.querySelector(".ia-burbuja-pensando")?.remove();
+    iaRedaccionAppendMensaje("error", "Error al cargar el modelo: " + String(e));
+  }
+}
+
+async function enviarMensajeIa(): Promise<void> {
+  if (_iaEnviando) return;
+  const input = document.getElementById("redaccion-ia-input") as HTMLTextAreaElement | null;
+  const btnEnviar = document.getElementById("redaccion-ia-btn-enviar") as HTMLButtonElement | null;
+  if (!input) return;
+  const texto = input.value.trim();
+  if (!texto) return;
+
+  _iaEnviando = true;
+  if (btnEnviar) { btnEnviar.disabled = true; btnEnviar.style.opacity = "0.5"; btnEnviar.style.cursor = "not-allowed"; }
+
+  // Zeroize + limpiar (igual que el traductor)
+  input.value = "0".repeat(input.value.length);
+  input.value = "";
+  input.style.height = "52px";
+
+  iaRedaccionAppendMensaje("usuario", texto);
+  iaRedaccionAppendMensaje("sistema", "Pensando...");
+
+  try {
+    const respuesta = await invoke<string>("enviar_mensaje_ia", { mensaje: texto });
+    document.getElementById("redaccion-ia-mensajes")?.querySelector(".ia-burbuja-pensando")?.remove();
+    iaRedaccionAppendMensaje("babel", respuesta);
+  } catch (e) {
+    document.getElementById("redaccion-ia-mensajes")?.querySelector(".ia-burbuja-pensando")?.remove();
+    iaRedaccionAppendMensaje("error", "Error: " + String(e));
+  } finally {
+    _iaEnviando = false;
+    if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
+  }
+}
+
+function iaRedaccionAppendMensaje(tipo: "babel" | "usuario" | "sistema" | "error", texto: string): void {
+  const cont = document.getElementById("redaccion-ia-mensajes");
+  if (!cont) return;
+
+  if (tipo === "usuario") {
+    const burbuja = document.createElement("div");
+    burbuja.className = "chat-burbuja usuario";
+    burbuja.innerHTML = `
+      <div class="burbuja-contenido derecha">
+        <p class="burbuja-texto">${escapeHTML(texto)}</p>
+        <span class="burbuja-hora">TÚ</span>
+      </div>`;
+    cont.appendChild(burbuja);
+  } else if (tipo === "babel") {
+    const burbuja = document.createElement("div");
+    burbuja.className = "chat-burbuja babel";
+    burbuja.innerHTML = `
+      <div class="burbuja-icono">B</div>
+      <div class="burbuja-contenido">
+        <p class="burbuja-texto" style="white-space:pre-wrap;">${escapeHTML(texto)}</p>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+          <span class="burbuja-hora">BABEL · IA LOCAL</span>
+          <button type="button" class="burbuja-btn-copiar" title="Copiar respuesta">⊕</button>
+        </div>
+      </div>`;
+    burbuja.querySelector(".burbuja-btn-copiar")?.addEventListener("click", () => {
+      navigator.clipboard.writeText(texto).then(() => mostrarToast("Copiado", false)).catch(() => {});
+    });
+    cont.appendChild(burbuja);
+  } else {
+    // sistema / error
+    const burbuja = document.createElement("div");
+    burbuja.className = tipo === "sistema" ? "ia-burbuja-pensando" : "";
+    burbuja.style.cssText = `text-align:center;font-family:'Times New Roman',Times,serif;font-size:0.6rem;
+      letter-spacing:1px;color:${tipo === "error" ? "#f87171" : "rgba(212,175,55,0.4)"};padding:4px 0;`;
+    burbuja.textContent = texto;
+    cont.appendChild(burbuja);
+  }
+
+  cont.scrollTop = cont.scrollHeight;
+}
+
+function abrirChatIaRedaccion(): void {
+  // Reemplazado por iniciarAsistenteIa — el botón INICIAR ASISTENTE llama directo
+  void iniciarAsistenteIa();
+}
+
+async function cerrarChatIaRedaccion(): Promise<void> {
+  document.getElementById("redaccion-ia-chat")?.classList.add("hidden");
+  document.getElementById("redaccion-ia-mini")?.classList.remove("hidden");
+  const btnEnviar = document.getElementById("redaccion-ia-btn-enviar") as HTMLButtonElement | null;
+  if (btnEnviar) { btnEnviar.disabled = true; btnEnviar.style.opacity = "0.5"; btnEnviar.style.cursor = "not-allowed"; }
+  // Liberar el modelo de RAM al cerrar el panel
+  try { await invoke("parar_ia_redaccion"); } catch { /* ignorar */ }
+}
+
+(window as any).enviarMensajeIa = enviarMensajeIa;
+
+// Drag del separador en la vista dividida de redacción
+function iniciarDragRedaccion(): void {
+  const sep = document.getElementById("redaccion-sep");
+  const izq = document.getElementById("redaccion-izq");
+  const der = document.getElementById("redaccion-der");
+  const body = document.getElementById("redaccion-body");
+  if (!sep || !izq || !der || !body) return;
+
+  sep.addEventListener("mousedown", (e: MouseEvent) => {
+    e.preventDefault();
+    window._redaccionDragging = true;
+    sep.style.background = "rgba(212,175,55,0.55)";
+    document.body.style.userSelect = "none";
+    (document.body.style as any).webkitUserSelect = "none";
+    const totalW = body.getBoundingClientRect().width - sep.offsetWidth;
+
+    const onMove = (mv: MouseEvent) => {
+      mv.preventDefault();
+      const bodyRect = body.getBoundingClientRect();
+      const offset = mv.clientX - bodyRect.left;
+      const pct = Math.min(Math.max(offset / totalW * 100, 10), 90);
+      izq.style.flexBasis = pct + "%";
+      der.style.flexBasis = (100 - pct) + "%";
+    };
+    const onUp = () => {
+      window._redaccionDragging = false;
+      sep.style.background = "rgba(212,175,55,0.13)";
+      document.body.style.userSelect = "";
+      (document.body.style as any).webkitUserSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+}
+
 function actualizarContadorEditor(): void {
   if (!_tiptapEditor) return;
   const texto = _tiptapEditor.getText();
@@ -3541,6 +3947,11 @@ function limpiarFormatoEditor(): void {
 (window as any).aplicarResaltado = aplicarResaltado;
 (window as any).aplicarTamañoFuente = aplicarTamañoFuente;
 (window as any).limpiarFormatoEditor = limpiarFormatoEditor;
+(window as any).aplicarFSRedaccion = aplicarFSRedaccion;
+(window as any).aplicarColorRedaccion = aplicarColorRedaccion;
+(window as any).aplicarResaltadoRedaccion = aplicarResaltadoRedaccion;
+(window as any).limpiarFmtRedaccion = limpiarFmtRedaccion;
+(window as any).toggleMenuExtraRedaccion = toggleMenuExtraRedaccion;
 
 function actualizarToolbarEditor(): void {
   if (!_tiptapEditor) return;
@@ -4156,20 +4567,6 @@ function cerrarPopupExportarClick(e: MouseEvent): void {
 }
 
 // Exporta múltiples archivos con un único folder picker
-async function exportarTodo(): Promise<void> {
-  try {
-    const archivos = await invoke<any[]>("listar_archivos_guardados", { buzon: "todos" });
-    if (archivos.length === 0) { mostrarToast("No hay archivos para exportar", true); return; }
-    const rutas = archivos.map((a: any) => a.ruta);
-    const copiados = await invoke<number>("exportar_archivos_a_carpeta", { rutas });
-    mostrarToast(`✓ ${copiados} archivos exportados`, false);
-  } catch (error) {
-    const msg = String(error);
-    if (msg.includes("cancelada") || msg.includes("cancelado")) return;
-    mostrarToast("Error: " + msg, true);
-  }
-}
-
 // TOAST — NOTIFICACIONES TEMPORALES
 
 // Muestra una notificación temporal en la parte inferior de la pantalla
@@ -6295,6 +6692,18 @@ function guardarNombreDisplay(): void {
 document.addEventListener("DOMContentLoaded", () => {
   cargarAjustesGuardados();
   cargarAjustesTraduccion().catch(() => {});
+  iniciarDragRedaccion();
+
+  // Cerrar paletas de color/resaltado del editor de redacción al hacer clic fuera
+  document.addEventListener("click", (e: MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (!t.closest("#rd-color-palette") && !t.closest("[onclick*='rd-color-palette']")) {
+      document.getElementById("rd-color-palette")?.classList.add("hidden");
+    }
+    if (!t.closest("#rd-highlight-palette") && !t.closest("[onclick*='rd-highlight-palette']")) {
+      document.getElementById("rd-highlight-palette")?.classList.add("hidden");
+    }
+  }, true);
 
   // Modal autologin — activar
   function actualizarBadgeAutologin(activo: boolean) {
@@ -6453,6 +6862,21 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
   }).observe(document.body, { childList: true, subtree: true });
+
+  // IA redacción: Enter envía, Shift+Enter inserta nueva línea
+  const iaInput = document.getElementById("redaccion-ia-input") as HTMLTextAreaElement | null;
+  if (iaInput) {
+    iaInput.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void enviarMensajeIa();
+      }
+    });
+    iaInput.addEventListener("input", () => {
+      iaInput.style.height = "52px";
+      iaInput.style.height = Math.min(iaInput.scrollHeight, 120) + "px";
+    });
+  }
 
   // Pantalla de bloqueo: Enter navega entre campos y dispara desbloqueo
   document.getElementById("bloqueo-maestra")?.addEventListener("keydown", (e) => {
