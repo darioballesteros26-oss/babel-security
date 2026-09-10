@@ -211,15 +211,18 @@ Responde siempre en español."
     Ok(limpiar_thinking(&content))
 }
 
-// Qwen3 puede incluir <think>…</think> aunque /no_think esté activo
+// Qwen3 puede incluir <think>…</think> aunque /no_think esté activo.
+// Elimina todos los bloques (puede haber más de uno).
 fn limpiar_thinking(texto: &str) -> String {
-    if let (Some(i), Some(j)) = (texto.find("<think>"), texto.find("</think>")) {
-        if i < j {
-            return texto[j + "</think>".len()..]
-                .trim_start_matches('\n')
-                .trim()
-                .to_string();
+    let mut resultado = texto.to_string();
+    loop {
+        match (resultado.find("<think>"), resultado.find("</think>")) {
+            (Some(i), Some(j)) if i < j => {
+                let fin = j + "</think>".len();
+                resultado = format!("{}{}", &resultado[..i], &resultado[fin..]);
+            }
+            _ => break,
         }
     }
-    texto.trim().to_string()
+    resultado.trim().to_string()
 }

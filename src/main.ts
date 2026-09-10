@@ -267,6 +267,7 @@ let _iaEnviando = false;
 let _textoDocumentoIa = "";   // texto plano del documento para enviar a Qwen
 let _nombreDocumentoIa = "";  // nombre del documento actual en modo babel
 let _rutaRefDocumento = "";   // ruta del .babel de referencia para el diálogo de guardar
+let _buzonRefDocumento = "";  // buzon_id del archivo de referencia (para opción "junto")
 
 const PANTALLAS_SENSIBLES: Pantalla[] =
   ["principal", "traduccion", "archivos-guardados", "comunicacion", "frase", "ajustes", "registro"];
@@ -614,6 +615,7 @@ document.addEventListener("click", (e: MouseEvent) => {
       document.getElementById("modal-guardar-ia")?.classList.add("hidden");
       break;
     case "redaccion-cmd":            ejecutarCmdRedaccion(el.dataset.cmd ?? ""); break;
+    case "rd-volver-chat-ia":       volverAChatIaRedaccion(); break;
     case "abrir-chat-ia-redaccion":  abrirChatIaRedaccion(); break;
     case "cerrar-chat-ia-redaccion": void cerrarChatIaRedaccion(); break;
     case "toggle-menu-extra-editor": toggleMenuExtraEditor(); break;
@@ -3565,6 +3567,7 @@ async function abrirRedaccion(modo: "manual" | "babel"): Promise<void> {
   const ruta = card?.dataset.ruta;
   if (!ruta) return;
   const nombre = card?.dataset.base ?? ruta.split("/").pop() ?? ruta;
+  const buzonCard = card?.dataset.buzonId ?? "todos";
 
   // Cargar contenido del original (descifrado)
   let texto = "";
@@ -3626,6 +3629,7 @@ async function abrirRedaccion(modo: "manual" | "babel"): Promise<void> {
     // Babel: extraer texto plano ANTES de abrir el panel → siempre disponible al enviar
     _textoDocumentoIa = "";
     _rutaRefDocumento = ruta;
+    _buzonRefDocumento = buzonCard;
     _nombreDocumentoIa = nombre.replace(/\.babel$/, "").replace(/^\d+_/, "");
     try {
       _textoDocumentoIa = await invoke<string>("extraer_texto_para_ia", { ruta });
@@ -3655,7 +3659,9 @@ function cerrarPantallaRedaccion(): void {
   _textoDocumentoIa = "";
   _nombreDocumentoIa = "";
   _rutaRefDocumento = "";
+  _buzonRefDocumento = "";
   _nombreArchivoRedaccion = "";
+  document.getElementById("rd-volver-ia-bar")?.classList.add("hidden");
 }
 
 async function guardarRedaccion(): Promise<void> {
@@ -3695,10 +3701,18 @@ async function _ejecutarGuardarRedaccion(nombre: string): Promise<void> {
   const nombreFinal = nombreArchivo.endsWith(".docx") ? nombreArchivo : nombreArchivo + ".docx";
   const btn = document.getElementById("redaccion-btn-guardar") as HTMLButtonElement | null;
   if (btn) btn.disabled = true;
+
+  // Leer opción de ubicación del modal
+  const opJunto = document.querySelector<HTMLInputElement>("input[name='guardar-ia-ubicacion'][value='junto']");
+  const guardarJunto = opJunto?.checked && !!_buzonRefDocumento && _buzonRefDocumento !== "todos";
+
   try {
     const bytes = await tiptapADocx(_tiptapRedaccion.getJSON());
     const b64 = bytesABase64(bytes);
-    await invoke<string>("guardar_documento_desde_bytes", { nombreArchivo: nombreFinal, contenidoB64: b64 });
+    const ruta = await invoke<string>("guardar_documento_desde_bytes", { nombreArchivo: nombreFinal, contenidoB64: b64 });
+    if (guardarJunto) {
+      await invoke("mover_archivo_guardado", { ruta, buzonDestino: _buzonRefDocumento }).catch(() => {});
+    }
     mostrarToast("Documento guardado y cifrado", false);
     invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreFinal }).catch(() => {});
     cargarArchivosGuardados().catch(() => {});
@@ -4010,7 +4024,15 @@ function insertarEnEditorRedaccion(texto: string): void {
     });
   }
   actualizarContadorRedaccion();
+  // Mostrar barra "← Volver al asistente" (solo cuando venimos de IA)
+  document.getElementById("rd-volver-ia-bar")?.classList.remove("hidden");
   mostrarToast("Texto insertado en el editor — edita y pulsa GUARDAR", false);
+}
+
+function volverAChatIaRedaccion(): void {
+  document.getElementById("redaccion-editor-wrap")?.classList.add("hidden");
+  document.getElementById("redaccion-ia-wrap")?.classList.remove("hidden");
+  document.getElementById("rd-volver-ia-bar")?.classList.add("hidden");
 }
 
 // Drag del separador en la vista dividida de redacción
@@ -7209,6 +7231,8 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("modal-guardar-ia")?.classList.add("hidden");
       void _ejecutarGuardarRedaccion(nombre);
     } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
       document.getElementById("modal-guardar-ia")?.classList.add("hidden");
     }
   });
@@ -7222,6 +7246,7 @@ document.addEventListener("DOMContentLoaded", () => {
         navegarMatchVisor(e.shiftKey ? -1 : 1);
       } else if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation(); // evitar que el documento cierre también el modal-visor
         cerrarBusquedaVisor();
       }
     });

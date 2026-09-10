@@ -2648,6 +2648,15 @@
       <!-- ── MODO "REDACTAR TÚ MISMO": editor Tiptap embebido ── -->
       <div id="redaccion-editor-wrap" class="hidden" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
 
+        <!-- Botón volver al chat IA (solo visible cuando se llega desde insertarEnEditorRedaccion) -->
+        <div id="rd-volver-ia-bar" class="hidden" style="display:flex;align-items:center;padding:4px 12px;
+          background:rgba(212,175,55,0.06);border-bottom:1px solid rgba(212,175,55,0.12);flex-shrink:0;">
+          <button type="button" data-action="rd-volver-chat-ia"
+            style="background:transparent;border:none;color:var(--dorado);cursor:pointer;
+            font-size:0.75rem;padding:2px 6px;border-radius:4px;opacity:0.8;"
+            title="Volver al asistente IA">← Volver al asistente</button>
+        </div>
+
         <!-- Barra horizontal de formato -->
         <div style="display:flex;align-items:center;gap:6px;padding:6px 12px;flex-shrink:0;flex-wrap:wrap;
           border-bottom:1px solid rgba(212,175,55,0.1);background:rgba(255,255,255,0.02);">
