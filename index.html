@@ -2892,6 +2892,69 @@
 </div>
 <!-- fin pantalla-redaccion -->
 
+<!-- ── MODAL GUARDAR DOCUMENTO (borrador IA) ────────────────────────────── -->
+<div id="modal-guardar-ia" class="hidden" style="position:fixed;inset:0;z-index:1100;
+  background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;padding:24px;">
+  <div style="background:#0d0d0d;border:1px solid rgba(201,168,76,0.4);border-radius:4px;
+    width:100%;max-width:440px;padding:32px 36px;">
+
+    <p style="font-family:'Times New Roman',Times,serif;font-size:0.6rem;letter-spacing:2px;
+      color:rgba(201,168,76,0.5);margin:0 0 20px;">GUARDAR DOCUMENTO</p>
+
+    <!-- Nombre -->
+    <label style="display:block;font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+      letter-spacing:1px;color:rgba(201,168,76,0.45);margin-bottom:6px;">NOMBRE</label>
+    <input id="guardar-ia-nombre" type="text" maxlength="120" autocomplete="off"
+      style="width:100%;box-sizing:border-box;background:#111;border:1px solid rgba(201,168,76,0.3);
+      color:#e8e0d0;font-family:'Times New Roman',Times,serif;font-size:0.9rem;
+      padding:9px 12px;border-radius:3px;outline:none;margin-bottom:22px;"/>
+
+    <!-- Ubicación -->
+    <label style="display:block;font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+      letter-spacing:1px;color:rgba(201,168,76,0.45);margin-bottom:10px;">GUARDAR EN</label>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:26px;">
+
+      <label id="guardar-ia-opt-junto" style="display:flex;align-items:flex-start;gap:10px;
+        cursor:pointer;padding:10px 14px;border:1px solid rgba(201,168,76,0.2);border-radius:4px;">
+        <input type="radio" name="guardar-ia-ubicacion" value="junto" style="margin-top:2px;accent-color:#c9a84c;" checked>
+        <div>
+          <div id="guardar-ia-label-junto" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.72rem;color:#e8e0d0;">Guardar junto al documento de referencia</div>
+          <div id="guardar-ia-doc-referencia" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.6rem;color:rgba(201,168,76,0.4);margin-top:3px;">—</div>
+        </div>
+      </label>
+
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;
+        padding:10px 14px;border:1px solid rgba(201,168,76,0.2);border-radius:4px;">
+        <input type="radio" name="guardar-ia-ubicacion" value="normal" style="margin-top:2px;accent-color:#c9a84c;">
+        <div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;color:#e8e0d0;">
+            Guardar en Mis archivos</div>
+          <div style="font-family:'Times New Roman',Times,serif;font-size:0.6rem;
+            color:rgba(201,168,76,0.4);margin-top:3px;">Cifrado en tu bóveda Babel</div>
+        </div>
+      </label>
+    </div>
+
+    <!-- Botones -->
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button type="button" data-action="cancelar-guardar-ia"
+        style="font-family:'Times New Roman',Times,serif;font-size:0.62rem;letter-spacing:1.5px;
+        padding:8px 18px;background:transparent;border:1px solid rgba(201,168,76,0.3);
+        color:rgba(201,168,76,0.6);cursor:pointer;border-radius:2px;"
+        onmouseenter="this.style.borderColor='rgba(201,168,76,0.6)'"
+        onmouseleave="this.style.borderColor='rgba(201,168,76,0.3)'">CANCELAR</button>
+      <button type="button" data-action="confirmar-guardar-ia"
+        style="font-family:'Times New Roman',Times,serif;font-size:0.62rem;letter-spacing:1.5px;
+        padding:8px 20px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.5);
+        color:#c9a84c;cursor:pointer;border-radius:2px;"
+        onmouseenter="this.style.background='rgba(201,168,76,0.25)'"
+        onmouseleave="this.style.background='rgba(201,168,76,0.15)'">GUARDAR</button>
+    </div>
+  </div>
+</div>
+
 </body>
 
 

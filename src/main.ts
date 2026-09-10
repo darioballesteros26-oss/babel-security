@@ -266,6 +266,7 @@ let _traduciendo = false;
 let _iaEnviando = false;
 let _textoDocumentoIa = "";   // texto plano del documento para enviar a Qwen
 let _nombreDocumentoIa = "";  // nombre del documento actual en modo babel
+let _rutaRefDocumento = "";   // ruta del .babel de referencia para el diálogo de guardar
 
 const PANTALLAS_SENSIBLES: Pantalla[] =
   ["principal", "traduccion", "archivos-guardados", "comunicacion", "frase", "ajustes", "registro"];
@@ -602,6 +603,16 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "redactar-con-babel":       void abrirRedaccion("babel"); break;
     case "cerrar-redaccion":         cerrarPantallaRedaccion(); break;
     case "guardar-redaccion":        void guardarRedaccion(); break;
+    case "confirmar-guardar-ia": {
+      const inputN = document.getElementById("guardar-ia-nombre") as HTMLInputElement | null;
+      const nombre = inputN?.value.trim() || "Documento redactado";
+      document.getElementById("modal-guardar-ia")?.classList.add("hidden");
+      void _ejecutarGuardarRedaccion(nombre);
+      break;
+    }
+    case "cancelar-guardar-ia":
+      document.getElementById("modal-guardar-ia")?.classList.add("hidden");
+      break;
     case "redaccion-cmd":            ejecutarCmdRedaccion(el.dataset.cmd ?? ""); break;
     case "abrir-chat-ia-redaccion":  abrirChatIaRedaccion(); break;
     case "cerrar-chat-ia-redaccion": void cerrarChatIaRedaccion(); break;
@@ -3596,6 +3607,7 @@ async function abrirRedaccion(modo: "manual" | "babel"): Promise<void> {
   } else {
     // Babel: extraer texto plano ANTES de abrir el panel → siempre disponible al enviar
     _textoDocumentoIa = "";
+    _rutaRefDocumento = ruta;
     _nombreDocumentoIa = nombre.replace(/\.babel$/, "").replace(/^\d+_/, "");
     try {
       _textoDocumentoIa = await invoke<string>("extraer_texto_para_ia", { ruta });
@@ -3624,6 +3636,7 @@ function cerrarPantallaRedaccion(): void {
   void cerrarChatIaRedaccion();
   _textoDocumentoIa = "";
   _nombreDocumentoIa = "";
+  _rutaRefDocumento = "";
   _nombreArchivoRedaccion = "";
 }
 
@@ -3632,16 +3645,44 @@ async function guardarRedaccion(): Promise<void> {
     mostrarToast("Genera un texto con el asistente y pulsa «✍ Editar» primero.", true);
     return;
   }
-  const nombre = _nombreArchivoRedaccion.replace(/\.babel$/, "").replace(/^\d+_/, "") || "Documento redactado";
-  const nombreArchivo = nombre.endsWith(".docx") ? nombre : nombre + ".docx";
+  // Mostrar diálogo de nombre y ubicación
+  const nombreBase = _nombreArchivoRedaccion.replace(/\.babel$/, "").replace(/^\d+_/, "") || "Documento redactado";
+  const inputNombre = document.getElementById("guardar-ia-nombre") as HTMLInputElement | null;
+  const labelJunto = document.getElementById("guardar-ia-label-junto");
+  const docRef = document.getElementById("guardar-ia-doc-referencia");
+  const opJunto = document.querySelector<HTMLInputElement>("input[name='guardar-ia-ubicacion'][value='junto']");
+  const opNormal = document.querySelector<HTMLInputElement>("input[name='guardar-ia-ubicacion'][value='normal']");
+
+  if (inputNombre) inputNombre.value = nombreBase;
+  if (labelJunto) labelJunto.textContent = _nombreDocumentoIa
+    ? `Guardar junto a «${_nombreDocumentoIa}»`
+    : "Guardar junto al documento de referencia";
+  if (docRef) docRef.textContent = _nombreDocumentoIa || "—";
+
+  // Si no hay doc de referencia, deshabilitar opción "junto" y marcar "normal"
+  const hayRef = !!_rutaRefDocumento;
+  if (opJunto) { opJunto.disabled = !hayRef; opJunto.checked = hayRef; }
+  if (opNormal) opNormal.checked = !hayRef;
+  const optJuntoLabel = document.getElementById("guardar-ia-opt-junto");
+  if (optJuntoLabel) optJuntoLabel.style.opacity = hayRef ? "1" : "0.4";
+
+  document.getElementById("modal-guardar-ia")?.classList.remove("hidden");
+  inputNombre?.focus();
+  inputNombre?.select();
+}
+
+async function _ejecutarGuardarRedaccion(nombre: string): Promise<void> {
+  if (!_tiptapRedaccion) return;
+  const nombreArchivo = nombre.trim() || "Documento redactado";
+  const nombreFinal = nombreArchivo.endsWith(".docx") ? nombreArchivo : nombreArchivo + ".docx";
   const btn = document.getElementById("redaccion-btn-guardar") as HTMLButtonElement | null;
   if (btn) btn.disabled = true;
   try {
     const bytes = await tiptapADocx(_tiptapRedaccion.getJSON());
     const b64 = bytesABase64(bytes);
-    await invoke<string>("guardar_documento_desde_bytes", { nombreArchivo, contenidoB64: b64 });
-    mostrarToast("✓ Documento guardado y cifrado", false);
-    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreArchivo }).catch(() => {});
+    await invoke<string>("guardar_documento_desde_bytes", { nombreArchivo: nombreFinal, contenidoB64: b64 });
+    mostrarToast("Documento guardado y cifrado", false);
+    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreFinal }).catch(() => {});
     cargarArchivosGuardados().catch(() => {});
   } catch (err) {
     mostrarToast("Error al guardar: " + String(err), true);
@@ -3841,23 +3882,38 @@ function iaRedaccionAppendMensaje(tipo: "babel" | "usuario" | "sistema" | "error
     burbuja.className = "chat-burbuja babel";
     burbuja.innerHTML = `
       <div class="burbuja-icono">B</div>
-      <div class="burbuja-contenido">
+      <div class="burbuja-contenido" style="position:relative;padding-top:28px;">
+        <button type="button" class="burbuja-btn-editar"
+          title="Editar · Usar como borrador"
+          style="position:absolute;top:4px;right:4px;font-family:'Times New Roman',Times,serif;
+          font-size:0.52rem;letter-spacing:1px;padding:3px 10px;
+          background:rgba(212,175,55,0.08);border:1px solid rgba(212,175,55,0.25);
+          color:rgba(212,175,55,0.65);border-radius:2px;cursor:pointer;
+          transition:all 0.18s;white-space:nowrap;">
+          ✍ Editar · Usar borrador
+        </button>
         <p class="burbuja-texto" style="white-space:pre-wrap;">${escapeHTML(texto)}</p>
         <div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap;">
           <span class="burbuja-hora">BABEL · IA LOCAL</span>
           <button type="button" class="burbuja-btn-copiar" title="Copiar respuesta">⊕</button>
-          <button type="button" class="burbuja-btn-editar"
-            style="font-family:'Times New Roman',Times,serif;font-size:0.52rem;letter-spacing:1px;
-            padding:3px 8px;background:rgba(212,175,55,0.12);border:1px solid rgba(212,175,55,0.3);
-            color:var(--dorado);border-radius:2px;cursor:pointer;"
-            title="Insertar en editor para editar y guardar">✍ Editar</button>
         </div>
       </div>`;
+    const btnEditar = burbuja.querySelector<HTMLButtonElement>(".burbuja-btn-editar");
+    if (btnEditar) {
+      btnEditar.addEventListener("mouseenter", () => {
+        btnEditar.style.background = "rgba(212,175,55,0.18)";
+        btnEditar.style.color = "#c9a84c";
+        btnEditar.style.borderColor = "rgba(212,175,55,0.6)";
+      });
+      btnEditar.addEventListener("mouseleave", () => {
+        btnEditar.style.background = "rgba(212,175,55,0.08)";
+        btnEditar.style.color = "rgba(212,175,55,0.65)";
+        btnEditar.style.borderColor = "rgba(212,175,55,0.25)";
+      });
+      btnEditar.addEventListener("click", () => insertarEnEditorRedaccion(texto));
+    }
     burbuja.querySelector(".burbuja-btn-copiar")?.addEventListener("click", () => {
       navigator.clipboard.writeText(texto).then(() => mostrarToast("Copiado", false)).catch(() => {});
-    });
-    burbuja.querySelector(".burbuja-btn-editar")?.addEventListener("click", () => {
-      insertarEnEditorRedaccion(texto);
     });
     cont.appendChild(burbuja);
   } else {
@@ -7107,6 +7163,19 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Input búsqueda visor: busca al escribir, Enter/Shift+Enter navega, Escape cierra
+  // Diálogo guardar borrador IA: Enter confirma
+  const guardarIaNombre = document.getElementById("guardar-ia-nombre") as HTMLInputElement | null;
+  guardarIaNombre?.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const nombre = guardarIaNombre.value.trim() || "Documento redactado";
+      document.getElementById("modal-guardar-ia")?.classList.add("hidden");
+      void _ejecutarGuardarRedaccion(nombre);
+    } else if (e.key === "Escape") {
+      document.getElementById("modal-guardar-ia")?.classList.add("hidden");
+    }
+  });
+
   const visorBuscarInput = document.getElementById("visor-buscar-input") as HTMLInputElement | null;
   if (visorBuscarInput) {
     visorBuscarInput.addEventListener("input", () => buscarEnVisor());
