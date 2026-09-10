@@ -67,7 +67,7 @@ type Pantalla = "carga" | "decision" | "configuracion" | "login" | "principal" |
 // (mlock + zeroize). Aquí basta un flag de "sesión activa" para la lógica de la UI.
 let _sesionActiva = false;
 let _sesionUsuario = "";
-let _updVersionDismissed = ""; // versión que el usuario descartó con "MÁS TARDE"
+let _updVersionDismissed = localStorage.getItem("updVersionDismissed") ?? ""; // versión descartada con "MÁS TARDE", persiste entre sesiones
 let _updInstalando = false;    // evita doble clic en "ACTUALIZAR AHORA"
 let _updCompletado = false;    // instalación terminada — bloquea nuevos popups
 // Escapa caracteres HTML para prevenir XSS en innerHTML
@@ -762,6 +762,7 @@ document.addEventListener("click", (e: MouseEvent) => {
       const modalUpd = document.getElementById("modal-actualizacion");
       if (modalUpd) {
         _updVersionDismissed = (modalUpd as any)._updVersion ?? "";
+        if (_updVersionDismissed) localStorage.setItem("updVersionDismissed", _updVersionDismissed);
         modalUpd.classList.add("hidden");
       }
       break;
@@ -1360,6 +1361,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     const { version, notas } = ev.payload;
     if (_updCompletado) return;   // ya instalado — no molestar hasta el restart
     if (_updInstalando) return;   // descarga en curso — no superponer popup
+    // Si hay una versión más nueva que la que se descartó, limpiar el dismiss previo
+    if (version !== _updVersionDismissed) {
+      _updVersionDismissed = "";
+      localStorage.removeItem("updVersionDismissed");
+    }
     if (version === _updVersionDismissed) return;
     if (!_sesionActiva) return;
     if (!document.getElementById("pantalla-bloqueo-rat")?.classList.contains("hidden")) return;
