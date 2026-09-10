@@ -3661,7 +3661,8 @@ function cerrarPantallaRedaccion(): void {
   _rutaRefDocumento = "";
   _buzonRefDocumento = "";
   _nombreArchivoRedaccion = "";
-  document.getElementById("rd-volver-ia-bar")?.classList.add("hidden");
+  (document.getElementById("rd-btn-volver-ia") as HTMLElement | null)?.style.setProperty("display", "none");
+  (document.getElementById("rd-sep-volver-ia") as HTMLElement | null)?.style.setProperty("display", "none");
 }
 
 async function guardarRedaccion(): Promise<void> {
@@ -4024,15 +4025,21 @@ function insertarEnEditorRedaccion(texto: string): void {
     });
   }
   actualizarContadorRedaccion();
-  // Mostrar barra "← Volver al asistente" (solo cuando venimos de IA)
-  document.getElementById("rd-volver-ia-bar")?.classList.remove("hidden");
+  // Mostrar botón "← Asistente" en la barra de formato (solo cuando venimos de IA)
+  const btnVolver = document.getElementById("rd-btn-volver-ia") as HTMLElement | null;
+  const sepVolver = document.getElementById("rd-sep-volver-ia") as HTMLElement | null;
+  if (btnVolver) btnVolver.style.display = "inline-flex";
+  if (sepVolver) sepVolver.style.display = "block";
   mostrarToast("Texto insertado en el editor — edita y pulsa GUARDAR", false);
 }
 
 function volverAChatIaRedaccion(): void {
   document.getElementById("redaccion-editor-wrap")?.classList.add("hidden");
   document.getElementById("redaccion-ia-wrap")?.classList.remove("hidden");
-  document.getElementById("rd-volver-ia-bar")?.classList.add("hidden");
+  const btnVolver = document.getElementById("rd-btn-volver-ia") as HTMLElement | null;
+  const sepVolver = document.getElementById("rd-sep-volver-ia") as HTMLElement | null;
+  if (btnVolver) btnVolver.style.display = "none";
+  if (sepVolver) sepVolver.style.display = "none";
 }
 
 // Drag del separador en la vista dividida de redacción
