@@ -561,7 +561,6 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "cerrar-busqueda-visor": cerrarBusquedaVisor(); break;
     case "visor-buscar-prev": navegarMatchVisor(-1); break;
     case "visor-buscar-next": navegarMatchVisor(1); break;
-    case "toggle-menu-extra-editor": toggleMenuExtraEditor(); break;
     case "cerrar-visor-paralelo": cerrarVisorParalelo(); break;
     case "ver-comparacion": verComparacion(); break;
     // Traducción / chat
@@ -4139,19 +4138,26 @@ function actualizarToolbarEditor(): void {
 
 function toggleMenuExtraEditor(): void {
   const menu = document.getElementById("editor-menu-extra");
-  if (!menu) return;
+  const btn = document.getElementById("editor-btn-menu");
+  if (!menu || !btn) return;
   const abierto = !menu.classList.contains("hidden");
-  menu.classList.toggle("hidden", abierto);
-  if (!abierto) {
-    const cerrar = (ev: MouseEvent) => {
-      if (!(ev.target as HTMLElement).closest("#editor-menu-extra") &&
-          !(ev.target as HTMLElement).closest("#editor-btn-menu")) {
-        menu.classList.add("hidden");
-        document.removeEventListener("click", cerrar, true);
-      }
-    };
-    setTimeout(() => document.addEventListener("click", cerrar, { capture: true }), 0);
-  }
+  if (abierto) { menu.classList.add("hidden"); return; }
+
+  // Posicionar con fixed para salir del overflow:hidden del contenedor
+  const r = btn.getBoundingClientRect();
+  menu.style.position = "fixed";
+  menu.style.left = (r.right + 6) + "px";
+  menu.style.top = r.top + "px";
+  menu.classList.remove("hidden");
+
+  const cerrar = (ev: MouseEvent) => {
+    if (!(ev.target as HTMLElement).closest("#editor-menu-extra") &&
+        !(ev.target as HTMLElement).closest("#editor-btn-menu")) {
+      menu.classList.add("hidden");
+      document.removeEventListener("click", cerrar, true);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", cerrar, { capture: true }), 0);
 }
 
 function abrirImagenEditor(): void {
