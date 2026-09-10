@@ -408,7 +408,7 @@
                 font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:1.5px;color:#e8e0d0;
                 cursor:pointer;transition:background 0.15s;"
                 onmouseenter="this.style.background='rgba(212,175,55,0.08)'"
-                onmouseleave="this.style.background='transparent'">✍ Redactar tú mismo</button>
+                onmouseleave="this.style.background='transparent'">✍ Crear documento</button>
               <div style="height:1px;background:rgba(212,175,55,0.1);margin:2px 0;"></div>
               <button type="button" data-action="redactar-con-babel"
                 style="display:block;width:100%;text-align:left;padding:10px 18px;background:transparent;border:none;
@@ -425,7 +425,7 @@
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;">+ IMPORTAR</button>
           <button type="button" data-action="abrir-crear-archivo" id="ui-crear-archivo" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
-            title="Crear un archivo de texto cifrado">+ CREAR ARCHIVO</button>
+            title="Crear un archivo de texto cifrado">+ NUEVO DOCUMENTO</button>
         </div>
       </div>
 
@@ -1062,9 +1062,36 @@
         <div style="display:flex;align-items:center;justify-content:space-between;
         padding:16px 24px;border-bottom:1px solid rgba(201,168,76,0.2);">
           <span id="modal-visor-nombre" style="font-family:'Times New Roman', Times, serif,serif;
-          color:var(--dorado,#c9a84c);font-size:0.85rem;letter-spacing:0.15em;"></span>
+          color:var(--dorado,#c9a84c);font-size:0.85rem;letter-spacing:0.15em;flex:1;margin-right:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+          <button type="button" data-action="abrir-busqueda-visor"
+            title="Buscar en el documento (Ctrl+F)"
+            style="background:transparent;border:1px solid rgba(201,168,76,0.3);
+            color:rgba(201,168,76,0.7);font-family:'Times New Roman',Times,serif;font-size:0.6rem;
+            letter-spacing:1.5px;cursor:pointer;padding:3px 9px;border-radius:2px;margin-right:10px;
+            transition:border-color 0.2s,color 0.2s;"
+            onmouseenter="this.style.borderColor='rgba(201,168,76,0.7)';this.style.color='#c9a84c'"
+            onmouseleave="this.style.borderColor='rgba(201,168,76,0.3)';this.style.color='rgba(201,168,76,0.7)'">BUSCAR</button>
           <button type="button" data-action="cerrar-visor" style="background:transparent;border:none;
           color:var(--dorado,#c9a84c);font-size:1.2rem;cursor:pointer;opacity:0.7;padding:0 4px;">✕</button>
+        </div>
+        <div id="visor-buscar-bar" class="hidden" style="display:flex;align-items:center;gap:8px;
+          padding:10px 24px;border-bottom:1px solid rgba(201,168,76,0.12);background:#080808;">
+          <input id="visor-buscar-input" type="text" placeholder="Buscar en el documento…"
+            style="flex:1;background:#111;border:1px solid rgba(201,168,76,0.3);color:#e8e0d0;
+            font-family:'Times New Roman',Times,serif;font-size:0.82rem;padding:5px 10px;
+            border-radius:3px;outline:none;" autocomplete="off" spellcheck="false"/>
+          <span id="visor-buscar-contador" style="font-family:'Times New Roman',Times,serif;
+            font-size:0.72rem;color:rgba(201,168,76,0.5);min-width:90px;text-align:right;
+            white-space:nowrap;"></span>
+          <button type="button" data-action="visor-buscar-prev" title="Anterior (Shift+Enter)"
+            style="background:transparent;border:1px solid rgba(201,168,76,0.3);color:#c9a84c;
+            cursor:pointer;padding:4px 10px;border-radius:2px;font-size:0.75rem;">▲</button>
+          <button type="button" data-action="visor-buscar-next" title="Siguiente (Enter)"
+            style="background:transparent;border:1px solid rgba(201,168,76,0.3);color:#c9a84c;
+            cursor:pointer;padding:4px 10px;border-radius:2px;font-size:0.75rem;">▼</button>
+          <button type="button" data-action="cerrar-busqueda-visor" title="Cerrar búsqueda (Esc)"
+            style="background:transparent;border:none;color:rgba(201,168,76,0.5);cursor:pointer;
+            font-size:1rem;padding:0 4px;">✕</button>
         </div>
         <div id="modal-visor-contenido" style="padding:32px 40px;overflow-y:auto;
   max-height:calc(80vh - 60px);font-family:'Times New Roman', Times, serif,serif;

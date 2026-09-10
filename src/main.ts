@@ -81,6 +81,10 @@ function escapeHTML(s: string): string {
     .replace(/'/g, "&#039;");
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 let _renombraViejo = "";
 let _renombraViejoG = "";
 let _renombraArchivoRuta = "";
@@ -561,6 +565,10 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "imprimir-frase": imprimirFrase(); break;
     case "cerrar-ver-frase": cerrarVerFrase(); break;
     case "cerrar-visor": cerrarVisor(); break;
+    case "abrir-busqueda-visor": abrirBusquedaVisor(); break;
+    case "cerrar-busqueda-visor": cerrarBusquedaVisor(); break;
+    case "visor-buscar-prev": navegarMatchVisor(-1); break;
+    case "visor-buscar-next": navegarMatchVisor(1); break;
     case "cerrar-visor-paralelo": cerrarVisorParalelo(); break;
     case "ver-comparacion": verComparacion(); break;
     // Traducción / chat
@@ -3556,7 +3564,7 @@ async function abrirRedaccion(modo: "manual" | "babel"): Promise<void> {
   const elNombre = document.getElementById("redaccion-nombre");
   if (elNombre) elNombre.textContent = nombre.replace(/\.babel$/, "").replace(/^\d+_/, "");
   const badge = document.getElementById("redaccion-modo-badge");
-  if (badge) badge.textContent = modo === "manual" ? "REDACCIÓN MANUAL" : "REDACCIÓN CON IA";
+  if (badge) badge.textContent = modo === "manual" ? "NUEVO DOCUMENTO" : "REDACTAR CON IA";
 
   // Panel derecho
   const editorWrap = document.getElementById("redaccion-editor-wrap");
@@ -4917,6 +4925,7 @@ function renderizarEnContenedor(
 }
 
 function cerrarVisor(): void {
+  cerrarBusquedaVisor();
   const modal = document.getElementById("modal-visor");
   const contenido = document.getElementById("modal-visor-contenido");
   if (contenido) {
@@ -4928,6 +4937,116 @@ function cerrarVisor(): void {
   }
   modal?.classList.add("hidden");
 }
+
+// ── BÚSQUEDA EN VISOR ─────────────────────────────────────────────────────────
+let _visorMatchIdx = -1;
+let _visorMatches: HTMLElement[] = [];
+
+function abrirBusquedaVisor(): void {
+  const modal = document.getElementById("modal-visor");
+  if (!modal || modal.classList.contains("hidden")) return;
+  const bar = document.getElementById("visor-buscar-bar");
+  const input = document.getElementById("visor-buscar-input") as HTMLInputElement | null;
+  bar?.classList.remove("hidden");
+  input?.focus();
+  input?.select();
+}
+
+function cerrarBusquedaVisor(): void {
+  document.getElementById("visor-buscar-bar")?.classList.add("hidden");
+  limpiarResaltadoVisor();
+  const input = document.getElementById("visor-buscar-input") as HTMLInputElement | null;
+  if (input) input.value = "";
+  const contador = document.getElementById("visor-buscar-contador");
+  if (contador) contador.textContent = "";
+  _visorMatchIdx = -1;
+  _visorMatches = [];
+}
+
+function limpiarResaltadoVisor(): void {
+  const contenido = document.getElementById("modal-visor-contenido");
+  if (!contenido) return;
+  contenido.querySelectorAll<HTMLElement>("mark.visor-match").forEach(m => {
+    m.replaceWith(document.createTextNode(m.textContent ?? ""));
+  });
+  contenido.normalize();
+}
+
+function buscarEnVisor(): void {
+  const input = document.getElementById("visor-buscar-input") as HTMLInputElement | null;
+  const contenido = document.getElementById("modal-visor-contenido");
+  const contador = document.getElementById("visor-buscar-contador");
+  if (!input || !contenido || !contador) return;
+
+  const termino = input.value.trim();
+  limpiarResaltadoVisor();
+  _visorMatchIdx = -1;
+  _visorMatches = [];
+
+  if (!termino) { contador.textContent = ""; return; }
+
+  // PDF dentro de iframe — usar Ctrl+F del sistema
+  if ((contenido as any)._blobUrl) {
+    contador.textContent = "Usa Ctrl+F del sistema";
+    return;
+  }
+
+  const regex = new RegExp(escapeRegex(termino), "gi");
+  const walker = document.createTreeWalker(contenido, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let node: Node | null;
+  while ((node = walker.nextNode())) textNodes.push(node as Text);
+
+  for (const textNode of textNodes) {
+    const texto = textNode.textContent ?? "";
+    if (!regex.test(texto)) continue;
+    regex.lastIndex = 0;
+
+    const fragment = document.createDocumentFragment();
+    let lastIdx = 0;
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(texto)) !== null) {
+      if (m.index > lastIdx) {
+        fragment.appendChild(document.createTextNode(texto.slice(lastIdx, m.index)));
+      }
+      const mark = document.createElement("mark");
+      mark.className = "visor-match";
+      mark.style.cssText = "background:rgba(212,175,55,0.3);color:inherit;border-radius:2px;padding:0 1px;";
+      mark.textContent = m[0];
+      fragment.appendChild(mark);
+      lastIdx = m.index + m[0].length;
+    }
+    if (lastIdx < texto.length) {
+      fragment.appendChild(document.createTextNode(texto.slice(lastIdx)));
+    }
+    textNode.parentNode?.replaceChild(fragment, textNode);
+  }
+
+  _visorMatches = Array.from(contenido.querySelectorAll<HTMLElement>("mark.visor-match"));
+  if (_visorMatches.length === 0) { contador.textContent = "Sin resultados"; return; }
+
+  _visorMatchIdx = 0;
+  _resaltarMatchActualVisor();
+  contador.textContent = `1 / ${_visorMatches.length}`;
+}
+
+function navegarMatchVisor(dir: 1 | -1): void {
+  if (_visorMatches.length === 0) { buscarEnVisor(); return; }
+  _visorMatchIdx = (_visorMatchIdx + dir + _visorMatches.length) % _visorMatches.length;
+  _resaltarMatchActualVisor();
+  const contador = document.getElementById("visor-buscar-contador");
+  if (contador) contador.textContent = `${_visorMatchIdx + 1} / ${_visorMatches.length}`;
+}
+
+function _resaltarMatchActualVisor(): void {
+  _visorMatches.forEach((m, i) => {
+    m.style.background = i === _visorMatchIdx
+      ? "rgba(212,175,55,0.85)"
+      : "rgba(212,175,55,0.3)";
+  });
+  _visorMatches[_visorMatchIdx]?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+// ─────────────────────────────────────────────────────────────────────────────
 // VISOR PARALELO — ver 1 o 2 archivos side by side
 
 async function verComparacion(): Promise<void> {
@@ -6827,6 +6946,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key !== "Escape") return;
+    // Si la barra de búsqueda del visor está abierta, la cerramos primero
+    const buscarBar = document.getElementById("visor-buscar-bar");
+    if (buscarBar && !buscarBar.classList.contains("hidden")) {
+      cerrarBusquedaVisor();
+      return;
+    }
     const modales = [
       "modal-visor", "modal-paralelo", "modal-frase-app",
       "modal-renombrar", "modal-solicitud-p2p", "modal-renombrar-archivo",
@@ -6963,6 +7088,32 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("bloqueo-pass")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") desbloquearPantalla();
   });
+
+  // Ctrl+F abre búsqueda en el visor cuando está visible
+  document.addEventListener("keydown", (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+      const modal = document.getElementById("modal-visor");
+      if (modal && !modal.classList.contains("hidden")) {
+        e.preventDefault();
+        abrirBusquedaVisor();
+      }
+    }
+  });
+
+  // Input búsqueda visor: busca al escribir, Enter/Shift+Enter navega, Escape cierra
+  const visorBuscarInput = document.getElementById("visor-buscar-input") as HTMLInputElement | null;
+  if (visorBuscarInput) {
+    visorBuscarInput.addEventListener("input", () => buscarEnVisor());
+    visorBuscarInput.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        navegarMatchVisor(e.shiftKey ? -1 : 1);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        cerrarBusquedaVisor();
+      }
+    });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
