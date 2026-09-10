@@ -523,15 +523,6 @@ document.addEventListener("click", (e: MouseEvent) => {
     }
   }
 
-  // Cerrar menú extra del editor si click fuera
-  const menuExtra = document.getElementById("editor-menu-extra");
-  if (menuExtra && !menuExtra.classList.contains("hidden")) {
-    const target = e.target as Element;
-    if (!target.closest("#editor-menu-extra") && !target.closest("[data-action='toggle-menu-extra-editor']")) {
-      menuExtra.classList.add("hidden");
-    }
-  }
-
   const el = (e.target as Element).closest<HTMLElement>("[data-action]");
   if (!el) return;
   const action = el.dataset.action!;
@@ -569,6 +560,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "cerrar-busqueda-visor": cerrarBusquedaVisor(); break;
     case "visor-buscar-prev": navegarMatchVisor(-1); break;
     case "visor-buscar-next": navegarMatchVisor(1); break;
+    case "toggle-menu-extra-editor": toggleMenuExtraEditor(); break;
     case "cerrar-visor-paralelo": cerrarVisorParalelo(); break;
     case "ver-comparacion": verComparacion(); break;
     // Traducción / chat
@@ -4038,6 +4030,7 @@ function limpiarFormatoEditor(): void {
 (window as any).aplicarResaltadoRedaccion = aplicarResaltadoRedaccion;
 (window as any).limpiarFmtRedaccion = limpiarFmtRedaccion;
 (window as any).toggleMenuExtraRedaccion = toggleMenuExtraRedaccion;
+(window as any).toggleMenuExtraEditor = toggleMenuExtraEditor;
 
 function actualizarToolbarEditor(): void {
   if (!_tiptapEditor) return;
@@ -4089,7 +4082,20 @@ function actualizarToolbarEditor(): void {
 }
 
 function toggleMenuExtraEditor(): void {
-  document.getElementById("editor-menu-extra")?.classList.toggle("hidden");
+  const menu = document.getElementById("editor-menu-extra");
+  if (!menu) return;
+  const abierto = !menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", abierto);
+  if (!abierto) {
+    const cerrar = (ev: MouseEvent) => {
+      if (!(ev.target as HTMLElement).closest("#editor-menu-extra") &&
+          !(ev.target as HTMLElement).closest("#editor-btn-menu")) {
+        menu.classList.add("hidden");
+        document.removeEventListener("click", cerrar, true);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", cerrar, { capture: true }), 0);
+  }
 }
 
 function abrirImagenEditor(): void {
