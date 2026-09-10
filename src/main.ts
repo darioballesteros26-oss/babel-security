@@ -588,6 +588,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "guardar-form-destino":         void guardarFormDestino(); break;
     case "cerrar-modal-compartir": cerrarModalCompartir(); break;
     case "confirmar-compartir": confirmarCompartir(); break;
+    case "compartir-nativo": void compartirNativoHtml(); break;
     case "revelar-en-finder": revelarEnFinder(); break;
     case "copiar-pass-compartir": copiarPassCompartir(); break;
     case "eliminar-sel-guardados": eliminarSeleccionadosGuardados(); break;
@@ -2897,6 +2898,15 @@ async function revelarEnFinder(): Promise<void> {
     await invoke("revelar_en_finder", { ruta: _rutaHtmlCompartir });
   } catch (e) {
     mostrarToast("Error abriendo Finder: " + e, true);
+  }
+}
+
+async function compartirNativoHtml(): Promise<void> {
+  if (!_rutaHtmlCompartir) return;
+  try {
+    await invoke("compartir_archivo_nativo", { rutaHtml: _rutaHtmlCompartir });
+  } catch (e) {
+    mostrarToast("Error al compartir: " + String(e), true);
   }
 }
 
