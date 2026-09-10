@@ -3594,14 +3594,14 @@ async function abrirRedaccion(modo: "manual" | "babel"): Promise<void> {
     }
     document.getElementById("redaccion-btn-guardar")?.removeAttribute("hidden");
   } else {
-    // Babel: extraer texto plano del documento para enviarlo a Qwen
+    // Babel: extraer texto plano ANTES de abrir el panel → siempre disponible al enviar
     _textoDocumentoIa = "";
     _nombreDocumentoIa = nombre.replace(/\.babel$/, "").replace(/^\d+_/, "");
-    invoke<string>("extraer_texto_para_ia", { ruta }).then(txt => {
-      _textoDocumentoIa = txt;
-    }).catch(() => {
+    try {
+      _textoDocumentoIa = await invoke<string>("extraer_texto_para_ia", { ruta });
+    } catch {
       _textoDocumentoIa = ""; // el chat funcionará sin contexto del doc
-    });
+    }
   }
 
   // Mostrar la pantalla
@@ -3748,6 +3748,7 @@ async function iniciarAsistenteIa(): Promise<void> {
   try {
     const est = await invoke<string>("estado_ia_redaccion");
     if (est === "activo") {
+      _iaEnviando = false; // resetear por si quedó bloqueado de una sesión anterior
       mini.classList.add("hidden");
       chat.classList.remove("hidden");
       if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
@@ -3878,6 +3879,7 @@ function abrirChatIaRedaccion(): void {
 }
 
 async function cerrarChatIaRedaccion(): Promise<void> {
+  _iaEnviando = false; // desbloquear por si había un envío en curso
   document.getElementById("redaccion-ia-chat")?.classList.add("hidden");
   document.getElementById("redaccion-ia-mini")?.classList.remove("hidden");
   const btnEnviar = document.getElementById("redaccion-ia-btn-enviar") as HTMLButtonElement | null;
