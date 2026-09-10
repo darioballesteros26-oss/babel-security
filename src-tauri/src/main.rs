@@ -6589,6 +6589,7 @@ fn main() {
             ia_redaccion::parar_ia_redaccion,
             ia_redaccion::estado_ia_redaccion,
             ia_redaccion::enviar_mensaje_ia,
+            ia_redaccion::enviar_mensaje_ia_stream,
         ]);
     if let Err(e) = app.run(tauri::generate_context!()) {
         eprintln!("[!] Error crítico al iniciar Babel: {}", e);

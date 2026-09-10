@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use tauri::Emitter;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
@@ -158,27 +159,11 @@ pub async fn enviar_mensaje_ia(
         return Err("El asistente no está activo.".into());
     }
 
-    // /no_think desactiva el modo razonamiento encadenado de Qwen3
     let body = serde_json::json!({
         "model": "qwen3",
         "messages": [
-            {
-                "role": "system",
-                "content": "/no_think Eres Babel, asistente de redacción documental y jurídica. \
-Jerarquía de prioridades ESTRICTA:\n\
-1. EXACTITUD: No inventes datos, fechas, cantidades, nombres ni hechos.\n\
-2. FIDELIDAD: Usa únicamente la información del documento original proporcionado.\n\
-3. ESTRUCTURA: Organiza el texto de forma clara y coherente.\n\
-4. CALIDAD JURÍDICA: Lenguaje preciso y apropiado al contexto.\n\
-5. ESTILO: Redacción cuidada y fluida.\n\
-Si falta información esencial (fecha, nombre, importe, etc.) para completar lo pedido, \
-indícalo explícitamente con [DATO PENDIENTE: descripción] en lugar de inventarlo.\n\
-Responde siempre en español."
-            },
-            {
-                "role": "user",
-                "content": mensaje
-            }
+            { "role": "system", "content": SYSTEM_PROMPT },
+            { "role": "user",   "content": mensaje }
         ],
         "temperature": 0.7,
         "max_tokens": 2048,
@@ -209,6 +194,95 @@ Responde siempre en español."
         .to_string();
 
     Ok(limpiar_thinking(&content))
+}
+
+const SYSTEM_PROMPT: &str = "/no_think Eres Babel, asistente de redacción documental y jurídica. \
+Jerarquía de prioridades ESTRICTA:\n\
+1. EXACTITUD: No inventes datos, fechas, cantidades, nombres ni hechos.\n\
+2. FIDELIDAD: Usa únicamente la información del documento original proporcionado.\n\
+3. ESTRUCTURA: Organiza el texto de forma clara y coherente.\n\
+4. CALIDAD JURÍDICA: Lenguaje preciso y apropiado al contexto.\n\
+5. ESTILO: Redacción cuidada y fluida.\n\
+Si falta información esencial (fecha, nombre, importe, etc.) para completar lo pedido, \
+indícalo explícitamente con [DATO PENDIENTE: descripción] en lugar de inventarlo.\n\
+Responde siempre en español.";
+
+#[tauri::command]
+pub async fn enviar_mensaje_ia_stream(
+    mensaje: String,
+    state: tauri::State<'_, IaRedaccionState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    if *state.estado.lock().await != "activo" {
+        return Err("El asistente no está activo.".into());
+    }
+
+    let body = serde_json::json!({
+        "model": "qwen3",
+        "messages": [
+            { "role": "system", "content": SYSTEM_PROMPT },
+            { "role": "user",   "content": mensaje }
+        ],
+        "temperature": 0.7,
+        "max_tokens": 2048,
+        "stream": true
+    });
+
+    let url = format!("{}/v1/chat/completions", base_url());
+    let body_str = body.to_string();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::BufRead;
+
+        let response = ureq::post(&url)
+            .set("Content-Type", "application/json")
+            .timeout(std::time::Duration::from_secs(120))
+            .send_string(&body_str)
+            .map_err(|e| {
+                let msg = format!("Error al contactar el asistente: {e}");
+                let _ = app.emit("ia-stream-error", &msg);
+                msg
+            })?;
+
+        let reader = std::io::BufReader::new(response.into_reader());
+
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(e) => {
+                    let msg = format!("Error leyendo stream: {e}");
+                    let _ = app.emit("ia-stream-error", &msg);
+                    return Err(msg);
+                }
+            };
+
+            if !line.starts_with("data: ") {
+                continue;
+            }
+            let data = &line[6..];
+            if data == "[DONE]" {
+                break;
+            }
+
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                // Solo emitir delta.content; delta.reasoning_content es el thinking de Qwen3
+                if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
+                    if !content.is_empty() {
+                        let _ = app.emit("ia-token", content);
+                    }
+                }
+                if json["choices"][0]["finish_reason"].as_str() == Some("stop") {
+                    break;
+                }
+            }
+        }
+
+        let _ = app.emit("ia-stream-fin", ());
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| format!("Error de tarea interna: {e}"))
+    .and_then(|r| r)
 }
 
 // Qwen3 puede incluir <think>…</think> aunque /no_think esté activo.

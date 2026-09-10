@@ -625,6 +625,11 @@ body {
   50% { opacity: 1; transform: scale(1.1); }
 }
 
+@keyframes ia-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 .procesando-texto { font-size: 0.62rem; color: var(--dorado); letter-spacing: 3px; font-weight: 600; }
 
 /* ── Barra de input ── */

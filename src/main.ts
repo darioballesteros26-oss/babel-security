@@ -3878,32 +3878,128 @@ async function enviarMensajeIa(): Promise<void> {
   _iaEnviando = true;
   if (btnEnviar) { btnEnviar.disabled = true; btnEnviar.style.opacity = "0.5"; btnEnviar.style.cursor = "not-allowed"; }
 
-  // Zeroize + limpiar (igual que el traductor)
+  // Zeroize + limpiar
   input.value = "0".repeat(input.value.length);
   input.value = "";
   input.style.height = "52px";
 
   iaRedaccionAppendMensaje("usuario", texto);
-  iaRedaccionAppendMensaje("sistema", "Pensando...");
+  const burbujaPensando = iaRedaccionAppendMensaje("sistema", "Generando respuesta...");
+
+  // Burbuja de streaming: texto aparece token a token
+  const { burbuja: burbujaStream, parrafo: parrafoStream } = _iaCrearBurbujaStream();
+  let textoAcumulado = "";
+  let pensandoQuitado = false;
+
+  const finalizarStream = (exito: boolean): void => {
+    if (!pensandoQuitado) { burbujaPensando?.remove(); pensandoQuitado = true; }
+    if (exito) {
+      _iaFinalizarBurbujaStream(burbujaStream, parrafoStream, textoAcumulado);
+    } else {
+      burbujaStream.remove();
+    }
+    _iaEnviando = false;
+    if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
+  };
+
+  // Suscribirse a tokens y fin ANTES de llamar invoke
+  const unlistenToken = await listen<string>("ia-token", (ev) => {
+    if (!pensandoQuitado) { burbujaPensando?.remove(); pensandoQuitado = true; }
+    textoAcumulado += ev.payload;
+    parrafoStream.textContent = textoAcumulado;
+    const cont = document.getElementById("redaccion-ia-mensajes");
+    if (cont) cont.scrollTop = cont.scrollHeight;
+  });
+
+  const unlistenError = await listen<string>("ia-stream-error", (ev) => {
+    unlistenToken();
+    unlistenError();
+    unlistenFin();
+    finalizarStream(false);
+    iaRedaccionAppendMensaje("error", "Error: " + ev.payload);
+  });
+
+  // eslint-disable-next-line prefer-const
+  let unlistenFin: () => void;
+  unlistenFin = await listen("ia-stream-fin", () => {
+    unlistenToken();
+    unlistenError();
+    unlistenFin();
+    finalizarStream(true);
+  });
 
   try {
-    // Inyectar contenido del documento como contexto para Qwen
     const mensaje = _textoDocumentoIa
       ? `DOCUMENTO ORIGINAL:\n${_textoDocumentoIa}\n\n---\n\nINSTRUCCIONES:\n${texto}`
       : texto;
-    const respuesta = await invoke<string>("enviar_mensaje_ia", { mensaje });
-    document.getElementById("redaccion-ia-mensajes")?.querySelector(".ia-burbuja-pensando")?.remove();
-    iaRedaccionAppendMensaje("babel", respuesta);
+    await invoke("enviar_mensaje_ia_stream", { mensaje });
   } catch (e) {
-    document.getElementById("redaccion-ia-mensajes")?.querySelector(".ia-burbuja-pensando")?.remove();
+    unlistenToken();
+    unlistenError();
+    unlistenFin();
+    finalizarStream(false);
     iaRedaccionAppendMensaje("error", "Error: " + String(e));
-  } finally {
-    _iaEnviando = false;
-    if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
   }
 }
 
-function iaRedaccionAppendMensaje(tipo: "babel" | "usuario" | "sistema" | "error", texto: string): void {
+function _iaCrearBurbujaStream(): { burbuja: HTMLElement; parrafo: HTMLElement } {
+  const cont = document.getElementById("redaccion-ia-mensajes");
+  const burbuja = document.createElement("div");
+  burbuja.className = "chat-burbuja babel";
+  burbuja.innerHTML = `
+    <div class="burbuja-icono">B</div>
+    <div class="burbuja-contenido ia-stream-contenido" style="position:relative;padding-top:4px;">
+      <p class="ia-stream-texto burbuja-texto" style="white-space:pre-wrap;min-height:1.2em;"></p>
+      <span class="ia-stream-cursor" style="display:inline-block;width:7px;height:0.85em;
+        background:rgba(212,175,55,0.75);margin-left:1px;vertical-align:text-bottom;
+        animation:ia-cursor-blink 0.8s step-end infinite;"></span>
+    </div>`;
+  cont?.appendChild(burbuja);
+  if (cont) cont.scrollTop = cont.scrollHeight;
+  return {
+    burbuja,
+    parrafo: burbuja.querySelector<HTMLElement>(".ia-stream-texto")!,
+  };
+}
+
+function _iaFinalizarBurbujaStream(burbuja: HTMLElement, parrafo: HTMLElement, textoFinal: string): void {
+  burbuja.querySelector(".ia-stream-cursor")?.remove();
+  const contenido = burbuja.querySelector<HTMLElement>(".ia-stream-contenido");
+  if (!contenido) return;
+  contenido.style.paddingTop = "28px";
+
+  const btnEditar = document.createElement("button");
+  btnEditar.type = "button";
+  btnEditar.title = "Editar · Usar como borrador";
+  btnEditar.style.cssText = `position:absolute;top:4px;right:4px;font-family:'Times New Roman',Times,serif;
+    font-size:0.52rem;letter-spacing:1px;padding:3px 10px;
+    background:rgba(212,175,55,0.08);border:1px solid rgba(212,175,55,0.25);
+    color:rgba(212,175,55,0.65);border-radius:2px;cursor:pointer;transition:all 0.18s;white-space:nowrap;`;
+  btnEditar.textContent = "✍ Editar · Usar borrador";
+  btnEditar.addEventListener("mouseenter", () => {
+    btnEditar.style.background = "rgba(212,175,55,0.18)";
+    btnEditar.style.color = "#c9a84c";
+    btnEditar.style.borderColor = "rgba(212,175,55,0.6)";
+  });
+  btnEditar.addEventListener("mouseleave", () => {
+    btnEditar.style.background = "rgba(212,175,55,0.08)";
+    btnEditar.style.color = "rgba(212,175,55,0.65)";
+    btnEditar.style.borderColor = "rgba(212,175,55,0.25)";
+  });
+  btnEditar.addEventListener("click", () => insertarEnEditorRedaccion(textoFinal));
+  contenido.insertBefore(btnEditar, parrafo);
+
+  const footer = document.createElement("div");
+  footer.style.cssText = "display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap;";
+  footer.innerHTML = `<span class="burbuja-hora">BABEL · IA LOCAL</span>
+    <button type="button" class="burbuja-btn-copiar" title="Copiar respuesta">⊕</button>`;
+  footer.querySelector(".burbuja-btn-copiar")?.addEventListener("click", () => {
+    navigator.clipboard.writeText(textoFinal).then(() => mostrarToast("Copiado", false)).catch(() => {});
+  });
+  contenido.appendChild(footer);
+}
+
+function iaRedaccionAppendMensaje(tipo: "babel" | "usuario" | "sistema" | "error", texto: string): HTMLElement | undefined {
   const cont = document.getElementById("redaccion-ia-mensajes");
   if (!cont) return;
 
@@ -3963,6 +4059,8 @@ function iaRedaccionAppendMensaje(tipo: "babel" | "usuario" | "sistema" | "error
       letter-spacing:1px;color:${tipo === "error" ? "#f87171" : "rgba(212,175,55,0.4)"};padding:4px 0;`;
     burbuja.textContent = texto;
     cont.appendChild(burbuja);
+    cont.scrollTop = cont.scrollHeight;
+    return burbuja;
   }
 
   cont.scrollTop = cont.scrollHeight;
@@ -5699,6 +5797,7 @@ async function cargarAjustesTraduccion(): Promise<void> {
 let archivoEmailRuta: string = "";
 let archivoEmailFile: File | null = null;
 let intervaloBandeja: number | null = null;
+let _enviandoEmail = false;
 
 // Inicia la recarga automática de la bandeja cada 5 minutos
 function iniciarRecargaAutomatica(): void {
@@ -6239,6 +6338,7 @@ async function guardarConfigSmtp(): Promise<void> {
 }
 
 async function enviarEmail(): Promise<void> {
+  if (_enviandoEmail) return;
   const destinatario = (document.getElementById("comp-destinatario") as HTMLInputElement)?.value.trim();
   const cc = (document.getElementById("comp-cc") as HTMLInputElement)?.value.trim() ?? "";
   const cco = (document.getElementById("comp-cco") as HTMLInputElement)?.value.trim() ?? "";
@@ -6264,6 +6364,7 @@ async function enviarEmail(): Promise<void> {
     if (!confirmado) return;
   }
 
+  _enviandoEmail = true;
   if (estado) estado.textContent = "Enviando...";
 
   try {
@@ -6298,6 +6399,8 @@ async function enviarEmail(): Promise<void> {
   } catch (error) {
     if (estado) estado.textContent = "";
     mostrarToast("Error enviando: " + String(error), true);
+  } finally {
+    _enviandoEmail = false;
   }
 }
 
