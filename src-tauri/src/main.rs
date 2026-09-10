@@ -3995,6 +3995,133 @@ fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Strin
     Ok(contenido)
 }
 
+// COMANDO — Extracción de texto plano para el asistente IA (Fase 2.1)
+// Descifra el documento y devuelve texto plano (no HTML) apto para enviar a Qwen.
+
+#[tauri::command]
+fn extraer_texto_para_ia(
+    ruta: String,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+    validar_ruta_en(&ruta, archivos_dir())
+        .or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let bytes = fs::read(&ruta).map_err(|e| format!("Error leyendo archivo: {e}"))?;
+    let contenido = seguridad::descifrar_documento(bytes, &subclave_hex)
+        .map_err(|e| format!("Error descifrando: {e}"))?;
+
+    if let Ok(raw) = traductor::descomprimir_b64(&contenido) {
+        if raw.starts_with(b"PK") {
+            return Ok(ia_extraer_docx(&raw));
+        }
+        if raw.starts_with(b"%PDF") {
+            return ia_extraer_pdf(&raw);
+        }
+        if let Ok(txt) = String::from_utf8(raw) {
+            return Ok(ia_truncar(&txt));
+        }
+        return Err("Formato no soportado para el asistente IA. Usa PDF o DOCX.".into());
+    }
+    // Texto plano sin wrapper b64
+    if !contenido.starts_with("html:")
+        && !contenido.starts_with("pdf:")
+        && !contenido.starts_with("data:")
+    {
+        return Ok(ia_truncar(&contenido));
+    }
+    Err("Formato no soportado para el asistente IA. Usa PDF o DOCX.".into())
+}
+
+fn ia_extraer_docx(raw: &[u8]) -> String {
+    use std::io::Read;
+    let cursor = std::io::Cursor::new(raw);
+    let mut zip = match zip::ZipArchive::new(cursor) {
+        Ok(z) => z,
+        Err(_) => return String::new(),
+    };
+    let mut xml = String::new();
+    if let Ok(mut f) = zip.by_name("word/document.xml") {
+        let _ = f.read_to_string(&mut xml);
+    }
+    ia_truncar(&extraer_texto_xml(&xml))
+}
+
+fn ia_extraer_pdf(raw: &[u8]) -> Result<String, String> {
+    use std::io::Write;
+    let tmp = std::env::temp_dir().join(format!("babel_ia_{}.pdf", std::process::id()));
+    {
+        let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        f.write_all(raw).map_err(|e| e.to_string())?;
+    }
+    let ruta_str = tmp.to_string_lossy().to_string();
+    let resultado = ia_pdftotext(&ruta_str);
+    let _ = fs::remove_file(&tmp);
+    resultado
+}
+
+fn ia_pdftotext(ruta: &str) -> Result<String, String> {
+    const BINS: &[&str] = &[
+        "/opt/homebrew/bin/pdftotext",
+        "/usr/local/bin/pdftotext",
+        "/usr/bin/pdftotext",
+        "pdftotext",
+    ];
+    for bin in BINS {
+        let existe = !bin.contains('/') || std::path::Path::new(bin).exists();
+        if !existe { continue; }
+        if let Ok(out) = std::process::Command::new(bin).args([ruta, "-"]).output() {
+            let txt = String::from_utf8_lossy(&out.stdout).to_string();
+            if txt.split_whitespace().count() >= 30 {
+                return Ok(ia_truncar(&txt));
+            }
+        }
+        break;
+    }
+    // Fallback: pymupdf4llm (mejor calidad, pero requiere Python)
+    const PYTHONS: &[&str] = &[
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        "/usr/bin/python3",
+        "python3",
+    ];
+    for py in PYTHONS {
+        let existe = !py.contains('/') || std::path::Path::new(py).exists();
+        if !existe { continue; }
+        if let Ok(out) = std::process::Command::new(py)
+            .args([
+                "-c",
+                "import sys, pymupdf4llm; print(pymupdf4llm.to_markdown(sys.argv[1]))",
+                ruta,
+            ])
+            .output()
+        {
+            let txt = String::from_utf8_lossy(&out.stdout).to_string();
+            if txt.split_whitespace().count() >= 30 {
+                return Ok(ia_truncar(&txt));
+            }
+        }
+        break;
+    }
+    Err("No se pudo extraer texto del PDF. Instala poppler (pdftotext) o pymupdf4llm.".into())
+}
+
+fn ia_truncar(texto: &str) -> String {
+    const MAX: usize = 16_000;
+    let t = texto.trim();
+    if t.len() <= MAX {
+        return t.to_string();
+    }
+    let corte = t[..MAX].rfind(|c: char| c.is_whitespace()).unwrap_or(MAX);
+    format!(
+        "{}\n\n[... documento truncado a 16 000 caracteres ...]",
+        t[..corte].trim_end()
+    )
+}
+
 // COMANDO 18 — Guardar y cargar ajustes
 
 fn default_timeout() -> u32 { 60 }
@@ -6355,6 +6482,7 @@ fn main() {
             eliminar_archivo,
             eliminar_buzon,
             ver_archivo,
+            extraer_texto_para_ia,
             mover_archivo,
             generar_frase_recuperacion,
             recuperar_y_autenticar,

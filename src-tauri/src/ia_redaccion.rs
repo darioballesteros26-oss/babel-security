@@ -87,7 +87,7 @@ pub async fn iniciar_ia_redaccion(
             "--model",        &modelo_str,
             "--host",         HOST,
             "--port",         &PUERTO.to_string(),
-            "--ctx-size",     "4096",
+            "--ctx-size",     "8192",
             "--n-gpu-layers", "99",   // Metal GPU en macOS ARM
             "--threads",      &hilos,
             "--parallel",     "1",   // Un slot (un usuario a la vez)
@@ -164,7 +164,16 @@ pub async fn enviar_mensaje_ia(
         "messages": [
             {
                 "role": "system",
-                "content": "/no_think Eres Babel, un asistente de redacción de documentos en español. Respondes de forma clara, directa y concisa en español. Solo redactas y editas texto."
+                "content": "/no_think Eres Babel, asistente de redacción documental y jurídica. \
+Jerarquía de prioridades ESTRICTA:\n\
+1. EXACTITUD: No inventes datos, fechas, cantidades, nombres ni hechos.\n\
+2. FIDELIDAD: Usa únicamente la información del documento original proporcionado.\n\
+3. ESTRUCTURA: Organiza el texto de forma clara y coherente.\n\
+4. CALIDAD JURÍDICA: Lenguaje preciso y apropiado al contexto.\n\
+5. ESTILO: Redacción cuidada y fluida.\n\
+Si falta información esencial (fecha, nombre, importe, etc.) para completar lo pedido, \
+indícalo explícitamente con [DATO PENDIENTE: descripción] en lugar de inventarlo.\n\
+Responde siempre en español."
             },
             {
                 "role": "user",

@@ -260,6 +260,8 @@ let _pollRatId: number | null = null;
 let _pollBadgeId: number | null = null;
 let _traduciendo = false;
 let _iaEnviando = false;
+let _textoDocumentoIa = "";   // texto plano del documento para enviar a Qwen
+let _nombreDocumentoIa = "";  // nombre del documento actual en modo babel
 
 const PANTALLAS_SENSIBLES: Pantalla[] =
   ["principal", "traduccion", "archivos-guardados", "comunicacion", "frase", "ajustes", "registro"];
@@ -3592,9 +3594,14 @@ async function abrirRedaccion(modo: "manual" | "babel"): Promise<void> {
     }
     document.getElementById("redaccion-btn-guardar")?.removeAttribute("hidden");
   } else {
-    // Babel: ocultar botón guardar (no hay editor)
-    document.getElementById("redaccion-btn-guardar")?.setAttribute("style",
-      document.getElementById("redaccion-btn-guardar")!.getAttribute("style") ?? "");
+    // Babel: extraer texto plano del documento para enviarlo a Qwen
+    _textoDocumentoIa = "";
+    _nombreDocumentoIa = nombre.replace(/\.babel$/, "").replace(/^\d+_/, "");
+    invoke<string>("extraer_texto_para_ia", { ruta }).then(txt => {
+      _textoDocumentoIa = txt;
+    }).catch(() => {
+      _textoDocumentoIa = ""; // el chat funcionará sin contexto del doc
+    });
   }
 
   // Mostrar la pantalla
@@ -3615,11 +3622,16 @@ function cerrarPantallaRedaccion(): void {
   if (cd) cd.innerHTML = "";
   // Resetear chat IA (void: no esperamos a que el modelo se detenga, se hace en background)
   void cerrarChatIaRedaccion();
+  _textoDocumentoIa = "";
+  _nombreDocumentoIa = "";
   _nombreArchivoRedaccion = "";
 }
 
 async function guardarRedaccion(): Promise<void> {
-  if (!_tiptapRedaccion) return;
+  if (!_tiptapRedaccion) {
+    mostrarToast("Genera un texto con el asistente y pulsa «✍ Editar» primero.", true);
+    return;
+  }
   const nombre = _nombreArchivoRedaccion.replace(/\.babel$/, "").replace(/^\d+_/, "") || "Documento redactado";
   const nombreArchivo = nombre.endsWith(".docx") ? nombre : nombre + ".docx";
   const btn = document.getElementById("redaccion-btn-guardar") as HTMLButtonElement | null;
@@ -3759,7 +3771,10 @@ async function iniciarAsistenteIa(): Promise<void> {
     const msgsEl = document.getElementById("redaccion-ia-mensajes");
     msgsEl?.querySelector(".ia-burbuja-pensando")?.remove();
     if (resultado === "activo") {
-      iaRedaccionAppendMensaje("babel", "Listo. ¿Qué necesitas redactar?");
+      const saludo = _nombreDocumentoIa
+        ? `He leído «${_nombreDocumentoIa}». Escríbeme qué quieres redactar a partir de ese documento.`
+        : "Listo. ¿Qué necesitas redactar?";
+      iaRedaccionAppendMensaje("babel", saludo);
       if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
     } else {
       // "parado" u otro resultado inesperado — resetear UI
@@ -3791,7 +3806,11 @@ async function enviarMensajeIa(): Promise<void> {
   iaRedaccionAppendMensaje("sistema", "Pensando...");
 
   try {
-    const respuesta = await invoke<string>("enviar_mensaje_ia", { mensaje: texto });
+    // Inyectar contenido del documento como contexto para Qwen
+    const mensaje = _textoDocumentoIa
+      ? `DOCUMENTO ORIGINAL:\n${_textoDocumentoIa}\n\n---\n\nINSTRUCCIONES:\n${texto}`
+      : texto;
+    const respuesta = await invoke<string>("enviar_mensaje_ia", { mensaje });
     document.getElementById("redaccion-ia-mensajes")?.querySelector(".ia-burbuja-pensando")?.remove();
     iaRedaccionAppendMensaje("babel", respuesta);
   } catch (e) {
@@ -3823,13 +3842,21 @@ function iaRedaccionAppendMensaje(tipo: "babel" | "usuario" | "sistema" | "error
       <div class="burbuja-icono">B</div>
       <div class="burbuja-contenido">
         <p class="burbuja-texto" style="white-space:pre-wrap;">${escapeHTML(texto)}</p>
-        <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap;">
           <span class="burbuja-hora">BABEL · IA LOCAL</span>
           <button type="button" class="burbuja-btn-copiar" title="Copiar respuesta">⊕</button>
+          <button type="button" class="burbuja-btn-editar"
+            style="font-family:'Times New Roman',Times,serif;font-size:0.52rem;letter-spacing:1px;
+            padding:3px 8px;background:rgba(212,175,55,0.12);border:1px solid rgba(212,175,55,0.3);
+            color:var(--dorado);border-radius:2px;cursor:pointer;"
+            title="Insertar en editor para editar y guardar">✍ Editar</button>
         </div>
       </div>`;
     burbuja.querySelector(".burbuja-btn-copiar")?.addEventListener("click", () => {
       navigator.clipboard.writeText(texto).then(() => mostrarToast("Copiado", false)).catch(() => {});
+    });
+    burbuja.querySelector(".burbuja-btn-editar")?.addEventListener("click", () => {
+      insertarEnEditorRedaccion(texto);
     });
     cont.appendChild(burbuja);
   } else {
@@ -3860,6 +3887,55 @@ async function cerrarChatIaRedaccion(): Promise<void> {
 }
 
 (window as any).enviarMensajeIa = enviarMensajeIa;
+
+// Carga el texto generado por la IA en el editor Tiptap y cambia al modo edición
+function insertarEnEditorRedaccion(texto: string): void {
+  const editorWrap = document.getElementById("redaccion-editor-wrap");
+  const iaWrap = document.getElementById("redaccion-ia-wrap");
+  if (!editorWrap || !iaWrap) return;
+
+  editorWrap.classList.remove("hidden");
+  iaWrap.classList.add("hidden");
+
+  const contenedorEd = document.getElementById("redaccion-contenido");
+  if (!contenedorEd) return;
+
+  // Convertir texto plano a HTML para Tiptap: doble newline = párrafo, simple = <br>
+  const html = texto.split(/\n\n+/)
+    .map(p => `<p>${escapeHTML(p).replace(/\n/g, "<br>")}</p>`)
+    .join("") || "<p></p>";
+
+  const exts = [
+    StarterKit,
+    Underline,
+    TextAlign.configure({ types: ["heading", "paragraph"] }),
+    Table.configure({ resizable: true }),
+    TableRow,
+    TableHeader,
+    TableCell,
+    TiptapImage.configure({ inline: false, allowBase64: true }),
+    TextStyle,
+    Color,
+    FontSize,
+    Highlight.configure({ multicolor: true }),
+  ];
+
+  if (_tiptapRedaccion) {
+    _tiptapRedaccion.commands.setContent(html);
+    _tiptapRedaccion.commands.focus("end");
+  } else {
+    contenedorEd.innerHTML = "";
+    _tiptapRedaccion = new Editor({
+      element: contenedorEd,
+      extensions: exts,
+      content: html,
+      autofocus: "end",
+      onTransaction: () => actualizarContadorRedaccion(),
+    });
+  }
+  actualizarContadorRedaccion();
+  mostrarToast("Texto insertado en el editor — edita y pulsa GUARDAR", false);
+}
 
 // Drag del separador en la vista dividida de redacción
 function iniciarDragRedaccion(): void {
