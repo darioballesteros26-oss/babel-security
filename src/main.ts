@@ -3499,14 +3499,23 @@ function abrirEditorTiptap(): void {
   document.addEventListener("click", _cerrarPaletasEditor, { capture: true, once: false });
 }
 
+function toggleColorPaletteEditor(): void {
+  document.getElementById("editor-color-palette")?.classList.toggle("hidden");
+  document.getElementById("editor-highlight-palette")?.classList.add("hidden");
+}
+function toggleHighlightPaletteEditor(): void {
+  document.getElementById("editor-highlight-palette")?.classList.toggle("hidden");
+  document.getElementById("editor-color-palette")?.classList.add("hidden");
+}
+(window as any).toggleColorPaletteEditor = toggleColorPaletteEditor;
+(window as any).toggleHighlightPaletteEditor = toggleHighlightPaletteEditor;
+
 function _cerrarPaletasEditor(e: Event): void {
   const target = e.target as HTMLElement;
-  if (!target.closest("#editor-color-palette") && !target.closest("[onclick*='editor-color-palette']") &&
-      !target.closest("[onclick*='color-palette']")) {
+  if (!target.closest("#editor-color-palette") && !target.closest("#editor-color-btn")) {
     document.getElementById("editor-color-palette")?.classList.add("hidden");
   }
-  if (!target.closest("#editor-highlight-palette") && !target.closest("[onclick*='editor-highlight-palette']") &&
-      !target.closest("[onclick*='highlight-palette']")) {
+  if (!target.closest("#editor-highlight-palette") && !target.closest("#editor-highlight-btn")) {
     document.getElementById("editor-highlight-palette")?.classList.add("hidden");
   }
 }

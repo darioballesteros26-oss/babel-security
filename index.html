@@ -2420,8 +2420,8 @@
 
     <!-- Color de texto -->
     <div style="position:relative;">
-      <button type="button" title="Color de texto"
-        onclick="document.getElementById('editor-color-palette').classList.toggle('hidden');document.getElementById('editor-highlight-palette').classList.add('hidden')"
+      <button type="button" id="editor-color-btn" title="Color de texto"
+        onclick="toggleColorPaletteEditor()"
         style="display:flex;flex-direction:column;align-items:center;gap:2px;
         background:transparent;border:none;cursor:pointer;padding:2px 5px;border-radius:4px;">
         <span style="font-size:0.75rem;color:#ccc;font-family:'Times New Roman',Times,serif;line-height:1;">A</span>
@@ -2454,8 +2454,8 @@
 
     <!-- Resaltado / fondo -->
     <div style="position:relative;">
-      <button type="button" title="Resaltar texto"
-        onclick="document.getElementById('editor-highlight-palette').classList.toggle('hidden');document.getElementById('editor-color-palette').classList.add('hidden')"
+      <button type="button" id="editor-highlight-btn" title="Resaltar texto"
+        onclick="toggleHighlightPaletteEditor()"
         style="display:flex;flex-direction:column;align-items:center;gap:2px;
         background:transparent;border:none;cursor:pointer;padding:2px 5px;border-radius:4px;">
         <span style="font-size:0.75rem;color:#ccc;font-family:'Times New Roman',Times,serif;line-height:1;">ab</span>
