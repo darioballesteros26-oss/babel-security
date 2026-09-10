@@ -3720,7 +3720,7 @@ function toggleMenuExtraRedaccion(): void {
   if (!abierto) {
     const cerrar = (ev: MouseEvent) => {
       if (!(ev.target as HTMLElement).closest("#rd-menu-extra") &&
-          !(ev.target as HTMLElement).closest("button[onclick*='toggleMenuExtraRedaccion']")) {
+          !(ev.target as HTMLElement).closest("#rd-menu-btn")) {
         menu.classList.add("hidden");
         document.removeEventListener("click", cerrar, true);
       }
@@ -6981,11 +6981,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }, true);
 
-  // Selector de color nativo en paleta de redacción (this.value no funciona con dispatchInlineHandler)
-  document.getElementById("rd-native-color-input")?.addEventListener("change", (e) => {
-    aplicarColorRedaccion((e.target as HTMLInputElement).value);
-  });
-
   // Modal autologin — activar
   function actualizarBadgeAutologin(activo: boolean) {
     const badge = document.getElementById("autologin-estado-badge");
@@ -7577,6 +7572,7 @@ function parseOnclickArg(s: string): unknown {
 }
 
 function dispatchInlineHandler(raw: string, ev: Event) {
+  const targetEl = ev.target as HTMLInputElement | HTMLSelectElement | null;
   for (const part of raw.split(";").map((s) => s.trim()).filter(Boolean)) {
     if (part === "event.stopPropagation()") { ev.stopPropagation(); continue; }
     if (part === "event.preventDefault()") { ev.preventDefault(); continue; }
@@ -7586,7 +7582,12 @@ function dispatchInlineHandler(raw: string, ev: Event) {
     if (typeof fn !== "function") continue;
     const argsRaw = m[2].trim();
     if (!argsRaw) { (fn as () => void)(); continue; }
-    const args = argsRaw.split(",").map(parseOnclickArg);
+    const args = argsRaw.split(",").map(s => {
+      const t = s.trim();
+      if (t === "this.value")   return targetEl ? (targetEl as HTMLInputElement).value   : "";
+      if (t === "this.checked") return targetEl ? (targetEl as HTMLInputElement).checked : false;
+      return parseOnclickArg(t);
+    });
     (fn as (...a: unknown[]) => void)(...args);
   }
 }
