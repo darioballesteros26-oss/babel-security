@@ -4087,6 +4087,17 @@ function limpiarFormatoEditor(): void {
 (window as any).toggleMenuExtraRedaccion = toggleMenuExtraRedaccion;
 (window as any).toggleMenuExtraEditor = toggleMenuExtraEditor;
 
+function toggleColorPaletteRedaccion(): void {
+  document.getElementById("rd-color-palette")?.classList.toggle("hidden");
+  document.getElementById("rd-highlight-palette")?.classList.add("hidden");
+}
+function toggleHighlightPaletteRedaccion(): void {
+  document.getElementById("rd-highlight-palette")?.classList.toggle("hidden");
+  document.getElementById("rd-color-palette")?.classList.add("hidden");
+}
+(window as any).toggleColorPaletteRedaccion = toggleColorPaletteRedaccion;
+(window as any).toggleHighlightPaletteRedaccion = toggleHighlightPaletteRedaccion;
+
 function actualizarToolbarEditor(): void {
   if (!_tiptapEditor) return;
   const ed = _tiptapEditor;
@@ -6962,13 +6973,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // Cerrar paletas de color/resaltado del editor de redacción al hacer clic fuera
   document.addEventListener("click", (e: MouseEvent) => {
     const t = e.target as HTMLElement;
-    if (!t.closest("#rd-color-palette") && !t.closest("[onclick*='rd-color-palette']")) {
+    if (!t.closest("#rd-color-palette") && !t.closest("#rd-color-btn")) {
       document.getElementById("rd-color-palette")?.classList.add("hidden");
     }
-    if (!t.closest("#rd-highlight-palette") && !t.closest("[onclick*='rd-highlight-palette']")) {
+    if (!t.closest("#rd-highlight-palette") && !t.closest("#rd-highlight-btn")) {
       document.getElementById("rd-highlight-palette")?.classList.add("hidden");
     }
   }, true);
+
+  // Selector de color nativo en paleta de redacción (this.value no funciona con dispatchInlineHandler)
+  document.getElementById("rd-native-color-input")?.addEventListener("change", (e) => {
+    aplicarColorRedaccion((e.target as HTMLInputElement).value);
+  });
 
   // Modal autologin — activar
   function actualizarBadgeAutologin(activo: boolean) {
@@ -7021,6 +7037,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     const modales = [
+      "modal-guardar-ia",
       "modal-visor", "modal-paralelo", "modal-frase-app",
       "modal-renombrar", "modal-solicitud-p2p", "modal-renombrar-archivo",
       "modal-sinc",
