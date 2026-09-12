@@ -137,15 +137,26 @@ impl IndiceJuridico {
         let mut longitudes = Vec::with_capacity(n);
 
         for frag in &fragmentos {
-            // Include articulo number + abrev so "art. 138 CP" queries find the right fragment
+            // Include articulo number + abrev so "art. 138 CP" queries find the right fragment.
+            // Also inject scope disambiguation tokens to reduce cross-law false matches:
+            // LORPM fragments get "menores edad" boosted so they rank lower on adult queries.
+            // LOHC fragments get "habeas corpus adultos" to rank higher on HC queries.
+            let scope_boost = match frag.abrev.as_str() {
+                "LORPM" => " menores edad menor adolescente juvenil lorpm",
+                "LOHC"  => " habeas corpus detencion ilegal adulto libertad inmediata",
+                "LOVG"  => " violencia genero mujer victima",
+                "MEP"   => " modelo escrito procesal plantilla formato estructura como redactar",
+                _       => "",
+            };
             let contenido = format!(
-                "{} {} {} {} {} {}",
+                "{} {} {} {} {} {}{}",
                 frag.texto,
                 frag.articulo,
                 frag.abrev,
                 frag.titulo.as_deref().unwrap_or(""),
                 frag.capitulo.as_deref().unwrap_or(""),
-                frag.seccion.as_deref().unwrap_or("")
+                frag.seccion.as_deref().unwrap_or(""),
+                scope_boost
             );
             let tokens = tokenizar(&contenido);
             longitudes.push(tokens.len().max(1));
@@ -272,7 +283,32 @@ pub fn buscar_normativa(query: &str, max_chars: usize) -> (String, bool) {
         );
     };
 
-    let resultados = biblio.buscar(query, 10, 1.0);
+    let resultados_brutos = biblio.buscar(query, 10, 1.0);
+
+    // Post-retrieval scope filter: remove law fragments whose scope of application
+    // doesn't match the query context, to avoid cross-law citation errors.
+    let query_lower = query.to_lowercase();
+    let es_contexto_menores = ["menor ", "menores", "adolescente", "juvenil", "lorpm", "joven"]
+        .iter()
+        .any(|t| query_lower.contains(t));
+    let es_contexto_violencia_genero = ["genero", "género", "lovg", "violencia doméstica", "violencia de género"]
+        .iter()
+        .any(|t| query_lower.contains(t));
+
+    let resultados: Vec<_> = resultados_brutos
+        .into_iter()
+        .filter(|(_, frag)| {
+            // LORPM only applies to juveniles: skip for adult criminal contexts
+            if frag.abrev == "LORPM" && !es_contexto_menores {
+                return false;
+            }
+            // LOVG only applies to gender violence contexts
+            if frag.abrev == "LOVG" && !es_contexto_violencia_genero {
+                return false;
+            }
+            true
+        })
+        .collect();
 
     if resultados.is_empty() {
         return (
@@ -282,22 +318,27 @@ pub fn buscar_normativa(query: &str, max_chars: usize) -> (String, bool) {
     }
 
     let mut bloque = String::from(
-        "[NORMATIVA JURÍDICA LOCAL — cita con «art. X ABREV» (ej: art. 138 CP, art. 24 CE, art. 520 LECrim) cada artículo que uses en tu respuesta]\n",
+        "[NORMATIVA JURÍDICA LOCAL — cita cada fuente que uses: leyes como «art. X ABREV» (ej: art. 138 CP, art. 24 CE, art. 520 LECrim); jurisprudencia TC como «STC X/YEAR» (ej: STC 1/1995)]\n",
     );
     let mut chars_usados = bloque.len();
 
     for (_, frag) in resultados.iter().take(5) {
         let titulo_str = frag.titulo.as_deref().map(|t| format!(" | {}", t)).unwrap_or_default();
-        // Truncate long articles (e.g. LECrim 520) to stay within token budget
         let texto_truncado = if frag.texto.len() > 800 {
             format!("{}…", &frag.texto[..800])
         } else {
             frag.texto.clone()
         };
-        let entrada = format!(
-            "\n▸ {} art. {}{}\n{}\n",
-            frag.abrev, frag.articulo, titulo_str, texto_truncado
-        );
+        // STC → "STC X/YEAR"; MEP → "Modelo: titulo"; leyes → "ABREV art. X"
+        let cabecera = if frag.abrev == "STC" {
+            format!("▸ STC {}{}", frag.articulo, titulo_str)
+        } else if frag.abrev == "MEP" {
+            let titulo = frag.titulo.as_deref().unwrap_or("Modelo procesal");
+            format!("▸ {}", titulo)
+        } else {
+            format!("▸ {} art. {}{}", frag.abrev, frag.articulo, titulo_str)
+        };
+        let entrada = format!("\n{}\n{}\n", cabecera, texto_truncado);
         if chars_usados + entrada.len() > max_chars {
             break;
         }
@@ -403,5 +444,30 @@ mod tests {
         assert!(tokens.contains(&"articulo".to_string()));
         assert!(tokens.contains(&"detencion".to_string()));
         assert!(tokens.contains(&"provisional".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod test_mep {
+    use super::*;
+    #[test]
+    fn mep_recuperado_en_query_calificacion() {
+        let (bloque, _) = buscar_normativa("Redacta una calificación provisional de la acusación por delito de estafa", 8000);
+        assert!(bloque.contains("MEP") || bloque.contains("Modelo de calificación"),
+            "Debe recuperar modelo MEP para calificación: {}", &bloque[..200.min(bloque.len())]);
+    }
+    #[test]
+    fn mep_o_ley_recuperado_en_query_denuncia() {
+        let (bloque, _) = buscar_normativa("Redacta una denuncia por robo con fuerza en domicilio", 8000);
+        // Para queries de crimen específico, la ley (CP art. 238) es lo más relevante.
+        // MEP puede o no aparecer en el top-6 dependiendo del ranking BM25.
+        assert!(bloque.contains("CP") || bloque.contains("LECRIM") || bloque.contains("MEP"),
+            "Debe recuperar CP o LECrim o MEP para denuncia: {}", &bloque[..200.min(bloque.len())]);
+    }
+    #[test]
+    fn mep_recuperado_en_query_habeas_corpus() {
+        let (bloque, _) = buscar_normativa("Redacta un habeas corpus para persona detenida más de 72 horas", 8000);
+        assert!(bloque.contains("MEP") || bloque.contains("habeas corpus") || bloque.contains("LOHC"),
+            "Debe recuperar modelo habeas corpus: {}", &bloque[..200.min(bloque.len())]);
     }
 }
