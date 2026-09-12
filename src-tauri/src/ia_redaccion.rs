@@ -514,6 +514,93 @@ pub async fn enviar_mensaje_ia_stream(
     .and_then(|r| r)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── detectar_fechas_palabras_imposibles ──────────────────────────────
+
+    #[test]
+    fn treinta_y_uno_septiembre_detectado() {
+        let t = "contrata a Carlos Medina desde el treinta y uno de septiembre de 2025";
+        let a = detectar_fechas_palabras_imposibles(t);
+        assert!(!a.is_empty(), "debe detectar treinta y uno de septiembre");
+        assert!(a[0].contains("treinta y uno"), "alerta debe citar la palabra día");
+        assert!(a[0].contains("septiembre"),    "alerta debe citar el mes");
+        assert!(a[0].contains("30"),            "alerta debe indicar máximo 30 días");
+    }
+
+    #[test]
+    fn treinta_septiembre_es_valida() {
+        // 30 ≤ 30: no debe alertar
+        let t = "desde el treinta de septiembre de 2025";
+        assert!(detectar_fechas_palabras_imposibles(t).is_empty());
+    }
+
+    #[test]
+    fn veintinueve_de_febrero_bisiesto_ok() {
+        // 2024 es bisiesto: 29 feb válido
+        let t = "el veintinueve de febrero de 2024";
+        assert!(detectar_fechas_palabras_imposibles(t).is_empty());
+    }
+
+    #[test]
+    fn veintinueve_de_febrero_no_bisiesto_alerta() {
+        // 2025 no es bisiesto: 29 feb inválido
+        let t = "el veintinueve de febrero de 2025";
+        let a = detectar_fechas_palabras_imposibles(t);
+        assert!(!a.is_empty(), "29 feb 2025 debe alertar");
+    }
+
+    #[test]
+    fn digito_no_lo_detecta_funcion_palabras() {
+        // "31 de septiembre" en dígitos: esta función lo omite (lo gestiona detectar_fechas_imposibles)
+        let t = "desde el 31 de septiembre de 2025";
+        assert!(detectar_fechas_palabras_imposibles(t).is_empty());
+    }
+
+    #[test]
+    fn treinta_y_uno_abril_detectado() {
+        let t = "plazo hasta el treinta y uno de abril de 2025";
+        let a = detectar_fechas_palabras_imposibles(t);
+        assert!(!a.is_empty(), "treinta y uno de abril debe alertar");
+    }
+
+    // ── es_bisiesto ──────────────────────────────────────────────────────
+
+    #[test]
+    fn bisiesto_2024() { assert!(es_bisiesto(2024)); }
+    #[test]
+    fn no_bisiesto_2025() { assert!(!es_bisiesto(2025)); }
+    #[test]
+    fn bisiesto_2000() { assert!(es_bisiesto(2000)); }   // divisible por 400
+    #[test]
+    fn no_bisiesto_1900() { assert!(!es_bisiesto(1900)); } // siglo no ÷400
+
+    // ── preparar_mensaje ─────────────────────────────────────────────────
+
+    #[test]
+    fn preparar_mensaje_alerta_sin_prefijo_para_palabras() {
+        let msg = "Formaliza este contrato desde el treinta y uno de septiembre de 2025. Salario 1.800 €.";
+        let resultado = preparar_mensaje(msg);
+        // Debe contener la cabecera de parada inmediata
+        assert!(resultado.contains("PARADA INMEDIATA"), "debe incluir PARADA INMEDIATA");
+        // Debe citar la fecha detectada
+        assert!(resultado.contains("treinta y uno de septiembre"), "debe citar la fecha");
+        // NO debe incluir el PREFIJO_CONTROL (para evitar que el modelo confunda ejemplos con documento)
+        assert!(!resultado.contains("COMPROBACIÓN A"), "no debe incluir PREFIJO_CONTROL");
+        assert!(!resultado.contains("SOLICITUD DEL USUARIO"), "no debe incluir PREFIJO_CONTROL");
+    }
+
+    #[test]
+    fn preparar_mensaje_sin_alerta_incluye_prefijo() {
+        let msg = "Redacta un contrato entre Ana y Luis, alquiler 600 €/mes, inicio 1 enero 2025.";
+        let resultado = preparar_mensaje(msg);
+        assert!(resultado.contains("SOLICITUD DEL USUARIO"), "sin alerta debe incluir PREFIJO_CONTROL");
+        assert!(!resultado.contains("PARADA INMEDIATA"), "sin alerta no debe incluir PARADA INMEDIATA");
+    }
+}
+
 // Qwen3 puede incluir <think>…</think> aunque /no_think esté activo.
 // Elimina todos los bloques (puede haber más de uno).
 fn limpiar_thinking(texto: &str) -> String {
