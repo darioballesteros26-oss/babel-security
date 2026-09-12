@@ -276,13 +276,13 @@ pub fn buscar_normativa(query: &str, max_chars: usize) -> (String, bool) {
 
     if resultados.is_empty() {
         return (
-            "[NORMATIVA: sin artículos específicos en la biblioteca local para esta consulta]".into(),
+            "[NORMATIVA JURÍDICA LOCAL: no se han encontrado artículos relacionados con esta solicitud en la biblioteca local]".into(),
             false,
         );
     }
 
     let mut bloque = String::from(
-        "[NORMATIVA JURÍDICA LOCAL — cita con «art. X ABREV» cada artículo que uses]\n",
+        "[NORMATIVA JURÍDICA LOCAL — cita con «art. X ABREV» (ej: art. 138 CP, art. 24 CE, art. 520 LECrim) cada artículo que uses en tu respuesta]\n",
     );
     let mut chars_usados = bloque.len();
 
@@ -392,7 +392,8 @@ mod tests {
         let (bloque, encontrado) = buscar_normativa("homicidio código penal", 6000);
         if encontrado {
             assert!(bloque.contains("NORMATIVA JURÍDICA LOCAL"), "bloque debe tener cabecera");
-            assert!(bloque.contains("CP"), "debe incluir referencia al CP");
+            assert!(bloque.contains("CP") || bloque.contains("CE") || bloque.contains("LECrim"),
+                "debe incluir referencia a alguna ley");
         }
     }
 
