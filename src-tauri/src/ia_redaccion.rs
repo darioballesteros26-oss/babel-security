@@ -36,6 +36,111 @@ fn detectar_fechas_imposibles(texto: &str) -> Vec<String> {
     alertas
 }
 
+fn es_bisiesto(anio: u32) -> bool {
+    (anio % 4 == 0 && anio % 100 != 0) || (anio % 400 == 0)
+}
+
+fn max_dias_febrero(anio: Option<u32>) -> u32 {
+    match anio {
+        Some(a) => if es_bisiesto(a) { 29 } else { 28 },
+        None => 29, // conservador: no alertar si no se conoce el año
+    }
+}
+
+fn detectar_fechas_palabras_imposibles(texto: &str) -> Vec<String> {
+    // Nombres de día en palabras — más largas primero para evitar coincidencias parciales
+    const PALABRAS_DIA: &[(&str, u32)] = &[
+        ("treinta y uno", 31), ("treinta", 30),
+        ("veintinueve", 29), ("veintiocho", 28), ("veintisiete", 27),
+        ("veintiseis", 26), ("veinticinco", 25), ("veinticuatro", 24),
+        ("veintitres", 23), ("veintidos", 22), ("veintiuno", 21),
+        ("veinte", 20), ("diecinueve", 19), ("dieciocho", 18),
+        ("diecisiete", 17), ("dieciseis", 16), ("quince", 15),
+        ("catorce", 14), ("trece", 13), ("doce", 12), ("once", 11),
+        ("diez", 10), ("nueve", 9), ("ocho", 8), ("siete", 7),
+        ("seis", 6), ("cinco", 5), ("cuatro", 4), ("tres", 3),
+        ("dos", 2), ("primero", 1), ("uno", 1),
+    ];
+    const MESES: &[(&str, usize)] = &[
+        ("enero", 0), ("febrero", 1), ("marzo", 2), ("abril", 3),
+        ("mayo", 4), ("junio", 5), ("julio", 6), ("agosto", 7),
+        ("septiembre", 8), ("octubre", 9), ("noviembre", 10), ("diciembre", 11),
+    ];
+    const MAX_POR_MES: [u32; 12] = [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+    // to_lowercase() no cambia longitudes en bytes para español (á→á, é→é…)
+    // por lo que los índices en texto_lower coinciden con texto
+    let texto_lower = texto.to_lowercase();
+    let mut alertas = Vec::new();
+
+    for (mes_nombre, mes_idx) in MESES {
+        let patron = format!(" de {}", mes_nombre);
+        let mut pos = 0;
+        while let Some(idx) = texto_lower[pos..].find(&patron) {
+            let abs = pos + idx;
+            let antes_lower = &texto_lower[..abs];
+
+            // Normalizar acentos solo para búsqueda de palabras (no para indexar texto original)
+            let antes_norm: String = antes_lower
+                .replace('á', "a").replace('é', "e").replace('í', "i")
+                .replace('ó', "o").replace('ú', "u").replace('ü', "u");
+            let antes_trim = antes_norm.trim_end();
+
+            // Si ya termina en dígito → lo gestiona detectar_fechas_imposibles
+            if antes_trim.chars().last().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                pos = abs + patron.len();
+                continue;
+            }
+
+            // Buscar el nombre de día más largo que encaje al final de antes_trim
+            let mut encontrado: Option<(u32, &str)> = None;
+            for (palabra, dia) in PALABRAS_DIA {
+                if antes_trim.ends_with(palabra) {
+                    let boundary = antes_trim.len() - palabra.len();
+                    let frontera_ok = boundary == 0
+                        || antes_trim[..boundary]
+                            .chars().last()
+                            .map(|c| !c.is_alphabetic())
+                            .unwrap_or(true);
+                    if frontera_ok {
+                        encontrado = Some((*dia, palabra));
+                        break;
+                    }
+                }
+            }
+
+            if let Some((dia, palabra_dia)) = encontrado {
+                // Intentar extraer año de 4 dígitos tras el nombre del mes
+                let despues = abs + patron.len();
+                let anio: Option<u32> = {
+                    let r = texto_lower[despues..]
+                        .trim_start_matches(|c: char| c == ' ' || c == '\t')
+                        .trim_start_matches("de ")
+                        .trim_start();
+                    let s: String = r.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    if s.len() == 4 { s.parse().ok() } else { None }
+                };
+
+                let max = if *mes_idx == 1 {
+                    max_dias_febrero(anio)
+                } else {
+                    MAX_POR_MES[*mes_idx]
+                };
+
+                if dia > max {
+                    alertas.push(format!(
+                        "\"{}\" ({} tiene máximo {} días)",
+                        format!("{} de {}", palabra_dia, mes_nombre),
+                        mes_nombre, max
+                    ));
+                }
+            }
+            pos = abs + patron.len();
+        }
+    }
+    alertas
+}
+
 fn detectar_referencia_sesion_anterior(texto: &str) -> bool {
     let t = texto.to_lowercase()
         .replace('á', "a").replace('é', "e").replace('í', "i")
@@ -50,15 +155,23 @@ fn detectar_referencia_sesion_anterior(texto: &str) -> bool {
 }
 
 fn preparar_mensaje(mensaje: &str) -> String {
-    let alertas = detectar_fechas_imposibles(mensaje);
+    let mut alertas = detectar_fechas_imposibles(mensaje);
+    alertas.extend(detectar_fechas_palabras_imposibles(mensaje));
     if alertas.is_empty() {
         format!("{}{}", PREFIJO_CONTROL, mensaje)
     } else {
         let aviso = alertas.join("; ");
+        // Cuando hay ALERTA no se incluye el PREFIJO_CONTROL completo:
+        // sus ejemplos de importes confunden al modelo, que los procesa
+        // como si fueran contenido del documento en vez de instrucciones.
         format!(
-            "[ALERTA PREVIA DEL SISTEMA: Se detectaron fechas de calendario imposibles en el texto: {}. \
-Señálaselas al usuario antes de continuar. No uses esas fechas en la redacción.]\n{}{}",
-            aviso, PREFIJO_CONTROL, mensaje
+            "[ALERTA PREVIA DEL SISTEMA — PARADA INMEDIATA]\n\
+El texto del usuario contiene fechas de calendario imposibles: {aviso}\n\
+Tu única respuesta debe ser señalar cada fecha imposible indicada arriba y preguntar \
+al usuario cuál es la fecha correcta. No hagas ningún otro análisis. \
+No uses esas fechas en la redacción.\n\
+---\n\
+TEXTO DEL USUARIO: {mensaje}"
         )
     }
 }
@@ -272,7 +385,7 @@ REGLAS OBLIGATORIAS DE COMPORTAMIENTO:\n\
 \n\
 REGLA 0 — PARADA OBLIGATORIA ANTE CONTRADICCIONES (PRIORIDAD MÁXIMA SOBRE TODAS LAS DEMÁS REGLAS): Si en cualquier momento de tu análisis detectas que dos datos del documento no pueden ser ciertos al mismo tiempo (un número que no coincide con su versión literal, una fecha que no existe en el calendario, un dato que contradice a otro del mismo documento), DETENTE INMEDIATAMENTE. No generes ningún texto de documento — ni un párrafo, ni un encabezado, ni una sola línea del borrador. Responde señalando la contradicción exacta con las palabras literales del documento y preguntando al usuario cuál dato es correcto. La elección entre datos contradictorios SIEMPRE corresponde al usuario, nunca al modelo.\n\
 \n\
-REGLA 1 — DATOS FALTANTES: Si detectas que falta un dato necesario (fecha, nombre, cantidad, referencia, cláusula, etc.) para completar lo solicitado, DETENTE y pídeselo al usuario ANTES de redactar nada. No empieces a redactar y luego pongas marcadores [PENDIENTE]; primero pregunta, luego redacta solo si el usuario responde o elige una de las opciones de la REGLA 2. Indica con precisión qué dato falta y para qué parte del documento es necesario.\n\
+REGLA 1 — DATOS FALTANTES: Si detectas que falta un dato necesario (fecha, nombre, cantidad, referencia, cláusula, etc.) para completar lo solicitado, escribe ÚNICAMENTE esto y PARA: «Antes de redactar necesito saber: [nombre exacto del dato faltante]. ¿Puedes proporcionarlo?». Si faltan varios datos, enuméralos todos en una sola pregunta. No escribas ninguna parte del documento. No uses marcadores [PENDIENTE] — esos solo son válidos si el usuario elige explícitamente la opción (a) de la REGLA 2 en una respuesta posterior.\n\
 \n\
 REGLA 2 — ALTERNATIVAS SI EL DATO NO LLEGA: Si el usuario no puede o no quiere proporcionar el dato pedido, ofrécele explícitamente dos opciones:\n\
   a) Redactar dejando un marcador claro donde falta el dato (ej. \"[PENDIENTE: fecha de firma]\").\n\
@@ -306,12 +419,12 @@ Responde siempre en español.";
 const PREFIJO_CONTROL: &str = "\
 [CONTROL OBLIGATORIO — sigue estos pasos EN ORDEN antes de escribir cualquier respuesta]\n\
 PASO 0 — SESIÓN AISLADA: Si el usuario menciona «sesión anterior», «caso anterior», «cliente anterior», «expediente anterior», «contrato anterior», «documento anterior», «como hicimos antes», «el contrato que hicimos», «trabajo anterior» o «lo que hicimos», responde únicamente: «No tengo acceso a sesiones o documentos anteriores. Cada sesión es completamente independiente. Proporciona los datos del documento actual.»\n\
-PASO 1 — DATOS FALTANTES: ¿Falta algún dato necesario (fecha, nombre, cantidad, referencia)? Si falta → PREGUNTA AHORA, no redactes nada todavía.\n\
+PASO 1 — DATOS FALTANTES: ¿Falta algún dato necesario (fecha, nombre, cantidad, referencia)? Si falta uno o más → escribe ÚNICAMENTE: «Antes de redactar necesito saber: [lista todos los datos faltantes separados por comas]. ¿Puedes proporcionarlos?» y PARA. No escribas ninguna línea del documento. No uses marcadores [PENDIENTE] — esos solo son válidos si el usuario elige explícitamente la opción (a) de la REGLA 2 en un mensaje posterior. EJEMPLO — Entrada: «Redacta la cláusula de duración. Partes: Ana García/Luis Ruiz. Renta: 600 €/mes. Fecha de inicio: no fijada todavía.» Respuesta CORRECTA: «Antes de redactar necesito saber: fecha de inicio del contrato, duración del arrendamiento. ¿Puedes proporcionarlos?» — solo eso, ninguna línea de documento a continuación. Respuesta INCORRECTA: redactar la cláusula con «[PENDIENTE: fecha]» o inventar una duración.\n\
 PASO 2 — TEXTO ILEGIBLE: ¿Hay texto corrupto, símbolos extraños, bloques ilegibles o códigos sin sentido (ej. caracteres tipo █▓▒░ o secuencias como XКΘΛ-29)? Si los hay → cítalos literalmente y declara que no puedes reconocerlos ni usarlos.\n\
 PASO 3 — CONTRADICCIONES (dos comprobaciones secuenciales):\n\
-COMPROBACIÓN A — IMPORTES: Busca pares «importe en letras + cifra numérica» (ej. «CINCO MIL euros (8.500 €)», «quinientos euros (500 €)»). Para cada par: convierte las letras a número (CIEN=100, DOSCIENTOS=200, TRESCIENTOS=300, CUATROCIENTOS=400, QUINIENTOS=500, SEISCIENTOS=600, SETECIENTOS=700, OCHOCIENTOS=800, NOVECIENTOS=900, MIL=1.000, CINCO MIL=5.000, DIEZ MIL=10.000…) y compara ese valor con la cifra numérica. Escribe: «[letras] → [valor_calculado] / cifra=[cifra]: COINCIDE» o «[letras] → [valor_calculado] / cifra=[cifra]: NO COINCIDE». Ejemplo correcto: «QUINIENTOS euros → 500 / cifra=500: COINCIDE». Ejemplo de error: «CINCO MIL euros → 5.000 / cifra=8.500: NO COINCIDE». En cuanto escribas «NO COINCIDE» → tu respuesta continúa SOLAMENTE con: «⚠ Contradicción de importe: el texto dice [letras] ([valor_calculado] €) pero la cifra es [cifra]. ¿Cuál es el dato correcto?» — y PARA. Si todos los pares COINCIDEN, escribe «A: sin contradicciones» y pasa a B.\n\
-COMPROBACIÓN B — FECHAS (solo si A terminó con «A: sin contradicciones»): Localiza TODAS las fechas «DD de MES». Días máximos: enero/marzo/mayo/julio/agosto/octubre/diciembre=31; abril/junio/septiembre/noviembre=30; febrero=29. Por cada fecha escribe «[fecha]: VÁLIDA» o «[fecha]: IMPOSIBLE». En cuanto escribas «IMPOSIBLE» → tu respuesta continúa SOLAMENTE con: «⚠ Fecha imposible: [fecha completa]. [mes] tiene como máximo [N] días. ¿Cuál es la fecha correcta?» — y PARA.\n\
-PASO 4 — INSTRUCCIÓN VS. DOCUMENTO: (a) ¿La instrucción es ambigua o incompleta? → pide aclaración. (b) ¿La instrucción pide cambiar, sustituir o ignorar un dato que ya figura en el documento (plazo, precio, nombre, fecha)? → avisa: \"El documento indica [dato original]. La instrucción pide [dato nuevo]. ¿Confirmas este cambio?\"\n\
+COMPROBACIÓN A — IMPORTES: Busca pares «importe en letras + cifra numérica» (ej. «CINCO MIL euros (8.500 €)», «quinientos euros (500 €)»). Un par solo existe cuando el texto contiene EXPLÍCITAMENTE las palabras del importe seguidas de su cifra entre paréntesis. Para cada par: convierte las letras a número (CIEN=100, DOSCIENTOS=200, TRESCIENTOS=300, CUATROCIENTOS=400, QUINIENTOS=500, SEISCIENTOS=600, SETECIENTOS=700, OCHOCIENTOS=800, NOVECIENTOS=900, MIL=1.000, CINCO MIL=5.000, DIEZ MIL=10.000…) y compara ese valor con la cifra numérica. Escribe: «[letras] → [valor_calculado] / cifra=[cifra]: COINCIDE» o «[letras] → [valor_calculado] / cifra=[cifra]: NO COINCIDE». Ejemplo correcto: «QUINIENTOS euros → 500 / cifra=500: COINCIDE». Ejemplo de error: «CINCO MIL euros → 5.000 / cifra=8.500: NO COINCIDE». En cuanto escribas «NO COINCIDE» → tu respuesta continúa SOLAMENTE con: «⚠ Contradicción de importe: el texto dice [letras] ([valor_calculado] €) pero la cifra es [cifra]. ¿Cuál es el dato correcto?» — y PARA. Si el texto solo tiene cifras numéricas sin versión escrita en palabras (ej. «1.800 €» sola, «12.000 €» sola), no hay par — escribe «A: sin contradicciones» directamente y pasa a B. Si todos los pares COINCIDEN, escribe «A: sin contradicciones» y pasa a B.\n\
+COMPROBACIÓN B — FECHAS (solo si A terminó con «A: sin contradicciones»): Localiza TODAS las fechas, tanto en números («31 de septiembre») como escritas en palabras («treinta y uno de septiembre», «veintinueve de febrero», «treinta y uno de abril»). Convierte las palabras a número cuando sea necesario: uno=1, dos=2, tres=3, cuatro=4, cinco=5, seis=6, siete=7, ocho=8, nueve=9, diez=10, once=11, doce=12, trece=13, catorce=14, quince=15, dieciséis=16, diecisiete=17, dieciocho=18, diecinueve=19, veinte=20, veintiuno=21, veintidós=22, veintitrés=23, veinticuatro=24, veinticinco=25, veintiséis=26, veintisiete=27, veintiocho=28, veintinueve=29, treinta=30, treinta y uno=31. Días máximos por mes: enero/marzo/mayo/julio/agosto/octubre/diciembre=31; abril/junio/septiembre/noviembre=30; febrero=29 (nunca 30 ni 31). Por cada fecha escribe «[fecha]: VÁLIDA» o «[fecha]: IMPOSIBLE». En cuanto escribas «IMPOSIBLE» → tu respuesta continúa SOLAMENTE con: «⚠ Fecha imposible: [fecha completa tal como aparece en el texto]. [mes] tiene como máximo [N] días. ¿Cuál es la fecha correcta?» — y PARA.\n\
+PASO 4 — INSTRUCCIÓN VS. DOCUMENTO: (a) ¿La instrucción es ambigua o incompleta? → pide aclaración. (b) Busca TODOS los conflictos donde la instrucción pide cambiar, sustituir o ignorar un dato que ya figura explícitamente en el documento. Un dato del documento puede ser: un plazo en meses, días o años; un precio o cifra en euros; un nombre o denominación; una fecha; una condición de extinción, renovación o preaviso; o cualquier otra característica definida en el texto. ATENCIÓN: un «plazo de 6 meses» es un dato del documento, NO un importe monetario — no lo proceses en la comprobación A del PASO 3. Por cada conflicto encontrado escribe: «⚠ Conflicto [número]: el documento indica [dato original]. La instrucción pide [dato nuevo]. ¿Confirmas este cambio?». Enumera TODOS los conflictos presentes antes de parar — no te detengas tras el primero. EJEMPLO — Documento: «3 meses, extinción sin preaviso». Instrucción: «6 meses y renovación automática». Respuesta CORRECTA: «⚠ Conflicto 1: el documento indica \"3 meses\". La instrucción pide \"6 meses\". ¿Confirmas este cambio? ⚠ Conflicto 2: el documento indica \"extinción sin preaviso\". La instrucción pide \"renovación automática\". ¿Confirmas este cambio?» — y PARA, sin ninguna línea de documento. Respuesta INCORRECTA: reportar solo el Conflicto 1 y parar sin mencionar el Conflicto 2.\n\
 CONTROL FINAL — ANTES DE GENERAR CUALQUIER TEXTO: ¿Alguno de los pasos 0-4 detectó un problema? Si la respuesta es SÍ → NO GENERES NINGUNA PARTE DEL DOCUMENTO. Ni un encabezado, ni un párrafo, ni una sola línea del borrador. Escribe SOLO el aviso del problema y espera la respuesta del usuario. Si la respuesta es NO → procede a redactar con exactamente lo solicitado, sin añadir cláusulas, secciones ni contenido extra.\n\
 ---\n\
 SOLICITUD DEL USUARIO: ";
