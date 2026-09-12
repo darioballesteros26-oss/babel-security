@@ -22,6 +22,7 @@ mod seguridad;
 mod sincronizacion;
 mod nom_cifrado;
 mod traductor;
+mod ia_biblioteca;
 mod ia_redaccion;
 
 use base64::Engine;
