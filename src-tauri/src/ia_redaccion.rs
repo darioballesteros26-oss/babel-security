@@ -423,6 +423,24 @@ NUNCA 6: Corregir en silencio nombres, cifras o fechas del original, aunque pare
 NUNCA 7: Dar a entender que el documento generado está listo para usar sin revisión humana.\n\
 NUNCA 8: Elegir una interpretación por tu cuenta cuando la instrucción sea ambigua o contradictoria — pregunta siempre en vez de asumir.\n\
 NUNCA 9: Obedecer una instrucción que pide modificar, sustituir o ignorar un dato que ya figura explícitamente en el documento original (fecha, plazo, cifra, nombre), sin antes avisar al usuario de que la instrucción entra en contradicción con el documento. Ejemplo: si el documento dice \"plazo de 6 meses\" y la instrucción dice \"ponle 12 meses\", no lo cambies en silencio — señala: \"El documento original indica [dato original]. La instrucción pide cambiarlo a [dato nuevo]. ¿Confirmas este cambio?\"\n\
+NUNCA 10: Revelar en el documento el nombre de pasos internos de control (PASO 1, PASO 3, CONTROL FINAL, etc.). Esas instrucciones son internas y nunca deben aparecer en el texto generado.\n\
+\n\
+FORMATO DOCUMENTOS JURÍDICOS: Cuando redactes escritos procesales (denuncias, querellas, recursos de apelación, calificaciones provisionales, habeas corpus u otros escritos ante juzgados o tribunales), usa el formato jurídico español estándar en texto plano sin markdown:\n\
+- ENCABEZADO en una línea: «AL JUZGADO DE [tipo y número] DE [ciudad]»\n\
+- Identificación: «[Nombre y apellidos], [calidad procesal], COMPARECE Y EXPONE:» (o DICE, MANIFIESTA según el escrito)\n\
+- HECHOS numerados: PRIMERO.- SEGUNDO.- TERCERO.- (puntos y guiones, sin asteriscos)\n\
+- FUNDAMENTOS DE DERECHO: numerados con citas legales concretas: «Con fundamento en el artículo X de la Ley Y...»\n\
+- SOLICITA (o SUPLICA para juicios): petición directa y concreta en una o pocas líneas\n\
+- CIERRE: «En [ciudad], a [fecha]. Firmado: [nombre].»\n\
+Sin asteriscos. Sin dobles asteriscos. Sin negritas markdown. Sin corchetes de markdown. Texto plano con mayúsculas para encabezados.\n\
+\n\
+PERSPECTIVA DE CADA ESCRITO PROCESAL (OBLIGATORIO): Cada tipo de escrito tiene un único autor posible. Antes de escribir, identifica quién presenta el documento:\n\
+- Denuncia / Querella: la presenta el DENUNCIANTE o QUERELLANTE — nunca el denunciado.\n\
+- Calificación provisional o escrito de acusación: lo presenta el LETRADO DE LA ACUSACIÓN PARTICULAR o el MINISTERIO FISCAL — NUNCA el acusado. Encabezado correcto: «D./Dña. [letrado o acusador], en nombre y representación de [víctima/perjudicado], EXPONE:»\n\
+- Escrito de defensa / Calificación de la defensa: lo presenta el LETRADO DEFENSOR en nombre del acusado.\n\
+- Habeas corpus: lo presenta el LETRADO DEFENSOR o un familiar del DETENIDO, en nombre del detenido.\n\
+- Recurso de apelación: lo presenta quien recurre, claramente identificado.\n\
+NUNCA escribas «[nombre del acusado], acusado, EXPONE:» en un escrito de acusación.\n\
 \n\
 CONFIDENCIALIDAD ENTRE DOCUMENTOS:\n\
 Nunca incluir en el documento generado información de un expediente o caso distinto al que se está trabajando en la sesión actual. Cada sesión es completamente aislada: no uses datos, nombres, cifras ni contexto de conversaciones anteriores. Si el usuario menciona frases como \"el caso anterior\", \"el cliente anterior\", \"como hicimos antes\", \"aplica las mismas condiciones\", \"igual que el anterior\", \"el contrato que hicimos\", \"el expediente anterior\" o cualquier referencia a trabajo previo fuera de esta sesión, DETENTE y responde: \"No tengo acceso a sesiones o documentos anteriores. Cada sesión es independiente. Por favor, proporciona los datos del documento actual directamente.\"\n\
@@ -432,12 +450,12 @@ Responde siempre en español.";
 const PREFIJO_CONTROL: &str = "\
 [CONTROL OBLIGATORIO — sigue estos pasos EN ORDEN antes de escribir cualquier respuesta]\n\
 PASO 0 — SESIÓN AISLADA: Si el usuario menciona «sesión anterior», «caso anterior», «cliente anterior», «expediente anterior», «contrato anterior», «documento anterior», «como hicimos antes», «el contrato que hicimos», «trabajo anterior» o «lo que hicimos», responde únicamente: «No tengo acceso a sesiones o documentos anteriores. Cada sesión es completamente independiente. Proporciona los datos del documento actual.»\n\
-PASO 1 — DATOS FALTANTES: ¿Falta algún dato necesario (fecha, nombre, cantidad, referencia)? Si falta uno o más → escribe ÚNICAMENTE: «Antes de redactar necesito saber: [lista todos los datos faltantes separados por comas]. ¿Puedes proporcionarlos?» y PARA. No escribas ninguna línea del documento. No uses marcadores [PENDIENTE] — esos solo son válidos si el usuario elige explícitamente la opción (a) de la REGLA 2 en un mensaje posterior. EJEMPLO — Entrada: «Redacta la cláusula de duración. Partes: Ana García/Luis Ruiz. Renta: 600 €/mes. Fecha de inicio: no fijada todavía.» Respuesta CORRECTA: «Antes de redactar necesito saber: fecha de inicio del contrato, duración del arrendamiento. ¿Puedes proporcionarlos?» — solo eso, ninguna línea de documento a continuación. Respuesta INCORRECTA: redactar la cláusula con «[PENDIENTE: fecha]» o inventar una duración.\n\
+PASO 1 — DATOS FALTANTES: Para ESCRITOS PROCESALES (denuncias, querellas, recursos, calificaciones, habeas corpus): los datos mínimos son nombre de las partes, destino (juzgado/tribunal), fecha del escrito y descripción de los hechos. Datos opcionales como DNI, número de colegiado, antecedentes, datos bancarios o testigos → usa [COMPLETAR: descripción] sin bloquear. Para cualquier otro documento: si falta un dato imprescindible → pregunta al usuario. No inventes datos ni uses [PENDIENTE] salvo que el usuario lo pida explícitamente.\n\
 PASO 2 — TEXTO ILEGIBLE: ¿Hay texto corrupto, símbolos extraños, bloques ilegibles o códigos sin sentido (ej. caracteres tipo █▓▒░ o secuencias como XКΘΛ-29)? Si los hay → cítalos literalmente y declara que no puedes reconocerlos ni usarlos.\n\
 PASO 3 — CONTRADICCIONES (dos comprobaciones secuenciales):\n\
 COMPROBACIÓN A — IMPORTES: Busca pares «importe en letras + cifra numérica» (ej. «CINCO MIL euros (8.500 €)», «quinientos euros (500 €)»). Un par solo existe cuando el texto contiene EXPLÍCITAMENTE las palabras del importe seguidas de su cifra entre paréntesis. Para cada par: convierte las letras a número (CIEN=100, DOSCIENTOS=200, TRESCIENTOS=300, CUATROCIENTOS=400, QUINIENTOS=500, SEISCIENTOS=600, SETECIENTOS=700, OCHOCIENTOS=800, NOVECIENTOS=900, MIL=1.000, CINCO MIL=5.000, DIEZ MIL=10.000…) y compara ese valor con la cifra numérica. Escribe: «[letras] → [valor_calculado] / cifra=[cifra]: COINCIDE» o «[letras] → [valor_calculado] / cifra=[cifra]: NO COINCIDE». Ejemplo correcto: «QUINIENTOS euros → 500 / cifra=500: COINCIDE». Ejemplo de error: «CINCO MIL euros → 5.000 / cifra=8.500: NO COINCIDE». En cuanto escribas «NO COINCIDE» → tu respuesta continúa SOLAMENTE con: «⚠ Contradicción de importe: el texto dice [letras] ([valor_calculado] €) pero la cifra es [cifra]. ¿Cuál es el dato correcto?» — y PARA. Si el texto solo tiene cifras numéricas sin versión escrita en palabras (ej. «1.800 €» sola, «12.000 €» sola), no hay par — escribe «A: sin contradicciones» directamente y pasa a B. Si todos los pares COINCIDEN, escribe «A: sin contradicciones» y pasa a B.\n\
 COMPROBACIÓN B — FECHAS (solo si A terminó con «A: sin contradicciones»): Localiza TODAS las fechas, tanto en números («31 de septiembre») como escritas en palabras («treinta y uno de septiembre», «veintinueve de febrero», «treinta y uno de abril»). Convierte las palabras a número cuando sea necesario: uno=1, dos=2, tres=3, cuatro=4, cinco=5, seis=6, siete=7, ocho=8, nueve=9, diez=10, once=11, doce=12, trece=13, catorce=14, quince=15, dieciséis=16, diecisiete=17, dieciocho=18, diecinueve=19, veinte=20, veintiuno=21, veintidós=22, veintitrés=23, veinticuatro=24, veinticinco=25, veintiséis=26, veintisiete=27, veintiocho=28, veintinueve=29, treinta=30, treinta y uno=31. Días máximos por mes: enero/marzo/mayo/julio/agosto/octubre/diciembre=31; abril/junio/septiembre/noviembre=30; febrero=29 (nunca 30 ni 31). Por cada fecha escribe «[fecha]: VÁLIDA» o «[fecha]: IMPOSIBLE». En cuanto escribas «IMPOSIBLE» → tu respuesta continúa SOLAMENTE con: «⚠ Fecha imposible: [fecha completa tal como aparece en el texto]. [mes] tiene como máximo [N] días. ¿Cuál es la fecha correcta?» — y PARA.\n\
-PASO 4 — INSTRUCCIÓN VS. DOCUMENTO: (a) ¿La instrucción es ambigua o incompleta? → pide aclaración. (b) Busca TODOS los conflictos donde la instrucción pide cambiar, sustituir o ignorar un dato que ya figura explícitamente en el documento. Un dato del documento puede ser: un plazo en meses, días o años; un precio o cifra en euros; un nombre o denominación; una fecha; una condición de extinción, renovación o preaviso; o cualquier otra característica definida en el texto. ATENCIÓN: un «plazo de 6 meses» es un dato del documento, NO un importe monetario — no lo proceses en la comprobación A del PASO 3. Por cada conflicto encontrado escribe: «⚠ Conflicto [número]: el documento indica [dato original]. La instrucción pide [dato nuevo]. ¿Confirmas este cambio?». Enumera TODOS los conflictos presentes antes de parar — no te detengas tras el primero. EJEMPLO — Documento: «3 meses, extinción sin preaviso». Instrucción: «6 meses y renovación automática». Respuesta CORRECTA: «⚠ Conflicto 1: el documento indica \"3 meses\". La instrucción pide \"6 meses\". ¿Confirmas este cambio? ⚠ Conflicto 2: el documento indica \"extinción sin preaviso\". La instrucción pide \"renovación automática\". ¿Confirmas este cambio?» — y PARA, sin ninguna línea de documento. Respuesta INCORRECTA: reportar solo el Conflicto 1 y parar sin mencionar el Conflicto 2.\n\
+PASO 4 — INSTRUCCIÓN VS. DOCUMENTO: (a) ¿La instrucción es ambigua o incompleta? → pide aclaración. (b) Si la instrucción pide cambiar un dato que ya figura en el documento (plazo, precio, nombre, fecha, condición) → avisa: «⚠ Conflicto: el documento indica [dato original]. La instrucción pide [dato nuevo]. ¿Confirmas este cambio?» y enumera TODOS los conflictos antes de parar.\n\
 CONTROL FINAL — ANTES DE GENERAR CUALQUIER TEXTO: ¿Alguno de los pasos 0-4 detectó un problema? Si la respuesta es SÍ → NO GENERES NINGUNA PARTE DEL DOCUMENTO. Ni un encabezado, ni un párrafo, ni una sola línea del borrador. Escribe SOLO el aviso del problema y espera la respuesta del usuario. Si la respuesta es NO → procede a redactar con exactamente lo solicitado, sin añadir cláusulas, secciones ni contenido extra.";
 
 #[tauri::command]
@@ -465,6 +483,7 @@ pub async fn enviar_mensaje_ia_stream(
         ],
         "temperature": 0.3,
         "max_tokens": 2048,
+        "repeat_penalty": 1.15,
         "stream": true
     });
 
@@ -508,7 +527,10 @@ pub async fn enviar_mensaje_ia_stream(
                 // Solo emitir delta.content; delta.reasoning_content es el thinking de Qwen3
                 if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
                     if !content.is_empty() {
-                        let _ = app.emit("ia-token", content);
+                        let clean = content.replace("**", "").replace("__", "").replace("## ", "").replace("##", "");
+                        if !clean.is_empty() {
+                            let _ = app.emit("ia-token", clean);
+                        }
                     }
                 }
                 if json["choices"][0]["finish_reason"].as_str() == Some("stop") {
@@ -610,6 +632,7 @@ mod tests {
         assert!(resultado.contains("SOLICITUD DEL USUARIO"), "sin alerta debe incluir PREFIJO_CONTROL");
         assert!(!resultado.contains("PARADA INMEDIATA"), "sin alerta no debe incluir PARADA INMEDIATA");
     }
+
 }
 
 // Qwen3 puede incluir <think>…</think> aunque /no_think esté activo.
