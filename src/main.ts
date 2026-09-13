@@ -3723,6 +3723,7 @@ async function _ejecutarGuardarRedaccion(nombre: string): Promise<void> {
     mostrarToast("Documento guardado y cifrado", false);
     invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreFinal }).catch(() => {});
     cargarArchivosGuardados().catch(() => {});
+    invoke("parar_ia_redaccion").catch(() => {}); // libera KV cache y pesos del modelo tras guardar
   } catch (err) {
     mostrarToast("Error al guardar: " + String(err), true);
   } finally {

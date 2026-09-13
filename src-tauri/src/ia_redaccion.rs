@@ -274,9 +274,11 @@ pub async fn iniciar_ia_redaccion(
             "--host",         HOST,
             "--port",         &PUERTO.to_string(),
             "--ctx-size",     "8192",
-            "--n-gpu-layers", "99",   // Metal GPU en macOS ARM
+            "--n-gpu-layers", "99",
             "--threads",      &hilos,
-            "--parallel",     "1",   // Un slot (un usuario a la vez)
+            "--parallel",     "1",
+            "--cache-type-k", "q4_0", // KV cache quantization: −857 MB wired vs f16
+            "--cache-type-v", "q4_0",
         ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
