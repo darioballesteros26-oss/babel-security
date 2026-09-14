@@ -1425,6 +1425,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (bip39MsgEl) bip39MsgEl.textContent = "";
     if (intentosEl) intentosEl.textContent = "";
     if (bip39Input) bip39Input.value = "";
+    // Limpiar estado IA: el proceso ya fue matado en el backend, pero hay que
+    // sincronizar el estado Tauri a "inactivo" para que el frontend lo refleje.
+    invoke("parar_ia_redaccion").catch(() => {});
   }).catch(() => {});
 
   listen("rat-desbloqueado", () => {

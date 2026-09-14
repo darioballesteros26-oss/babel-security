@@ -339,6 +339,9 @@ fn activar_bloqueo_rat(proceso: &str, app: &tauri::AppHandle) {
     if let Ok(mut g) = RAT_PROCESO.lock() {
         *g = Some(proceso.to_string());
     }
+    // Detener llama-server si está activo: evita que un atacante con acceso remoto
+    // pueda seguir interactuando con el modelo aunque la UI esté bloqueada.
+    crate::ia_redaccion::matar_llama_si_activo();
     let _ = app.emit("rat-detectado", serde_json::json!({ "proceso": proceso }));
     // Registrar en historial
     let subclave = crate::sincronizacion::obtener_subclave_sesion_copy()

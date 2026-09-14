@@ -1,10 +1,35 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tauri::Emitter;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 use crate::ia_biblioteca;
+
+// PID del proceso llama-server activo. 0 = no corriendo.
+// Permite que rat_detector lo mate de forma síncrona sin acceder al estado Tauri.
+static LLAMA_PID: AtomicU32 = AtomicU32::new(0);
+
+/// Mata llama-server inmediatamente si está corriendo. Llamado por rat_detector
+/// al detectar acceso remoto, sin esperar a que el hilo async libere el Mutex del proceso.
+pub fn matar_llama_si_activo() {
+    let pid = LLAMA_PID.swap(0, Ordering::AcqRel);
+    if pid == 0 {
+        return;
+    }
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output();
+    }
+    log::warn!("[IA] llama-server (PID {}) detenido por detección RAT.", pid);
+}
 
 fn detectar_fechas_imposibles(texto: &str) -> Vec<String> {
     let meses = [
@@ -232,6 +257,8 @@ async fn ping_servidor() -> bool {
 pub async fn iniciar_ia_redaccion(
     state: tauri::State<'_, IaRedaccionState>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+
     // Ya activo → no relanzar
     if *state.estado.lock().await == "activo" {
         return Ok("activo".into());
@@ -250,6 +277,7 @@ pub async fn iniciar_ia_redaccion(
     // Matar proceso anterior si existía
     if let Some(mut p) = state.proceso.lock().await.take() {
         let _ = p.kill().await;
+        LLAMA_PID.store(0, Ordering::Release);
         sleep(Duration::from_millis(500)).await;
     }
 
@@ -293,6 +321,11 @@ pub async fn iniciar_ia_redaccion(
             msg
         })?;
 
+    // Registrar PID antes de mover el child al Mutex para que rat_detector pueda
+    // matarlo de forma síncrona sin necesitar acceso al estado Tauri.
+    if let Some(pid) = child.id() {
+        LLAMA_PID.store(pid, Ordering::Release);
+    }
     *state.proceso.lock().await = Some(child);
 
     // Esperar respuesta — hasta 2 minutos (carga inicial del modelo)
@@ -313,6 +346,7 @@ pub async fn iniciar_ia_redaccion(
     // Timeout — matar proceso y reportar error
     if let Some(mut p) = state.proceso.lock().await.take() {
         let _ = p.kill().await;
+        LLAMA_PID.store(0, Ordering::Release);
     }
     let msg = "El modelo no respondió en 2 minutos. Comprueba que ~/Babel/modelos_ia/Qwen3-4B-Q4_K_M.gguf existe y hay suficiente RAM.".to_string();
     *state.estado.lock().await = format!("error:{msg}");
@@ -324,7 +358,10 @@ pub async fn parar_ia_redaccion(
     state: tauri::State<'_, IaRedaccionState>,
 ) -> Result<(), String> {
     if let Some(mut p) = state.proceso.lock().await.take() {
-        p.kill().await.map_err(|e| e.to_string())?;
+        // Ignorar error: el proceso puede haber sido matado ya por matar_llama_si_activo
+        // (detección RAT) antes de que llegue esta llamada desde el frontend.
+        let _ = p.kill().await;
+        LLAMA_PID.store(0, Ordering::Release);
     }
     *state.estado.lock().await = "inactivo".into();
     Ok(())
@@ -342,6 +379,8 @@ pub async fn enviar_mensaje_ia(
     mensaje: String,
     state: tauri::State<'_, IaRedaccionState>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+
     if *state.estado.lock().await != "activo" {
         return Err("El asistente no está activo.".into());
     }
@@ -466,6 +505,8 @@ pub async fn enviar_mensaje_ia_stream(
     state: tauri::State<'_, IaRedaccionState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+
     if *state.estado.lock().await != "activo" {
         return Err("El asistente no está activo.".into());
     }
