@@ -1435,6 +1435,16 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("modal-confirmar-rat")?.classList.add("hidden");
   }).catch(() => {});
 
+  listen("acceso-masivo-detectado", () => {
+    // Mostrar aviso en la pantalla de bloqueo antes de bloquear
+    const msgEl = document.getElementById("bloqueo-msg");
+    if (msgEl) {
+      msgEl.textContent = "⚠ Sesión bloqueada: se detectaron demasiados archivos abiertos en poco tiempo.";
+      msgEl.classList.remove("hidden");
+    }
+    bloquearPantalla();
+  }).catch(() => {});
+
   listen("recuperacion-desactualizada", () => {
     mostrarToast(
       "Tu frase de recuperación usa un esquema antiguo. Regénerala en Configuración → Frase de recuperación para mayor seguridad.",

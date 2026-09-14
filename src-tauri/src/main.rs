@@ -24,6 +24,7 @@ mod nom_cifrado;
 mod traductor;
 mod ia_biblioteca;
 mod ia_redaccion;
+mod acceso_masivo;
 
 use base64::Engine;
 use chrono;
@@ -811,6 +812,8 @@ fn verificar_login_interno(
         }
     }
 
+    // Resetear contador de acceso masivo: login correcto = sesión legítima.
+    crate::acceso_masivo::reset_tras_login();
     // Monitor RAT: arrancar en segundo plano tras login correcto
     crate::rat_detector::iniciar_monitor_rat(app.clone());
 
@@ -3322,6 +3325,7 @@ async fn exportar_archivo(
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
+    crate::acceso_masivo::registrar_descifrado(&app, &subclave_hex)?;
 
     // Cargar índice cifrado fuera de spawn_blocking (State no es Send).
     let mut nomindex = nom_cifrado::leer(&ruta_nomindex_guardados(), &subclave_hex);
@@ -3380,6 +3384,14 @@ async fn exportar_archivos_a_carpeta(
 
         let mut copiados: u32 = 0;
         for ruta in &rutas {
+            // Cada archivo cuenta individualmente en la ventana de acceso masivo.
+            if crate::acceso_masivo::registrar_descifrado(&app, &subclave_hex).is_err() {
+                return Err(
+                    "Exportación detenida: demasiados archivos en poco tiempo. \
+                     Introduce tus credenciales para continuar."
+                        .into(),
+                );
+            }
             let raw = match abrir_descifrado_vault(ruta, &subclave_hex) {
                 Ok(b) => b,
                 Err(_) => continue,
@@ -3927,7 +3939,11 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<String, String> {
+fn ver_archivo(
+    ruta: String,
+    app: tauri::AppHandle,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<String, String> {
     crate::rat_detector::verificar_no_bloqueado_rat()?;
     if !integridad::integridad_ok() {
         return Err(
@@ -3942,6 +3958,7 @@ fn ver_archivo(ruta: String, sesion: tauri::State<SesionActiva>) -> Result<Strin
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
     }
+    crate::acceso_masivo::registrar_descifrado(&app, &subclave_hex)?;
 
     let bytes = fs::read(&ruta).map_err(|e| format!("Error leyendo archivo: {}", e))?;
     let contenido = seguridad::descifrar_documento(bytes, &subclave_hex)
