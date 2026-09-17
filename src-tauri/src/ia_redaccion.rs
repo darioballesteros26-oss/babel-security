@@ -233,7 +233,7 @@ fn ruta_modelo() -> PathBuf {
         .unwrap_or_default()
         .join("Babel")
         .join("modelos_ia")
-        .join("Qwen3-4B-Q4_K_M.gguf")
+        .join("Qwen3-4B-Q6_K.gguf")
 }
 
 fn base_url() -> String {
@@ -349,7 +349,7 @@ pub async fn iniciar_ia_redaccion(
         let _ = p.kill().await;
         LLAMA_PID.store(0, Ordering::Release);
     }
-    let msg = "El modelo no respondió en 2 minutos. Comprueba que ~/Babel/modelos_ia/Qwen3-4B-Q4_K_M.gguf existe y hay suficiente RAM.".to_string();
+    let msg = "El modelo no respondió en 2 minutos. Comprueba que ~/Babel/modelos_ia/Qwen3-4B-Q6_K.gguf existe y hay suficiente RAM.".to_string();
     *state.estado.lock().await = format!("error:{msg}");
     Err(msg)
 }
