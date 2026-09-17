@@ -169,6 +169,14 @@ def _verificar_token():
     return None
 
 
+# ── Firma digital PAdES-B-B ──────────────────────────────────────────────────
+try:
+    import firma as _firma_mod
+    _firma_mod.registrar_rutas(app, _verificar_token)
+    print("[server] firma PAdES-B-B disponible (/firmar, /cert_titular)", flush=True)
+except ImportError:
+    print("[server] pyhanko no instalado — /firmar no disponible (pip install pyhanko)", flush=True)
+
 # ── PaddleOCR-VL — modelo en memoria (warm) ──────────────────────────────────
 _OCR_LLM = None
 _OCR_LOCK = threading.Lock()

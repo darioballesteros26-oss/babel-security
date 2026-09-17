@@ -3009,6 +3009,65 @@ pub fn traducir_inteligente(
     }
 }
 
+// ── Firma digital — acceso público al token y HTTP ──────────────────────────
+
+/// Token efectivo del servidor — expuesto para que main.rs pueda llamar a /firmar.
+pub fn token_efectivo_pub() -> String {
+    token_efectivo()
+}
+
+/// Envía un PDF + certificado .p12 al servidor local /firmar.
+/// Devuelve los bytes del PDF firmado (PAdES-B-B).
+pub fn firmar_via_servidor(
+    pdf_bytes: &[u8],
+    p12_bytes: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    let pdf_b64  = base64::engine::general_purpose::STANDARD.encode(pdf_bytes);
+    let cert_b64 = base64::engine::general_purpose::STANDARD.encode(p12_bytes);
+    let body = serde_json::json!({ "pdf_b64": pdf_b64, "cert_b64": cert_b64, "password": password });
+    let resp = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .post("http://127.0.0.1:5002/firmar")
+        .set("Content-Type", "application/json")
+        .set("X-Babel-Token", &token_efectivo())
+        .send_json(&body)
+        .map_err(|e| format!("Servidor no disponible: {}", e))?;
+    let json: serde_json::Value = resp.into_json()
+        .map_err(|_| "Respuesta inválida del servidor".to_string())?;
+    if let Some(err) = json["error"].as_str() {
+        return Err(err.to_string());
+    }
+    let b64 = json["pdf_b64"].as_str().ok_or("Sin PDF firmado en la respuesta")?;
+    base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|_| "PDF firmado con base64 inválido".to_string())
+}
+
+/// Lee el nombre del titular del certificado .p12 vía /cert_titular.
+pub fn titular_via_servidor(p12_bytes: &[u8], password: &str) -> Result<String, String> {
+    use base64::Engine;
+    let cert_b64 = base64::engine::general_purpose::STANDARD.encode(p12_bytes);
+    let body = serde_json::json!({ "cert_b64": cert_b64, "password": password });
+    let resp = agente_http()
+        .post("http://127.0.0.1:5002/cert_titular")
+        .set("Content-Type", "application/json")
+        .set("X-Babel-Token", &token_efectivo())
+        .send_json(&body)
+        .map_err(|e| format!("Servidor no disponible: {}", e))?;
+    let json: serde_json::Value = resp.into_json()
+        .map_err(|_| "Respuesta inválida".to_string())?;
+    if let Some(err) = json["error"].as_str() {
+        return Err(err.to_string());
+    }
+    json["nombre"].as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Sin nombre en la respuesta".to_string())
+}
+
 // ── Tests email / OAuth (sin red) ───────────────────────────────────────────
 #[cfg(test)]
 mod tests_email {

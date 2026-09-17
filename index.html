@@ -445,6 +445,9 @@
                 onmouseleave="this.style.background='transparent'">⊟ Seleccionar páginas</button>
             </div>
           </div>
+          <button type="button" id="btn-firmar-g" data-action="abrir-firma-digital"
+            class="hidden btn-secundario-oro"
+            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;">✒ FIRMAR</button>
           <button type="button" data-action="abrir-importar-guardado" id="ui-importar" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;">+ IMPORTAR</button>
           <button type="button" data-action="abrir-crear-archivo" id="ui-crear-archivo" class="btn-secundario-oro"
@@ -1956,6 +1959,61 @@
           color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
           onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
           onmouseleave="this.style.background='transparent'">EXTRAER</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL FIRMA DIGITAL -->
+  <div id="modal-firma-digital" class="hidden" style="
+    position:fixed;inset:0;background:rgba(0,0,0,0.82);
+    display:flex;align-items:center;justify-content:center;z-index:3000;">
+    <div style="background:#0d0d0d;border:1px solid rgba(212,175,55,0.35);border-radius:6px;
+      padding:28px 30px;width:390px;max-width:92vw;">
+      <h3 style="font-family:'Times New Roman',Times,serif;font-size:0.8rem;letter-spacing:3px;
+        color:var(--dorado);margin:0 0 20px;">✒ FIRMA DIGITAL (PAdES-B-B)</h3>
+
+      <!-- Selector de certificado -->
+      <label style="font-size:0.68rem;letter-spacing:1px;color:#e8e0d0;display:block;margin-bottom:7px;">
+        Certificado digital (.p12 / .pfx)
+      </label>
+      <button type="button" data-action="seleccionar-cert-p12"
+        style="width:100%;text-align:left;background:#111;border:1px solid rgba(212,175,55,0.3);
+        color:#888;padding:9px 12px;border-radius:3px;font-family:'Times New Roman',Times,serif;
+        font-size:0.78rem;cursor:pointer;margin-bottom:5px;transition:border-color 0.2s;"
+        id="btn-elegir-cert"
+        onmouseenter="this.style.borderColor='rgba(212,175,55,0.6)'"
+        onmouseleave="this.style.borderColor='rgba(212,175,55,0.3)'">
+        Seleccionar certificado…
+      </button>
+      <p id="firma-cert-nombre" style="font-size:0.65rem;color:var(--dorado);min-height:1.1em;margin:0 0 4px;"></p>
+      <p id="firma-titular" style="font-size:0.65rem;color:var(--texto-secundario);min-height:1.1em;margin:0 0 18px;"></p>
+
+      <!-- Contraseña -->
+      <label style="font-size:0.68rem;letter-spacing:1px;color:#e8e0d0;display:block;margin-bottom:7px;">
+        Contraseña del certificado
+      </label>
+      <input id="input-password-firma" type="password" placeholder="Contraseña del .p12"
+        autocomplete="current-password"
+        style="width:100%;box-sizing:border-box;background:#111;border:1px solid rgba(212,175,55,0.3);
+        color:#e8e0d0;padding:9px 12px;border-radius:3px;font-family:'Times New Roman',Times,serif;
+        font-size:0.82rem;outline:none;letter-spacing:1px;margin-bottom:6px;"/>
+      <p style="font-size:0.61rem;color:var(--texto-secundario);margin:0 0 22px;">
+        El resultado se guardará como un nuevo archivo cifrado en el vault. El certificado nunca se almacena.
+      </p>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button type="button" data-action="cerrar-modal-firma"
+          style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;
+          padding:7px 18px;background:transparent;border:1px solid rgba(255,255,255,0.15);
+          color:#888;cursor:pointer;border-radius:2px;"
+          onmouseenter="this.style.background='rgba(255,255,255,0.05)'"
+          onmouseleave="this.style.background='transparent'">CANCELAR</button>
+        <button type="button" data-action="confirmar-firma-digital"
+          style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;
+          padding:7px 18px;background:transparent;border:1px solid var(--dorado);
+          color:var(--dorado);cursor:pointer;border-radius:2px;"
+          onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+          onmouseleave="this.style.background='transparent'">✒ FIRMAR</button>
       </div>
     </div>
   </div>

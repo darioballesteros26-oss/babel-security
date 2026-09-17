@@ -606,6 +606,10 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "seleccionar-paginas":      void abrirModalSeleccionarPaginas(); break;
     case "cerrar-modal-paginas":     cerrarModalPaginas(); break;
     case "confirmar-seleccion-paginas": void confirmarSeleccionPaginas(); break;
+    case "abrir-firma-digital":      void abrirModalFirma(); break;
+    case "cerrar-modal-firma":       cerrarModalFirma(); break;
+    case "seleccionar-cert-p12":     void seleccionarCertP12(); break;
+    case "confirmar-firma-digital":  void confirmarFirmaDigital(); break;
     case "cerrar-redaccion":         cerrarPantallaRedaccion(); break;
     case "guardar-redaccion":        void guardarRedaccion(); break;
     case "confirmar-guardar-ia": {
@@ -2297,12 +2301,14 @@ function actualizarSeleccionGuardados(): void {
     return (card?.dataset.base ?? "").toLowerCase();
   });
   const todasImagenes = hay && bases.every(b => /\.(png|jpe?g|webp|bmp|tiff?|heic)$/i.test(b));
+  const unicoPdf = unico && bases[0]?.endsWith(".pdf");
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.toggle("hidden", !hay);
   document.getElementById("wrap-compartir-g")?.classList.toggle("hidden", !unico);
   document.getElementById("btn-unir-pdfs-g")?.classList.toggle("hidden", seleccionados.length < 2);
   document.getElementById("btn-convertir-img-pdf-g")?.classList.toggle("hidden", !todasImagenes);
   document.getElementById("wrap-redactar-g")?.classList.toggle("hidden", !unico);
+  document.getElementById("btn-firmar-g")?.classList.toggle("hidden", !unicoPdf);
   document.getElementById("ui-importar")?.classList.toggle("hidden", hay);
   document.getElementById("ui-crear-archivo")?.classList.toggle("hidden", hay);
 }
@@ -3649,6 +3655,80 @@ async function confirmarSeleccionPaginas(): Promise<void> {
     void cargarArchivosGuardados();
   } catch (e) {
     mostrarToast("Error al extraer páginas: " + String(e), true);
+  }
+}
+
+// ── FIRMA DIGITAL ─────────────────────────────────────────────────────────────
+
+let _rutaFirmaModal  = "";  // ruta del PDF seleccionado al abrir el modal
+let _rutaCertModal   = "";  // ruta del .p12 elegido en el modal
+
+async function abrirModalFirma(): Promise<void> {
+  const cb = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
+  if (!cb) return;
+  const card = cb.closest(".archivo-card") as HTMLElement | null;
+  const ruta = card?.dataset.ruta;
+  if (!ruta) return;
+
+  _rutaFirmaModal = ruta;
+  _rutaCertModal  = "";
+
+  const btnCert = document.getElementById("btn-elegir-cert");
+  if (btnCert) btnCert.textContent = "Seleccionar certificado…";
+  const nombreEl  = document.getElementById("firma-cert-nombre");
+  const titularEl = document.getElementById("firma-titular");
+  if (nombreEl)  nombreEl.textContent  = "";
+  if (titularEl) titularEl.textContent = "";
+  const pwd = document.getElementById("input-password-firma") as HTMLInputElement | null;
+  if (pwd) pwd.value = "";
+
+  document.getElementById("modal-firma-digital")?.classList.remove("hidden");
+  pwd?.focus();
+}
+
+function cerrarModalFirma(): void {
+  document.getElementById("modal-firma-digital")?.classList.add("hidden");
+  _rutaFirmaModal = "";
+  _rutaCertModal  = "";
+}
+
+async function seleccionarCertP12(): Promise<void> {
+  try {
+    const ruta = await invoke<string | null>("seleccionar_cert_p12");
+    if (!ruta) return;
+    _rutaCertModal = ruta;
+    const nombre = ruta.split("/").pop() ?? ruta;
+    const btnCert = document.getElementById("btn-elegir-cert");
+    if (btnCert) btnCert.textContent = nombre;
+    const nombreEl  = document.getElementById("firma-cert-nombre");
+    const titularEl = document.getElementById("firma-titular");
+    if (nombreEl)  nombreEl.textContent  = nombre;
+    if (titularEl) titularEl.textContent = "Introduce la contraseña para ver el titular";
+  } catch (e) {
+    mostrarToast("Error al seleccionar el certificado: " + String(e), true);
+  }
+}
+
+async function confirmarFirmaDigital(): Promise<void> {
+  if (!_rutaFirmaModal) { cerrarModalFirma(); return; }
+  if (!_rutaCertModal) {
+    mostrarToast("Selecciona un certificado .p12 primero.", true);
+    return;
+  }
+  const pwd = (document.getElementById("input-password-firma") as HTMLInputElement | null)?.value ?? "";
+
+  cerrarModalFirma();
+  mostrarToast("Firmando PDF…", false);
+  try {
+    await invoke<string>("firmar_pdf_cifrado", {
+      rutaPdf:  _rutaFirmaModal,
+      rutaCert: _rutaCertModal,
+      password: pwd,
+    });
+    mostrarToast("Documento firmado y guardado correctamente.", false);
+    void cargarArchivosGuardados();
+  } catch (e) {
+    mostrarToast("Error al firmar: " + String(e), true);
   }
 }
 
@@ -7301,7 +7381,7 @@ document.addEventListener("DOMContentLoaded", () => {
       "modal-renombrar", "modal-solicitud-p2p", "modal-renombrar-archivo",
       "modal-sinc",
       "modal-compartir-onboarding", "modal-menu-compartir", "modal-compartir",
-      "modal-seleccionar-paginas",
+      "modal-seleccionar-paginas", "modal-firma-digital",
     ];
     for (const id of modales) {
       const el = document.getElementById(id);

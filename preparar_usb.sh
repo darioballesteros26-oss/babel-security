@@ -470,6 +470,7 @@ PAQUETES=(
   "pdf2docx>=0.5.0"
   "pypdfium2>=4.0"
   "reportlab>=4.0"
+  "pyhanko>=0.28"
 )
 STAMP_CONTENT="${PAQUETES[*]}"
 STAMP_FILE="$CACHE_DIR/python_env_${ARCH}.stamp"

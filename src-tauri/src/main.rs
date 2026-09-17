@@ -6256,6 +6256,95 @@ async fn instalar_actualizacion(app: tauri::AppHandle) -> Result<(), String> {
     app.restart();
 }
 
+// ── FIRMA DIGITAL (Fase 1) ────────────────────────────────────────────────────
+
+/// Abre un diálogo nativo para elegir un certificado .p12 / .pfx.
+/// Devuelve la ruta seleccionada, o None si el usuario canceló.
+#[tauri::command]
+async fn seleccionar_cert_p12(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let sel = app
+            .dialog()
+            .file()
+            .add_filter("Certificado digital", &["p12", "pfx"])
+            .blocking_pick_file();
+        Ok(sel
+            .and_then(|fp| fp.into_path().ok())
+            .map(|p| p.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| format!("Error interno: {}", e))?
+}
+
+/// Lee el nombre del titular del certificado .p12 via /cert_titular del servidor local.
+#[tauri::command]
+async fn titular_del_cert(
+    ruta_cert: String,
+    password: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let p12_bytes = Zeroizing::new(
+            std::fs::read(&ruta_cert)
+                .map_err(|_| "No se pudo leer el certificado.".to_string())?,
+        );
+        traductor::titular_via_servidor(&p12_bytes, &password)
+    })
+    .await
+    .map_err(|e| format!("Error interno: {}", e))?
+}
+
+/// Firma un PDF cifrado del vault y guarda el resultado como nuevo archivo cifrado.
+/// El certificado .p12 se lee desde disco, nunca se guarda en el vault.
+#[tauri::command]
+async fn firmar_pdf_cifrado(
+    ruta_pdf:  String,
+    ruta_cert: String,
+    password:  String,
+    sesion:    tauri::State<'_, SesionActiva>,
+) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let id_usuario = sesion
+        .usuario
+        .lock()
+        .map_err(|_| "Error".to_string())?
+        .clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        validar_ruta_en(&ruta_pdf, guardados_dir())
+            .or_else(|_| validar_ruta_en(&ruta_pdf, archivos_dir()))?;
+        // 1. Descifrar PDF a RAM
+        let pdf_bytes = Zeroizing::new(
+            descifrar_a_bytes(&ruta_pdf, &subclave_hex)
+                .map_err(|_| "No se pudo descifrar el PDF.".to_string())?,
+        );
+        if detectar_ext(&pdf_bytes) != "pdf" {
+            return Err("Solo se pueden firmar archivos PDF.".into());
+        }
+        // 2. Leer certificado a RAM
+        let p12_bytes = Zeroizing::new(
+            std::fs::read(&ruta_cert)
+                .map_err(|_| "No se pudo leer el certificado.".to_string())?,
+        );
+        // 3. Firmar via servidor Flask (POST /firmar)
+        let pdf_firmado = Zeroizing::new(
+            traductor::firmar_via_servidor(&pdf_bytes, &p12_bytes, &password)?,
+        );
+        // 4. Nombre del archivo firmado: "nombre_firmado.pdf"
+        let nombre_base = std::path::Path::new(&ruta_pdf)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("documento");
+        let nombre_final = format!("{}_firmado.pdf", nombre_base);
+        cifrar_y_guardar_desde_bytes(&nombre_final, &pdf_firmado, &subclave_hex, &id_usuario)
+    })
+    .await
+    .map_err(|e| format!("Error interno: {}", e))?
+}
+
 // PUNTO DE ENTRADA — Arranca Tauri, registra todos los comandos — y gestiona el estado global de sesión (SesionActiva).
 
 fn main() {
@@ -6684,6 +6773,9 @@ fn main() {
             ia_redaccion::estado_ia_redaccion,
             ia_redaccion::enviar_mensaje_ia,
             ia_redaccion::enviar_mensaje_ia_stream,
+            seleccionar_cert_p12,
+            titular_del_cert,
+            firmar_pdf_cifrado,
         ]);
     if let Err(e) = app.run(tauri::generate_context!()) {
         eprintln!("[!] Error crítico al iniciar Babel: {}", e);
