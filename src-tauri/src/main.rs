@@ -2219,6 +2219,7 @@ fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
     crate::sincronizacion::limpiar_subclave_sesion();
     crate::conexion_directa::limpiar_subclave_servidor();
     limpiar_finder_token(); // revocar token CSRF del URL scheme babel://
+    crate::ia_redaccion::matar_llama_si_activo(); // KV cache del modelo fuera de RAM al cerrar sesión
     sesion.limpiar();
     // Al cerrar sesión: borrar TODOS los archivos en claro de compartidos/ sin esperar 1h.
     compartir::barrer_plaintext_compartidos_logout();
@@ -6460,6 +6461,7 @@ fn main() {
                     // Nunca dejar el SO colgado en modo de entrada segura al cerrar Babel:
                     // dejaría el teclado del usuario en modo protegido para el resto del sistema.
                     seguridad::desactivar_entrada_segura_os();
+                    crate::ia_redaccion::matar_llama_si_activo(); // evitar llama-server huérfano tras cierre de ventana
                     if let Ok(mut guard) = USB_CHILD.lock() {
                         if let Some(mut c) = guard.take() {
                             let _ = c.kill();
