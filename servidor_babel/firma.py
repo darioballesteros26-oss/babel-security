@@ -21,9 +21,10 @@ except ImportError:
 def _firmar(pdf_bytes: bytes, p12_bytes: bytes, password: str) -> bytes:
     if not _PYHANKO_OK:
         raise RuntimeError("pyhanko no instalado — ejecuta: pip install pyhanko")
-    signer = signers.SimpleSigner.load_pkcs12(
-        pfx_data=p12_bytes,
-        passphrase=password.encode() if password else b"",
+    signer = signers.SimpleSigner.load_pkcs12_data(
+        pkcs12_bytes=p12_bytes,
+        other_certs=[],
+        passphrase=password.encode() if password else None,
     )
     writer = IncrementalPdfFileWriter(BytesIO(pdf_bytes))
     fields.append_signature_field(writer, sig_field_spec=fields.SigFieldSpec("Firma"))
