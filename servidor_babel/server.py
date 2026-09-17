@@ -385,16 +385,17 @@ def _gestor_memoria():
 
 
 if __name__ == "__main__":
-    mt.cargar_modelo()
-    # Warmup: traducir un mini-batch para que los pesos queden hot en L2/L3
-    # antes del primer request real. Sin esto, el primer batch grande puede
-    # tardar minutos si el OS ha swapeado partes del modelo.
     try:
-        mt.traducir_batch(["Hello.", "The contract.", "First article.",
-                           "Yes.", "No.", "Good morning."], "en-es")
-        print("[server] Warmup OK.", flush=True)
+        mt.cargar_modelo()
+        try:
+            mt.traducir_batch(["Hello.", "The contract.", "First article.",
+                               "Yes.", "No.", "Good morning."], "en-es")
+            print("[server] Warmup OK.", flush=True)
+        except Exception as e:
+            print(f"[server] Warmup error (no crítico): {e}", file=sys.stderr)
     except Exception as e:
-        print(f"[server] Warmup error (no crítico): {e}", file=sys.stderr)
+        print(f"[server] Modelo de traducción no disponible: {e}", file=sys.stderr)
+        print("[server] Endpoints activos: /ping /firmar /cert_titular", file=sys.stderr)
     t = threading.Thread(target=_gestor_memoria, daemon=True)
     t.start()
     app.run(host="127.0.0.1", port=5002, debug=False)

@@ -6284,11 +6284,12 @@ async fn titular_del_cert(
     password: String,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let password = Zeroizing::new(password);
         let p12_bytes = Zeroizing::new(
             std::fs::read(&ruta_cert)
                 .map_err(|_| "No se pudo leer el certificado.".to_string())?,
         );
-        traductor::titular_via_servidor(&p12_bytes, &password)
+        traductor::titular_via_servidor(&p12_bytes, &*password)
     })
     .await
     .map_err(|e| format!("Error interno: {}", e))?
@@ -6314,6 +6315,7 @@ async fn firmar_pdf_cifrado(
         .map_err(|_| "Error".to_string())?
         .clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let password = Zeroizing::new(password);
         validar_ruta_en(&ruta_pdf, guardados_dir())
             .or_else(|_| validar_ruta_en(&ruta_pdf, archivos_dir()))?;
         // 1. Descifrar PDF a RAM
@@ -6331,7 +6333,7 @@ async fn firmar_pdf_cifrado(
         );
         // 3. Firmar via servidor Flask (POST /firmar)
         let pdf_firmado = Zeroizing::new(
-            traductor::firmar_via_servidor(&pdf_bytes, &p12_bytes, &password)?,
+            traductor::firmar_via_servidor(&pdf_bytes, &p12_bytes, &*password)?,
         );
         // 4. Nombre del archivo firmado: "nombre_firmado.pdf"
         let nombre_base = std::path::Path::new(&ruta_pdf)

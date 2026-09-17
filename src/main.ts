@@ -3690,6 +3690,8 @@ function cerrarModalFirma(): void {
   document.getElementById("modal-firma-digital")?.classList.add("hidden");
   _rutaFirmaModal = "";
   _rutaCertModal  = "";
+  const pwd = document.getElementById("input-password-firma") as HTMLInputElement | null;
+  if (pwd) pwd.value = "";
 }
 
 async function seleccionarCertP12(): Promise<void> {
@@ -3716,11 +3718,12 @@ async function seleccionarCertP12(): Promise<void> {
 }
 
 async function cargarTitularCert(password: string): Promise<void> {
-  if (!_rutaCertModal) return;
+  const rutaCert = _rutaCertModal;  // captura antes del await para evitar race condition
+  if (!rutaCert) return;
   const titularEl = document.getElementById("firma-titular");
   if (titularEl) titularEl.textContent = "Leyendo certificado…";
   try {
-    const nombre = await invoke<string>("titular_del_cert", { rutaCert: _rutaCertModal, password });
+    const nombre = await invoke<string>("titular_del_cert", { rutaCert, password });
     if (titularEl) {
       titularEl.textContent = `Titular: ${nombre}`;
       titularEl.style.color = "var(--dorado)";
@@ -3739,14 +3742,17 @@ async function confirmarFirmaDigital(): Promise<void> {
     mostrarToast("Selecciona un certificado .p12 primero.", true);
     return;
   }
+  // Capturar rutas y contraseña ANTES de cerrar el modal (cerrarModalFirma las borra)
+  const rutaPdf  = _rutaFirmaModal;
+  const rutaCert = _rutaCertModal;
   const pwd = (document.getElementById("input-password-firma") as HTMLInputElement | null)?.value ?? "";
 
   cerrarModalFirma();
   mostrarToast("Firmando PDF…", false);
   try {
     await invoke<string>("firmar_pdf_cifrado", {
-      rutaPdf:  _rutaFirmaModal,
-      rutaCert: _rutaCertModal,
+      rutaPdf,
+      rutaCert,
       password: pwd,
     });
     mostrarToast("Documento firmado y guardado correctamente.", false);
