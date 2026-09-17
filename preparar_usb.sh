@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# preparar_usb.sh — USB autocontenido de Babel Security (auto-tier MADLAD-3B / SMaLL-100)
+# preparar_usb.sh — USB autocontenido de Babel Security
+#   Traducción: auto-tier MADLAD-3B (≥12 GB RAM) / SMaLL-100 (8 GB RAM)
+#   IA redacción: Qwen3-4B-Q6_K (llama-server bundleado)
 #
 # USO:
 #   ./preparar_usb.sh /Volumes/BABEL_USB
@@ -13,17 +15,18 @@
 # PREREQUISITO (solo una vez):
 #   cd ~/Desktop/Babel/babel-interfaz && npm run tauri -- build
 #
-# Contenido del USB (total ~2.0 GB incluyendo PaddleOCR-VL cuantizado):
-#   App:               ~26 MB  (babel Security.app + dylibs)
-#   tessdata:          ~150 MB (8 idiomas Tesseract)
-#   Python + pkgs:     ~450 MB (Flask, CTranslate2, pymupdf, pdf2docx, pymupdf4llm…)
-#   MADLAD-400-3B int8: ~2.8 GB (calidad legal/profesional, Apache 2.0 — máquinas ≥12 GB)
-#   SMaLL-100 int8:    ~330 MB (ligero y rápido, MIT — máquinas de 8 GB; el servidor elige según RAM)
-#   PaddleOCR-VL-1.5:  ~1.1 GB (LM Q4_K_M 286 MB + mmproj BF16 841 MB, Apache 2.0)
+# Contenido del USB (total ~8 GB):
+#   App + dylibs:       ~577 MB (Security Babel.app + Frameworks)
+#   tessdata:           ~150 MB (8 idiomas Tesseract)
+#   Python + pkgs:      ~450 MB (Flask, CTranslate2, pymupdf, pdf2docx, pymupdf4llm…)
+#   MADLAD-400-3B int8: ~2.8 GB (traducción calidad legal, Apache 2.0 — máquinas ≥12 GB)
+#   SMaLL-100 int8:     ~330 MB (traducción rápida, MIT — máquinas 8 GB; auto-tier)
+#   PaddleOCR-VL-1.5:  ~1.1 GB (OCR avanzado, Apache 2.0; opcional)
+#   Qwen3-4B-Q6_K:     ~3.1 GB (IA redacción jurídica; llama-server incluido)
 #
 # Tiempos esperados:
-#   1ª vez (descarga Python + paquetes + modelos): ~15-25 min
-#   Siguientes (todo cacheado):                    ~3-5 min
+#   1ª vez (descarga Python + paquetes): ~15-25 min
+#   Siguientes (todo cacheado):          ~5-10 min (copia Q6_K + MADLAD tarda ~3 min)
 set -euo pipefail
 
 USB="${1:-}"
@@ -115,6 +118,12 @@ if [[ -d "$SERVIDOR_SRC/modelos_usb/small100-int8" ]]; then
   fi
 fi
 
+check_ruta "$BREW/bin/llama-server" \
+           "llama-server" "brew install llama.cpp"
+check_ruta "$HOME/Babel/modelos_ia/Qwen3-4B-Q6_K.gguf" \
+           "modelo IA Qwen3-4B-Q6_K.gguf (~3.1 GB)" \
+           "Descarga en https://huggingface.co/bartowski/Qwen3-4B-GGUF y ponlo en ~/Babel/modelos_ia/"
+
 check_ruta "$SERVIDOR_SRC/server.py"              "server.py"
 check_ruta "$SERVIDOR_SRC/traduccion_madlad.py"   "traduccion_madlad.py (motor MADLAD, tier ≥12 GB)"
 check_ruta "$SERVIDOR_SRC/traduccion_small100.py" "traduccion_small100.py (motor SMaLL-100, tier 8 GB)"
@@ -165,7 +174,7 @@ APP="$USB/$APP_NAME"
 BINARY="$APP/Contents/MacOS/babel-interfaz"
 FRAMEWORKS="$APP/Contents/Frameworks"
 RESOURCES="$APP/Contents/Resources"
-mkdir -p "$FRAMEWORKS" "$RESOURCES"/{tessdata,python,servidor/modelos,servidor/modelos_usb}
+mkdir -p "$FRAMEWORKS" "$RESOURCES"/{tessdata,python,servidor/modelos,servidor/modelos_usb,modelos_ia,binaries}
 echo "└─ App copiada ($(( SECONDS - T1 ))s)"
 
 # ── 2. dylibs (Tesseract + Leptonica + deps) ────────────────────────────
@@ -189,6 +198,11 @@ declare -a DYLIBS=(
   "$BREW/opt/zstd/lib/libzstd.1.dylib"
   "$BREW/opt/lz4/lib/liblz4.1.dylib"
   "$BREW/opt/libb2/lib/libb2.1.dylib"
+  # llama.cpp — necesarias para llama-server bundleado
+  "$BREW/opt/ggml/lib/libggml.0.dylib"
+  "$BREW/opt/ggml/lib/libggml-base.0.dylib"
+  "$BREW/opt/openssl@3/lib/libssl.3.dylib"
+  "$BREW/opt/openssl@3/lib/libcrypto.3.dylib"
 )
 
 bundle_lib() {
@@ -242,12 +256,44 @@ for lib in "$FRAMEWORKS/"*.dylib "$BINARY"; do
   done < <(otool -L "$lib" 2>/dev/null | awk 'NR>1{print $1}' | grep "@rpath")
 done
 [[ $MISSING_FOUND -gt 0 ]] && echo "  + $MISSING_FOUND dylibs adicionales detectadas"
+# llama-server + sus dylibs privadas (libllama-server-impl, libllama, libllama-common, libmtmd)
+LLAMA_BIN_SRC=$(readlink -f "$BREW/bin/llama-server")
+LLAMA_LIB_DIR=$(dirname "$LLAMA_BIN_SRC")/../lib
+LLAMA_LIB_DIR=$(cd "$LLAMA_LIB_DIR" && pwd)
+cp "$LLAMA_BIN_SRC" "$RESOURCES/binaries/llama-server"
+chmod 755 "$RESOURCES/binaries/llama-server"
+codesign --remove-signature "$RESOURCES/binaries/llama-server" 2>/dev/null || true
+# Dylibs privadas de llama.cpp (no están en Homebrew opt, viven junto al binario)
+for _lib in libllama-server-impl.dylib libllama-common.0.dylib libmtmd.0.dylib libllama.0.dylib; do
+  _real=$(find "$LLAMA_LIB_DIR" -name "${_lib%.dylib}.*.dylib" 2>/dev/null | sort -V | tail -1)
+  [[ -z "$_real" ]] && _real="$LLAMA_LIB_DIR/$_lib"
+  if [[ -f "$_real" ]]; then
+    _dest_name=$(basename "$_real")
+    cp "$_real" "$FRAMEWORKS/$_dest_name"
+    chmod 755 "$FRAMEWORKS/$_dest_name"
+    codesign --remove-signature "$FRAMEWORKS/$_dest_name" 2>/dev/null || true
+    install_name_tool -id "@rpath/$_dest_name" "$FRAMEWORKS/$_dest_name" 2>/dev/null || true
+    # También crear el symlink versionado sin patch (libfoo.0.dylib → libfoo.0.X.Y.dylib)
+    ln -sf "$_dest_name" "$FRAMEWORKS/$_lib" 2>/dev/null || true
+  fi
+done
+# Reparchar RPATHs del binario llama-server para apuntar a Frameworks
+install_name_tool -add_rpath "@executable_path/../../../Frameworks" \
+  "$RESOURCES/binaries/llama-server" 2>/dev/null || true
+install_name_tool -add_rpath "@loader_path/../../../Frameworks" \
+  "$RESOURCES/binaries/llama-server" 2>/dev/null || true
+for _ref in $(otool -L "$RESOURCES/binaries/llama-server" 2>/dev/null | awk 'NR>1{print $1}' | grep "$BREW"); do
+  _ref_name=$(basename "$_ref")
+  [[ -f "$FRAMEWORKS/$_ref_name" ]] && \
+    install_name_tool -change "$_ref" "@rpath/$_ref_name" "$RESOURCES/binaries/llama-server" 2>/dev/null || true
+done
+echo "  ✓ llama-server bundleado ($(du -sh "$RESOURCES/binaries/llama-server" | cut -f1))"
 echo "└─ $(ls "$FRAMEWORKS/"*.dylib 2>/dev/null | wc -l | tr -d ' ') dylibs ($(( SECONDS - T2 ))s)"
 
 # ── 3. tessdata + modelos + tokenizadores (en paralelo) ─────────────────
 echo ""
-echo "┌─ [3/7] Copiando tessdata y modelos (MADLAD-3B + SMaLL-100)..."
-echo "  (esto puede tardar un par de minutos — ~1.2 GB)"
+echo "┌─ [3/7] Copiando tessdata, modelos traducción y modelo IA..."
+echo "  (esto puede tardar varios minutos — ~6 GB en total)"
 T3=$SECONDS
 
 # tessdata
@@ -284,8 +330,22 @@ for f in server.py traduccion_madlad.py traduccion_small100.py traduccion_comun.
 done
 echo "  ✓ código servidor (6 archivos, pipeline PDF doble pasada)"
 
+# Modelo IA: Qwen3-4B-Q6_K (~3.1 GB)
+(
+  mkdir -p "$RESOURCES/modelos_ia"
+  echo "  Copiando Qwen3-4B-Q6_K.gguf (~3.1 GB, puede tardar 2-4 min)..."
+  rsync -a --info=progress2 \
+    "$HOME/Babel/modelos_ia/Qwen3-4B-Q6_K.gguf" \
+    "$RESOURCES/modelos_ia/Qwen3-4B-Q6_K.gguf" 2>/dev/null || \
+  cp "$HOME/Babel/modelos_ia/Qwen3-4B-Q6_K.gguf" \
+     "$RESOURCES/modelos_ia/Qwen3-4B-Q6_K.gguf"
+  echo "  ✓ Qwen3-4B-Q6_K ($(du -sh "$RESOURCES/modelos_ia/Qwen3-4B-Q6_K.gguf" | cut -f1))"
+) &
+PID_IA=$!
+
 wait $PID_TESS
 wait $PID_MOD
+wait $PID_IA
 
 # PaddleOCR-VL-1.5 (~1.1 GB tras cuantización) — copia si está descargado localmente,
 # o descarga la primera vez. Licencia: Apache 2.0.
@@ -651,6 +711,27 @@ else
   echo "  ℹ PaddleOCR-VL no descargado — PDF usará pymupdf4llm (normal si no se descargó)"
 fi
 
+# Modelo IA + llama-server
+if [[ ! -f "$RESOURCES/modelos_ia/Qwen3-4B-Q6_K.gguf" ]]; then
+  echo "  ✗ Falta modelos_ia/Qwen3-4B-Q6_K.gguf"
+  _smoke_ok=0
+else
+  IA_MB=$(du -m "$RESOURCES/modelos_ia/Qwen3-4B-Q6_K.gguf" | cut -f1)
+  if [[ $IA_MB -lt 2900 ]]; then
+    echo "  ✗ Qwen3-4B-Q6_K.gguf parece incompleto (${IA_MB}MB, esperado ≥2900MB)"
+    _smoke_ok=0
+  else
+    echo "  ✓ Qwen3-4B-Q6_K.gguf (${IA_MB}MB)"
+  fi
+fi
+
+if [[ ! -x "$RESOURCES/binaries/llama-server" ]]; then
+  echo "  ✗ Falta binaries/llama-server"
+  _smoke_ok=0
+else
+  echo "  ✓ llama-server bundleado"
+fi
+
 # Archivos servidor
 for f in server.py traduccion_madlad.py traduccion_small100.py traduccion_comun.py; do
   if [[ ! -f "$RESOURCES/servidor/$f" ]]; then
@@ -676,7 +757,8 @@ echo "╚═══════════════════════�
 echo ""
 printf "  %-22s %s\n" "Tiempo total:"    "${T_FINAL}s (~$((T_FINAL/60))m $((T_FINAL%60))s)"
 printf "  %-22s %s\n" "Tamaño USB:"      "$USB_SIZE"
-printf "  %-22s %s\n" "Modelos:" "MADLAD-3B (≥12GB) / SMaLL-100 (8GB) — auto"
+printf "  %-22s %s\n" "Traducción:" "MADLAD-3B (≥12GB) / SMaLL-100 (8GB) — auto"
+printf "  %-22s %s\n" "IA redacción:" "Qwen3-4B-Q6_K + llama-server bundleado"
 printf "  %-22s %s\n" "Caché Python:"    "$CACHE_DIR"
 echo ""
 echo "  Contenido USB:"

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
@@ -228,12 +228,35 @@ impl IaRedaccionState {
     }
 }
 
-fn ruta_modelo() -> PathBuf {
+const NOMBRE_MODELO: &str = "Qwen3-4B-Q6_K.gguf";
+
+// Busca el modelo en: 1) Resources/modelos_ia/ (bundle USB), 2) ~/Babel/modelos_ia/
+fn ruta_modelo(app: &tauri::AppHandle) -> PathBuf {
+    if let Ok(res) = app.path().resource_dir() {
+        let bundle = res.join("modelos_ia").join(NOMBRE_MODELO);
+        if bundle.exists() {
+            return bundle;
+        }
+    }
     dirs::home_dir()
         .unwrap_or_default()
         .join("Babel")
         .join("modelos_ia")
-        .join("Qwen3-4B-Q6_K.gguf")
+        .join(NOMBRE_MODELO)
+}
+
+// Busca llama-server en: 1) Resources/binaries/ (bundle USB), 2) Homebrew
+fn ruta_llama_server(app: &tauri::AppHandle) -> String {
+    if let Ok(res) = app.path().resource_dir() {
+        let bundled = res.join("binaries").join("llama-server");
+        if bundled.exists() {
+            return bundled.to_string_lossy().into_owned();
+        }
+    }
+    if std::path::Path::new("/opt/homebrew/bin/llama-server").exists() {
+        return "/opt/homebrew/bin/llama-server".into();
+    }
+    "/usr/local/bin/llama-server".into()
 }
 
 fn base_url() -> String {
@@ -255,6 +278,7 @@ async fn ping_servidor() -> bool {
 
 #[tauri::command]
 pub async fn iniciar_ia_redaccion(
+    app: tauri::AppHandle,
     state: tauri::State<'_, IaRedaccionState>,
 ) -> Result<String, String> {
     crate::rat_detector::verificar_no_bloqueado_rat()?;
@@ -264,7 +288,7 @@ pub async fn iniciar_ia_redaccion(
         return Ok("activo".into());
     }
 
-    let modelo = ruta_modelo();
+    let modelo = ruta_modelo(&app);
     if !modelo.exists() {
         let msg = format!(
             "Modelo no encontrado en {}. Descárgalo primero.",
@@ -288,13 +312,7 @@ pub async fn iniciar_ia_redaccion(
 
     let hilos = num_cpus::get().min(4).to_string();
     let modelo_str = modelo.to_string_lossy().to_string();
-
-    // Apple Silicon: /opt/homebrew — Intel Mac: /usr/local
-    let llama_bin = if std::path::Path::new("/opt/homebrew/bin/llama-server").exists() {
-        "/opt/homebrew/bin/llama-server"
-    } else {
-        "/usr/local/bin/llama-server"
-    };
+    let llama_bin = ruta_llama_server(&app);
 
     let child = Command::new(llama_bin)
         .args([
@@ -349,7 +367,10 @@ pub async fn iniciar_ia_redaccion(
         let _ = p.kill().await;
         LLAMA_PID.store(0, Ordering::Release);
     }
-    let msg = "El modelo no respondió en 2 minutos. Comprueba que ~/Babel/modelos_ia/Qwen3-4B-Q6_K.gguf existe y hay suficiente RAM.".to_string();
+    let msg = format!(
+        "El modelo no respondió en 2 minutos. Comprueba que {} existe y hay suficiente RAM.",
+        modelo.display()
+    );
     *state.estado.lock().await = format!("error:{msg}");
     Err(msg)
 }
