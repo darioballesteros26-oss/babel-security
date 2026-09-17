@@ -6264,14 +6264,29 @@ async fn instalar_actualizacion(app: tauri::AppHandle) -> Result<(), String> {
 async fn seleccionar_cert_p12(app: tauri::AppHandle) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"));
         let sel = app
             .dialog()
             .file()
-            .add_filter("Certificado digital", &["p12", "pfx"])
+            .set_title("Seleccionar certificado digital (.p12 / .pfx)")
+            .add_filter("Certificado digital (.p12, .pfx)", &["p12", "pfx", "P12", "PFX"])
+            .set_directory(&home)
             .blocking_pick_file();
-        Ok(sel
+        let ruta = sel
             .and_then(|fp| fp.into_path().ok())
-            .map(|p| p.to_string_lossy().into_owned()))
+            .map(|p| p.to_string_lossy().into_owned());
+        // Validación: rechazar si la extensión no es .p12 / .pfx
+        if let Some(ref r) = ruta {
+            let ext = std::path::Path::new(r)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if ext != "p12" && ext != "pfx" {
+                return Err("El archivo seleccionado no es un certificado .p12 o .pfx.".to_string());
+            }
+        }
+        Ok(ruta)
     })
     .await
     .map_err(|e| format!("Error interno: {}", e))?

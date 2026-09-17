@@ -3713,7 +3713,12 @@ async function seleccionarCertP12(): Promise<void> {
       document.getElementById("input-password-firma")?.focus();
     }
   } catch (e) {
-    mostrarToast("Error al seleccionar el certificado: " + String(e), true);
+    const msg = String(e);
+    if (msg.includes("p12") || msg.includes("pfx") || msg.includes("certificado")) {
+      mostrarToast("Selecciona un archivo .p12 o .pfx válido.", true);
+    } else {
+      mostrarToast("Error al seleccionar el certificado: " + msg, true);
+    }
   }
 }
 
