@@ -3027,10 +3027,7 @@ pub fn firmar_via_servidor(
     let pdf_b64  = base64::engine::general_purpose::STANDARD.encode(pdf_bytes);
     let cert_b64 = base64::engine::general_purpose::STANDARD.encode(p12_bytes);
     let body = serde_json::json!({ "pdf_b64": pdf_b64, "cert_b64": cert_b64, "password": password });
-    let resp = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(5))
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
+    let resp = agente_http()
         .post("http://127.0.0.1:5002/firmar")
         .set("Content-Type", "application/json")
         .set("X-Babel-Token", &token_efectivo())
