@@ -26,7 +26,8 @@
 #
 # Tiempos esperados:
 #   1ª vez (descarga Python + paquetes): ~15-25 min
-#   Siguientes (todo cacheado):          ~5-10 min (copia Q6_K + MADLAD tarda ~3 min)
+#   Siguientes (binario ya en USB):      ~2-3 min  (solo actualiza MacOS/ + Frameworks)
+#   --reset-cache:                       ~15-25 min (fuerza reinstalación Python)
 set -euo pipefail
 
 USB="${1:-}"
@@ -88,35 +89,42 @@ check_ruta "$BREW/opt/leptonica" \
 check_ruta "$BREW/Cellar/tesseract-lang" \
            "tesseract-lang" "brew install tesseract-lang"
 
-# Auto-tier: el servidor elige MADLAD (≥12 GB) o SMaLL-100 (menos) según la RAM del destino,
-# así que el USB lleva LOS DOS modelos. Ambos deben estar presentes.
-check_ruta "$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8" \
-           "modelo MADLAD-400-3B int8 (modelos_usb/madlad400-3b-int8/)" \
-           "Convierte: python3 -m ctranslate2.converters.transformers --model google/madlad400-3b-mt --output_dir $SERVIDOR_SRC/modelos_usb/madlad400-3b-int8 --quantization int8 --force"
-if [[ -d "$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8" ]]; then
-  if [[ ! -f "$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8/model.bin" ]]; then
-    echo "  ✗ falta model.bin — reconvierte MADLAD-3B"; _prereq_ok=0
-  elif [[ ! -f "$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8/spiece.model" ]]; then
-    echo "  ✗ falta el tokenizer — guarda T5Tokenizer en la carpeta del modelo"; _prereq_ok=0
-  else
-    echo "  ✓ MADLAD-400-3B int8 ($(du -sh "$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8" | cut -f1))"
-  fi
-fi
+# Auto-tier: el servidor elige MADLAD (≥12 GB) o SMaLL-100 (menos) según la RAM del destino.
+# Acepta los modelos en local (SERVIDOR_SRC) O ya presentes en el destino USB (_DEST_MOD).
+_DEST_MOD="$USB/Security Babel.app/Contents/Resources/servidor/modelos_usb"
 
-check_ruta "$SERVIDOR_SRC/modelos_usb/small100-int8" \
-           "modelo SMaLL-100 int8 (modelos_usb/small100-int8/)" \
-           "Convierte: python3 -m ctranslate2.converters.transformers --model alirezamsh/small100 --output_dir $SERVIDOR_SRC/modelos_usb/small100-int8 --quantization int8 --force  (y copia sentencepiece.bpe.model + tokenization_small100.py del repo HF a esa carpeta)"
-if [[ -d "$SERVIDOR_SRC/modelos_usb/small100-int8" ]]; then
-  if [[ ! -f "$SERVIDOR_SRC/modelos_usb/small100-int8/model.bin" ]]; then
-    echo "  ✗ falta model.bin — reconvierte el modelo SMaLL-100"; _prereq_ok=0
-  elif [[ ! -f "$SERVIDOR_SRC/modelos_usb/small100-int8/sentencepiece.bpe.model" ]]; then
-    echo "  ✗ falta el tokenizer — copia sentencepiece.bpe.model del repo a la carpeta del modelo"; _prereq_ok=0
-  elif [[ ! -f "$SERVIDOR_SRC/modelos_usb/small100-int8/tokenization_small100.py" ]]; then
-    echo "  ✗ falta tokenization_small100.py — el tokenizer propio de SMaLL-100 no está en transformers"; _prereq_ok=0
+_check_modelo_madlad() {
+  local src="$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8"
+  local dst="$_DEST_MOD/madlad400-3b-int8"
+  if [[ -f "$src/model.bin" && -f "$src/spiece.model" ]]; then
+    echo "  ✓ MADLAD-400-3B int8 ($(du -sh "$src" | cut -f1)) [local]"
+  elif [[ -f "$dst/model.bin" && -f "$dst/spiece.model" ]]; then
+    echo "  ✓ MADLAD-400-3B int8 ($(du -sh "$dst" | cut -f1)) [ya en USB — se omite copia]"
+    MADLAD_YA_EN_USB=1
   else
-    echo "  ✓ SMaLL-100 int8 ($(du -sh "$SERVIDOR_SRC/modelos_usb/small100-int8" | cut -f1))"
+    echo "  ✗ Falta MADLAD-400-3B int8"
+    echo "    → python3 -m ctranslate2.converters.transformers --model google/madlad400-3b-mt --output_dir $src --quantization int8 --force"
+    _prereq_ok=0
   fi
-fi
+}
+_check_modelo_small100() {
+  local src="$SERVIDOR_SRC/modelos_usb/small100-int8"
+  local dst="$_DEST_MOD/small100-int8"
+  if [[ -f "$src/model.bin" && -f "$src/sentencepiece.bpe.model" && -f "$src/tokenization_small100.py" ]]; then
+    echo "  ✓ SMaLL-100 int8 ($(du -sh "$src" | cut -f1)) [local]"
+  elif [[ -f "$dst/model.bin" && -f "$dst/sentencepiece.bpe.model" ]]; then
+    echo "  ✓ SMaLL-100 int8 ($(du -sh "$dst" | cut -f1)) [ya en USB — se omite copia]"
+    SMALL_YA_EN_USB=1
+  else
+    echo "  ✗ Falta SMaLL-100 int8"
+    echo "    → python3 -m ctranslate2.converters.transformers --model alirezamsh/small100 --output_dir $src --quantization int8 --force"
+    _prereq_ok=0
+  fi
+}
+MADLAD_YA_EN_USB=0
+SMALL_YA_EN_USB=0
+_check_modelo_madlad
+_check_modelo_small100
 
 check_ruta "$BREW/bin/llama-server" \
            "llama-server" "brew install llama.cpp"
@@ -149,9 +157,12 @@ mkdir -p "$USB" "$CACHE_DIR"
 echo ""
 echo "┌─ [1/7] Buscando app compilada..."
 # Busca primero el build con target explícito (aarch64-apple-darwin), luego el genérico
-APP_SRC=$(find "$INTERFAZ/src-tauri/target/aarch64-apple-darwin/release/bundle/macos" \
-            -name "*.app" -maxdepth 1 2>/dev/null | head -1)
-if [[ -z "$APP_SRC" ]]; then
+APP_SRC=""
+if [[ -d "$INTERFAZ/src-tauri/target/aarch64-apple-darwin/release/bundle/macos" ]]; then
+  APP_SRC=$(find "$INTERFAZ/src-tauri/target/aarch64-apple-darwin/release/bundle/macos" \
+              -name "*.app" -maxdepth 1 2>/dev/null | head -1)
+fi
+if [[ -z "$APP_SRC" && -d "$INTERFAZ/src-tauri/target/release/bundle/macos" ]]; then
   APP_SRC=$(find "$INTERFAZ/src-tauri/target/release/bundle/macos" \
               -name "*.app" -maxdepth 1 2>/dev/null | head -1)
 fi
@@ -165,17 +176,28 @@ if [[ -z "$APP_SRC" ]]; then
 fi
 
 APP_NAME=$(basename "$APP_SRC")
-echo "  ✓ $APP_NAME"
-
-T1=$SECONDS
-rm -rf "$USB/$APP_NAME"
-cp -R "$APP_SRC" "$USB/"
 APP="$USB/$APP_NAME"
 BINARY="$APP/Contents/MacOS/babel-interfaz"
 FRAMEWORKS="$APP/Contents/Frameworks"
 RESOURCES="$APP/Contents/Resources"
+echo "  ✓ $APP_NAME"
+
+T1=$SECONDS
+if [[ -d "$APP" ]]; then
+  # Smart update: solo reemplaza binario y Frameworks.
+  # Preserva modelos_ia/, servidor/modelos_usb/, python/ y tessdata/ ya presentes.
+  echo "  App ya existe — actualizando solo binario y Frameworks..."
+  rsync -a --delete "$APP_SRC/Contents/MacOS/" "$APP/Contents/MacOS/"
+  cp -f "$APP_SRC/Contents/Info.plist" "$APP/Contents/" 2>/dev/null || true
+  cp -f "$APP_SRC/Contents/PkgInfo"    "$APP/Contents/" 2>/dev/null || true
+  echo "  ✓ Binario actualizado ($(( SECONDS - T1 ))s)"
+else
+  echo "  Primera instalación — copiando app completa..."
+  cp -R "$APP_SRC" "$USB/"
+  echo "  ✓ App copiada ($(( SECONDS - T1 ))s)"
+fi
 mkdir -p "$FRAMEWORKS" "$RESOURCES"/{tessdata,python,servidor/modelos,servidor/modelos_usb,modelos_ia,binaries}
-echo "└─ App copiada ($(( SECONDS - T1 ))s)"
+echo "└─ App lista ($(( SECONDS - T1 ))s)"
 
 # ── 2. dylibs (Tesseract + Leptonica + deps) ────────────────────────────
 echo ""
@@ -260,7 +282,12 @@ done
 LLAMA_BIN_SRC=$(readlink -f "$BREW/bin/llama-server")
 LLAMA_LIB_DIR=$(dirname "$LLAMA_BIN_SRC")/../lib
 LLAMA_LIB_DIR=$(cd "$LLAMA_LIB_DIR" && pwd)
-cp "$LLAMA_BIN_SRC" "$RESOURCES/binaries/llama-server"
+_llama_dest="$RESOURCES/binaries/llama-server"
+_llama_src_size=$(stat -f%z "$LLAMA_BIN_SRC" 2>/dev/null || echo 0)
+_llama_dst_size=$(stat -f%z "$_llama_dest" 2>/dev/null || echo 0)
+if [[ "$_llama_src_size" != "$_llama_dst_size" ]]; then
+  cp "$LLAMA_BIN_SRC" "$_llama_dest"
+fi
 chmod 755 "$RESOURCES/binaries/llama-server"
 codesign --remove-signature "$RESOURCES/binaries/llama-server" 2>/dev/null || true
 # Dylibs privadas de llama.cpp (no están en Homebrew opt, viven junto al binario)
@@ -296,23 +323,36 @@ echo "┌─ [3/7] Copiando tessdata, modelos traducción y modelo IA..."
 echo "  (esto puede tardar varios minutos — ~6 GB en total)"
 T3=$SECONDS
 
-# tessdata
+# tessdata (omite copia si ya hay ≥8 idiomas)
 (
-  for f in eng.traineddata osd.traineddata; do
-    [[ -f "$TESS_DIR/share/tessdata/$f" ]] && \
-      cp "$TESS_DIR/share/tessdata/$f" "$RESOURCES/tessdata/"
-  done
-  for lang in spa fra deu ara rus chi_sim; do
-    src="$LANG_DIR/share/tessdata/${lang}.traineddata"
-    [[ -f "$src" ]] && cp "$src" "$RESOURCES/tessdata/"
-  done
-  echo "  ✓ tessdata"
+  _tess_count=$(ls "$RESOURCES/tessdata/"*.traineddata 2>/dev/null | wc -l | tr -d ' ')
+  if [[ $_tess_count -ge 8 ]]; then
+    echo "  ✓ tessdata ya presente ($_tess_count idiomas) — omitida copia"
+  else
+    for f in eng.traineddata osd.traineddata; do
+      [[ -f "$TESS_DIR/share/tessdata/$f" ]] && \
+        cp "$TESS_DIR/share/tessdata/$f" "$RESOURCES/tessdata/"
+    done
+    for lang in spa fra deu ara rus chi_sim; do
+      src="$LANG_DIR/share/tessdata/${lang}.traineddata"
+      [[ -f "$src" ]] && cp "$src" "$RESOURCES/tessdata/"
+    done
+    echo "  ✓ tessdata"
+  fi
 ) &
 PID_TESS=$!
 
 # Ambos modelos (auto-tier): MADLAD-3B (~2.8 GB) + SMaLL-100 (~330 MB)
+# Si ya están en el USB (MADLAD_YA_EN_USB / SMALL_YA_EN_USB) se omite la copia.
 (
   for m in madlad400-3b-int8 small100-int8; do
+    _flag=0
+    [[ "$m" == "madlad400-3b-int8" && $MADLAD_YA_EN_USB -eq 1 ]] && _flag=1
+    [[ "$m" == "small100-int8"     && $SMALL_YA_EN_USB  -eq 1 ]] && _flag=1
+    if [[ $_flag -eq 1 ]]; then
+      echo "  ✓ $m ya presente en USB — omitida copia"
+      continue
+    fi
     rm -rf "$RESOURCES/servidor/modelos_usb/$m"
     rsync -a --info=progress2 \
       "$SERVIDOR_SRC/modelos_usb/$m/" \
@@ -330,16 +370,24 @@ for f in server.py traduccion_madlad.py traduccion_small100.py traduccion_comun.
 done
 echo "  ✓ código servidor (6 archivos, pipeline PDF doble pasada)"
 
-# Modelo IA: Qwen3-4B-Q6_K (~3.1 GB)
+# Modelo IA: Qwen3-4B-Q6_K (~3.1 GB) — omitir si ya está en el USB
 (
   mkdir -p "$RESOURCES/modelos_ia"
-  echo "  Copiando Qwen3-4B-Q6_K.gguf (~3.1 GB, puede tardar 2-4 min)..."
-  rsync -a --info=progress2 \
-    "$HOME/Babel/modelos_ia/Qwen3-4B-Q6_K.gguf" \
-    "$RESOURCES/modelos_ia/Qwen3-4B-Q6_K.gguf" 2>/dev/null || \
-  cp "$HOME/Babel/modelos_ia/Qwen3-4B-Q6_K.gguf" \
-     "$RESOURCES/modelos_ia/Qwen3-4B-Q6_K.gguf"
-  echo "  ✓ Qwen3-4B-Q6_K ($(du -sh "$RESOURCES/modelos_ia/Qwen3-4B-Q6_K.gguf" | cut -f1))"
+  _q6k_dest="$RESOURCES/modelos_ia/Qwen3-4B-Q6_K.gguf"
+  _q6k_src="$HOME/Babel/modelos_ia/Qwen3-4B-Q6_K.gguf"
+  if [[ -f "$_q6k_dest" ]]; then
+    _dest_mb=$(du -m "$_q6k_dest" | cut -f1)
+    if [[ $_dest_mb -ge 2900 ]]; then
+      echo "  ✓ Qwen3-4B-Q6_K ya en USB (${_dest_mb}MB) — omitida copia"
+    else
+      rsync -a --info=progress2 "$_q6k_src" "$_q6k_dest" 2>/dev/null || cp "$_q6k_src" "$_q6k_dest"
+      echo "  ✓ Qwen3-4B-Q6_K ($(du -sh "$_q6k_dest" | cut -f1))"
+    fi
+  else
+    echo "  Copiando Qwen3-4B-Q6_K.gguf (~3.1 GB, puede tardar 2-4 min)..."
+    rsync -a --info=progress2 "$_q6k_src" "$_q6k_dest" 2>/dev/null || cp "$_q6k_src" "$_q6k_dest"
+    echo "  ✓ Qwen3-4B-Q6_K ($(du -sh "$_q6k_dest" | cut -f1))"
+  fi
 ) &
 PID_IA=$!
 
@@ -440,9 +488,17 @@ elif [[ $RESET_CACHE -eq 1 ]]; then
 fi
 
 if [[ $CACHE_VALID -eq 1 ]]; then
-  echo "  ✓ Caché hit — copiando Python sin internet..."
-  rm -rf "$RESOURCES/python"
-  rsync -a "$PY_CACHE_ENV/" "$RESOURCES/python/"
+  # Si Python ya está en el USB y el stamp coincide, no hace falta re-copiar
+  _usb_py="$RESOURCES/python/bin/python3"
+  _usb_stamp="$RESOURCES/python/.babel_stamp"
+  if [[ -x "$_usb_py" && -f "$_usb_stamp" && "$(cat "$_usb_stamp" 2>/dev/null)" == "$STAMP_CONTENT" ]]; then
+    echo "  ✓ Python ya en USB y actualizado — omitida copia"
+  else
+    echo "  ✓ Caché hit — copiando Python sin internet..."
+    rm -rf "$RESOURCES/python"
+    rsync -a "$PY_CACHE_ENV/" "$RESOURCES/python/"
+    echo "$STAMP_CONTENT" > "$_usb_stamp"
+  fi
 else
   if [[ ! -f "$PY_CACHE_ARCHIVE" ]]; then
     echo "  Descargando Python portable (~80 MB)..."
@@ -508,6 +564,7 @@ print(hits[0] if hits else '')
   echo "$STAMP_CONTENT" > "$STAMP_FILE"
   echo "  Copiando entorno al USB..."
   rsync -a "$PY_CACHE_ENV/" "$RESOURCES/python/"
+  echo "$STAMP_CONTENT" > "$RESOURCES/python/.babel_stamp"
 fi
 
 PY_VER=$("$RESOURCES/python/bin/python3" --version 2>&1)
