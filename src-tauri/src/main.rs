@@ -6264,13 +6264,16 @@ async fn instalar_actualizacion(app: tauri::AppHandle) -> Result<(), String> {
 async fn seleccionar_cert_p12(app: tauri::AppHandle) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
-        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"));
+        let desktop = dirs::home_dir()
+            .map(|h| h.join("Desktop"))
+            .filter(|p| p.exists())
+            .unwrap_or_else(|| std::path::PathBuf::from("/"));
         let sel = app
             .dialog()
             .file()
             .set_title("Seleccionar certificado digital (.p12 / .pfx)")
             .add_filter("Certificado digital (.p12, .pfx)", &["p12", "pfx", "P12", "PFX"])
-            .set_directory(&home)
+            .set_directory(&desktop)
             .blocking_pick_file();
         let ruta = sel
             .and_then(|fp| fp.into_path().ok())
