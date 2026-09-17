@@ -2782,6 +2782,73 @@ async fn preparar_union_pdfs(
     .map_err(|e| format!("Error interno: {}", e))?
 }
 
+// COMANDO — Cuenta las páginas de un PDF cifrado sin escribir nada al disco.
+#[tauri::command]
+async fn contar_paginas_pdf(
+    app: tauri::AppHandle,
+    ruta: String,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<usize, String> {
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let dirs = pdfium_dirs(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        validar_ruta_en(&ruta, guardados_dir())
+            .or_else(|_| validar_ruta_en(&ruta, archivos_dir()))?;
+        let bytes = descifrar_a_bytes(&ruta, &subclave_hex)
+            .map_err(|_| "No se pudo leer el archivo.".to_string())?;
+        if detectar_ext(&bytes) != "pdf" {
+            return Err("Solo se puede contar páginas de archivos PDF.".into());
+        }
+        let pdfium = pdf_union::pdfium(&dirs)?;
+        pdf_union::contar_paginas(pdfium, &bytes)
+    })
+    .await
+    .map_err(|e| format!("Error interno: {}", e))?
+}
+
+// COMANDO — Extrae páginas seleccionadas de un PDF cifrado y guarda el resultado
+// como un nuevo archivo cifrado en el vault. Todo en memoria, sin escribir en claro.
+#[tauri::command]
+async fn extraer_paginas_pdf(
+    app: tauri::AppHandle,
+    ruta: String,
+    paginas: Vec<u32>,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
+    let dirs = pdfium_dirs(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        validar_ruta_en(&ruta, guardados_dir())
+            .or_else(|_| validar_ruta_en(&ruta, archivos_dir()))?;
+        let bytes = Zeroizing::new(
+            descifrar_a_bytes(&ruta, &subclave_hex)
+                .map_err(|_| "No se pudo leer el archivo.".to_string())?,
+        );
+        if detectar_ext(&bytes) != "pdf" {
+            return Err("Solo se puede extraer páginas de archivos PDF.".into());
+        }
+        let pdfium = pdf_union::pdfium(&dirs)?;
+        let pdf_resultado = Zeroizing::new(pdf_union::extraer(pdfium, &bytes, &paginas)?);
+        let etiqueta = paginas
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join("-");
+        let nombre_final = format!("paginas_{}.pdf", etiqueta);
+        cifrar_y_guardar_desde_bytes(&nombre_final, &pdf_resultado, &subclave_hex, &id_usuario)
+    })
+    .await
+    .map_err(|e| format!("Error interno: {}", e))?
+}
+
 // COMANDO — Une los PDFs (en el orden dado) y guarda el resultado cifrado en el
 // buzón. Corre en spawn_blocking para no bloquear la UI y emite "progreso-union".
 #[tauri::command]
@@ -6558,6 +6625,8 @@ fn main() {
             abrir_carpeta_guardados,
             mover_archivo_guardado,
             preparar_union_pdfs,
+            contar_paginas_pdf,
+            extraer_paginas_pdf,
             unir_pdfs,
             convertir_imagenes_a_pdf,
             obtener_usuario_con_maestra,

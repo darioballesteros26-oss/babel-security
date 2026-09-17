@@ -19,6 +19,7 @@ b2.toml
 # Modelos de traducción y binarios de build (no van al repo)
 servidor_babel/modelos/
 servidor_babel/modelos_usb/
+src-tauri/modelos_usb/
 src-tauri/binaries/
 
 # Editor directories and files

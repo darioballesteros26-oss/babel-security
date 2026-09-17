@@ -378,10 +378,30 @@
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">◫ VER ARCHIVO</button>
-          <button type="button" id="btn-compartir-sel-g" data-action="compartir-archivo-guardado" class="hidden"
-            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
-            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
-            onmouseleave="this.style.background='transparent'">⇪ COMPARTIR</button>
+          <!-- COMPARTIR — fusiona "Compartir" y "Enviar por email" -->
+          <div id="wrap-compartir-g" class="hidden" style="position:relative;display:inline-block;">
+            <button type="button" id="btn-compartir-sel-g" data-action="toggle-menu-compartir"
+              style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;display:flex;align-items:center;gap:6px;"
+              onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+              onmouseleave="this.style.background='transparent'">⇪ COMPARTIR <span style="font-size:0.5rem;opacity:0.7;">▾</span></button>
+            <div id="menu-compartir-sel" class="hidden" style="position:absolute;top:calc(100% + 6px);left:0;
+              z-index:500;background:#0d0d0d;border:1px solid rgba(212,175,55,0.35);border-radius:6px;
+              padding:4px 0;min-width:190px;box-shadow:0 8px 28px rgba(0,0,0,0.8);">
+              <button type="button" data-action="compartir-archivo-guardado"
+                style="display:block;width:100%;text-align:left;padding:10px 18px;background:transparent;border:none;
+                font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:1.5px;color:#e8e0d0;
+                cursor:pointer;transition:background 0.15s;"
+                onmouseenter="this.style.background='rgba(212,175,55,0.08)'"
+                onmouseleave="this.style.background='transparent'">⇪ Compartir</button>
+              <div style="height:1px;background:rgba(212,175,55,0.1);margin:2px 0;"></div>
+              <button type="button" data-action="enviar-email-seleccion"
+                style="display:block;width:100%;text-align:left;padding:10px 18px;background:transparent;border:none;
+                font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:1.5px;color:#e8e0d0;
+                cursor:pointer;transition:background 0.15s;"
+                onmouseenter="this.style.background='rgba(212,175,55,0.08)'"
+                onmouseleave="this.style.background='transparent'">✉ Enviar por email</button>
+            </div>
+          </div>
           <button type="button" id="btn-unir-pdfs-g" data-action="abrir-union-pdfs" class="hidden"
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
@@ -394,12 +414,12 @@
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
             onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
-          <!-- REDACTAR — aparece al seleccionar un único archivo -->
+          <!-- EDITAR — aparece al seleccionar un único archivo -->
           <div id="wrap-redactar-g" class="hidden" style="position:relative;display:inline-block;">
             <button type="button" id="btn-redactar-g" data-action="toggle-menu-redactar"
               style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;display:flex;align-items:center;gap:6px;"
               onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
-              onmouseleave="this.style.background='transparent'">✍ REDACTAR <span style="font-size:0.5rem;opacity:0.7;">▾</span></button>
+              onmouseleave="this.style.background='transparent'">✍ EDITAR <span style="font-size:0.5rem;opacity:0.7;">▾</span></button>
             <div id="menu-redactar" class="hidden" style="position:absolute;top:calc(100% + 6px);right:0;
               z-index:500;background:#0d0d0d;border:1px solid rgba(212,175,55,0.35);border-radius:6px;
               padding:4px 0;min-width:210px;box-shadow:0 8px 28px rgba(0,0,0,0.8);">
@@ -416,11 +436,15 @@
                 cursor:pointer;transition:background 0.15s;"
                 onmouseenter="this.style.background='rgba(212,175,55,0.08)'"
                 onmouseleave="this.style.background='transparent'">◈ Redactar con Babel</button>
+              <div style="height:1px;background:rgba(212,175,55,0.1);margin:2px 0;"></div>
+              <button type="button" data-action="seleccionar-paginas"
+                style="display:block;width:100%;text-align:left;padding:10px 18px;background:transparent;border:none;
+                font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:1.5px;color:#e8e0d0;
+                cursor:pointer;transition:background 0.15s;"
+                onmouseenter="this.style.background='rgba(212,175,55,0.08)'"
+                onmouseleave="this.style.background='transparent'">⊟ Seleccionar páginas</button>
             </div>
           </div>
-          <button type="button" data-action="enviar-email-seleccion" id="btn-mail-sel-g"
-            class="btn-secundario-oro hidden" style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
-            title="Enviar archivo por email">✉ ENVIAR POR MAIL</button>
           <button type="button" data-action="abrir-importar-guardado" id="ui-importar" class="btn-secundario-oro"
             style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;">+ IMPORTAR</button>
           <button type="button" data-action="abrir-crear-archivo" id="ui-crear-archivo" class="btn-secundario-oro"
@@ -1896,6 +1920,42 @@
           border-radius:2px;
           font-family:'Times New Roman',Times,serif;letter-spacing:1px;">
           CONFIRMAR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL SELECCIONAR PÁGINAS — extrae páginas de un PDF -->
+  <div id="modal-seleccionar-paginas" class="hidden" style="
+    position:fixed;inset:0;background:rgba(0,0,0,0.82);
+    display:flex;align-items:center;justify-content:center;z-index:3000;">
+    <div style="background:#0d0d0d;border:1px solid rgba(212,175,55,0.35);border-radius:6px;
+      padding:28px 30px;width:360px;max-width:92vw;">
+      <h3 style="font-family:'Times New Roman',Times,serif;font-size:0.8rem;letter-spacing:3px;
+        color:var(--dorado);margin:0 0 6px;">SELECCIONAR PÁGINAS</h3>
+      <p id="paginas-doc-info" style="font-size:0.68rem;color:var(--texto-secundario);margin:0 0 18px;min-height:1.2em;"></p>
+      <label style="font-size:0.68rem;letter-spacing:1px;color:#e8e0d0;display:block;margin-bottom:7px;">
+        Páginas a extraer (separadas por coma)
+      </label>
+      <input id="input-paginas" type="text" placeholder="Ej: 2, 16, 17"
+        style="width:100%;box-sizing:border-box;background:#111;border:1px solid rgba(212,175,55,0.3);
+        color:#e8e0d0;padding:9px 12px;border-radius:3px;font-family:'Times New Roman',Times,serif;
+        font-size:0.82rem;outline:none;letter-spacing:1px;"/>
+      <p style="font-size:0.61rem;color:var(--texto-secundario);margin:8px 0 22px;">
+        Solo archivos PDF. El resultado se guardará como un nuevo archivo cifrado.
+      </p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button type="button" data-action="cerrar-modal-paginas"
+          style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;
+          padding:7px 18px;background:transparent;border:1px solid rgba(255,255,255,0.15);
+          color:#888;cursor:pointer;border-radius:2px;transition:background 0.2s;"
+          onmouseenter="this.style.background='rgba(255,255,255,0.05)'"
+          onmouseleave="this.style.background='transparent'">CANCELAR</button>
+        <button type="button" data-action="confirmar-seleccion-paginas"
+          style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:2px;
+          padding:7px 18px;background:transparent;border:1px solid var(--dorado);
+          color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+          onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+          onmouseleave="this.style.background='transparent'">EXTRAER</button>
       </div>
     </div>
   </div>

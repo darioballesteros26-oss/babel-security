@@ -103,6 +103,40 @@ pub fn unir(pdfium: &Pdfium, entradas: &[&[u8]]) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("No se pudo generar el PDF unido: {}", e))
 }
 
+/// Extrae las páginas indicadas (1-based) del PDF `bytes` y devuelve un nuevo PDF en memoria.
+/// `paginas` es una lista de números de página tal como los escribe el usuario (1 = primera).
+/// El orden de las páginas en el resultado sigue el orden del slice `paginas`.
+pub fn extraer(pdfium: &Pdfium, bytes: &[u8], paginas: &[u32]) -> Result<Vec<u8>, String> {
+    if paginas.is_empty() {
+        return Err("Indica al menos una página.".into());
+    }
+    let _g = PDF_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let src = cargar(pdfium, bytes)?;
+    let total = src.pages().len() as u32;
+    for &p in paginas {
+        if p == 0 || p > total {
+            return Err(format!(
+                "La página {} no existe (el documento tiene {} páginas).",
+                p, total
+            ));
+        }
+    }
+    let mut dest = pdfium
+        .create_new_pdf()
+        .map_err(|e| format!("No se pudo crear el PDF: {}", e))?;
+    // copy_pages_from_document acepta "1,3,16,17" (1-indexed, igual que el usuario)
+    let pages_str = paginas
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    dest.pages_mut()
+        .copy_pages_from_document(&src, &pages_str, 0)
+        .map_err(|e| format!("No se pudieron copiar las páginas: {}", e))?;
+    dest.save_to_bytes()
+        .map_err(|e| format!("No se pudo generar el PDF resultante: {}", e))
+}
+
 /// Extrae el texto de cada página de un PDF en memoria (una String por página).
 /// Serializado bajo el mismo lock que el resto de operaciones PDFium.
 #[cfg(test)]

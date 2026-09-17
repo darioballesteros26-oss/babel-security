@@ -580,6 +580,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "confirmar-img-pdf-uno":        void convertirImagenesAPdf("uno"); break;
     case "confirmar-img-pdf-varios":     void convertirImagenesAPdf("varios"); break;
     case "cerrar-modal-img-pdf":         cerrarModalImgAPdf(); break;
+    case "toggle-menu-compartir":        toggleMenuCompartir(); break;
     case "compartir-archivo-guardado":   mostrarMenuCompartir(); break;
     case "cerrar-menu-compartir":        cerrarMenuCompartir(); break;
     case "mas-opciones-compartir":       cerrarMenuCompartir(); compartirDirecto(); break;
@@ -602,6 +603,9 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "toggle-menu-redactar":     toggleMenuRedactar(); break;
     case "redactar-tu-mismo":        void abrirRedaccion("manual"); break;
     case "redactar-con-babel":       void abrirRedaccion("babel"); break;
+    case "seleccionar-paginas":      void abrirModalSeleccionarPaginas(); break;
+    case "cerrar-modal-paginas":     cerrarModalPaginas(); break;
+    case "confirmar-seleccion-paginas": void confirmarSeleccionPaginas(); break;
     case "cerrar-redaccion":         cerrarPantallaRedaccion(); break;
     case "guardar-redaccion":        void guardarRedaccion(); break;
     case "confirmar-guardar-ia": {
@@ -2294,8 +2298,7 @@ function actualizarSeleccionGuardados(): void {
   const todasImagenes = hay && bases.every(b => /\.(png|jpe?g|webp|bmp|tiff?|heic)$/i.test(b));
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.toggle("hidden", !hay);
-  document.getElementById("btn-compartir-sel-g")?.classList.toggle("hidden", !unico);
-  document.getElementById("btn-mail-sel-g")?.classList.toggle("hidden", !unico);
+  document.getElementById("wrap-compartir-g")?.classList.toggle("hidden", !unico);
   document.getElementById("btn-unir-pdfs-g")?.classList.toggle("hidden", seleccionados.length < 2);
   document.getElementById("btn-convertir-img-pdf-g")?.classList.toggle("hidden", !todasImagenes);
   document.getElementById("wrap-redactar-g")?.classList.toggle("hidden", !unico);
@@ -3557,6 +3560,88 @@ function cerrarEditorTiptap(): void {
   document.removeEventListener("click", _cerrarPaletasEditor, true);
   if (_tiptapEditor) { _tiptapEditor.destroy(); _tiptapEditor = null; }
   _editorRutaCifrada = null;
+}
+
+// ── COMPARTIR — dropdown fusionado ───────────────────────────────────────────
+
+function toggleMenuCompartir(): void {
+  const menu = document.getElementById("menu-compartir-sel");
+  if (!menu) return;
+  const abierto = !menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", abierto);
+  if (!abierto) {
+    const cerrarFuera = (ev: MouseEvent) => {
+      if (!(ev.target as HTMLElement).closest("#wrap-compartir-g")) {
+        menu.classList.add("hidden");
+        document.removeEventListener("click", cerrarFuera, true);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", cerrarFuera, { capture: true, once: false }), 0);
+  }
+}
+
+// ── SELECCIONAR PÁGINAS ───────────────────────────────────────────────────────
+
+async function abrirModalSeleccionarPaginas(): Promise<void> {
+  document.getElementById("menu-redactar")?.classList.add("hidden");
+  const cb = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
+  if (!cb) return;
+  const card = cb.closest(".archivo-card") as HTMLElement | null;
+  const ruta = card?.dataset.ruta;
+  const base = (card?.dataset.base ?? "").toLowerCase();
+  if (!ruta) return;
+
+  if (!base.endsWith(".pdf")) {
+    mostrarToast("Solo se pueden seleccionar páginas de archivos PDF.", true);
+    return;
+  }
+
+  const info = document.getElementById("paginas-doc-info");
+  if (info) info.textContent = "Contando páginas…";
+  const input = document.getElementById("input-paginas") as HTMLInputElement | null;
+  if (input) input.value = "";
+  document.getElementById("modal-seleccionar-paginas")?.classList.remove("hidden");
+
+  try {
+    const total = await invoke<number>("contar_paginas_pdf", { ruta });
+    if (info) info.textContent = `El documento tiene ${total} página${total !== 1 ? "s" : ""}.`;
+  } catch (e) {
+    if (info) info.textContent = "";
+    mostrarToast("No se pudo leer el documento: " + String(e), true);
+  }
+}
+
+function cerrarModalPaginas(): void {
+  document.getElementById("modal-seleccionar-paginas")?.classList.add("hidden");
+}
+
+async function confirmarSeleccionPaginas(): Promise<void> {
+  const input = document.getElementById("input-paginas") as HTMLInputElement | null;
+  const texto = input?.value.trim() ?? "";
+  if (!texto) { mostrarToast("Indica al menos una página.", true); return; }
+
+  const paginas: number[] = [];
+  for (const parte of texto.split(",")) {
+    const n = parseInt(parte.trim(), 10);
+    if (!isNaN(n) && n > 0) paginas.push(n);
+  }
+  if (paginas.length === 0) { mostrarToast("No se reconocieron páginas válidas.", true); return; }
+
+  const cb = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
+  if (!cb) { cerrarModalPaginas(); return; }
+  const card = cb.closest(".archivo-card") as HTMLElement | null;
+  const ruta = card?.dataset.ruta ?? "";
+  if (!ruta) return;
+
+  cerrarModalPaginas();
+  mostrarToast("Extrayendo páginas…", false);
+  try {
+    await invoke<string>("extraer_paginas_pdf", { ruta, paginas });
+    mostrarToast("Páginas extraídas y guardadas correctamente.", false);
+    void cargarArchivosGuardados();
+  } catch (e) {
+    mostrarToast("Error al extraer páginas: " + String(e), true);
+  }
 }
 
 // ── REDACCIÓN — vista dividida ────────────────────────────────────────────────
