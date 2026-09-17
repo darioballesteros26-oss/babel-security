@@ -3678,7 +3678,7 @@ async function abrirModalFirma(): Promise<void> {
   const nombreEl  = document.getElementById("firma-cert-nombre");
   const titularEl = document.getElementById("firma-titular");
   if (nombreEl)  nombreEl.textContent  = "";
-  if (titularEl) titularEl.textContent = "";
+  if (titularEl) { titularEl.textContent = ""; titularEl.style.color = "var(--texto-secundario)"; }
   const pwd = document.getElementById("input-password-firma") as HTMLInputElement | null;
   if (pwd) pwd.value = "";
 
@@ -3702,10 +3702,34 @@ async function seleccionarCertP12(): Promise<void> {
     if (btnCert) btnCert.textContent = nombre;
     const nombreEl  = document.getElementById("firma-cert-nombre");
     const titularEl = document.getElementById("firma-titular");
-    if (nombreEl)  nombreEl.textContent  = nombre;
-    if (titularEl) titularEl.textContent = "Introduce la contraseña para ver el titular";
+    if (nombreEl)  nombreEl.textContent = nombre;
+    const pwd = (document.getElementById("input-password-firma") as HTMLInputElement | null)?.value ?? "";
+    if (pwd) {
+      void cargarTitularCert(pwd);
+    } else {
+      if (titularEl) titularEl.textContent = "Introduce la contraseña para ver el titular";
+      document.getElementById("input-password-firma")?.focus();
+    }
   } catch (e) {
     mostrarToast("Error al seleccionar el certificado: " + String(e), true);
+  }
+}
+
+async function cargarTitularCert(password: string): Promise<void> {
+  if (!_rutaCertModal) return;
+  const titularEl = document.getElementById("firma-titular");
+  if (titularEl) titularEl.textContent = "Leyendo certificado…";
+  try {
+    const nombre = await invoke<string>("titular_del_cert", { rutaCert: _rutaCertModal, password });
+    if (titularEl) {
+      titularEl.textContent = `Titular: ${nombre}`;
+      titularEl.style.color = "var(--dorado)";
+    }
+  } catch {
+    if (titularEl) {
+      titularEl.textContent = "Contraseña incorrecta o certificado no válido";
+      titularEl.style.color = "#c0392b";
+    }
   }
 }
 
@@ -7338,6 +7362,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("autologin-btn-activar")?.addEventListener("click", () => cerrarAutologinModal(true));
   document.getElementById("autologin-btn-no")?.addEventListener("click", () => cerrarAutologinModal(false));
   document.getElementById("autologin-btn-no-alt")?.addEventListener("click", () => cerrarAutologinModal(false));
+
+  // Firma digital — cargar titular al salir del campo de contraseña
+  document.getElementById("input-password-firma")?.addEventListener("blur", () => {
+    const pwd = (document.getElementById("input-password-firma") as HTMLInputElement).value;
+    if (_rutaCertModal && pwd !== "") void cargarTitularCert(pwd);
+  });
 
   // Listener seguro para el buscador de fechas del historial (backup del onchange inline)
   document.getElementById("registro-buscar-fecha")?.addEventListener("change", (e) => {
