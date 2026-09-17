@@ -6334,9 +6334,23 @@ async fn firmar_pdf_cifrado(
         .clone();
     tauri::async_runtime::spawn_blocking(move || {
         let password = Zeroizing::new(password);
+        let en_guardados = validar_ruta_en(&ruta_pdf, guardados_dir()).is_ok();
         validar_ruta_en(&ruta_pdf, guardados_dir())
             .or_else(|_| validar_ruta_en(&ruta_pdf, archivos_dir()))?;
-        // 1. Descifrar PDF a RAM
+
+        // 1. Nombre visible desde el nomindex (evita usar el nombre opaco en disco)
+        let nombre_disco = std::path::Path::new(&ruta_pdf)
+            .file_name().unwrap_or_default().to_string_lossy().to_string();
+        let nomindex = if en_guardados { ruta_nomindex_guardados() } else { ruta_nomindex_archivos() };
+        let nombre_visible = nom_cifrado::leer(&nomindex, &subclave_hex)
+            .get(&nombre_disco)
+            .map(|e| e.nombre.clone())
+            .unwrap_or_else(|| "documento.pdf".to_string());
+        let nombre_base = std::path::Path::new(&nombre_visible)
+            .file_stem().and_then(|s| s.to_str()).unwrap_or("documento");
+        let nombre_final = format!("{} firmado.pdf", nombre_base);
+
+        // 2. Descifrar PDF a RAM
         let pdf_bytes = Zeroizing::new(
             descifrar_a_bytes(&ruta_pdf, &subclave_hex)
                 .map_err(|_| "No se pudo descifrar el PDF.".to_string())?,
@@ -6344,22 +6358,23 @@ async fn firmar_pdf_cifrado(
         if detectar_ext(&pdf_bytes) != "pdf" {
             return Err("Solo se pueden firmar archivos PDF.".into());
         }
-        // 2. Leer certificado a RAM
+        // 3. Leer certificado a RAM
         let p12_bytes = Zeroizing::new(
             std::fs::read(&ruta_cert)
                 .map_err(|_| "No se pudo leer el certificado.".to_string())?,
         );
-        // 3. Firmar via servidor Flask (POST /firmar)
+        // 4. Firmar via servidor Flask (POST /firmar)
         let pdf_firmado = Zeroizing::new(
             traductor::firmar_via_servidor(&pdf_bytes, &p12_bytes, &*password)?,
         );
-        // 4. Nombre del archivo firmado: "nombre_firmado.pdf"
-        let nombre_base = std::path::Path::new(&ruta_pdf)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("documento");
-        let nombre_final = format!("{}_firmado.pdf", nombre_base);
-        cifrar_y_guardar_desde_bytes(&nombre_final, &pdf_firmado, &subclave_hex, &id_usuario)
+        // 5. Guardar PDF firmado en vault
+        cifrar_y_guardar_desde_bytes(&nombre_final, &pdf_firmado, &subclave_hex, &id_usuario)?;
+
+        // 6. Eliminar el original sin firmar (evita duplicados)
+        nom_cifrado::eliminar(&nombre_disco, &nomindex, &subclave_hex);
+        let _ = std::fs::remove_file(&ruta_pdf);
+
+        Ok(nombre_final)
     })
     .await
     .map_err(|e| format!("Error interno: {}", e))?
