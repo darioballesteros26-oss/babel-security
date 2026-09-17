@@ -301,7 +301,7 @@ pub async fn iniciar_ia_redaccion(
             "--model",        &modelo_str,
             "--host",         HOST,
             "--port",         &PUERTO.to_string(),
-            "--ctx-size",     "4096",   // 4K basta para docs legales; ahorra ~120 MB KV
+            "--ctx-size",     "8192",   // system+prefijo usan ~4226 tokens; 8K necesario
             "--n-gpu-layers", "99",
             "--threads",      &hilos,
             "--parallel",     "1",
@@ -425,7 +425,7 @@ pub async fn enviar_mensaje_ia(
         .unwrap_or("")
         .to_string();
 
-    Ok(limpiar_thinking(&content))
+    Ok(limpiar_pasos_internos(&limpiar_thinking(&content)))
 }
 
 const SYSTEM_PROMPT: &str = "/no_think Eres Babel, asistente de redacción documental y jurídica. \
@@ -549,12 +549,23 @@ pub async fn enviar_mensaje_ia_stream(
 
         let reader = std::io::BufReader::new(response.into_reader());
 
+        // Buffer por línea para filtrar encabezados de control interno (PASO N, CONTROL FINAL…)
+        // antes de emitir al frontend. Los tokens llegan fragmentados; acumulamos hasta '\n'.
+        let mut line_buf = String::new();
+
         for line in reader.lines() {
             let line = match line {
                 Ok(l) => l,
                 Err(e) => {
                     let msg = format!("Error leyendo stream: {e}");
                     let _ = app.emit("ia-stream-error", &msg);
+                    // Vaciar buffer pendiente antes de salir
+                    if !line_buf.is_empty() && !es_linea_interna(&line_buf) {
+                        let clean = limpiar_md(&line_buf);
+                        if !clean.is_empty() {
+                            let _ = app.emit("ia-token", clean);
+                        }
+                    }
                     return Err(msg);
                 }
             };
@@ -571,15 +582,32 @@ pub async fn enviar_mensaje_ia_stream(
                 // Solo emitir delta.content; delta.reasoning_content es el thinking de Qwen3
                 if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
                     if !content.is_empty() {
-                        let clean = content.replace("**", "").replace("__", "").replace("## ", "").replace("##", "");
-                        if !clean.is_empty() {
-                            let _ = app.emit("ia-token", clean);
+                        for ch in content.chars() {
+                            if ch == '\n' {
+                                if !es_linea_interna(&line_buf) {
+                                    let clean = limpiar_md(&line_buf);
+                                    if !clean.is_empty() {
+                                        let _ = app.emit("ia-token", format!("{clean}\n"));
+                                    }
+                                }
+                                line_buf.clear();
+                            } else {
+                                line_buf.push(ch);
+                            }
                         }
                     }
                 }
                 if json["choices"][0]["finish_reason"].as_str() == Some("stop") {
                     break;
                 }
+            }
+        }
+
+        // Vaciar lo que quede en el buffer al terminar el stream
+        if !line_buf.is_empty() && !es_linea_interna(&line_buf) {
+            let clean = limpiar_md(&line_buf);
+            if !clean.is_empty() {
+                let _ = app.emit("ia-token", clean);
             }
         }
 
@@ -693,4 +721,35 @@ fn limpiar_thinking(texto: &str) -> String {
         }
     }
     resultado.trim().to_string()
+}
+
+// Devuelve true si la línea es un encabezado de control interno (PASO N —, CONTROL FINAL, etc.)
+// que el modelo no debería revelar al usuario según NUNCA 10.
+fn es_linea_interna(linea: &str) -> bool {
+    let t = linea.trim();
+    if t.is_empty() {
+        return false;
+    }
+    t.starts_with("[CONTROL OBLIGATORIO")
+        || t.starts_with("CONTROL FINAL")
+        || t.starts_with("COMPROBACIÓN A")
+        || t.starts_with("COMPROBACIÓN B")
+        || (t.starts_with("PASO ")
+            && t.as_bytes().get(5).map(|b| b.is_ascii_digit()).unwrap_or(false))
+}
+
+// Elimina markdown básico (negrita, subrayado, encabezados ##).
+fn limpiar_md(s: &str) -> String {
+    s.replace("**", "").replace("__", "").replace("## ", "").replace("##", "")
+}
+
+// Elimina líneas de control interno del texto completo (ruta no-streaming).
+fn limpiar_pasos_internos(texto: &str) -> String {
+    texto
+        .lines()
+        .filter(|l| !es_linea_interna(l))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
 }
