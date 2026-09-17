@@ -581,7 +581,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "confirmar-img-pdf-varios":     void convertirImagenesAPdf("varios"); break;
     case "cerrar-modal-img-pdf":         cerrarModalImgAPdf(); break;
     case "toggle-menu-compartir":        toggleMenuCompartir(); break;
-    case "compartir-archivo-guardado":   mostrarMenuCompartir(); break;
+    case "compartir-archivo-guardado":   cerrarMenuCompartirSel(); mostrarMenuCompartir(); break;
     case "cerrar-menu-compartir":        cerrarMenuCompartir(); break;
     case "mas-opciones-compartir":       cerrarMenuCompartir(); compartirDirecto(); break;
     case "cerrar-onboarding-compartir":  void cerrarOnboardingCompartir(); break;
@@ -711,6 +711,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "seleccionar-archivo-email": seleccionarArchivoEmail(); break;
     case "enviar-email": enviarEmail(); break;
     case "enviar-email-seleccion": {
+      cerrarMenuCompartirSel();
       const sel = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
       if (!sel) break;
       const selCard = sel.closest(".archivo-card") as HTMLElement;
@@ -3564,6 +3565,10 @@ function cerrarEditorTiptap(): void {
 
 // ── COMPARTIR — dropdown fusionado ───────────────────────────────────────────
 
+function cerrarMenuCompartirSel(): void {
+  document.getElementById("menu-compartir-sel")?.classList.add("hidden");
+}
+
 function toggleMenuCompartir(): void {
   const menu = document.getElementById("menu-compartir-sel");
   if (!menu) return;
@@ -3582,6 +3587,9 @@ function toggleMenuCompartir(): void {
 
 // ── SELECCIONAR PÁGINAS ───────────────────────────────────────────────────────
 
+// Captura la ruta al abrir el modal para que confirmar use siempre el mismo archivo.
+let _rutaPaginasModal = "";
+
 async function abrirModalSeleccionarPaginas(): Promise<void> {
   document.getElementById("menu-redactar")?.classList.add("hidden");
   const cb = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
@@ -3596,6 +3604,7 @@ async function abrirModalSeleccionarPaginas(): Promise<void> {
     return;
   }
 
+  _rutaPaginasModal = ruta;
   const info = document.getElementById("paginas-doc-info");
   if (info) info.textContent = "Contando páginas…";
   const input = document.getElementById("input-paginas") as HTMLInputElement | null;
@@ -3606,32 +3615,31 @@ async function abrirModalSeleccionarPaginas(): Promise<void> {
     const total = await invoke<number>("contar_paginas_pdf", { ruta });
     if (info) info.textContent = `El documento tiene ${total} página${total !== 1 ? "s" : ""}.`;
   } catch (e) {
-    if (info) info.textContent = "";
+    cerrarModalPaginas();
     mostrarToast("No se pudo leer el documento: " + String(e), true);
   }
 }
 
 function cerrarModalPaginas(): void {
   document.getElementById("modal-seleccionar-paginas")?.classList.add("hidden");
+  _rutaPaginasModal = "";
 }
 
 async function confirmarSeleccionPaginas(): Promise<void> {
+  const ruta = _rutaPaginasModal;
+  if (!ruta) { cerrarModalPaginas(); return; }
+
   const input = document.getElementById("input-paginas") as HTMLInputElement | null;
   const texto = input?.value.trim() ?? "";
   if (!texto) { mostrarToast("Indica al menos una página.", true); return; }
 
+  const seen = new Set<number>();
   const paginas: number[] = [];
   for (const parte of texto.split(",")) {
     const n = parseInt(parte.trim(), 10);
-    if (!isNaN(n) && n > 0) paginas.push(n);
+    if (!isNaN(n) && n > 0 && !seen.has(n)) { seen.add(n); paginas.push(n); }
   }
   if (paginas.length === 0) { mostrarToast("No se reconocieron páginas válidas.", true); return; }
-
-  const cb = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
-  if (!cb) { cerrarModalPaginas(); return; }
-  const card = cb.closest(".archivo-card") as HTMLElement | null;
-  const ruta = card?.dataset.ruta ?? "";
-  if (!ruta) return;
 
   cerrarModalPaginas();
   mostrarToast("Extrayendo páginas…", false);
@@ -7293,6 +7301,7 @@ document.addEventListener("DOMContentLoaded", () => {
       "modal-renombrar", "modal-solicitud-p2p", "modal-renombrar-archivo",
       "modal-sinc",
       "modal-compartir-onboarding", "modal-menu-compartir", "modal-compartir",
+      "modal-seleccionar-paginas",
     ];
     for (const id of modales) {
       const el = document.getElementById(id);

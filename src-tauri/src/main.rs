@@ -2837,11 +2837,16 @@ async fn extraer_paginas_pdf(
         }
         let pdfium = pdf_union::pdfium(&dirs)?;
         let pdf_resultado = Zeroizing::new(pdf_union::extraer(pdfium, &bytes, &paginas)?);
-        let etiqueta = paginas
-            .iter()
-            .map(|p| p.to_string())
-            .collect::<Vec<_>>()
-            .join("-");
+        let etiqueta = if paginas.len() <= 6 {
+            paginas.iter().map(|p| p.to_string()).collect::<Vec<_>>().join("-")
+        } else {
+            format!(
+                "{}-{}_{}_pags",
+                paginas[0],
+                paginas[paginas.len() - 1],
+                paginas.len()
+            )
+        };
         let nombre_final = format!("paginas_{}.pdf", etiqueta);
         cifrar_y_guardar_desde_bytes(&nombre_final, &pdf_resultado, &subclave_hex, &id_usuario)
     })
