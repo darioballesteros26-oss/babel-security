@@ -341,7 +341,7 @@ for _ref in $(otool -L "$RESOURCES/binaries/llama-server" 2>/dev/null | awk 'NR>
     install_name_tool -change "$_ref" "@rpath/$_ref_name" "$RESOURCES/binaries/llama-server" 2>/dev/null || true
 done
 echo "  ✓ llama-server bundleado ($(du -sh "$RESOURCES/binaries/llama-server" | cut -f1))"
-echo "└─ $(ls "$FRAMEWORKS/"*.dylib 2>/dev/null | wc -l | tr -d ' ') dylibs ($(( SECONDS - T2 ))s)"
+echo "└─ $(find "$FRAMEWORKS" -maxdepth 1 -name "*.dylib" 2>/dev/null | wc -l | tr -d ' ') dylibs ($(( SECONDS - T2 ))s)"
 
 # ── 3. tessdata + modelos + tokenizadores (en paralelo) ─────────────────
 echo ""
@@ -351,7 +351,7 @@ T3=$SECONDS
 
 # tessdata (omite copia si ya hay ≥8 idiomas)
 (
-  _tess_count=$(ls "$RESOURCES/tessdata/"*.traineddata 2>/dev/null | wc -l | tr -d ' ')
+  _tess_count=$(find "$RESOURCES/tessdata" -name "*.traineddata" 2>/dev/null | wc -l | tr -d ' ')
   if [[ $_tess_count -ge 8 ]]; then
     echo "  ✓ tessdata ya presente ($_tess_count idiomas) — omitida copia"
   else
@@ -683,7 +683,7 @@ else
 fi
 
 # tessdata
-TDATA_COUNT=$(ls "$RESOURCES/tessdata/"*.traineddata 2>/dev/null | wc -l | tr -d ' ')
+TDATA_COUNT=$(find "$RESOURCES/tessdata" -name "*.traineddata" 2>/dev/null | wc -l | tr -d ' ')
 if [[ $TDATA_COUNT -lt 7 ]]; then
   echo "  ✗ Solo $TDATA_COUNT idiomas tessdata (esperados ≥7)"
   _smoke_ok=0
