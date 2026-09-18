@@ -318,12 +318,16 @@ for _lib in libllama-server-impl.dylib libllama-common.0.dylib libmtmd.0.dylib l
   [[ -z "$_real" ]] && _real="$LLAMA_LIB_DIR/$_lib"
   if [[ -f "$_real" ]]; then
     _dest_name=$(basename "$_real")
+    # Eliminar symlink o archivo anterior para evitar "Too many levels of symbolic links"
+    rm -f "$FRAMEWORKS/$_dest_name"
     cp "$_real" "$FRAMEWORKS/$_dest_name"
     chmod 755 "$FRAMEWORKS/$_dest_name"
     codesign --remove-signature "$FRAMEWORKS/$_dest_name" 2>/dev/null || true
     install_name_tool -id "@rpath/$_dest_name" "$FRAMEWORKS/$_dest_name" 2>/dev/null || true
-    # También crear el symlink versionado sin patch (libfoo.0.dylib → libfoo.0.X.Y.dylib)
-    ln -sf "$_dest_name" "$FRAMEWORKS/$_lib" 2>/dev/null || true
+    # Symlink base→versionado solo cuando los nombres difieren (evita symlink circular)
+    if [[ "$_lib" != "$_dest_name" ]]; then
+      ln -sf "$_dest_name" "$FRAMEWORKS/$_lib" 2>/dev/null || true
+    fi
   fi
 done
 # Reparchar RPATHs del binario llama-server para apuntar a Frameworks
