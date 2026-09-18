@@ -93,39 +93,56 @@ check_ruta "$BREW/Cellar/tesseract-lang" \
            "tesseract-lang" "brew install tesseract-lang"
 
 # Auto-tier: el servidor elige MADLAD (≥12 GB) o SMaLL-100 (menos) según la RAM del destino.
-# Acepta los modelos en local (SERVIDOR_SRC) O ya presentes en el destino USB (_DEST_MOD).
+# Busca modelos en: 1) servidor_babel/modelos_usb/, 2) src-tauri/modelos_usb/, 3) ya en USB.
+# MADLAD es opcional: si no está, el servidor usa SMaLL-100.
 _DEST_MOD="$USB/Security Babel.app/Contents/Resources/servidor/modelos_usb"
 
+# Devuelve la ruta local donde existe el modelo, o vacío si no se encuentra.
+_buscar_modelo_local() {
+  local nombre="$1" archivo="$2"
+  for _base in \
+    "$SERVIDOR_SRC/modelos_usb" \
+    "$INTERFAZ/src-tauri/modelos_usb" \
+    "$BABEL/modelos_usb"; do
+    [[ -f "$_base/$nombre/$archivo" ]] && echo "$_base/$nombre" && return
+  done
+}
+
 _check_modelo_madlad() {
-  local src="$SERVIDOR_SRC/modelos_usb/madlad400-3b-int8"
-  local dst="$_DEST_MOD/madlad400-3b-int8"
-  if [[ -f "$src/model.bin" && -f "$src/spiece.model" ]]; then
-    echo "  ✓ MADLAD-400-3B int8 ($(du -sh "$src" | cut -f1)) [local]"
+  local src dst
+  src=$(_buscar_modelo_local "madlad400-3b-int8" "model.bin")
+  dst="$_DEST_MOD/madlad400-3b-int8"
+  if [[ -n "$src" && -f "$src/spiece.model" ]]; then
+    echo "  ✓ MADLAD-400-3B int8 ($(du -sh "$src" | cut -f1)) [local: $src]"
+    MADLAD_SRC="$src"
   elif [[ -f "$dst/model.bin" && -f "$dst/spiece.model" ]]; then
     echo "  ✓ MADLAD-400-3B int8 ($(du -sh "$dst" | cut -f1)) [ya en USB — se omite copia]"
     MADLAD_YA_EN_USB=1
   else
-    echo "  ✗ Falta MADLAD-400-3B int8"
-    echo "    → python3 -m ctranslate2.converters.transformers --model google/madlad400-3b-mt --output_dir $src --quantization int8 --force"
-    _prereq_ok=0
+    echo "  ℹ MADLAD-400-3B no encontrado — se usará solo SMaLL-100 (tier 8 GB)"
+    echo "    (opcional: python3 -m ctranslate2.converters.transformers --model google/madlad400-3b-mt --output_dir $SERVIDOR_SRC/modelos_usb/madlad400-3b-int8 --quantization int8 --force)"
   fi
 }
 _check_modelo_small100() {
-  local src="$SERVIDOR_SRC/modelos_usb/small100-int8"
-  local dst="$_DEST_MOD/small100-int8"
-  if [[ -f "$src/model.bin" && -f "$src/sentencepiece.bpe.model" && -f "$src/tokenization_small100.py" ]]; then
-    echo "  ✓ SMaLL-100 int8 ($(du -sh "$src" | cut -f1)) [local]"
+  local src dst
+  src=$(_buscar_modelo_local "small100-int8" "model.bin")
+  dst="$_DEST_MOD/small100-int8"
+  if [[ -n "$src" && -f "$src/sentencepiece.bpe.model" ]]; then
+    echo "  ✓ SMaLL-100 int8 ($(du -sh "$src" | cut -f1)) [local: $src]"
+    SMALL100_SRC="$src"
   elif [[ -f "$dst/model.bin" && -f "$dst/sentencepiece.bpe.model" ]]; then
     echo "  ✓ SMaLL-100 int8 ($(du -sh "$dst" | cut -f1)) [ya en USB — se omite copia]"
     SMALL_YA_EN_USB=1
   else
-    echo "  ✗ Falta SMaLL-100 int8"
-    echo "    → python3 -m ctranslate2.converters.transformers --model alirezamsh/small100 --output_dir $src --quantization int8 --force"
+    echo "  ✗ Falta SMaLL-100 int8 (necesario)"
+    echo "    → python3 -m ctranslate2.converters.transformers --model alirezamsh/small100 --output_dir $SERVIDOR_SRC/modelos_usb/small100-int8 --quantization int8 --force"
     _prereq_ok=0
   fi
 }
 MADLAD_YA_EN_USB=0
 SMALL_YA_EN_USB=0
+MADLAD_SRC=""
+SMALL100_SRC=""
 _check_modelo_madlad
 _check_modelo_small100
 
@@ -346,24 +363,29 @@ T3=$SECONDS
 ) &
 PID_TESS=$!
 
-# Ambos modelos (auto-tier): MADLAD-3B (~2.8 GB) + SMaLL-100 (~330 MB)
-# Si ya están en el USB (MADLAD_YA_EN_USB / SMALL_YA_EN_USB) se omite la copia.
+# Modelos de traducción (auto-tier): MADLAD-3B opcional + SMaLL-100 requerido.
+# Usa las rutas resueltas en el paso 0 (MADLAD_SRC / SMALL100_SRC).
 (
-  for m in madlad400-3b-int8 small100-int8; do
-    _flag=0
-    [[ "$m" == "madlad400-3b-int8" && $MADLAD_YA_EN_USB -eq 1 ]] && _flag=1
-    [[ "$m" == "small100-int8"     && $SMALL_YA_EN_USB  -eq 1 ]] && _flag=1
-    if [[ $_flag -eq 1 ]]; then
-      echo "  ✓ $m ya presente en USB — omitida copia"
-      continue
-    fi
-    rm -rf "$RESOURCES/servidor/modelos_usb/$m"
-    rsync -a --info=progress2 \
-      "$SERVIDOR_SRC/modelos_usb/$m/" \
-      "$RESOURCES/servidor/modelos_usb/$m/" 2>/dev/null || \
-    cp -R "$SERVIDOR_SRC/modelos_usb/$m" "$RESOURCES/servidor/modelos_usb/"
-  done
-  echo "  ✓ MADLAD-3B ($(du -sh "$RESOURCES/servidor/modelos_usb/madlad400-3b-int8" | cut -f1)) + SMaLL-100 ($(du -sh "$RESOURCES/servidor/modelos_usb/small100-int8" | cut -f1))"
+  # MADLAD (opcional)
+  if [[ $MADLAD_YA_EN_USB -eq 1 ]]; then
+    echo "  ✓ MADLAD-3B ya en USB — omitida copia"
+  elif [[ -n "$MADLAD_SRC" ]]; then
+    rm -rf "$RESOURCES/servidor/modelos_usb/madlad400-3b-int8"
+    rsync -a --info=progress2 "$MADLAD_SRC/" \
+      "$RESOURCES/servidor/modelos_usb/madlad400-3b-int8/" 2>/dev/null || \
+    cp -R "$MADLAD_SRC" "$RESOURCES/servidor/modelos_usb/madlad400-3b-int8"
+    echo "  ✓ MADLAD-3B ($(du -sh "$RESOURCES/servidor/modelos_usb/madlad400-3b-int8" | cut -f1))"
+  fi
+  # SMaLL-100 (requerido)
+  if [[ $SMALL_YA_EN_USB -eq 1 ]]; then
+    echo "  ✓ SMaLL-100 ya en USB — omitida copia"
+  elif [[ -n "$SMALL100_SRC" ]]; then
+    rm -rf "$RESOURCES/servidor/modelos_usb/small100-int8"
+    rsync -a --info=progress2 "$SMALL100_SRC/" \
+      "$RESOURCES/servidor/modelos_usb/small100-int8/" 2>/dev/null || \
+    cp -R "$SMALL100_SRC" "$RESOURCES/servidor/modelos_usb/small100-int8"
+    echo "  ✓ SMaLL-100 ($(du -sh "$RESOURCES/servidor/modelos_usb/small100-int8" | cut -f1))"
+  fi
 ) &
 PID_MOD=$!
 
@@ -621,19 +643,17 @@ echo "┌─ [6/6] Verificando integridad..."
 T6=$SECONDS
 _smoke_ok=1
 
-# Modelo MADLAD-3B (tier ≥12 GB): model.bin + tokenizer T5 (spiece.model)
+# Modelo MADLAD-3B (tier ≥12 GB, opcional)
 MADLAD_DIR="$RESOURCES/servidor/modelos_usb/madlad400-3b-int8"
-if [[ ! -f "$MADLAD_DIR/model.bin" ]] || [[ ! -f "$MADLAD_DIR/spiece.model" ]]; then
-  echo "  ✗ MADLAD-3B incompleto (falta model.bin o spiece.model)"
-  _smoke_ok=0
-else
+if [[ -f "$MADLAD_DIR/model.bin" && -f "$MADLAD_DIR/spiece.model" ]]; then
   MADLAD_MB=$(du -m "$MADLAD_DIR/model.bin" | cut -f1)
   if [[ $MADLAD_MB -lt 2500 ]]; then
-    echo "  ✗ MADLAD model.bin parece incompleto (${MADLAD_MB}MB, esperado ≥2500MB)"
-    _smoke_ok=0
+    echo "  ⚠ MADLAD model.bin parece incompleto (${MADLAD_MB}MB, esperado ≥2500MB)"
   else
-    echo "  ✓ MADLAD-400-3B int8 ($(du -sh "$MADLAD_DIR" | cut -f1))"
+    echo "  ✓ MADLAD-400-3B int8 ($(du -sh "$MADLAD_DIR" | cut -f1)) — tier ≥12 GB"
   fi
+else
+  echo "  ℹ MADLAD-400-3B no incluido — USB usará SMaLL-100 en todas las máquinas"
 fi
 
 # Modelo SMaLL-100 (tier 8 GB): model.bin + tokenizer SentencePiece + tokenizer propio
