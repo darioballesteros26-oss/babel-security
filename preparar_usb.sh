@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# preparar_usb.sh — USB autocontenido de Babel Security
+# preparar_usb.sh — USB autocontenido de Babel Security (solo macOS)
 #   Traducción: auto-tier MADLAD-3B (≥12 GB RAM) / SMaLL-100 (8 GB RAM)
 #   IA redacción: Qwen3-4B-Q6_K (llama-server bundleado)
+#   Firma digital: PAdES-B-B vía pyHanko (firma.py)
 #
 # USO:
 #   ./preparar_usb.sh /Volumes/BABEL_USB
@@ -13,12 +14,14 @@
 #   HOMEBREW_PREFIX  — prefijo de Homebrew        (por defecto: /opt/homebrew)
 #
 # PREREQUISITO (solo una vez):
-#   cd ~/Desktop/Babel/babel-interfaz && npm run tauri -- build
+#   TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.babel-update-key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+#     npm run tauri build -- --target aarch64-apple-darwin
 #
 # Contenido del USB (total ~8 GB):
 #   App + dylibs:       ~577 MB (Security Babel.app + Frameworks)
+#   DMG instalación:    ~520 MB (para instalar permanentemente en un Mac)
 #   tessdata:           ~150 MB (8 idiomas Tesseract)
-#   Python + pkgs:      ~450 MB (Flask, CTranslate2, pymupdf, pdf2docx, pymupdf4llm…)
+#   Python + pkgs:      ~440 MB (Flask, CTranslate2, pymupdf, pdf2docx, pyhanko…)
 #   MADLAD-400-3B int8: ~2.8 GB (traducción calidad legal, Apache 2.0 — máquinas ≥12 GB)
 #   SMaLL-100 int8:     ~330 MB (traducción rápida, MIT — máquinas 8 GB; auto-tier)
 #   PaddleOCR-VL-1.5:  ~1.1 GB (OCR avanzado, Apache 2.0; opcional)
@@ -67,7 +70,7 @@ echo "  Babel   : $BABEL"
 echo ""
 
 # ── 0. Prerrequisitos ────────────────────────────────────────────────────
-echo "┌─ [0/7] Comprobando prerrequisitos..."
+echo "┌─ [0/6] Comprobando prerrequisitos..."
 _prereq_ok=1
 check_ruta() {
   local ruta="$1" desc="$2" fix="${3:-}"
@@ -138,6 +141,7 @@ check_ruta "$SERVIDOR_SRC/traduccion_small100.py" "traduccion_small100.py (motor
 check_ruta "$SERVIDOR_SRC/traduccion_comun.py"    "traduccion_comun.py (utilidades compartidas)"
 check_ruta "$SERVIDOR_SRC/pymupdf4llm_extract.py" "pymupdf4llm_extract.py (primera pasada PDF)"
 check_ruta "$SERVIDOR_SRC/md_to_pdf.py"           "md_to_pdf.py (PDF desde Markdown con reportlab)"
+check_ruta "$SERVIDOR_SRC/firma.py"               "firma.py (firma digital PAdES-B-B)"
 
 if [[ $_prereq_ok -eq 0 ]]; then
   echo ""
@@ -155,7 +159,7 @@ mkdir -p "$USB" "$CACHE_DIR"
 
 # ── 1. App compilada ─────────────────────────────────────────────────────
 echo ""
-echo "┌─ [1/7] Buscando app compilada..."
+echo "┌─ [1/6] Buscando app compilada..."
 # Busca primero el build con target explícito (aarch64-apple-darwin), luego el genérico
 APP_SRC=""
 if [[ -d "$INTERFAZ/src-tauri/target/aarch64-apple-darwin/release/bundle/macos" ]]; then
@@ -201,7 +205,7 @@ echo "└─ App lista ($(( SECONDS - T1 ))s)"
 
 # ── 2. dylibs (Tesseract + Leptonica + deps) ────────────────────────────
 echo ""
-echo "┌─ [2/7] Bundleando dylibs..."
+echo "┌─ [2/6] Bundleando dylibs..."
 T2=$SECONDS
 
 declare -a DYLIBS=(
@@ -319,7 +323,7 @@ echo "└─ $(ls "$FRAMEWORKS/"*.dylib 2>/dev/null | wc -l | tr -d ' ') dylibs 
 
 # ── 3. tessdata + modelos + tokenizadores (en paralelo) ─────────────────
 echo ""
-echo "┌─ [3/7] Copiando tessdata, modelos traducción y modelo IA..."
+echo "┌─ [3/6] Copiando tessdata, modelos traducción y modelo IA..."
 echo "  (esto puede tardar varios minutos — ~6 GB en total)"
 T3=$SECONDS
 
@@ -365,10 +369,10 @@ PID_MOD=$!
 
 # Código del servidor (pipeline PDF de doble pasada incluido)
 for f in server.py traduccion_madlad.py traduccion_small100.py traduccion_comun.py \
-          pymupdf4llm_extract.py md_to_pdf.py; do
+          pymupdf4llm_extract.py md_to_pdf.py firma.py; do
   [[ -f "$SERVIDOR_SRC/$f" ]] && cp "$SERVIDOR_SRC/$f" "$RESOURCES/servidor/"
 done
-echo "  ✓ código servidor (6 archivos, pipeline PDF doble pasada)"
+echo "  ✓ código servidor (7 archivos, pipeline PDF + firma PAdES-B-B)"
 
 # Modelo IA: Qwen3-4B-Q6_K (~3.1 GB) — omitir si ya está en el USB
 (
@@ -443,7 +447,7 @@ echo "└─ Todos los recursos copiados ($(( SECONDS - T3 ))s)"
 
 # ── 4. Python portable + paquetes ───────────────────────────────────────
 echo ""
-echo "┌─ [4/7] Python portable + paquetes..."
+echo "┌─ [4/6] Python portable + paquetes..."
 T4=$SECONDS
 
 if [[ "$ARCH" == "arm64" ]]; then
@@ -468,7 +472,6 @@ PAQUETES=(
   "pymupdf4llm>=0.0.20"
   "llama-cpp-python>=0.3.0"
   "pdf2docx>=0.5.0"
-  "pypdfium2>=4.0"
   "reportlab>=4.0"
   "pyhanko>=0.28"
 )
@@ -581,112 +584,40 @@ find "$APP" -name '._*' -delete 2>/dev/null || true
 xattr -rd com.apple.quarantine "$APP" 2>/dev/null || true
 echo "  Bundle firmado"
 
-# ── 6. Launchers ─────────────────────────────────────────────────────────
+# ── 5. DMG ───────────────────────────────────────────────────────────────
 echo ""
-echo "┌─ [5/7] Creando launchers..."
+echo "┌─ [5/6] Copiando DMG de instalación..."
+T5=$SECONDS
 
-# Copiar recursos Windows fuera del .app
-mkdir -p "$USB/win/recursos"
-rsync -a --delete "$RESOURCES/tessdata/"  "$USB/win/recursos/tessdata/"
-# De-dup: los modelos de traducción (~4 GB) NO se copian a Windows. Viven una sola vez
-# dentro del bundle .app y el .bat apunta BABEL_DIR_USB ahí (ahorra ~4 GB en el USB).
-rsync -a --delete --exclude 'modelos_usb' --exclude 'modelos' "$RESOURCES/servidor/"  "$USB/win/recursos/servidor/"
+# Busca el DMG más reciente en el bundle de release
+DMG_SRC=""
+for _dir in \
+  "$INTERFAZ/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg" \
+  "$INTERFAZ/src-tauri/target/release/bundle/dmg"; do
+  _found=$(find "$_dir" -name "*.dmg" -maxdepth 1 2>/dev/null | sort -V | tail -1)
+  [[ -n "$_found" ]] && DMG_SRC="$_found" && break
+done
 
-echo "  ✓ win/recursos/ sincronizado (modelos compartidos desde el bundle, no duplicados)"
+if [[ -n "$DMG_SRC" ]]; then
+  DMG_NAME=$(basename "$DMG_SRC")
+  DMG_DEST="$USB/$DMG_NAME"
+  _dmg_src_size=$(stat -f%z "$DMG_SRC" 2>/dev/null || echo 0)
+  _dmg_dst_size=$(stat -f%z "$DMG_DEST" 2>/dev/null || echo 0)
+  if [[ "$_dmg_src_size" == "$_dmg_dst_size" && $_dmg_dst_size -gt 0 ]]; then
+    echo "  ✓ DMG ya presente ($(du -sh "$DMG_DEST" | cut -f1)) — omitida copia"
+  else
+    echo "  Copiando $DMG_NAME ($(du -sh "$DMG_SRC" | cut -f1))..."
+    cp "$DMG_SRC" "$DMG_DEST"
+    echo "  ✓ $DMG_NAME copiado ($(( SECONDS - T5 ))s)"
+  fi
+else
+  echo "  ⚠ No se encontró ningún DMG — compila con: npm run tauri build"
+fi
+echo "└─ DMG ($(( SECONDS - T5 ))s)"
 
-cat > "$USB/LANZAR_BABEL.bat" << 'WIN_EOF'
-@echo off
-chcp 65001 > nul
-setlocal EnableDelayedExpansion
-
-:: Rutas base (%~dp0 termina siempre en \)
-set "USB=%~dp0"
-set "WIN_EXE=%USB%win\babel-interfaz.exe"
-set "PYWIN=%USB%win\python_win\python.exe"
-set "SERVIDOR=%USB%win\recursos\servidor\server.py"
-:: Modelos de traducción compartidos: viven UNA sola vez dentro del bundle .app
-:: (no duplicados en win\). Se localiza la carpeta .app dinámicamente.
-:: Modelos compartidos desde el bundle .app (traducción + OCR), no duplicados en win\.
-set "APP_SRV="
-for /d %%A in ("%USB%*.app") do set "APP_SRV=%%A\Contents\Resources\servidor"
-set "USB_MOD=%APP_SRV%\modelos_usb"
-set "LOG=%USB%win\servidor_log.txt"
-
-if not exist "%WIN_EXE%" (
-  echo [ERROR] Falta win\babel-interfaz.exe
-  echo         Compila en Windows con: cargo tauri build
-  pause & exit /b 1
-)
-if not exist "%PYWIN%" (
-  echo [ERROR] Falta win\python_win\python.exe
-  echo         Descarga Python 3.12 embeddable de python.org y ponlo en win\python_win\
-  pause & exit /b 1
-)
-if not exist "%SERVIDOR%" (
-  echo [ERROR] Falta el servidor. Regenera el USB con preparar_usb.sh
-  pause & exit /b 1
-)
-if not exist "%USB_MOD%\" (
-  echo [ERROR] No se encontraron los modelos en el bundle .app
-  echo         La carpeta *.app debe estar en la raiz del USB (modelos compartidos)
-  pause & exit /b 1
-)
-
-:: Token aleatorio de 32 hex
-for /f "delims=" %%i in ('powershell -NoProfile -Command "[guid]::NewGuid().ToString(\"N\")"') do set "BABEL_NLLB_TOKEN=babel_%%i"
-
-:: Entorno (comillas en todas las rutas para soportar espacios)
-set "TESSDATA_PREFIX=%USB%win\recursos\tessdata"
-set "TRANSFORMERS_OFFLINE=1"
-set "HF_DATASETS_OFFLINE=1"
-set "TOKENIZERS_PARALLELISM=false"
-set "BABEL_DIR_USB=%USB_MOD%"
-set "BABEL_DIR_MODELOS=%APP_SRV%\modelos"
-set "PATH=%USB%win\python_win;%PATH%"
-
-:: Arrancar servidor en segundo plano; log en win\servidor_log.txt
-echo Iniciando servidor Babel (auto-tier MADLAD/SMaLL-100 segun RAM)...
-start /B "" cmd /c ""%PYWIN%" "%SERVIDOR%" >> "%LOG%" 2>&1"
-
-:: Esperar hasta que el puerto 5002 responda (máx. 90 s, sondeo cada 2 s)
-echo Esperando servidor...
-set "_LISTO=0"
-for /L %%i in (1,1,45) do (
-  if "!_LISTO!" == "0" (
-    powershell -NoProfile -Command "try{$c=New-Object Net.Sockets.TcpClient;$c.Connect('127.0.0.1',5002);$c.Close();exit 0}catch{exit 1}" >nul 2>&1
-    if !ERRORLEVEL! == 0 set "_LISTO=1"
-    if "!_LISTO!" == "0" timeout /t 2 /nobreak >nul
-  )
-)
-if "!_LISTO!" == "0" (
-  echo.
-  echo [ERROR] El servidor no respondio en 90 segundos.
-  echo         Revisa el log: %LOG%
-  pause & exit /b 1
-)
-
-:: Lanzar app y esperar a que el usuario la cierre
-echo Servidor listo. Abriendo Babel Security...
-start /WAIT "" "%WIN_EXE%"
-
-:: Apagar el servidor al cerrar la app
-echo Cerrando servidor...
-taskkill /F /IM python.exe >nul 2>&1
-
-endlocal
-WIN_EOF
-echo "  ✓ LANZAR_BABEL.bat"
-
-cat > "$USB/autorun.inf" << 'INF_EOF'
-[autorun]
-label=Babel Security
-icon=babel Security.app\Contents\Resources\icon.ico
-INF_EOF
-echo "└─ Launchers creados"
-
-# ── 7. Smoke test ────────────────────────────────────────────────────────
+# ── 6. Smoke test ────────────────────────────────────────────────────────
 echo ""
-echo "┌─ [6/7] Verificando integridad..."
+echo "┌─ [6/6] Verificando integridad..."
 T6=$SECONDS
 _smoke_ok=1
 
@@ -790,14 +721,14 @@ else
   echo "  ✓ llama-server bundleado"
 fi
 
-# Archivos servidor
-for f in server.py traduccion_madlad.py traduccion_small100.py traduccion_comun.py; do
+# Archivos servidor (incluye firma.py para PAdES-B-B)
+for f in server.py traduccion_madlad.py traduccion_small100.py traduccion_comun.py firma.py; do
   if [[ ! -f "$RESOURCES/servidor/$f" ]]; then
     echo "  ✗ Falta servidor/$f"
     _smoke_ok=0
   fi
 done
-echo "  ✓ Archivos servidor presentes"
+echo "  ✓ Archivos servidor presentes (incluye firma.py)"
 
 if [[ $_smoke_ok -eq 1 ]]; then
   echo "└─ Integridad OK ($(( SECONDS - T6 ))s)"
@@ -815,17 +746,18 @@ echo "╚═══════════════════════�
 echo ""
 printf "  %-22s %s\n" "Tiempo total:"    "${T_FINAL}s (~$((T_FINAL/60))m $((T_FINAL%60))s)"
 printf "  %-22s %s\n" "Tamaño USB:"      "$USB_SIZE"
-printf "  %-22s %s\n" "Traducción:" "MADLAD-3B (≥12GB) / SMaLL-100 (8GB) — auto"
-printf "  %-22s %s\n" "IA redacción:" "Qwen3-4B-Q6_K + llama-server bundleado"
+printf "  %-22s %s\n" "Traducción:"      "MADLAD-3B (≥12GB) / SMaLL-100 (8GB) — auto"
+printf "  %-22s %s\n" "IA redacción:"    "Qwen3-4B-Q6_K + llama-server bundleado"
+printf "  %-22s %s\n" "Firma digital:"   "PAdES-B-B vía pyHanko (firma.py)"
 printf "  %-22s %s\n" "Caché Python:"    "$CACHE_DIR"
 echo ""
 echo "  Contenido USB:"
 ls -1 "$USB"
 echo ""
-echo "  macOS   → doble clic en ${APP_NAME}"
-echo "            (1ª vez: clic derecho → Abrir para pasar Gatekeeper)"
-echo "            El servidor arranca solo y elige modelo según la RAM."
-echo "  Windows → doble clic en LANZAR_BABEL.bat"
-echo "            (requiere añadir win/babel-interfaz.exe y win/python_win/)"
+echo "  Usar en macOS:"
+echo "    Ejecutar directamente → doble clic en ${APP_NAME}"
+echo "      (1ª vez: clic derecho → Abrir para pasar Gatekeeper)"
+echo "      El servidor arranca solo y elige modelo según la RAM."
+echo "    Instalar en este Mac  → abrir el .dmg y arrastrar al Dock/Aplicaciones"
 echo ""
 echo "  NOTA: La próxima vez este script tardará ~3-5 min (Python cacheado)"
