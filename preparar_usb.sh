@@ -603,13 +603,22 @@ echo "└─ $PY_VER listo ($(( SECONDS - T4 ))s)"
 
 # ── 5. Firma del bundle ──────────────────────────────────────────────────
 echo ""
-echo "  Limpiando AppleDouble y firmando bundle..."
-find "$APP" -name '._*' -delete 2>/dev/null || true
-codesign -f -s - --deep "$APP" 2>&1 | grep -v "^$" | head -3 || \
-  echo "  Aviso: codesign con error (puede ser normal en exFAT)"
+echo "  Limpiando AppleDouble, quarantine y firmando bundle..."
 find "$APP" -name '._*' -delete 2>/dev/null || true
 xattr -rd com.apple.quarantine "$APP" 2>/dev/null || true
-echo "  Bundle firmado"
+# Firmar componentes primero (--deep falla con .gguf y Python — los saltamos)
+for _lib in "$FRAMEWORKS/"*.dylib; do
+  codesign --force -s - "$_lib" 2>/dev/null || true
+done
+codesign --force -s - "$RESOURCES/binaries/llama-server" 2>/dev/null || true
+codesign --force -s - "$BINARY" 2>/dev/null || true
+# Firmar el bundle sin --deep (componentes ya firmados arriba)
+if codesign --force -s - --options runtime "$APP" 2>/dev/null; then
+  echo "  ✓ Bundle firmado correctamente"
+else
+  echo "  Aviso: firma ad-hoc con advertencias (normal sin Apple Developer cert)"
+fi
+find "$APP" -name '._*' -delete 2>/dev/null || true
 
 # ── 5. DMG ───────────────────────────────────────────────────────────────
 echo ""
