@@ -104,8 +104,9 @@ _buscar_modelo_local() {
     "$SERVIDOR_SRC/modelos_usb" \
     "$INTERFAZ/src-tauri/modelos_usb" \
     "$BABEL/modelos_usb"; do
-    [[ -f "$_base/$nombre/$archivo" ]] && echo "$_base/$nombre" && return
+    [[ -f "$_base/$nombre/$archivo" ]] && echo "$_base/$nombre" && return 0
   done
+  return 0
 }
 
 _check_modelo_madlad() {
