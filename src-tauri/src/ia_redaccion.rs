@@ -20,7 +20,7 @@ pub fn matar_llama_si_activo() {
     }
     #[cfg(unix)]
     unsafe {
-        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        libc::kill(pid as libc::pid_t, libc::SIGKILL);
     }
     #[cfg(windows)]
     {
@@ -54,7 +54,7 @@ fn detectar_fechas_imposibles(texto: &str) -> Vec<String> {
                     // Captura el fragmento original (no lowercased) para la alerta
                     let frag_start = abs.saturating_sub(3);
                     let frag_end = (abs + patron.len() + 5).min(texto.len());
-                    alertas.push(format!("\"{}\" ({}\" tiene máximo {} días)", texto[frag_start..frag_end].trim(), mes, max_dias));
+                    alertas.push(format!("\"{}\" ({} tiene máximo {} días)", texto[frag_start..frag_end].trim(), mes, max_dias));
                 }
             }
             pos = abs + patron.len();
@@ -298,11 +298,20 @@ pub async fn iniciar_ia_redaccion(
         return Err(msg);
     }
 
-    // Matar proceso anterior si existía
+    // Matar proceso anterior si existía en esta sesión
     if let Some(mut p) = state.proceso.lock().await.take() {
         let _ = p.kill().await;
         LLAMA_PID.store(0, Ordering::Release);
         sleep(Duration::from_millis(500)).await;
+    }
+    // Matar cualquier llama-server huérfano de sesiones anteriores que ocupe el puerto
+    let puerto_ia_ocupado = std::net::TcpStream::connect_timeout(
+        &format!("{}:{}", HOST, PUERTO).parse::<std::net::SocketAddr>().unwrap(),
+        std::time::Duration::from_millis(300),
+    ).is_ok();
+    if puerto_ia_ocupado {
+        let _ = std::process::Command::new("pkill").args(["-KILL", "-f", "llama-server"]).output();
+        sleep(Duration::from_millis(1500)).await;
     }
 
     *state.estado.lock().await = "cargando".into();
@@ -313,12 +322,13 @@ pub async fn iniciar_ia_redaccion(
     let hilos = num_cpus::get().min(4).to_string();
     let modelo_str = modelo.to_string_lossy().to_string();
     let llama_bin = ruta_llama_server(&app);
+    let puerto_str = PUERTO.to_string();
 
-    let child = Command::new(llama_bin)
+    let child = match Command::new(llama_bin)
         .args([
             "--model",        &modelo_str,
             "--host",         HOST,
-            "--port",         &PUERTO.to_string(),
+            "--port",         &puerto_str,
             "--ctx-size",     "8192",   // system+prefijo usan ~4226 tokens; 8K necesario
             "--n-gpu-layers", "99",
             "--threads",      &hilos,
@@ -330,15 +340,14 @@ pub async fn iniciar_ia_redaccion(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| {
+    {
+        Ok(c) => c,
+        Err(e) => {
             let msg = format!("No se pudo arrancar llama-server: {e}");
-            // Si falla el spawn, actualizar estado para no quedar en "cargando"
-            // (no podemos await aquí, usamos try_lock como mejor esfuerzo)
-            if let Ok(mut est) = state.estado.try_lock() {
-                *est = format!("error:{msg}");
-            }
-            msg
-        })?;
+            *state.estado.lock().await = format!("error:{msg}");
+            return Err(msg);
+        }
+    };
 
     // Registrar PID antes de mover el child al Mutex para que rat_detector pueda
     // matarlo de forma síncrona sin necesitar acceso al estado Tauri.
@@ -347,8 +356,8 @@ pub async fn iniciar_ia_redaccion(
     }
     *state.proceso.lock().await = Some(child);
 
-    // Esperar respuesta — hasta 2 minutos (carga inicial del modelo)
-    for _ in 0..60u32 {
+    // Esperar respuesta — hasta 5 minutos (desde USB Qwen 3.1 GB puede tardar más)
+    for _ in 0..150u32 {
         sleep(Duration::from_millis(2000)).await;
 
         // Salir limpiamente si alguien llamó parar_ia_redaccion mientras cargaba
@@ -368,7 +377,7 @@ pub async fn iniciar_ia_redaccion(
         LLAMA_PID.store(0, Ordering::Release);
     }
     let msg = format!(
-        "El modelo no respondió en 2 minutos. Comprueba que {} existe y hay suficiente RAM.",
+        "El modelo no respondió en 5 minutos. Comprueba que {} existe y hay suficiente RAM.",
         modelo.display()
     );
     *state.estado.lock().await = format!("error:{msg}");
@@ -420,6 +429,7 @@ pub async fn enviar_mensaje_ia(
         ],
         "temperature": 0.3,
         "max_tokens": 2048,
+        "repeat_penalty": 1.15,
         "stream": false
     });
 
@@ -446,7 +456,9 @@ pub async fn enviar_mensaje_ia(
         .unwrap_or("")
         .to_string();
 
-    Ok(limpiar_pasos_internos(&limpiar_thinking(&content)))
+    // Aplicar el mismo pipeline de limpieza que el modo streaming
+    let limpio = limpiar_pasos_internos(&limpiar_thinking(&content));
+    Ok(limpio.lines().map(limpiar_md).collect::<Vec<_>>().join("\n").trim().to_string())
 }
 
 const SYSTEM_PROMPT: &str = "/no_think Eres Babel, asistente de redacción documental y jurídica. \
@@ -573,6 +585,10 @@ pub async fn enviar_mensaje_ia_stream(
         // Buffer por línea para filtrar encabezados de control interno (PASO N, CONTROL FINAL…)
         // antes de emitir al frontend. Los tokens llegan fragmentados; acumulamos hasta '\n'.
         let mut line_buf = String::new();
+        // Estado para filtrar bloques <think>…</think> en streaming.
+        // Qwen3 puede emitirlos incluso con /no_think activo; los acumulamos sin emitir.
+        let mut en_think = false;
+        let mut think_buf = String::new();
 
         for line in reader.lines() {
             let line = match line {
@@ -580,8 +596,8 @@ pub async fn enviar_mensaje_ia_stream(
                 Err(e) => {
                     let msg = format!("Error leyendo stream: {e}");
                     let _ = app.emit("ia-stream-error", &msg);
-                    // Vaciar buffer pendiente antes de salir
-                    if !line_buf.is_empty() && !es_linea_interna(&line_buf) {
+                    // Vaciar buffer pendiente antes de salir (solo si no estamos en bloque think)
+                    if !en_think && !line_buf.is_empty() && !es_linea_interna(&line_buf) {
                         let clean = limpiar_md(&line_buf);
                         if !clean.is_empty() {
                             let _ = app.emit("ia-token", clean);
@@ -603,17 +619,62 @@ pub async fn enviar_mensaje_ia_stream(
                 // Solo emitir delta.content; delta.reasoning_content es el thinking de Qwen3
                 if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
                     if !content.is_empty() {
-                        for ch in content.chars() {
-                            if ch == '\n' {
-                                if !es_linea_interna(&line_buf) {
-                                    let clean = limpiar_md(&line_buf);
-                                    if !clean.is_empty() {
-                                        let _ = app.emit("ia-token", format!("{clean}\n"));
-                                    }
+                        // Acumular el contenido recibido en el buffer de thinking para detectar
+                        // <think> / </think> que pueden llegar partidos entre varios chunks.
+                        think_buf.push_str(content);
+
+                        // Procesar think_buf: extraer partes fuera de <think>…</think>
+                        loop {
+                            if en_think {
+                                // Buscamos </think> para salir del bloque
+                                if let Some(fin) = think_buf.find("</think>") {
+                                    think_buf = think_buf[fin + "</think>".len()..].to_string();
+                                    en_think = false;
+                                } else {
+                                    // Todavía dentro del bloque — descartar y esperar más datos
+                                    think_buf.clear();
+                                    break;
                                 }
-                                line_buf.clear();
                             } else {
-                                line_buf.push(ch);
+                                // Buscamos <think> para entrar en el bloque
+                                if let Some(inicio) = think_buf.find("<think>") {
+                                    // Emitir lo que haya ANTES del <think>
+                                    let antes = think_buf[..inicio].to_string();
+                                    think_buf = think_buf[inicio + "<think>".len()..].to_string();
+                                    en_think = true;
+                                    // Procesar 'antes' carácter a carácter
+                                    for ch in antes.chars() {
+                                        if ch == '\n' {
+                                            if !es_linea_interna(&line_buf) {
+                                                let clean = limpiar_md(&line_buf);
+                                                if !clean.is_empty() {
+                                                    let _ = app.emit("ia-token", format!("{clean}\n"));
+                                                }
+                                            }
+                                            line_buf.clear();
+                                        } else {
+                                            line_buf.push(ch);
+                                        }
+                                    }
+                                } else {
+                                    // No hay <think>: procesar todo carácter a carácter
+                                    let chunk = think_buf.clone();
+                                    think_buf.clear();
+                                    for ch in chunk.chars() {
+                                        if ch == '\n' {
+                                            if !es_linea_interna(&line_buf) {
+                                                let clean = limpiar_md(&line_buf);
+                                                if !clean.is_empty() {
+                                                    let _ = app.emit("ia-token", format!("{clean}\n"));
+                                                }
+                                            }
+                                            line_buf.clear();
+                                        } else {
+                                            line_buf.push(ch);
+                                        }
+                                    }
+                                    break;
+                                }
                             }
                         }
                     }
@@ -624,8 +685,8 @@ pub async fn enviar_mensaje_ia_stream(
             }
         }
 
-        // Vaciar lo que quede en el buffer al terminar el stream
-        if !line_buf.is_empty() && !es_linea_interna(&line_buf) {
+        // Vaciar lo que quede en el buffer al terminar el stream (si no estamos en bloque think)
+        if !en_think && !line_buf.is_empty() && !es_linea_interna(&line_buf) {
             let clean = limpiar_md(&line_buf);
             if !clean.is_empty() {
                 let _ = app.emit("ia-token", clean);
@@ -726,10 +787,39 @@ mod tests {
         assert!(!resultado.contains("PARADA INMEDIATA"), "sin alerta no debe incluir PARADA INMEDIATA");
     }
 
+    // ── limpiar_thinking ────────────────────────────────────────────────
+    #[test]
+    fn thinking_completo_eliminado() {
+        let r = limpiar_thinking("Hola <think>esto es interno</think> mundo");
+        assert_eq!(r, "Hola  mundo".trim_end_matches(' ').trim());
+    }
+
+    #[test]
+    fn thinking_sin_cierre_trunca_desde_apertura() {
+        let r = limpiar_thinking("Texto visible <think>razonamiento sin cerrar");
+        assert_eq!(r, "Texto visible");
+    }
+
+    #[test]
+    fn thinking_multiple_bloques() {
+        let r = limpiar_thinking("<think>a</think>res<think>b</think>puesta");
+        assert_eq!(r, "respuesta");
+    }
+
+    #[test]
+    fn alerta_fecha_digito_sin_comilla_suelta() {
+        let alertas = detectar_fechas_imposibles("31 de febrero de 2025");
+        assert!(!alertas.is_empty());
+        // No debe contener comilla suelta: '("' seguido de letra
+        assert!(!alertas[0].contains("(\""), "el mensaje de alerta no debe tener comilla suelta");
+    }
+
 }
 
 // Qwen3 puede incluir <think>…</think> aunque /no_think esté activo.
 // Elimina todos los bloques (puede haber más de uno).
+// Si la etiqueta de apertura existe pero la de cierre falta (respuesta truncada),
+// elimina desde <think> hasta el final del texto para evitar filtrar el razonamiento.
 fn limpiar_thinking(texto: &str) -> String {
     let mut resultado = texto.to_string();
     loop {
@@ -737,6 +827,11 @@ fn limpiar_thinking(texto: &str) -> String {
             (Some(i), Some(j)) if i < j => {
                 let fin = j + "</think>".len();
                 resultado = format!("{}{}", &resultado[..i], &resultado[fin..]);
+            }
+            (Some(i), _) => {
+                // Etiqueta de cierre ausente — truncar desde <think>
+                resultado = resultado[..i].to_string();
+                break;
             }
             _ => break,
         }
