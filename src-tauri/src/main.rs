@@ -1182,6 +1182,17 @@ fn traducir_texto(
 
     let par = idioma_a_par(&idioma)?;
 
+    // Si el servidor fue lanzado por nosotros (estado 2) intentamos la IA.
+    // Si falla, devolvemos el error en claro (no fallback silencioso al diccionario)
+    // para que el usuario sepa que el traductor no está funcionando.
+    let servidor_activo = SERVIDOR_ESTADO.load(std::sync::atomic::Ordering::Relaxed) == 2;
+    if servidor_activo {
+        match traductor::traducir_via_servidor(&texto, par) {
+            Ok(traduccion) => return Ok((traduccion, 0)),
+            Err(e) => return Err(format!("El traductor no pudo procesar el texto: {e}")),
+        }
+    }
+
     let (resultado, sin_traducir) =
         traductor::traducir_inteligente(&texto, &dict, &subclave_hex, par);
     Ok((resultado, sin_traducir))
@@ -2007,11 +2018,26 @@ struct HerramientasPdf {
 
 #[tauri::command]
 fn verificar_herramientas_pdf() -> HerramientasPdf {
-    let pdf2docx = std::process::Command::new("python3")
-        .args(["-c", "import pdf2docx"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+    // Buscar python que tenga pdf2docx: bundled primero, sin bare "python3" (evita diálogo Xcode).
+    let _bundled = std::env::current_exe().ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+        .and_then(|d| d.parent().map(|p| p.to_path_buf()))
+        .map(|c| c.join("Resources").join("python").join("bin").join("python3"));
+    let pdf2docx = [_bundled.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(|p| p.to_string_lossy().into_owned())
+        .chain([
+            "/opt/homebrew/bin/python3".to_string(),
+            "/usr/local/bin/python3".to_string(),
+        ])
+        .any(|p| {
+            std::process::Command::new(&p)
+                .args(["-c", "import pdf2docx"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        });
 
     let libreoffice = [
         "/opt/homebrew/bin/soffice",
@@ -4173,14 +4199,21 @@ fn ia_pdftotext(ruta: &str) -> Result<String, String> {
         break;
     }
     // Fallback: pymupdf4llm (mejor calidad, pero requiere Python)
-    const PYTHONS: &[&str] = &[
-        "/opt/homebrew/bin/python3",
-        "/usr/local/bin/python3",
-        "/usr/bin/python3",
-        "python3",
-    ];
-    for py in PYTHONS {
-        let existe = !py.contains('/') || std::path::Path::new(py).exists();
+    // Evitar /usr/bin/python3 — en macOS sin Xcode CLT es un stub que dispara
+    // el diálogo "Instalar herramientas de desarrollador". Solo rutas reales.
+    let _bundled_ia = std::env::current_exe().ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+        .and_then(|d| d.parent().map(|p| p.to_path_buf()))
+        .map(|c| c.join("Resources").join("python").join("bin").join("python3"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let _pythons_ia: Vec<&str> = [_bundled_ia.as_str(), "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
+        .iter()
+        .filter(|p| !p.is_empty() && std::path::Path::new(p).exists())
+        .copied()
+        .collect();
+    for py in &_pythons_ia {
+        let existe = std::path::Path::new(py).exists();
         if !existe { continue; }
         if let Ok(out) = std::process::Command::new(py)
             .args([
@@ -6401,6 +6434,9 @@ fn main() {
                 let _ = c.kill();
             }
         }
+        // PyInstaller --onefile hace fork: el PID almacenado es el bootstrap,
+        // el proceso hijo real queda huérfano. pkill -f lo captura.
+        let _ = std::process::Command::new("pkill").args(["-KILL", "-f", "servidor_babel"]).output();
         prev_hook(info);
     }));
 
@@ -6498,7 +6534,24 @@ fn main() {
                 res.join("python").join("bin").join("python3").exists()
                     && res.join("servidor").join("server.py").exists()
             }).unwrap_or(false);
-            // Puerto libre = no hay servidor externo arrancado en modo dev
+            // Si el puerto 5002 está ocupado por un servidor_babel huérfano de una
+            // sesión anterior (cierre forzado, crash, etc.), lo matamos para poder
+            // arrancar uno nuevo con el token de esta sesión.
+            let puerto_ocupado = std::net::TcpStream::connect_timeout(
+                &"127.0.0.1:5002".parse::<std::net::SocketAddr>().unwrap(),
+                std::time::Duration::from_millis(300),
+            ).is_ok();
+            if puerto_ocupado && (sidecar_exists || legacy_exists) {
+                // SIGKILL (no SIGTERM) para garantizar que el proceso PyInstaller muere
+                // en <100 ms; SIGTERM puede tardar segundos si el servidor está cargando
+                // el modelo y provocaría que el siguiente check de puerto aún lo vea activo.
+                let _ = std::process::Command::new("pkill")
+                    .args(["-KILL", "-f", "servidor_babel"])
+                    .output();
+                // Dar tiempo a que el kernel libere el puerto (normalmente <200 ms)
+                std::thread::sleep(std::time::Duration::from_millis(1200));
+                log::info!("[Servidor] Puerto 5002 liberado — servidor huérfano eliminado");
+            }
             let puerto_libre = std::net::TcpStream::connect_timeout(
                 &"127.0.0.1:5002".parse::<std::net::SocketAddr>().unwrap(),
                 std::time::Duration::from_millis(300),
@@ -6513,11 +6566,13 @@ fn main() {
                 // Resolver dónde están los modelos en orden de preferencia:
                 // 1. ~/Babel/modelos_usb  (instalación estándar / usuario)
                 // 2. {exe_dir}/modelos_usb (USB o dev con symlink)
-                // 3. {resources}/modelos_usb (bundle con modelos integrados)
+                // 3. {resources}/servidor/modelos_usb (puesto por preparar_usb.sh)
+                // 4. {resources}/modelos_usb (bundle con modelos integrados)
                 // Si ninguno existe, se omite BABEL_DIR_USB y el servidor usa su default.
                 let modelos_dir: Option<std::path::PathBuf> = [
                     Some(babel_dir().join("modelos_usb")),
                     exe_dir.as_ref().map(|d| d.join("modelos_usb")),
+                    app.path().resource_dir().ok().map(|r| r.join("servidor").join("modelos_usb")),
                     app.path().resource_dir().ok().map(|r| r.join("modelos_usb")),
                 ]
                 .into_iter()
@@ -6572,12 +6627,21 @@ fn main() {
                             let mut listo = false;
                             for _ in 0..120 {
                                 std::thread::sleep(std::time::Duration::from_secs(2));
+                                // Verificar con HTTP /ping (no solo TCP) para saber que
+                                // Flask está respondiendo, no solo que el proceso existe.
                                 if std::net::TcpStream::connect_timeout(&addr, tc).is_ok() {
-                                    log::info!("[Servidor] listo en 127.0.0.1:5002");
-                                    SERVIDOR_ESTADO.store(2, std::sync::atomic::Ordering::Relaxed);
-                                    let _ = handle.emit("servidor-usb-listo", ());
-                                    listo = true;
-                                    break;
+                                    let ok = ureq::get("http://127.0.0.1:5002/ping")
+                                        .timeout(std::time::Duration::from_secs(3))
+                                        .call()
+                                        .map(|r| r.status() == 200)
+                                        .unwrap_or(false);
+                                    if ok {
+                                        log::info!("[Servidor] listo en 127.0.0.1:5002");
+                                        SERVIDOR_ESTADO.store(2, std::sync::atomic::Ordering::Relaxed);
+                                        let _ = handle.emit("servidor-usb-listo", ());
+                                        listo = true;
+                                        break;
+                                    }
                                 }
                             }
                             if !listo {
@@ -6649,21 +6713,36 @@ fn main() {
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { .. } => {
-                    // X button: salir del proceso completo (macOS por defecto solo cierra
-                    // la ventana pero deja el proceso vivo en el Dock).
-                    window.app_handle().exit(0);
-                }
-                tauri::WindowEvent::Destroyed => {
-                    // Nunca dejar el SO colgado en modo de entrada segura al cerrar Babel:
-                    // dejaría el teclado del usuario en modo protegido para el resto del sistema.
+                    // Matar servidor y llama-server ANTES de exit(0): exit() llama
+                    // std::process::exit que termina el proceso inmediatamente sin
+                    // llegar a disparar Destroyed, dejando servidor_babel huérfano
+                    // en el puerto 5002 y rompiendo la siguiente sesión.
                     seguridad::desactivar_entrada_segura_os();
-                    crate::ia_redaccion::matar_llama_si_activo(); // evitar llama-server huérfano tras cierre de ventana
+                    crate::ia_redaccion::matar_llama_si_activo();
                     if let Ok(mut guard) = USB_CHILD.lock() {
                         if let Some(mut c) = guard.take() {
                             let _ = c.kill();
                             let _ = c.wait();
                         }
                     }
+                    // PyInstaller --onefile hace fork: el bootstrap PID se almacena
+                    // en USB_CHILD pero el proceso hijo real (que escucha en 5002)
+                    // queda huérfano al matar solo el bootstrap. pkill -f lo captura.
+                    let _ = std::process::Command::new("pkill").args(["-KILL", "-f", "servidor_babel"]).output();
+                    window.app_handle().exit(0);
+                }
+                tauri::WindowEvent::Destroyed => {
+                    // Fallback por si Destroyed llega antes que CloseRequested en
+                    // alguna ruta de cierre alternativa (forzado por el SO, etc.).
+                    seguridad::desactivar_entrada_segura_os();
+                    crate::ia_redaccion::matar_llama_si_activo();
+                    if let Ok(mut guard) = USB_CHILD.lock() {
+                        if let Some(mut c) = guard.take() {
+                            let _ = c.kill();
+                            let _ = c.wait();
+                        }
+                    }
+                    let _ = std::process::Command::new("pkill").args(["-KILL", "-f", "servidor_babel"]).output();
                 }
                 _ => {}
             }

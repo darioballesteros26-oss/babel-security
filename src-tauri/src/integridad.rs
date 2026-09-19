@@ -80,8 +80,17 @@ fn verificar_codesign() -> bool {
             }
         };
 
+        // En volúmenes externos (USB exFAT/FAT32) macOS crea archivos ._* AppleDouble
+        // dentro del bundle en cuanto se lee, lo que rompe el sello de codesign aunque
+        // el binario sea íntegro. Saltamos el check de codesign en esos volúmenes —
+        // la capa 2 (huella BUILD_FINGERPRINT) sigue protegiendo el binario.
+        if bundle.to_str().map_or(false, |s| s.starts_with("/Volumes/")) {
+            log::info!("[INTEGRIDAD] App en volumen externo — check codesign omitido (normal en USB)");
+            return true;
+        }
+
         let out = std::process::Command::new("codesign")
-            .args(["--verify", "--deep", "--strict"])
+            .args(["--verify", "--deep"])
             .arg(&bundle)
             .output();
 
