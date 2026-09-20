@@ -6444,6 +6444,23 @@ fn main() {
 
     env_logger::init();
 
+    // Al instalar desde DMG en otro Mac, macOS añade com.apple.quarantine a todos
+    // los archivos del bundle pero solo lo limpia del ejecutable principal al aprobar.
+    // Binarios en Resources/binaries/ (llama-server) y Resources/python/ retienen
+    // la quarantine y macOS bloquea su ejecución. Limpiar todo el bundle en cada
+    // arranque (operación rápida e idempotente — no afecta al codesign ad-hoc).
+    #[cfg(target_os = "macos")]
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bundle) = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
+            if bundle.extension().and_then(|e| e.to_str()) == Some("app") {
+                let _ = std::process::Command::new("xattr")
+                    .args(["-rd", "com.apple.quarantine"])
+                    .arg(bundle)
+                    .output();
+            }
+        }
+    }
+
     // Verificar integridad del binario antes de cualquier operación sensible.
     // Si falla, INTEGRIDAD_OK queda en false y los comandos de cifrado lo comprueban.
     integridad::verificar_integridad_binario();
@@ -6619,7 +6636,8 @@ fn main() {
                     cmd .env("BABEL_NLLB_TOKEN", &token)
                         .env("TRANSFORMERS_OFFLINE", "1")
                         .env("HF_DATASETS_OFFLINE", "1")
-                        .env("TOKENIZERS_PARALLELISM", "false");
+                        .env("TOKENIZERS_PARALLELISM", "false")
+                        .env("PYTHONDONTWRITEBYTECODE", "1");
                     if let Some(ref m) = modelos_dir {
                         cmd.env("BABEL_DIR_USB", m);
                     }
@@ -6629,12 +6647,19 @@ fn main() {
                     let py_bin = res.join("python").join("bin").join("python3");
                     let servidor = res.join("servidor").join("server.py");
                     log::info!("[Servidor] lanzando Python bundle: {}", servidor.display());
+                    // PYTHONDONTWRITEBYTECODE evita que Python cree archivos .pyc
+                    // dentro del bundle, lo que invalidaría la firma codesign.
+                    #[cfg(target_os = "macos")]
+                    let _ = std::process::Command::new("xattr")
+                        .args(["-d", "com.apple.quarantine", py_bin.to_str().unwrap_or("")])
+                        .output();
                     let mut cmd2 = std::process::Command::new(&py_bin);
                     cmd2.arg(&servidor)
                         .env("BABEL_NLLB_TOKEN", &token)
                         .env("TRANSFORMERS_OFFLINE", "1")
                         .env("HF_DATASETS_OFFLINE", "1")
-                        .env("TOKENIZERS_PARALLELISM", "false");
+                        .env("TOKENIZERS_PARALLELISM", "false")
+                        .env("PYTHONDONTWRITEBYTECODE", "1");
                     if let Some(ref m) = modelos_dir {
                         cmd2.env("BABEL_DIR_USB", m);
                     }

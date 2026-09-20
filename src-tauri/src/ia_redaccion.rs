@@ -324,7 +324,16 @@ pub async fn iniciar_ia_redaccion(
     let llama_bin = ruta_llama_server(&app);
     let puerto_str = PUERTO.to_string();
 
-    let child = match Command::new(llama_bin)
+    // Al instalar desde DMG en otro Mac, macOS aplica com.apple.quarantine a todos
+    // los archivos del bundle pero solo lo limpia del ejecutable principal al aprobar
+    // la app. Los binarios en Resources/binaries/ retienen la quarantine y macOS
+    // bloquea su ejecución. Eliminarla explícitamente antes de lanzar.
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("xattr")
+        .args(["-d", "com.apple.quarantine", &llama_bin])
+        .output();
+
+    let child = match Command::new(&llama_bin)
         .args([
             "--model",        &modelo_str,
             "--host",         HOST,
