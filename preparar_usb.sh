@@ -209,7 +209,11 @@ if [[ -d "$APP" ]]; then
   # Smart update: reemplaza binario, Frameworks y binarios Tauri-bundleados (pdfium, etc.).
   # Preserva modelos_ia/, servidor/modelos_usb/, python/ y tessdata/ ya presentes.
   echo "  App ya existe — actualizando binario, Frameworks y Resources/binaries..."
+  mkdir -p "$APP/Contents/MacOS" "$APP/Contents"
   rsync -a --delete "$APP_SRC/Contents/MacOS/" "$APP/Contents/MacOS/"
+  # Info.plist y PkgInfo son críticos — el bundle no funciona sin ellos
+  rsync -a "$APP_SRC/Contents/Info.plist" "$APP/Contents/Info.plist"
+  rsync -a "$APP_SRC/Contents/PkgInfo"    "$APP/Contents/PkgInfo" 2>/dev/null || true
   # Sincronizar binarios Tauri (pdfium, etc.) pero NO tocar llama-server (lo gestiona paso 2)
   if [[ -d "$APP_SRC/Contents/Resources/binaries" ]]; then
     mkdir -p "$APP/Contents/Resources/binaries"
@@ -217,9 +221,16 @@ if [[ -d "$APP" ]]; then
       "$APP_SRC/Contents/Resources/binaries/" \
       "$APP/Contents/Resources/binaries/"
   fi
-  cp -f "$APP_SRC/Contents/Info.plist" "$APP/Contents/" 2>/dev/null || true
-  cp -f "$APP_SRC/Contents/PkgInfo"    "$APP/Contents/" 2>/dev/null || true
-  echo "  ✓ Binario actualizado ($(( SECONDS - T1 ))s)"
+  # Verificar que Info.plist llegó correctamente (sin él macOS rechaza el bundle)
+  if [[ ! -f "$APP/Contents/Info.plist" ]]; then
+    echo "  ✗ CRÍTICO: Info.plist no se pudo copiar al USB"
+    echo "  → Reintentando copia completa del bundle..."
+    rm -rf "$APP"
+    cp -R "$APP_SRC" "$USB/"
+    echo "  ✓ App copiada (copia completa de emergencia)"
+  else
+    echo "  ✓ Binario actualizado ($(( SECONDS - T1 ))s)"
+  fi
 else
   echo "  Primera instalación — copiando app completa..."
   cp -R "$APP_SRC" "$USB/"
@@ -687,6 +698,15 @@ echo ""
 echo "┌─ [6/6] Verificando integridad..."
 T6=$SECONDS
 _smoke_ok=1
+
+# Estructura mínima del bundle (sin esto macOS rechaza la app completamente)
+for _f in "Contents/Info.plist" "Contents/MacOS/babel-interfaz" "Contents/MacOS/servidor_babel"; do
+  if [[ ! -f "$APP/$_f" ]]; then
+    echo "  ✗ CRÍTICO: falta $APP/$_f — bundle inválido, macOS no podrá abrir la app"
+    _smoke_ok=0
+  fi
+done
+[[ $_smoke_ok -eq 1 ]] && echo "  ✓ Estructura bundle OK (Info.plist + binarios)"
 
 # Modelo MADLAD-3B (tier ≥12 GB, opcional)
 MADLAD_DIR="$RESOURCES/servidor/modelos_usb/madlad400-3b-int8"
