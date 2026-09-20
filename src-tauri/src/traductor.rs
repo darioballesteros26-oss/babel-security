@@ -1482,25 +1482,33 @@ pub fn procesar_pdf(
     progreso(5, "CONVIRTIENDO PDF...");
     // PASO 1: PDF → DOCX con pdf2docx (timeout 120 s)
     let ruta_docx_tmp = tmp_dir.join(format!("{}_tmp.docx", nombre));
-    // Buscar el python que tenga pdf2docx. Rutas estándar de macOS/Linux y, al final,
-    // los nombres a resolver por PATH (`python3` en Unix, `python` en Windows).
-    let python3 = [
-        "/opt/homebrew/bin/python3",
-        "/usr/local/bin/python3",
-        "/usr/bin/python3",
-        "python3",
-        "python",
-    ]
-    .iter()
-    .copied()
-    .find(|&p| {
-        std::process::Command::new(p)
-            .args(["-c", "import pdf2docx"])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    })
-    .unwrap_or("python3");
+    // Buscar el python que tenga pdf2docx.
+    // Orden: bundled (Resources/python) → rutas absolutas del sistema.
+    // No usamos bare "python3" para evitar el diálogo de herramientas Xcode en macOS.
+    let _bundled_py = std::env::current_exe().ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))  // MacOS/
+        .and_then(|d| d.parent().map(|p| p.to_path_buf()))  // Contents/
+        .map(|c| c.join("Resources").join("python").join("bin").join("python3"))
+        .map(|p| p.to_string_lossy().into_owned());
+    let mut _pythons_owned: Vec<String> = Vec::new();
+    if let Some(ref b) = _bundled_py { _pythons_owned.push(b.clone()); }
+    for &s in &["/opt/homebrew/bin/python3", "/usr/local/bin/python3"] {
+        _pythons_owned.push(s.to_string());
+    }
+    // Si no hay Python con pdf2docx, python3 queda vacío → spawn falla → ok=false
+    // → el código cae automáticamente al PASO 1b (LibreOffice) sin abortar.
+    let python3_owned = _pythons_owned
+        .iter()
+        .find(|p| {
+            std::process::Command::new(p.as_str())
+                .args(["-c", "import pdf2docx"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
+        .cloned()
+        .unwrap_or_default();
+    let python3 = python3_owned.as_str();
 
     let ok = match std::process::Command::new(python3)
         .args([
@@ -2401,6 +2409,7 @@ fn obtener_email_completo_interno(
     password: &str,
     id: u32,
     usar_oauth: bool,
+    carpeta: &str,
 ) -> Result<EmailCompletoRust, String> {
     let cliente = imap::ClientBuilder::new(imap_dominio, 993)
         .connect()
@@ -2414,7 +2423,8 @@ fn obtener_email_completo_interno(
         cliente.login(usuario, password).map_err(|_| "Error de autenticación IMAP.".to_string())?
     };
 
-    sesion.select("INBOX").map_err(|e| e.to_string())?;
+    let carpeta_imap = if carpeta.is_empty() { "INBOX" } else { carpeta };
+    sesion.select(carpeta_imap).map_err(|e| format!("Error abriendo {}: {}", carpeta_imap, e))?;
 
     let fetch = sesion.uid_fetch(id.to_string(), "(RFC822)").map_err(|e| e.to_string())?;
 
@@ -2470,6 +2480,7 @@ pub fn obtener_email_completo(
     password: &str,
     id: u32,
     usar_oauth: bool,
+    carpeta: &str,
 ) -> Result<EmailCompletoRust, Box<dyn std::error::Error>> {
     validar_campo_imap(imap_dominio, "imap_dominio")?;
     validar_campo_imap(usuario, "usuario")?;
@@ -2480,10 +2491,11 @@ pub fn obtener_email_completo(
     let dom = Zeroizing::new(imap_dominio.to_string());
     let usr = Zeroizing::new(usuario.to_string());
     let pwd = Zeroizing::new(password.to_string());
+    let carp = carpeta.to_string();
 
     let (tx, rx) = std::sync::mpsc::channel::<Result<EmailCompletoRust, String>>();
     std::thread::spawn(move || {
-        let _ = tx.send(obtener_email_completo_interno(dom.as_str(), usr.as_str(), pwd.as_str(), id, usar_oauth));
+        let _ = tx.send(obtener_email_completo_interno(dom.as_str(), usr.as_str(), pwd.as_str(), id, usar_oauth, &carp));
     });
 
     rx.recv_timeout(std::time::Duration::from_secs(30))

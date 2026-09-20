@@ -1899,6 +1899,8 @@ async function advertirCalidadPdf(nombreArchivo: string): Promise<void> {
 }
 
 async function procesarRuta(ruta: string): Promise<void> {
+  if (_traduciendo) return;
+  _traduciendo = true;
   const partes = ruta.replace(/\\/g, "/").split("/");
   const nombreArchivo = partes[partes.length - 1];
   const ext = nombreArchivo.split(".").pop()?.toUpperCase() ?? "FILE";
@@ -1910,6 +1912,7 @@ async function procesarRuta(ruta: string): Promise<void> {
   try {
     const rutaResultado = await invoke<string>("traducir_documento_ruta", { ruta, nombreArchivo });
     mostrarProcesando(false);
+    _traduciendo = false;
     const partesRes = rutaResultado.replace(/\\/g, "/").split("/");
     añadirResultadoArchivo(partesRes[partesRes.length - 1], rutaResultado);
     scrollAlFinal();
@@ -1918,6 +1921,7 @@ async function procesarRuta(ruta: string): Promise<void> {
     }
   } catch (error) {
     mostrarProcesando(false);
+    _traduciendo = false;
     añadirMensajeBabel("Error procesando archivo: " + String(error), "BABEL · error");
   }
 }
@@ -3536,7 +3540,7 @@ function abrirEditorTiptap(): void {
   actualizarToolbarEditor();
   actualizarContadorEditor();
 
-  // Cerrar paletas de color al hacer clic fuera
+  document.removeEventListener("click", _cerrarPaletasEditor, true);
   document.addEventListener("click", _cerrarPaletasEditor, { capture: true, once: false });
 }
 
@@ -3642,8 +3646,20 @@ async function confirmarSeleccionPaginas(): Promise<void> {
   const seen = new Set<number>();
   const paginas: number[] = [];
   for (const parte of texto.split(",")) {
-    const n = parseInt(parte.trim(), 10);
-    if (!isNaN(n) && n > 0 && !seen.has(n)) { seen.add(n); paginas.push(n); }
+    const t = parte.trim();
+    const rango = t.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+    if (rango) {
+      const desde = parseInt(rango[1], 10);
+      const hasta = parseInt(rango[2], 10);
+      if (!isNaN(desde) && !isNaN(hasta) && desde <= hasta) {
+        for (let i = desde; i <= hasta; i++) {
+          if (!seen.has(i)) { seen.add(i); paginas.push(i); }
+        }
+      }
+    } else {
+      const n = parseInt(t, 10);
+      if (!isNaN(n) && n > 0 && !seen.has(n)) { seen.add(n); paginas.push(n); }
+    }
   }
   if (paginas.length === 0) { mostrarToast("No se reconocieron páginas válidas.", true); return; }
 
@@ -5245,6 +5261,7 @@ async function desbloquearPantalla(): Promise<void> {
       _sesionUsuario = localStorage.getItem("babel-nombre-display") ?? "";
       document.getElementById("pantalla-bloqueo")?.classList.add("hidden");
       activarTimerInactividad();
+      iniciarRegistroDiario().catch(() => {});
       // FINDER — drenar la cola de "Guardar con Babel" acumulada durante el bloqueo.
       invoke("procesar_entrada_finder").catch(() => {});
       invoke<boolean>("tiene_config_email").then(ok2 => {
@@ -6326,7 +6343,7 @@ async function seleccionarEmail(id: number): Promise<void> {
     const email = await invoke<{
       id: number; remitente: string; asunto: string;
       fecha: string; cuerpo: string; adjuntos: string[];
-    }>("obtener_email_completo_tauri", { id });
+    }>("obtener_email_completo_tauri", { id, carpeta: _emailVista === "archivados" ? "archivados" : "" });
 
     emailVisorActualId = email.id;
     _emailVisorRemitente = email.remitente;

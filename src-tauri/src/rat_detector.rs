@@ -389,7 +389,7 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
     }
 
     if palabras.len() != 12 {
-        RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel); // longitud inválida: no es un intento real
+        RAT_BIP39_INTENTOS.fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| Some(v.saturating_sub(1))).ok(); // longitud inválida: no es un intento real
         return Ok(false);
     }
     // Palabras fuera del wordlist: mantener el slot (intento consumido).
@@ -400,7 +400,7 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
     let cifrado = match std::fs::read(crate::babel_path("recovery.babel")) {
         Ok(c) => c,
         Err(_) => {
-            RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel); // error de infraestructura: liberar slot
+            RAT_BIP39_INTENTOS.fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| Some(v.saturating_sub(1))).ok(); // error de infraestructura: liberar slot
             return Err("Sin frase de recuperación configurada en este búnker.".to_string());
         }
     };
@@ -413,7 +413,7 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
     if let Ok(key) = crate::seguridad::derivar_clave_recuperacion_v3(palabras, &recovery_salt) {
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado.clone(), &hex).is_ok() {
-            RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
+            RAT_BIP39_INTENTOS.fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| Some(v.saturating_sub(1))).ok();
             borrar_intentos_bip39_disco();
             return Ok(true);
         }
@@ -421,7 +421,7 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
     if let Ok(key) = crate::seguridad::derivar_clave_recuperacion_v2(palabras, &recovery_salt) {
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado.clone(), &hex).is_ok() {
-            RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
+            RAT_BIP39_INTENTOS.fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| Some(v.saturating_sub(1))).ok();
             borrar_intentos_bip39_disco();
             return Ok(true);
         }
@@ -429,7 +429,7 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
     if let Ok(key) = crate::seguridad::derivar_clave_recuperacion(palabras) {
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado.clone(), &hex).is_ok() {
-            RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
+            RAT_BIP39_INTENTOS.fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| Some(v.saturating_sub(1))).ok();
             borrar_intentos_bip39_disco();
             return Ok(true);
         }
@@ -437,7 +437,7 @@ pub fn verificar_frase_bip39_para_rat(palabras: &[String]) -> Result<bool, Strin
     if let Ok(key) = crate::seguridad::derivar_clave_recuperacion_v0(palabras) {
         let hex = zeroize::Zeroizing::new(hex::encode(key.as_ref()));
         if crate::seguridad::descifrar_documento(cifrado, &hex).is_ok() {
-            RAT_BIP39_INTENTOS.fetch_sub(1, Ordering::AcqRel);
+            RAT_BIP39_INTENTOS.fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| Some(v.saturating_sub(1))).ok();
             borrar_intentos_bip39_disco();
             return Ok(true);
         }
@@ -463,7 +463,10 @@ pub fn hmac_rat_con_clave(dominio: &str, ts: u64, clave_par: &[u8]) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     type H = Hmac<Sha256>;
-    let mut mac = H::new_from_slice(clave_par).expect("clave HMAC válida");
+    let mut mac = match H::new_from_slice(clave_par) {
+        Ok(m) => m,
+        Err(_) => return String::new(), // clave vacía → entrada de emparejamiento corrupta
+    };
     mac.update(dominio.as_bytes());
     mac.update(b":");
     mac.update(ts.to_string().as_bytes());

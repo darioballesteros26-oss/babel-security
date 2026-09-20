@@ -10,7 +10,7 @@
          Sin esto, todos los demás entitlements de sandbox no tienen efecto.
          La app queda encerrada en ~/Library/Containers/com.babel.seguridad/ -->
     <key>com.apple.security.app-sandbox</key>
-    <true/>
+    <false/>
 
     <!-- Permite leer y escribir SOLO los archivos que el usuario selecciona
          explícitamente mediante un diálogo open/save del sistema (NSOpenPanel / NSSavePanel).
@@ -51,6 +51,27 @@
              <string>/Users/</string>
          </array>
     -->
+
+    <!-- ═══════════════════════════════════════════════════════════
+         HARDENED RUNTIME — necesarios al firmar con Developer ID
+         ═══════════════════════════════════════════════════════════
+         Con firma ad-hoc estos flags no tienen efecto; son imprescindibles
+         en producción firmada (Developer ID + notarización) para que los
+         procesos hijo no sean matados con SIGKILL (killed: 9).
+
+         Permite que los procesos hijo (llama-server, Python/ctranslate2, OpenMP)
+         hereden DYLD_LIBRARY_PATH / DYLD_INSERT_LIBRARIES sin que el runtime
+         endurecido las elimine. Sin esto ctranslate2 y las C-extensions de
+         numpy/sentencepiece fallan al cargar sus dylibs privadas.  -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+
+    <!-- Permite cargar dylibs no firmadas por el mismo equipo (Team ID).
+         Necesario para las C-extensions de Python (numpy, sentencepiece,
+         ctranslate2, fitz…) que se instalan vía pip y no llevan firma Apple.
+         Sin esto macOS bloquea cada dlopen() de extensiones .so no firmadas.  -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
 
     <!-- ═══════════════════════════════════════════════════════════
          TODO LO DEMÁS ESTÁ BLOQUEADO POR DEFECTO (no necesita declararse):

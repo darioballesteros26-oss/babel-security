@@ -2249,8 +2249,16 @@ fn cerrar_sesion_rust(sesion: tauri::State<SesionActiva>) {
     sesion.limpiar();
     // Al cerrar sesión: borrar TODOS los archivos en claro de compartidos/ sin esperar 1h.
     compartir::barrer_plaintext_compartidos_logout();
-    // Limpiar todas las rutas pendientes de borrado al cerrar sesión
-    if let Ok(mut guard) = PENDING_BORRAR_ORIGINAL.lock() { *guard = None; }
+    // Limpiar todas las rutas pendientes de borrado al cerrar sesión —
+    // el usuario importó estos archivos pero no llegó a confirmar el borrado.
+    // Los borramos ahora: si se cierran sin confirmar, no deben quedar en claro.
+    if let Ok(mut guard) = PENDING_BORRAR_ORIGINAL.lock() {
+        if let Some(mapa) = guard.take() {
+            for (_tok, ruta) in mapa {
+                borrar_seguro(&ruta);
+            }
+        }
+    }
     // Borrar temporales en claro con 3 pasadas (0x00, 0xFF, 0xAA) + fsync antes de eliminar
     let tmp = babel_dir().join("tmp");
     if let Ok(entradas) = fs::read_dir(&tmp) {
@@ -2419,8 +2427,11 @@ async fn traducir_archivo_guardado(
 
         let nombre_base = format!("{}.{}", nombre_original, ext);
 
-        // Escribir a tmp/ y traducir
-        let tmp_path = tmp_dir().join(&nombre_base);
+        // Escribir a tmp/ y traducir — prefijo aleatorio evita colisión si hay dos traducciones simultáneas
+        let mut raw = [0u8; 4];
+        rand::rngs::OsRng.fill_bytes(&mut raw);
+        let pfx = hex::encode(raw);
+        let tmp_path = tmp_dir().join(format!("{}_{}", pfx, nombre_base));
         escribir_privado(&tmp_path, &bytes).map_err(|e| format!("Error escribiendo temporal: {}", e))?;
 
         let progreso = |pct: u8, msg: &str| {
@@ -2554,8 +2565,7 @@ async fn traducir_documento_dialogo(
             &progreso,
         )?;
 
-        let ruta_real = archivos_path(&format!("{}_{}_{}.babel", id_usuario, par, nombre_base));
-        Ok(Some(ruta_real))
+        renombrar_salida_traduccion(&id_usuario, par, nombre_base, &subclave_hex).map(Some)
     })
     .await
     .map_err(|e| format!("Error interno al traducir: {}", e))?
@@ -4169,8 +4179,14 @@ fn ia_extraer_docx(raw: &[u8]) -> String {
 
 fn ia_extraer_pdf(raw: &[u8]) -> Result<String, String> {
     use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
     let tmp = std::env::temp_dir().join(format!("babel_ia_{}.pdf", std::process::id()));
     {
+        #[cfg(unix)]
+        let mut f = fs::OpenOptions::new().write(true).create(true).truncate(true)
+            .mode(0o600).open(&tmp).map_err(|e| e.to_string())?;
+        #[cfg(not(unix))]
         let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
         f.write_all(raw).map_err(|e| e.to_string())?;
     }
@@ -4239,7 +4255,12 @@ fn ia_truncar(texto: &str) -> String {
     if t.len() <= MAX {
         return t.to_string();
     }
-    let corte = t[..MAX].rfind(|c: char| c.is_whitespace()).unwrap_or(MAX);
+    // Retroceder hasta el último límite de carácter UTF-8 en o antes de MAX
+    let mut boundary = MAX;
+    while boundary > 0 && !t.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    let corte = t[..boundary].rfind(|c: char| c.is_whitespace()).unwrap_or(boundary);
     format!(
         "{}\n\n[... documento truncado a 16 000 caracteres ...]",
         t[..corte].trim_end()
@@ -4893,6 +4914,7 @@ struct EmailCompleto {
 #[tauri::command]
 fn obtener_email_completo_tauri(
     id: u32,
+    carpeta: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<EmailCompleto, String> {
     let subclave_hex = sesion.subclave_hex()?;
@@ -4902,7 +4924,7 @@ fn obtener_email_completo_tauri(
     let (credencial, usar_oauth) = credencial_email(&creds, &subclave_hex)?;
 
     let email =
-        traductor::obtener_email_completo(&creds.imap_dominio, &creds.usuario, &credencial, id, usar_oauth)
+        traductor::obtener_email_completo(&creds.imap_dominio, &creds.usuario, &credencial, id, usar_oauth, &carpeta)
             .map_err(|e| format!("Error obteniendo email: {}", e))?;
 
     if !creds.remitentes_autorizados.is_empty() {

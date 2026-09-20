@@ -325,7 +325,10 @@ pub fn buscar_normativa(query: &str, max_chars: usize) -> (String, bool) {
     for (_, frag) in resultados.iter().take(5) {
         let titulo_str = frag.titulo.as_deref().map(|t| format!(" | {}", t)).unwrap_or_default();
         let texto_truncado = if frag.texto.len() > 800 {
-            format!("{}…", &frag.texto[..800])
+            // Retroceder hasta el límite de carácter UTF-8 más próximo a 800 bytes
+            let mut end = 800;
+            while end > 0 && !frag.texto.is_char_boundary(end) { end -= 1; }
+            format!("{}…", &frag.texto[..end])
         } else {
             frag.texto.clone()
         };

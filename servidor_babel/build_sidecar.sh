@@ -4,7 +4,7 @@
 #
 # Requisitos previos (una sola vez):
 #   pip install pyinstaller flask flask-cors ctranslate2 sentencepiece \
-#               pymupdf llama-cpp-python pymupdf4llm
+#               pymupdf llama-cpp-python pymupdf4llm pyhanko pyhanko-certvalidator
 #
 # Uso:
 #   cd babel-interfaz/servidor_babel
@@ -37,8 +37,30 @@ fi
 
 cd "$SCRIPT_DIR"
 
+# Localizar python con PyInstaller y las dependencias del servidor.
+# Prioridad: babel_env local > pyenv > homebrew > sistema.
+_PY=""
+for _candidate in \
+  "$HOME/Desktop/Babel copia/babel_env/bin/python3" \
+  "$HOME/Desktop/Babel/babel_env/bin/python3" \
+  "$HOME/.pyenv/shims/python3" \
+  "/opt/homebrew/bin/python3" \
+  "/usr/local/bin/python3" \
+  "/usr/bin/python3"; do
+  if [ -x "$_candidate" ] && "$_candidate" -m PyInstaller --version &>/dev/null; then
+    _PY="$_candidate"
+    break
+  fi
+done
+if [ -z "$_PY" ]; then
+  echo "ERROR: No se encontró python con PyInstaller. Ejecuta:"
+  echo "  pip install pyinstaller flask flask-cors ctranslate2 sentencepiece pymupdf llama-cpp-python pymupdf4llm pyhanko pyhanko-certvalidator"
+  exit 1
+fi
+echo "  Python: $_PY ($(\"$_PY\" --version 2>&1))"
+
 echo "[1/3] Construyendo con PyInstaller..."
-python3 -m PyInstaller \
+"$_PY" -m PyInstaller \
   --onefile \
   --name servidor_babel \
   --noconfirm \
@@ -46,12 +68,17 @@ python3 -m PyInstaller \
   --add-data "traduccion_comun.py:." \
   --add-data "traduccion_small100.py:." \
   --add-data "traduccion_madlad.py:." \
+  --add-data "firma.py:." \
   --hidden-import ctranslate2 \
   --hidden-import sentencepiece \
   --hidden-import flask \
   --hidden-import flask_cors \
   --hidden-import fitz \
   --hidden-import pymupdf4llm \
+  --hidden-import pyhanko \
+  --hidden-import pyhanko_certvalidator \
+  --hidden-import pyhanko.sign \
+  --hidden-import pyhanko.pdf_utils \
   server.py
 
 echo "[2/3] Copiando binario a src-tauri/binaries/..."

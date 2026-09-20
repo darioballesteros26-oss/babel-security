@@ -247,6 +247,7 @@ declare -a DYLIBS=(
   "$BREW/opt/ggml/lib/libggml-base.0.dylib"
   "$BREW/opt/openssl@3/lib/libssl.3.dylib"
   "$BREW/opt/openssl@3/lib/libcrypto.3.dylib"
+  "$BREW/opt/libomp/lib/libomp.dylib"
 )
 
 bundle_lib() {
@@ -330,15 +331,33 @@ for _lib in libllama-server-impl.dylib libllama-common.0.dylib libmtmd.0.dylib l
     fi
   fi
 done
-# Reparchar RPATHs del binario llama-server para apuntar a Frameworks
-install_name_tool -add_rpath "@executable_path/../../../Frameworks" \
+# Reparchar RPATHs del binario llama-server para apuntar a Frameworks.
+# El binario vive en Contents/Resources/binaries/; subir 2 niveles llega a
+# Contents/ y de ahí Frameworks/ → @executable_path/../../Frameworks.
+# Los rpaths erróneos con ../../.. (3 niveles) apuntarían a Security Babel.app/Frameworks
+# que no existe; se eliminan si los dejó una ejecución anterior.
+install_name_tool -delete_rpath "@executable_path/../../../Frameworks" \
   "$RESOURCES/binaries/llama-server" 2>/dev/null || true
-install_name_tool -add_rpath "@loader_path/../../../Frameworks" \
+install_name_tool -delete_rpath "@loader_path/../../../Frameworks" \
+  "$RESOURCES/binaries/llama-server" 2>/dev/null || true
+install_name_tool -add_rpath "@executable_path/../../Frameworks" \
+  "$RESOURCES/binaries/llama-server" 2>/dev/null || true
+install_name_tool -add_rpath "@loader_path/../../Frameworks" \
   "$RESOURCES/binaries/llama-server" 2>/dev/null || true
 for _ref in $(otool -L "$RESOURCES/binaries/llama-server" 2>/dev/null | awk 'NR>1{print $1}' | grep "$BREW"); do
   _ref_name=$(basename "$_ref")
   [[ -f "$FRAMEWORKS/$_ref_name" ]] && \
     install_name_tool -change "$_ref" "@rpath/$_ref_name" "$RESOURCES/binaries/llama-server" 2>/dev/null || true
+done
+# Segundo pase de parcheo: las dylibs privadas de llama.cpp se copiaron DESPUÉS
+# del primer bucle, así que sus referencias absolutas a Homebrew no quedaron parchadas.
+for lib in "$FRAMEWORKS/"*.dylib; do
+  codesign --remove-signature "$lib" 2>/dev/null || true
+  while IFS= read -r ref; do
+    ref_name=$(basename "$ref")
+    [[ -f "$FRAMEWORKS/$ref_name" ]] && \
+      install_name_tool -change "$ref" "@rpath/$ref_name" "$lib" 2>/dev/null || true
+  done < <(otool -L "$lib" 2>/dev/null | awk 'NR>1{print $1}' | grep "$BREW")
 done
 echo "  ✓ llama-server bundleado ($(du -sh "$RESOURCES/binaries/llama-server" | cut -f1))"
 echo "└─ $(find "$FRAMEWORKS" -maxdepth 1 -name "*.dylib" 2>/dev/null | wc -l | tr -d ' ') dylibs ($(( SECONDS - T2 ))s)"
@@ -603,8 +622,13 @@ echo "└─ $PY_VER listo ($(( SECONDS - T4 ))s)"
 
 # ── 5. Firma del bundle ──────────────────────────────────────────────────
 echo ""
-echo "  Limpiando AppleDouble, quarantine y firmando bundle..."
+echo "  Pre-compilando Python (.pyc) antes de firmar..."
+# Los .pyc se generan durante el smoke test del paso 6 si no los pre-compilamos aquí,
+# lo que rompe el sello del bundle y Gatekeeper bloquea la app en otros Macs.
+"$RESOURCES/python/bin/python3" -m compileall -q -j0 "$RESOURCES/python/lib" 2>/dev/null || true
 find "$APP" -name '._*' -delete 2>/dev/null || true
+
+echo "  Limpiando quarantine y firmando bundle..."
 xattr -rd com.apple.quarantine "$APP" 2>/dev/null || true
 # Firmar componentes primero (--deep falla con .gguf y Python — los saltamos)
 for _lib in "$FRAMEWORKS/"*.dylib; do
@@ -701,8 +725,9 @@ else
 fi
 
 # Python: importar paquetes clave incluyendo pymupdf4llm (primera pasada PDF)
+# PYTHONDONTWRITEBYTECODE=1 evita generar .pyc nuevos después de la firma
 find "$RESOURCES/python" -name '._*' -delete 2>/dev/null || true
-if "$RESOURCES/python/bin/python3" -c \
+if PYTHONDONTWRITEBYTECODE=1 "$RESOURCES/python/bin/python3" -c \
      "import flask, ctranslate2, transformers, sentencepiece, fitz, pymupdf4llm, llama_cpp, pdf2docx; print('OK')" \
      2>/dev/null | grep -q "OK"; then
   echo "  ✓ Paquetes Python OK (flask, ctranslate2, fitz, pymupdf4llm, llama_cpp, pdf2docx)"
