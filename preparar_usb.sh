@@ -682,7 +682,7 @@ DMG_SRC=""
 for _dir in \
   "$INTERFAZ/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg" \
   "$INTERFAZ/src-tauri/target/release/bundle/dmg"; do
-  _found=$(find "$_dir" -name "*.dmg" -maxdepth 1 2>/dev/null | sort -V | tail -1)
+  _found=$(find "$_dir" -name "*.dmg" -maxdepth 1 2>/dev/null | sort -V | tail -1) || true
   [[ -n "$_found" ]] && DMG_SRC="$_found" && break
 done
 
