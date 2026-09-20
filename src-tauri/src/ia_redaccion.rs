@@ -814,6 +814,38 @@ mod tests {
         assert!(!alertas[0].contains("(\""), "el mensaje de alerta no debe tener comilla suelta");
     }
 
+    // ── es_linea_interna con prefijos markdown ───────────────────────────
+
+    #[test]
+    fn paso_con_negrita_detectado() {
+        assert!(es_linea_interna("**PASO 1 — DATOS FALTANTES:**"), "debe detectar **PASO N");
+        assert!(es_linea_interna("**PASO 2 — TEXTOS CORRUPTOS:**"));
+    }
+
+    #[test]
+    fn paso_con_encabezado_detectado() {
+        assert!(es_linea_interna("## PASO 3 — ALGO"), "debe detectar ## PASO N");
+        assert!(es_linea_interna("# PASO 4 — OTRO"));
+    }
+
+    #[test]
+    fn paso_plano_detectado() {
+        assert!(es_linea_interna("PASO 1 — DATOS FALTANTES:"));
+    }
+
+    #[test]
+    fn linea_normal_no_detectada() {
+        assert!(!es_linea_interna("Los datos del contrato son los siguientes:"));
+        assert!(!es_linea_interna("PASO es un ejemplo de lo que no debes hacer"));
+        assert!(!es_linea_interna(""));
+    }
+
+    #[test]
+    fn comprobacion_sin_tilde_detectada() {
+        assert!(es_linea_interna("COMPROBACION A — importes"));
+        assert!(es_linea_interna("COMPROBACION B — fechas"));
+    }
+
 }
 
 // Qwen3 puede incluir <think>…</think> aunque /no_think esté activo.
@@ -841,15 +873,25 @@ fn limpiar_thinking(texto: &str) -> String {
 
 // Devuelve true si la línea es un encabezado de control interno (PASO N —, CONTROL FINAL, etc.)
 // que el modelo no debería revelar al usuario según NUNCA 10.
+// Se eliminan prefijos markdown (**, ##) antes de comprobar, porque el modelo a veces
+// formatea estas líneas con negrita o encabezado aunque se le indique texto plano.
 fn es_linea_interna(linea: &str) -> bool {
-    let t = linea.trim();
-    if t.is_empty() {
+    let raw = linea.trim();
+    if raw.is_empty() {
         return false;
     }
+    // Quitar prefijos markdown: "**", "## ", "# "
+    let t = raw
+        .trim_start_matches("**")
+        .trim_start_matches("## ")
+        .trim_start_matches("# ")
+        .trim_start();
     t.starts_with("[CONTROL OBLIGATORIO")
         || t.starts_with("CONTROL FINAL")
         || t.starts_with("COMPROBACIÓN A")
+        || t.starts_with("COMPROBACION A")
         || t.starts_with("COMPROBACIÓN B")
+        || t.starts_with("COMPROBACION B")
         || (t.starts_with("PASO ")
             && t.as_bytes().get(5).map(|b| b.is_ascii_digit()).unwrap_or(false))
 }
