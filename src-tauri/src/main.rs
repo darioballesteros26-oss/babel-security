@@ -6607,9 +6607,14 @@ fn main() {
                     log::warn!("[Servidor] modelos no encontrados — la traducción puede fallar");
                 }
 
-                let child_result = if sidecar_exists {
+                // Preferir Python del bundle (legacy) cuando está disponible: tiene
+                // transformers y todas las dependencias que el sidecar PyInstaller no
+                // incluye (tokenization_small100 → PreTrainedTokenizer). El sidecar
+                // se usa solo como fallback cuando no hay Python bundleado (instalación
+                // mínima desde DMG sin USB).
+                let child_result = if !legacy_exists && sidecar_exists {
                     let bin = sidecar_path.unwrap();
-                    log::info!("[Servidor] lanzando sidecar: {}", bin.display());
+                    log::info!("[Servidor] lanzando sidecar (sin Python bundle): {}", bin.display());
                     let mut cmd = std::process::Command::new(&bin);
                     cmd .env("BABEL_NLLB_TOKEN", &token)
                         .env("TRANSFORMERS_OFFLINE", "1")
@@ -6623,7 +6628,7 @@ fn main() {
                     let res = app.path().resource_dir().unwrap();
                     let py_bin = res.join("python").join("bin").join("python3");
                     let servidor = res.join("servidor").join("server.py");
-                    log::info!("[Servidor] lanzando legado python: {}", servidor.display());
+                    log::info!("[Servidor] lanzando Python bundle: {}", servidor.display());
                     let mut cmd2 = std::process::Command::new(&py_bin);
                     cmd2.arg(&servidor)
                         .env("BABEL_NLLB_TOKEN", &token)

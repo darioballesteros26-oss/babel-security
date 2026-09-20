@@ -79,6 +79,11 @@ echo "[1/3] Construyendo con PyInstaller..."
   --hidden-import pyhanko_certvalidator \
   --hidden-import pyhanko.sign \
   --hidden-import pyhanko.pdf_utils \
+  --hidden-import transformers \
+  --hidden-import transformers.tokenization_utils \
+  --hidden-import transformers.utils \
+  --hidden-import transformers.models.m2m_100 \
+  --hidden-import transformers.models.m2m_100.tokenization_m2m_100 \
   server.py
 
 echo "[2/3] Copiando binario a src-tauri/binaries/..."
