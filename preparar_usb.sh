@@ -647,6 +647,8 @@ echo "  Pre-compilando Python (.pyc) antes de firmar..."
 find "$APP" -name '._*' -delete 2>/dev/null || true
 
 echo "  Limpiando quarantine y firmando bundle..."
+# Eliminar bundles anidados (cp -R los crea cuando el destino ya existe)
+find "$APP" -mindepth 1 -maxdepth 1 -name "*.app" -exec rm -rf {} \; 2>/dev/null || true
 xattr -rd com.apple.quarantine "$APP" 2>/dev/null || true
 # Firmar componentes primero (--deep falla con .gguf y Python — los saltamos)
 for _lib in "$FRAMEWORKS/"*.dylib; do
@@ -654,13 +656,21 @@ for _lib in "$FRAMEWORKS/"*.dylib; do
 done
 codesign --force -s - "$RESOURCES/binaries/llama-server" 2>/dev/null || true
 codesign --force -s - "$BINARY" 2>/dev/null || true
-# Firmar el bundle sin --deep (componentes ya firmados arriba)
-if codesign --force -s - --options runtime "$APP" 2>/dev/null; then
-  echo "  ✓ Bundle firmado correctamente"
-else
-  echo "  Aviso: firma ad-hoc con advertencias (normal sin Apple Developer cert)"
-fi
+# Firmar el bundle SIN --options runtime:
+# Con runtime, codesign sella los 10 000+ archivos del bundle (modelos, Python…).
+# Cualquier acceso posterior rompe el sello → Gatekeeper lo marca como "dañada"
+# (sin botón "Abrir de todos modos"). Sin runtime la firma es simple/ad-hoc y
+# Gatekeeper lo trata como "desarrollador no identificado" → sí aparece Open Anyway.
+codesign --force -s - "$APP" 2>/dev/null || true
 find "$APP" -name '._*' -delete 2>/dev/null || true
+# Verificar que el resultado es aceptable para Gatekeeper
+_spctl_out=$(spctl --assess --type execute "$APP" 2>&1 || true)
+if echo "$_spctl_out" | grep -q "rejected"; then
+  echo "  ⚠ spctl rechaza el bundle: $_spctl_out"
+  echo "    (normal sin Developer ID — usuario debe clic derecho → Abrir la 1ª vez)"
+else
+  echo "  ✓ Bundle firmado ad-hoc (sin Developer ID — clic derecho → Abrir 1ª vez)"
+fi
 
 # ── 5. DMG ───────────────────────────────────────────────────────────────
 echo ""
@@ -706,7 +716,13 @@ for _f in "Contents/Info.plist" "Contents/MacOS/babel-interfaz" "Contents/MacOS/
     _smoke_ok=0
   fi
 done
-[[ $_smoke_ok -eq 1 ]] && echo "  ✓ Estructura bundle OK (Info.plist + binarios)"
+# Detectar bundle anidado (causa "unsealed contents" → Gatekeeper trata app como dañada)
+_nested=$(find "$APP" -mindepth 1 -maxdepth 1 -name "*.app" 2>/dev/null)
+if [[ -n "$_nested" ]]; then
+  echo "  ✗ CRÍTICO: bundle anidado detectado: $_nested — Gatekeeper bloqueará la app"
+  _smoke_ok=0
+fi
+[[ $_smoke_ok -eq 1 ]] && echo "  ✓ Estructura bundle OK (Info.plist + binarios + sin anidados)"
 
 # Modelo MADLAD-3B (tier ≥12 GB, opcional)
 MADLAD_DIR="$RESOURCES/servidor/modelos_usb/madlad400-3b-int8"
