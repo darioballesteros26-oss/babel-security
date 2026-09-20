@@ -206,10 +206,17 @@ echo "  ✓ $APP_NAME"
 
 T1=$SECONDS
 if [[ -d "$APP" ]]; then
-  # Smart update: solo reemplaza binario y Frameworks.
+  # Smart update: reemplaza binario, Frameworks y binarios Tauri-bundleados (pdfium, etc.).
   # Preserva modelos_ia/, servidor/modelos_usb/, python/ y tessdata/ ya presentes.
-  echo "  App ya existe — actualizando solo binario y Frameworks..."
+  echo "  App ya existe — actualizando binario, Frameworks y Resources/binaries..."
   rsync -a --delete "$APP_SRC/Contents/MacOS/" "$APP/Contents/MacOS/"
+  # Sincronizar binarios Tauri (pdfium, etc.) pero NO tocar llama-server (lo gestiona paso 2)
+  if [[ -d "$APP_SRC/Contents/Resources/binaries" ]]; then
+    mkdir -p "$APP/Contents/Resources/binaries"
+    rsync -a --exclude="llama-server" \
+      "$APP_SRC/Contents/Resources/binaries/" \
+      "$APP/Contents/Resources/binaries/"
+  fi
   cp -f "$APP_SRC/Contents/Info.plist" "$APP/Contents/" 2>/dev/null || true
   cp -f "$APP_SRC/Contents/PkgInfo"    "$APP/Contents/" 2>/dev/null || true
   echo "  ✓ Binario actualizado ($(( SECONDS - T1 ))s)"
@@ -781,13 +788,15 @@ else
 fi
 
 # Archivos servidor (incluye firma.py para PAdES-B-B)
+_serv_ok=1
 for f in server.py traduccion_madlad.py traduccion_small100.py traduccion_comun.py firma.py; do
   if [[ ! -f "$RESOURCES/servidor/$f" ]]; then
     echo "  ✗ Falta servidor/$f"
     _smoke_ok=0
+    _serv_ok=0
   fi
 done
-echo "  ✓ Archivos servidor presentes (incluye firma.py)"
+[[ $_serv_ok -eq 1 ]] && echo "  ✓ Archivos servidor presentes (incluye firma.py)"
 
 if [[ $_smoke_ok -eq 1 ]]; then
   echo "└─ Integridad OK ($(( SECONDS - T6 ))s)"
