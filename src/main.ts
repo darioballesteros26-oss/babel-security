@@ -94,6 +94,9 @@ let _renombraEsGuardado = false;
 let _tiptapEditor: Editor | null = null;
 let _editorRutaCifrada: string | null = null;
 let _carpetaEditorSeleccionada: string = "todos";
+// Modo edición: cuando se abre un DOCX guardado para modificarlo, guarda su ruta
+// (para sobrescribir en sitio). null = documento nuevo.
+let _editorRutaEdicion: string | null = null;
 
 // Editor de redacción (vista dividida)
 let _tiptapRedaccion: Editor | null = null;
@@ -189,6 +192,20 @@ function mostrarPantalla(nombre: Pantalla): void {
       const badge = document.getElementById("autologin-estado-badge");
       if (badge) badge.textContent = pref === true ? "ACTIVO" : pref === false ? "DESACTIVADO" : "NO CONFIGURADO";
     }).catch(() => {});
+  }
+  if (nombre === "traduccion") {
+    // Arranque BAJO DEMANDA del traductor Python (:5002). Ya no corre desde el
+    // inicio de Babel: se lanza aquí, al abrir el traductor. Además libera la RAM
+    // de la IA Qwen (cerrarChatIaRedaccion → parar_ia_redaccion) para que traductor
+    // e IA nunca coexistan en memoria (equipos de 8 GB).
+    void cerrarChatIaRedaccion();
+    invoke<string>("asegurar_servidor_traduccion").then((estado) => {
+      const overlay = document.getElementById("servidor-cargando-overlay");
+      if (estado === "cargando") overlay?.classList.remove("hidden");
+      else overlay?.classList.add("hidden");
+    }).catch(() => {
+      document.getElementById("servidor-cargando-overlay")?.classList.add("hidden");
+    });
   }
   if (nombre === "registro") {
     _modoSospechas = false;
@@ -1611,14 +1628,21 @@ window.addEventListener("DOMContentLoaded", async () => {
         servidorEstabaActivo = true;
       } else { throw new Error(); }
     } catch {
-      if (badge) {
-        badge.style.background = "var(--error, #ef4444)";
-        badge.style.opacity = "1";
-        badge.title = "Servidor caído";
-      }
+      // El traductor arranca bajo demanda: si nunca estuvo activo, no es un fallo
+      // sino que está en reposo (se activa al abrir el traductor). Solo marcamos
+      // rojo «caído» + toast si estaba activo y se cayó (crash real).
       if (servidorEstabaActivo) {
+        if (badge) {
+          badge.style.background = "var(--error, #ef4444)";
+          badge.style.opacity = "1";
+          badge.title = "Servidor caído";
+        }
         mostrarToast("Servidor de traducción desconectado", true);
         servidorEstabaActivo = false;
+      } else if (badge) {
+        badge.style.background = "var(--gris, #6b7280)";
+        badge.style.opacity = "0.5";
+        badge.title = "Traductor en reposo — se activa al abrir el traductor";
       }
     }
   }, 5000);
@@ -2215,6 +2239,7 @@ async function cargarArchivosGuardados(): Promise<void> {
   </div>
   <div class="archivo-card-botones">
     <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver">VER</button>
+    ${base.toLowerCase().endsWith(".docx") ? '<button type="button" class="btn-archivo" data-action="editar-docx" style="color:var(--dorado);border-color:var(--dorado);">EDITAR</button>' : ''}
     <button type="button" class="btn-archivo" data-action="traducir-guardado" style="color:var(--dorado);border-color:var(--dorado);">TRADUCIR</button>
     <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar">EXPORTAR</button>
     <button type="button" class="btn-archivo" data-action="mover" style="opacity:0.7;">MOVER</button>
@@ -2263,6 +2288,7 @@ async function cargarArchivosGuardados(): Promise<void> {
         case "ver":
           if (terminoBusquedaArchivos) { seleccionarBuzonGuardados(card.dataset.buzonId ?? "todos"); break; }
           verArchivo(ruta, card.dataset.base); break;
+        case "editar-docx": void editarDocxGuardado(ruta, base2); break;
         case "traducir-guardado": traducirArchivoGuardado(ruta, card.dataset.base); break;
         case "exportar": exportarArchivo(ruta); break;
         case "exportar-con-opcion": mostrarPopupExportar(btn, ruta, rutaOrig); break;
@@ -3499,15 +3525,24 @@ async function abrirFinderSistema(): Promise<void> {
 
 // ── EDITOR TIPTAP ────────────────────────────────────────────────────────────
 
-function abrirEditorTiptap(): void {
+// Abre el editor Tiptap. Sin argumento → documento nuevo. Con `edit` → carga un DOCX
+// guardado (HTML de docx_a_html) para modificarlo y sobrescribirlo en sitio.
+function abrirEditorTiptap(edit?: { ruta: string; titulo: string; html: string }): void {
   const pantalla = document.getElementById("editor-tiptap");
   const tituloInput = document.getElementById("editor-titulo") as HTMLInputElement | null;
   const contenedor = document.getElementById("editor-contenido");
   if (!pantalla || !contenedor) return;
 
   _editorRutaCifrada = null;
+  _editorRutaEdicion = edit?.ruta ?? null;
   _carpetaEditorSeleccionada = "todos";
-  if (tituloInput) tituloInput.value = "";
+  if (tituloInput) tituloInput.value = edit?.titulo ?? "";
+
+  // Selector de formato: en edición el formato es fijo (DOCX en sitio) → ocultarlo.
+  const formatoWrap = document.getElementById("editor-formato-wrap");
+  if (formatoWrap) formatoWrap.style.display = edit ? "none" : "";
+  const formatoSel = document.getElementById("editor-formato") as HTMLSelectElement | null;
+  if (formatoSel && !edit) formatoSel.value = "docx";
 
   if (_tiptapEditor) { _tiptapEditor.destroy(); _tiptapEditor = null; }
   contenedor.innerHTML = "";
@@ -3531,7 +3566,7 @@ function abrirEditorTiptap(): void {
       FontSize,
       Highlight.configure({ multicolor: true }),
     ],
-    content: "<p></p>",
+    content: edit?.html ?? "<p></p>",
     autofocus: "end",
     onTransaction: () => { actualizarToolbarEditor(); actualizarContadorEditor(); },
     onSelectionUpdate: () => actualizarToolbarEditor(),
@@ -3571,6 +3606,27 @@ function cerrarEditorTiptap(): void {
   document.removeEventListener("click", _cerrarPaletasEditor, true);
   if (_tiptapEditor) { _tiptapEditor.destroy(); _tiptapEditor = null; }
   _editorRutaCifrada = null;
+  _editorRutaEdicion = null;
+}
+
+// Abre un DOCX guardado en el editor para modificarlo. Descifra → HTML (docx_a_html en
+// Rust vía «ver_archivo») → carga en Tiptap. Al guardar, sobrescribe el mismo archivo.
+async function editarDocxGuardado(ruta: string, base: string): Promise<void> {
+  try {
+    // leer_docx_editable devuelve SOLO el cuerpo del DOCX como «html:<markup>»
+    // (sin cabecera/pie/imágenes sueltas) conservando encabezados, listas, alineación,
+    // negrita/cursiva/subrayado/tachado, color y tamaño para reeditarlo sin pérdidas.
+    const contenido = await invoke<string>("leer_docx_editable", { ruta });
+    if (!contenido.startsWith("html:")) {
+      mostrarToast("Este documento no se puede editar aquí.", true);
+      return;
+    }
+    const html = contenido.slice(5);
+    const titulo = base.replace(/\.docx$/i, "");
+    abrirEditorTiptap({ ruta, titulo, html });
+  } catch (e) {
+    mostrarToast("No se pudo abrir para editar: " + String(e), true);
+  }
 }
 
 // ── COMPARTIR — dropdown fusionado ───────────────────────────────────────────
@@ -3957,10 +4013,15 @@ async function _ejecutarGuardarRedaccion(nombre: string): Promise<void> {
     if (guardarJunto) {
       await invoke("mover_archivo_guardado", { ruta, buzonDestino: _buzonRefDocumento }).catch(() => {});
     }
-    mostrarToast("Documento guardado y cifrado", false);
     invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreFinal }).catch(() => {});
-    cargarArchivosGuardados().catch(() => {});
     invoke("parar_ia_redaccion").catch(() => {}); // libera KV cache y pesos del modelo tras guardar
+    // Salir a la pantalla de archivos Y seleccionar la carpeta destino (o "todos") para
+    // GARANTIZAR que el documento sea visible aunque estuviera activa otra carpeta.
+    // seleccionarBuzonGuardados ya recarga la lista.
+    document.getElementById("modal-guardar-ia")?.classList.add("hidden");
+    mostrarPantalla("archivos-guardados");
+    seleccionarBuzonGuardados(guardarJunto && _buzonRefDocumento ? _buzonRefDocumento : "todos");
+    mostrarToast("Documento guardado y cifrado", false);
   } catch (err) {
     mostrarToast("Error al guardar: " + String(err), true);
   } finally {
@@ -4083,10 +4144,18 @@ async function iniciarAsistenteIa(): Promise<void> {
   chat.classList.remove("hidden");
   if (btnEnviar) { btnEnviar.disabled = true; btnEnviar.style.opacity = "0.5"; btnEnviar.style.cursor = "not-allowed"; }
 
-  iaRedaccionAppendMensaje("sistema", "Cargando modelo Qwen3-4B... esto puede tardar hasta 1 minuto la primera vez.");
+  // Mensaje de carga con CONTADOR EN VIVO: el modelo tarda en cargar en CPU y sin
+  // feedback la pantalla parece congelada. El contador prueba que sigue trabajando.
+  const burbujaCarga = iaRedaccionAppendMensaje("sistema", "Cargando modelo Qwen3-4B…");
+  const t0 = Date.now();
+  const timerCarga = window.setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    if (burbujaCarga) burbujaCarga.textContent = `Cargando modelo Qwen3-4B… ${s}s (la primera vez puede tardar 1-2 min en CPU)`;
+  }, 1000);
 
   try {
     const resultado = await invoke<string>("iniciar_ia_redaccion");
+    clearInterval(timerCarga);
     const msgsEl = document.getElementById("redaccion-ia-mensajes");
     msgsEl?.querySelector(".ia-burbuja-pensando")?.remove();
     if (resultado === "activo") {
@@ -4096,12 +4165,15 @@ async function iniciarAsistenteIa(): Promise<void> {
       iaRedaccionAppendMensaje("babel", saludo);
       if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
     } else {
-      // "parado" u otro resultado inesperado — resetear UI
+      // "parado" u otro resultado inesperado — rehabilitar botón para reintentar
       iaRedaccionAppendMensaje("sistema", "Carga cancelada.");
+      if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
     }
   } catch (e) {
+    clearInterval(timerCarga);
     document.getElementById("redaccion-ia-mensajes")?.querySelector(".ia-burbuja-pensando")?.remove();
     iaRedaccionAppendMensaje("error", "Error al cargar el modelo: " + String(e));
+    if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
   }
 }
 
@@ -4622,20 +4694,47 @@ async function guardarDocumentoEditor(_e: Event): Promise<void> {
     tituloInput?.focus();
     return;
   }
-  const nombreArchivo = titulo.endsWith(".docx") ? titulo : titulo + ".docx";
-
+  const nombreDocx = titulo.endsWith(".docx") ? titulo : titulo + ".docx";
   const btn = document.getElementById("editor-btn-guardar") as HTMLButtonElement | null;
   if (btn) btn.disabled = true;
+
   try {
     const bytes = await tiptapADocx(_tiptapEditor.getJSON());
     const b64 = bytesABase64(bytes);
-    const ruta = await invoke<string>("guardar_documento_desde_bytes", {
-      nombreArchivo,
-      contenidoB64: b64,
-    });
+
+    // MODO EDICIÓN — sobrescribir el DOCX existente (mismo nombre y carpeta).
+    if (_editorRutaEdicion) {
+      await invoke("actualizar_documento_guardado", {
+        ruta: _editorRutaEdicion,
+        nombreArchivo: nombreDocx,
+        contenidoB64: b64,
+      });
+      invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreDocx }).catch(() => {});
+      cerrarEditorTiptap();
+      mostrarPantalla("archivos-guardados");
+      await cargarArchivosGuardados();
+      mostrarToast("✓ Documento actualizado", false);
+      return;
+    }
+
+    // DOCUMENTO NUEVO — respetar el formato elegido (DOCX editable / PDF final).
+    const formato = (document.getElementById("editor-formato") as HTMLSelectElement | null)?.value ?? "docx";
+    let ruta: string;
+    if (formato === "pdf") {
+      mostrarToast("Generando PDF…", false);
+      ruta = await invoke<string>("guardar_documento_pdf_desde_docx", {
+        nombreArchivo: nombreDocx, // Rust usa el stem y guarda «.pdf»
+        contenidoB64: b64,
+      });
+    } else {
+      ruta = await invoke<string>("guardar_documento_desde_bytes", {
+        nombreArchivo: nombreDocx,
+        contenidoB64: b64,
+      });
+    }
     _editorRutaCifrada = ruta;
-    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreArchivo }).catch(() => {});
-    await abrirSelectorCarpetaEditor(ruta, nombreArchivo);
+    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreDocx }).catch(() => {});
+    await abrirSelectorCarpetaEditor(ruta, nombreDocx);
   } catch (err) {
     mostrarToast("Error al guardar: " + String(err), true);
   } finally {
@@ -4697,15 +4796,21 @@ async function confirmarCarpetaEditor(): Promise<void> {
   }
   document.getElementById("modal-selector-carpeta-editor")?.classList.add("hidden");
   cerrarEditorTiptap();
+  // Salir a la pantalla de archivos Y seleccionar la carpeta DESTINO (incl. "todos"),
+  // para GARANTIZAR que el documento recién guardado sea visible aunque el usuario
+  // estuviera viendo otra carpeta antes. seleccionarBuzonGuardados ya recarga la lista.
+  mostrarPantalla("archivos-guardados");
+  seleccionarBuzonGuardados(_carpetaEditorSeleccionada || "todos");
   mostrarToast("✓ Documento guardado y cifrado", false);
-  await cargarArchivosGuardados();
 }
 
 function cancelarCarpetaEditor(): void {
   document.getElementById("modal-selector-carpeta-editor")?.classList.add("hidden");
   cerrarEditorTiptap();
+  // El documento quedó en "TODOS": mostrar esa vista para que sea visible.
+  mostrarPantalla("archivos-guardados");
+  seleccionarBuzonGuardados("todos");
   mostrarToast("✓ Documento guardado en TODOS y cifrado", false);
-  cargarArchivosGuardados().catch(() => {});
 }
 
 // ── CONVERSIÓN TIPTAP → DOCX ─────────────────────────────────────────────────
@@ -5831,6 +5936,12 @@ function toggleTraduccionP2P(): void {
   if (btn) {
     btn.style.opacity = p2pTraduccionActiva ? "1" : "0.4";
     btn.textContent = p2pTraduccionActiva ? "TRADUCCIÓN ON" : "TRADUCCIÓN OFF";
+  }
+  // Arranque bajo demanda: al activar la traducción de mensajes entrantes hay que
+  // asegurar que el servidor de traducción (:5002) esté vivo, ya que no corre desde
+  // el inicio de Babel.
+  if (p2pTraduccionActiva) {
+    invoke("asegurar_servidor_traduccion").catch(() => {});
   }
   mostrarToast(p2pTraduccionActiva ? "Traducción P2P activada" : "Traducción P2P desactivada", false);
 }

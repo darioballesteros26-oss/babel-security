@@ -1435,6 +1435,145 @@ fn guardar_documento_desde_bytes(
     Ok(ruta)
 }
 
+// Convierte bytes DOCX a PDF con LibreOffice (soffice). Bloqueante — llamar dentro de
+// spawn_blocking. Devuelve los bytes del PDF resultante.
+fn docx_bytes_a_pdf(docx: &[u8]) -> Result<Vec<u8>, String> {
+    const SIN_LIBREOFFICE: &str =
+        "Para guardar en PDF hace falta LibreOffice. Instálalo (libreoffice.org) o guarda \
+         en DOCX, que es totalmente editable.";
+    let soffice = traductor::resolver_binario(traductor::RUTAS_SOFFICE, "soffice");
+    // Pre-comprobación: si la ruta resuelta es absoluta y no existe, LibreOffice no está
+    // instalado → mensaje claro y accionable en vez de un fallo genérico de conversión.
+    if soffice.contains(std::path::MAIN_SEPARATOR) && !std::path::Path::new(&soffice).exists() {
+        return Err(SIN_LIBREOFFICE.to_string());
+    }
+    let sub = tmp_dir().join(nuevo_id());
+    std::fs::create_dir_all(&sub).map_err(|e| format!("Error creando temporal: {e}"))?;
+    let docx_tmp = sub.join("doc.docx");
+    escribir_privado(&docx_tmp, docx)
+        .map_err(|e| format!("Error escribiendo temporal: {e}"))?;
+
+    let mut cmd = std::process::Command::new(&soffice);
+    cmd.args([
+        "--headless", "--convert-to", "pdf",
+        "--outdir", &sub.to_string_lossy(),
+        &docx_tmp.to_string_lossy(),
+    ]);
+    let ok = traductor::ejecutar_con_timeout(&mut cmd, 180);
+    borrar_seguro(&docx_tmp.to_string_lossy());
+
+    let pdf_path = sub.join("doc.pdf");
+    let resultado = if ok {
+        std::fs::read(&pdf_path).map_err(|_| SIN_LIBREOFFICE.to_string())
+    } else {
+        // Fallo al lanzar (binario ausente en PATH) o timeout: mismo consejo accionable.
+        Err(SIN_LIBREOFFICE.to_string())
+    };
+    let _ = std::fs::remove_dir_all(&sub);
+    resultado
+}
+
+// COMANDO — Crear un documento nuevo en PDF a partir del DOCX del editor.
+// El editor Tiptap produce DOCX; para el formato PDF lo convertimos con LibreOffice
+// y guardamos el PDF cifrado (pasa por el pipeline de reducción como cualquier PDF).
+#[tauri::command]
+async fn guardar_documento_pdf_desde_docx(
+    app: tauri::AppHandle,
+    nombre_archivo: String,
+    contenido_b64: String,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
+
+    if contenido_b64.len() > 205 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 150 MB.".into());
+    }
+    let docx = base64::engine::general_purpose::STANDARD
+        .decode(contenido_b64.as_bytes())
+        .map_err(|_| "Datos del archivo no válidos.".to_string())?;
+
+    // Nombre final: forzar extensión .pdf (el editor manda «Titulo.docx»).
+    let stem = std::path::Path::new(&nombre_archivo)
+        .file_stem().and_then(|s| s.to_str()).unwrap_or("documento").to_string();
+    let nombre_pdf = format!("{stem}.pdf");
+
+    let ruta = tauri::async_runtime::spawn_blocking(move || {
+        let pdf = docx_bytes_a_pdf(&docx)?;
+        cifrar_y_guardar_desde_bytes(&nombre_pdf, &pdf, &subclave_hex, &id_usuario)
+    })
+    .await
+    .map_err(|e| format!("Error de tarea interna: {e}"))??;
+
+    if ULTIMA_IMPORTACION_LOSSY.with(|c| c.get()) {
+        let _ = app.emit("compresion-lossy", ());
+    }
+    Ok(ruta)
+}
+
+// COMANDO — Sobrescribir un documento DOCX guardado con contenido editado.
+// Reutiliza el mismo fichero cifrado (misma ruta, nombre y carpeta): editar en sitio.
+#[tauri::command]
+fn actualizar_documento_guardado(
+    ruta: String,
+    nombre_archivo: String,
+    contenido_b64: String,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<(), String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+    if !integridad::integridad_ok() {
+        return Err("Esta copia de Babel parece haber sido modificada y podría no ser segura.".into());
+    }
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+
+    // Validar que la ruta está DENTRO de ~/Babel/guardados (evita sobrescritura arbitraria).
+    let ruta_canon = std::fs::canonicalize(&ruta)
+        .map_err(|_| "Ruta no accesible o inexistente.".to_string())?;
+    let guardados_canon = std::fs::canonicalize(guardados_dir())
+        .map_err(|_| "Directorio de guardados no accesible.".to_string())?;
+    if !ruta_canon.starts_with(&guardados_canon) {
+        return Err("La ruta está fuera del directorio de guardados.".into());
+    }
+
+    if contenido_b64.len() > 205 * 1024 * 1024 {
+        return Err("El archivo supera el límite de 150 MB.".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(contenido_b64.as_bytes())
+        .map_err(|_| "Datos del archivo no válidos.".to_string())?;
+
+    // Cifrar y sobrescribir en la misma ruta (sin pasar por el reductor: el editor ya
+    // produce DOCX limpio y el reductor de imágenes es innecesario aquí).
+    let contenido_b64_comp = traductor::comprimir_b64(&bytes);
+    let cifrado = seguridad::blindar_documento(&contenido_b64_comp, &subclave_hex)
+        .map_err(|e| format!("Error cifrando: {}", e))?;
+    escribir_privado_atomico(&ruta_canon, &cifrado)
+        .map_err(|e| format!("Error guardando: {}", e))?;
+
+    // Actualizar tamaño y fecha en el índice de nombres cifrados, conservando el
+    // nombre visible. Si no existe entrada previa, registrar() la crea sin problema.
+    if let Some(nombre_cifrado) = ruta_canon.file_name().and_then(|n| n.to_str()) {
+        let ts: u64 = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let nombre_seguro = std::path::Path::new(&nombre_archivo)
+            .file_name().and_then(|n| n.to_str()).unwrap_or(&nombre_archivo);
+        let _ = nom_cifrado::registrar(
+            nombre_cifrado, nombre_seguro, ts, bytes.len() as u64,
+            &ruta_nomindex_guardados(), &subclave_hex,
+        );
+    }
+    Ok(())
+}
+
 // Borrado seguro de temporales de arrastre viejos (>1h) que hayan quedado de un
 // fallo previo, para que nunca se acumule plaintext en el temp del contenedor.
 fn barrer_temp_dnd(base: &std::path::Path) {
@@ -2288,6 +2427,227 @@ fn estado_servidor_cmd() -> String {
         3 => "error".into(),
         _ => "externo".into(),
     }
+}
+
+// Lanza el servidor de traducción (Python bundle o sidecar PyInstaller, :5002) BAJO
+// DEMANDA. Idempotente: no hace nada si ya está cargando (1) o listo (2). Antes esto
+// corría al arrancar Babel; ahora se llama al abrir el traductor para no tener el
+// servidor Python ocupando RAM cuando no se usa (clave en equipos de 8 GB donde
+// competía con la IA Qwen y provocaba lentitud/OOM).
+fn lanzar_servidor_traduccion(app: &tauri::AppHandle) {
+    let estado = SERVIDOR_ESTADO.load(std::sync::atomic::Ordering::Relaxed);
+    if estado == 1 || estado == 2 {
+        return; // ya cargando o listo
+    }
+    // Reclamar el arranque de forma ATÓMICA: pasar de {0 externo/reposo, 3 error} a
+    // 1 (cargando). Si otro hilo ya lo reclamó entre el load de arriba y este CAS
+    // (p. ej. dos `asegurar_servidor_traduccion` seguidos al cambiar de pantalla
+    // rápido), el compare_exchange falla y salimos — así nunca lanzamos dos procesos
+    // compitiendo por el puerto 5002 (el segundo no podría bindear y dejaría un
+    // Child huérfano en USB_CHILD).
+    if SERVIDOR_ESTADO
+        .compare_exchange(
+            estado,
+            1,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Relaxed,
+        )
+        .is_err()
+    {
+        return;
+    }
+
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let sidecar_path = exe_dir.as_ref().map(|d| d.join("servidor_babel"));
+    let sidecar_exists = sidecar_path.as_ref().map(|p| p.exists()).unwrap_or(false);
+    // Fallback legacy: python + script en Resources/ (USBs anteriores)
+    let legacy_exists = app.path().resource_dir().ok().map(|res| {
+        res.join("python").join("bin").join("python3").exists()
+            && res.join("servidor").join("server.py").exists()
+    }).unwrap_or(false);
+
+    // Si el puerto ya está ocupado (servidor externo en dev, o uno lanzado antes en
+    // esta misma sesión), asumimos que está disponible y no relanzamos.
+    let puerto_ocupado = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:5002".parse::<std::net::SocketAddr>().unwrap(),
+        std::time::Duration::from_millis(300),
+    ).is_ok();
+    if puerto_ocupado {
+        log::info!("[Servidor] puerto 5002 ya ocupado — se usa el servidor existente");
+        SERVIDOR_ESTADO.store(2, std::sync::atomic::Ordering::Relaxed);
+        return;
+    }
+
+    if !(sidecar_exists || legacy_exists) {
+        // Reclamamos el arranque (estado=1) pero no podemos lanzar: liberar el claim
+        // volviendo a 0 para permitir reintentos futuros y no dejar el badge en "cargando".
+        SERVIDOR_ESTADO.store(0, std::sync::atomic::Ordering::Relaxed);
+        log::warn!("[Servidor] sin sidecar ni Python bundle — traducción no disponible");
+        return;
+    }
+
+    // TOKEN: reutilizar el que ya esté fijado en lugar de generar uno nuevo cada vez.
+    // `NLLB_TOKEN` es un OnceLock (solo se fija UNA vez); con el arranque diferido el
+    // traductor se relanza varias veces (al alternar con la IA). Si aquí generáramos un
+    // token nuevo en cada relanzamiento, el servidor arrancaría con ese token pero
+    // `token_efectivo()` seguiría devolviendo el primero → las peticiones de traducción
+    // se rechazarían por token no coincidente. Reutilizando el existente siempre casan.
+    let token = {
+        let existente = traductor::token_efectivo_pub();
+        if !existente.is_empty() {
+            existente
+        } else {
+            let mut rng_bytes = [0u8; 16];
+            rand::rngs::OsRng.fill_bytes(&mut rng_bytes);
+            let nuevo = format!("babel_{}", hex::encode(rng_bytes));
+            traductor::inicializar_nllb_token(nuevo.clone());
+            nuevo
+        }
+    };
+
+    // Resolver dónde están los modelos en orden de preferencia:
+    // 1. ~/Babel/modelos_usb  (instalación estándar / usuario)
+    // 2. {exe_dir}/modelos_usb (USB o dev con symlink)
+    // 3. {resources}/servidor/modelos_usb (puesto por preparar_usb.sh)
+    // 4. {resources}/modelos_usb (bundle con modelos integrados)
+    let modelos_dir: Option<std::path::PathBuf> = [
+        Some(babel_dir().join("modelos_usb")),
+        exe_dir.as_ref().map(|d| d.join("modelos_usb")),
+        app.path().resource_dir().ok().map(|r| r.join("servidor").join("modelos_usb")),
+        app.path().resource_dir().ok().map(|r| r.join("modelos_usb")),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|p| p.is_dir());
+
+    if let Some(ref m) = modelos_dir {
+        log::info!("[Servidor] modelos en {}", m.display());
+    } else {
+        log::warn!("[Servidor] modelos no encontrados — la traducción puede fallar");
+    }
+
+    // Preferir Python del bundle (legacy) cuando está disponible: tiene transformers y
+    // todas las dependencias que el sidecar PyInstaller no incluye. El sidecar se usa
+    // solo como fallback cuando no hay Python bundleado (instalación mínima desde DMG).
+    let child_result = if !legacy_exists && sidecar_exists {
+        let bin = sidecar_path.unwrap();
+        log::info!("[Servidor] lanzando sidecar (sin Python bundle): {}", bin.display());
+        let mut cmd = std::process::Command::new(&bin);
+        cmd .env("BABEL_NLLB_TOKEN", &token)
+            .env("TRANSFORMERS_OFFLINE", "1")
+            .env("HF_DATASETS_OFFLINE", "1")
+            .env("TOKENIZERS_PARALLELISM", "false")
+            .env("PYTHONDONTWRITEBYTECODE", "1");
+        if let Some(ref m) = modelos_dir {
+            cmd.env("BABEL_DIR_USB", m);
+        }
+        cmd.spawn()
+    } else {
+        let res = app.path().resource_dir().unwrap();
+        let py_bin = res.join("python").join("bin").join("python3");
+        let servidor = res.join("servidor").join("server.py");
+        log::info!("[Servidor] lanzando Python bundle: {}", servidor.display());
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("xattr")
+            .args(["-d", "com.apple.quarantine", py_bin.to_str().unwrap_or("")])
+            .output();
+        let mut cmd2 = std::process::Command::new(&py_bin);
+        cmd2.arg(&servidor)
+            .env("BABEL_NLLB_TOKEN", &token)
+            .env("TRANSFORMERS_OFFLINE", "1")
+            .env("HF_DATASETS_OFFLINE", "1")
+            .env("TOKENIZERS_PARALLELISM", "false")
+            .env("PYTHONDONTWRITEBYTECODE", "1");
+        if let Some(ref m) = modelos_dir {
+            cmd2.env("BABEL_DIR_USB", m);
+        }
+        cmd2.spawn()
+    };
+
+    let handle = app.clone();
+    match child_result {
+        Ok(child) => {
+            log::info!("[Servidor] sidecar PID {}", child.id());
+            SERVIDOR_ESTADO.store(1, std::sync::atomic::Ordering::Relaxed);
+            *USB_CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
+
+            std::thread::spawn(move || {
+                let addr: std::net::SocketAddr = "127.0.0.1:5002".parse().unwrap();
+                let tc = std::time::Duration::from_secs(1);
+                let mut listo = false;
+                for _ in 0..120 {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    if std::net::TcpStream::connect_timeout(&addr, tc).is_ok() {
+                        let ok = ureq::get("http://127.0.0.1:5002/ping")
+                            .timeout(std::time::Duration::from_secs(3))
+                            .call()
+                            .map(|r| r.status() == 200)
+                            .unwrap_or(false);
+                        if ok {
+                            log::info!("[Servidor] listo en 127.0.0.1:5002");
+                            SERVIDOR_ESTADO.store(2, std::sync::atomic::Ordering::Relaxed);
+                            let _ = handle.emit("servidor-usb-listo", ());
+                            listo = true;
+                            break;
+                        }
+                    }
+                }
+                if !listo {
+                    log::error!("[Servidor] timeout: no respondió en 240 s");
+                    SERVIDOR_ESTADO.store(3, std::sync::atomic::Ordering::Relaxed);
+                    let _ = handle.emit(
+                        "servidor-error",
+                        "El traductor no arrancó en 4 minutos. Cierra y vuelve a abrir Babel.",
+                    );
+                }
+            });
+        }
+        Err(e) => {
+            log::error!("[Servidor] fallo al lanzar: {}", e);
+            SERVIDOR_ESTADO.store(3, std::sync::atomic::Ordering::Relaxed);
+            let msg = format!("No se pudo lanzar el traductor: {}. Reinicia Babel.", e);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                let _ = handle.emit("servidor-error", msg);
+            });
+        }
+    }
+}
+
+// Detiene el servidor de traducción (Python/sidecar) y libera su RAM. Se llama al
+// abrir la IA Qwen para que ambos nunca coexistan en memoria (equipos de 8 GB).
+// Deja SERVIDOR_ESTADO en 0 para que un `lanzar_servidor_traduccion` posterior lo
+// vuelva a arrancar cuando el usuario regrese al traductor.
+pub(crate) fn matar_servidor_traduccion() {
+    if let Ok(mut guard) = USB_CHILD.lock() {
+        if let Some(mut c) = guard.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+    let _ = std::process::Command::new("pkill")
+        .args(["-KILL", "-f", "servidor_babel"])
+        .output();
+    SERVIDOR_ESTADO.store(0, std::sync::atomic::Ordering::Relaxed);
+    log::info!("[Servidor] traductor detenido para liberar RAM");
+}
+
+// Comando invocado por el frontend al abrir el traductor o al traducir. Garantiza que
+// el servidor de traducción esté arrancando/listo. Libera primero la RAM de la IA Qwen
+// (matar_llama_si_activo) para que traductor e IA no coexistan en 8 GB. Devuelve el
+// estado del servidor ("cargando" | "listo" | "error" | "externo").
+#[tauri::command]
+fn asegurar_servidor_traduccion(app: tauri::AppHandle) -> String {
+    // Defensa en profundidad: si el vault está bloqueado por detección RAT no
+    // arrancamos nada (los comandos de traducción ya están bloqueados por su cuenta).
+    if crate::rat_detector::verificar_no_bloqueado_rat().is_err() {
+        return estado_servidor_cmd();
+    }
+    crate::ia_redaccion::matar_llama_si_activo();
+    lanzar_servidor_traduccion(&app);
+    estado_servidor_cmd()
 }
 
 // COMANDO 7 — Traducir documento vía drag & drop nativo
@@ -3915,7 +4275,74 @@ fn formato_header_footer(texto: &str, es_header: bool) -> String {
     )
 }
 
+// Detecta el nivel de encabezado (1..6) a partir del id de estilo del párrafo DOCX
+// («Heading1», «Heading 1», «heading-1», «Title», «Subtitle»…). None → párrafo normal.
+fn nivel_heading_docx(style_val: &str) -> Option<u8> {
+    let s = style_val
+        .to_lowercase()
+        .replace([' ', '-', '_'], "");
+    if s == "title" {
+        return Some(1);
+    }
+    if s == "subtitle" {
+        return Some(2);
+    }
+    if let Some(rest) = s.strip_prefix("heading") {
+        if let Ok(n) = rest.parse::<u8>() {
+            if (1..=6).contains(&n) {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+// Justificación DOCX → CSS text-align (que la extensión TextAlign de Tiptap lee al
+// cargar el HTML). None → alineación por defecto (izquierda), no se emite atributo.
+fn css_align_docx(just_val: &str) -> Option<&'static str> {
+    match just_val.to_lowercase().as_str() {
+        "center" => Some("center"),
+        "right" | "end" => Some("right"),
+        "both" | "distribute" => Some("justify"),
+        _ => None,
+    }
+}
+
+// Envuelve el HTML interno de un párrafo en <h1..6> o <p> según su estilo, aplicando
+// la alineación. Compartido por el visor y el editor para que ambos vean lo mismo.
+fn envolver_parrafo_docx(para: &docx_rs::Paragraph, inner: &str) -> String {
+    let align = para
+        .property
+        .alignment
+        .as_ref()
+        .and_then(|j| css_align_docx(&j.val));
+    let heading = para
+        .property
+        .style
+        .as_ref()
+        .and_then(|s| nivel_heading_docx(&s.val));
+    if let Some(h) = heading {
+        let astyle = align
+            .map(|a| format!(" style='text-align:{a};'"))
+            .unwrap_or_default();
+        format!("<h{h}{astyle}>{inner}</h{h}>")
+    } else {
+        let astyle = align.map(|a| format!("text-align:{a};")).unwrap_or_default();
+        format!("<p style='{astyle}margin:0 0 6px;'>{inner}</p>")
+    }
+}
+
+// Vista de SOLO LECTURA de un DOCX (incluye cabecera/pie/imágenes sueltas). Visor.
 fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
+    docx_a_html_impl(raw_bytes, false)
+}
+
+// Versión EDITABLE: solo el cuerpo del documento. Excluye cabecera/pie e imágenes
+// sueltas porque Tiptap no sabe distinguirlos del texto y acabarían mezclados en el
+// cuerpo al reeditar (y duplicándose en cada guardado). Conserva encabezados, listas,
+// alineación, negrita/cursiva/subrayado/tachado, color y tamaño de fuente — todo lo
+// que el editor sabe volver a producir en el DOCX de salida.
+fn docx_a_html_impl(raw_bytes: &[u8], editable: bool) -> Result<String, String> {
     let mut imagenes: Vec<String> = Vec::new();
     if let Ok(mut zip) = zip::ZipArchive::new(std::io::Cursor::new(raw_bytes)) {
         let mut nombres: Vec<String> = (0..zip.len())
@@ -3957,27 +4384,60 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
         }
     };
 
-    let (header_html, footer_html, imagenes_html) = extraer_zip_html(raw_bytes);
-    let mut html = String::from(
-        "<div style='font-family:Georgia,serif;line-height:1.7;color:inherit;max-width:100%;'>",
-    );
+    // En modo editable NO extraemos cabecera/pie/imágenes sueltas: solo el cuerpo.
+    let (header_html, footer_html, imagenes_html) = if editable {
+        (String::new(), String::new(), String::new())
+    } else {
+        extraer_zip_html(raw_bytes)
+    };
+    let mut html = if editable {
+        String::new()
+    } else {
+        String::from(
+            "<div style='font-family:Georgia,serif;line-height:1.7;color:inherit;max-width:100%;'>",
+        )
+    };
     if !header_html.is_empty() {
         html.push_str(&header_html);
     }
 
     let texto_run = |run: &docx_rs::Run| -> String {
-        let (bold, italic) = (run.run_property.bold.is_some(), run.run_property.italic.is_some());
+        let rp = &run.run_property;
+        let (bold, italic) = (rp.bold.is_some(), rp.italic.is_some());
+        let (underline, strike) = (rp.underline.is_some(), rp.strike.is_some());
+        // Color y tamaño: los campos `val` son privados, pero su Serialize expone el
+        // valor (Color → cadena hex, Sz → número en half-points), así que lo leemos
+        // vía serde_json sin depender de campos privados de docx_rs.
+        let color = serde_json::to_value(&rp.color)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .filter(|c| !c.is_empty() && c.to_lowercase() != "auto");
+        let size_halfpt = serde_json::to_value(&rp.sz).ok().and_then(|v| v.as_u64());
+        let mut span_style = String::new();
+        if let Some(c) = &color {
+            let hex = if c.starts_with('#') { c.clone() } else { format!("#{c}") };
+            span_style.push_str(&format!("color:{hex};"));
+        }
+        if let Some(hp) = size_halfpt {
+            // half-points → px (el editor usa px; px ≈ half-points / 1.5).
+            let px = ((hp as f64) / 1.5).round() as i64;
+            if px > 0 {
+                span_style.push_str(&format!("font-size:{px}px;"));
+            }
+        }
         let mut out = String::new();
         for rc in &run.children {
             match rc {
                 docx_rs::RunChild::Text(t) => {
-                    let e = t.text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-                    out.push_str(&match (bold, italic) {
-                        (true, true)  => format!("<strong><em>{}</em></strong>", e),
-                        (true, false) => format!("<strong>{}</strong>", e),
-                        (false, true) => format!("<em>{}</em>", e),
-                        _             => e,
-                    });
+                    let mut e = t.text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+                    if bold { e = format!("<strong>{e}</strong>"); }
+                    if italic { e = format!("<em>{e}</em>"); }
+                    if underline { e = format!("<u>{e}</u>"); }
+                    if strike { e = format!("<s>{e}</s>"); }
+                    if !span_style.is_empty() {
+                        e = format!("<span style='{span_style}'>{e}</span>");
+                    }
+                    out.push_str(&e);
                 }
                 docx_rs::RunChild::Drawing(_) => {
                     let i = img_idx.get();
@@ -3993,23 +4453,43 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
         out
     };
 
-    let parrafo_a_html = |para: &docx_rs::Paragraph| -> String {
-        let mut p = String::from("<p style='margin:0 0 6px;'>");
+    let parrafo_inner = |para: &docx_rs::Paragraph| -> String {
+        let mut inner = String::new();
         for cp in &para.children {
             if let docx_rs::ParagraphChild::Run(run) = cp {
-                p.push_str(&texto_run(run));
+                inner.push_str(&texto_run(run));
             }
         }
-        p.push_str("</p>");
-        p
+        inner
     };
 
+    // Los párrafos con numeración se agrupan en una <ul> (Tiptap solo distingue lista
+    // por el marcado; el tipo exacto ordenada/desordenada del DOCX importado no siempre
+    // es recuperable, así que unificamos en viñetas — los documentos creados en Babel
+    // usan prefijos literales «• »/«1. » y vuelven como párrafos normales).
+    let mut lista_abierta = false;
     for child in &docx.document.children {
         match child {
             docx_rs::DocumentChild::Paragraph(para) => {
-                html.push_str(&parrafo_a_html(para));
+                let es_item = para.property.numbering_property.is_some();
+                if es_item && !lista_abierta {
+                    html.push_str("<ul>");
+                    lista_abierta = true;
+                } else if !es_item && lista_abierta {
+                    html.push_str("</ul>");
+                    lista_abierta = false;
+                }
+                if es_item {
+                    html.push_str(&format!("<li>{}</li>", parrafo_inner(para)));
+                } else {
+                    html.push_str(&envolver_parrafo_docx(para, &parrafo_inner(para)));
+                }
             }
             docx_rs::DocumentChild::Table(table) => {
+                if lista_abierta {
+                    html.push_str("</ul>");
+                    lista_abierta = false;
+                }
                 html.push_str("<table style='border-collapse:collapse;width:100%;margin:10px 0;'>");
                 for row in &table.rows {
                     let docx_rs::TableChild::TableRow(tr) = row;
@@ -4021,7 +4501,7 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
                         );
                         for cc in &tc.children {
                             if let docx_rs::TableCellContent::Paragraph(p) = cc {
-                                html.push_str(&parrafo_a_html(p));
+                                html.push_str(&envolver_parrafo_docx(p, &parrafo_inner(p)));
                             }
                         }
                         html.push_str("</td>");
@@ -4033,6 +4513,9 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
             _ => {}
         }
     }
+    if lista_abierta {
+        html.push_str("</ul>");
+    }
 
     if !imagenes_html.is_empty() {
         html.push_str(&format!(
@@ -4043,7 +4526,9 @@ fn docx_a_html(raw_bytes: &[u8]) -> Result<String, String> {
     if !footer_html.is_empty() {
         html.push_str(&footer_html);
     }
-    html.push_str("</div>");
+    if !editable {
+        html.push_str("</div>");
+    }
     Ok(format!("html:{}", html))
 }
 
@@ -4120,6 +4605,41 @@ fn ver_archivo(
     }
 
     Ok(contenido)
+}
+
+// COMANDO — Abrir un DOCX guardado para EDITARLO en el editor Tiptap.
+// Devuelve solo el cuerpo como «html:…» (sin cabecera/pie/imágenes sueltas, que
+// contaminarían el texto al reeditar) conservando encabezados, listas, alineación,
+// negrita/cursiva/subrayado/tachado, color y tamaño. Solo válido para DOCX.
+#[tauri::command]
+fn leer_docx_editable(
+    ruta: String,
+    app: tauri::AppHandle,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+    if !integridad::integridad_ok() {
+        return Err(
+            "Esta copia de Babel parece haber sido modificada y podría no ser segura.".into(),
+        );
+    }
+    validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    crate::acceso_masivo::registrar_descifrado(&app, &subclave_hex)?;
+
+    let bytes = fs::read(&ruta).map_err(|e| format!("Error leyendo archivo: {}", e))?;
+    let contenido = seguridad::descifrar_documento(bytes, &subclave_hex)
+        .map_err(|e| format!("Error descifrando: {}", e))?;
+    let raw_bytes = traductor::descomprimir_b64(&contenido)
+        .map_err(|_| "No se pudo leer el documento.".to_string())?;
+    if !raw_bytes.starts_with(b"PK") {
+        return Err("Este documento no es un DOCX editable.".into());
+    }
+    docx_a_html_impl(&raw_bytes, true)
 }
 
 // COMANDO — Extracción de texto plano para el asistente IA (Fase 2.1)
@@ -6453,10 +6973,25 @@ fn main() {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(bundle) = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
             if bundle.extension().and_then(|e| e.to_str()) == Some("app") {
-                let _ = std::process::Command::new("xattr")
+                match std::process::Command::new("xattr")
                     .args(["-rd", "com.apple.quarantine"])
                     .arg(bundle)
-                    .output();
+                    .output()
+                {
+                    Ok(o) if o.status.success() => {
+                        log::info!("[Arranque] quarantine limpiada del bundle.");
+                    }
+                    Ok(o) => {
+                        // No fatal: puede que ya estuviera limpio, o el bundle sea
+                        // read-only (App Translocation). Los binarios se re-intentan
+                        // individualmente antes de spawnearse.
+                        log::warn!(
+                            "[Arranque] xattr -rd devolvió error (bundle read-only?): {}",
+                            String::from_utf8_lossy(&o.stderr).trim()
+                        );
+                    }
+                    Err(e) => log::warn!("[Arranque] no se pudo ejecutar xattr sobre el bundle: {e}"),
+                }
             }
         }
     }
@@ -6563,162 +7098,38 @@ fn main() {
             if let Some(win) = app.get_webview_window("main") {
                 excluir_ventana_de_captura(&win);
             }
-            let exe_dir = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-            let sidecar_path = exe_dir.as_ref().map(|d| d.join("servidor_babel"));
-            let sidecar_exists = sidecar_path.as_ref().map(|p| p.exists()).unwrap_or(false);
-            // Fallback legacy: python + script en Resources/ (USBs anteriores)
-            let legacy_exists = app.path().resource_dir().ok().map(|res| {
-                res.join("python").join("bin").join("python3").exists()
-                    && res.join("servidor").join("server.py").exists()
-            }).unwrap_or(false);
-            // Si el puerto 5002 está ocupado por un servidor_babel huérfano de una
-            // sesión anterior (cierre forzado, crash, etc.), lo matamos para poder
-            // arrancar uno nuevo con el token de esta sesión.
-            let puerto_ocupado = std::net::TcpStream::connect_timeout(
-                &"127.0.0.1:5002".parse::<std::net::SocketAddr>().unwrap(),
-                std::time::Duration::from_millis(300),
-            ).is_ok();
-            if puerto_ocupado && (sidecar_exists || legacy_exists) {
-                // SIGKILL (no SIGTERM) para garantizar que el proceso PyInstaller muere
-                // en <100 ms; SIGTERM puede tardar segundos si el servidor está cargando
-                // el modelo y provocaría que el siguiente check de puerto aún lo vea activo.
-                let _ = std::process::Command::new("pkill")
-                    .args(["-KILL", "-f", "servidor_babel"])
-                    .output();
-                // Dar tiempo a que el kernel libere el puerto (normalmente <200 ms)
-                std::thread::sleep(std::time::Duration::from_millis(1200));
-                log::info!("[Servidor] Puerto 5002 liberado — servidor huérfano eliminado");
-            }
-            let puerto_libre = std::net::TcpStream::connect_timeout(
-                &"127.0.0.1:5002".parse::<std::net::SocketAddr>().unwrap(),
-                std::time::Duration::from_millis(300),
-            ).is_err();
-
-            if puerto_libre && (sidecar_exists || legacy_exists) {
-                let mut rng_bytes = [0u8; 16];
-                rand::rngs::OsRng.fill_bytes(&mut rng_bytes);
-                let token = format!("babel_{}", hex::encode(rng_bytes));
-                traductor::inicializar_nllb_token(token.clone());
-
-                // Resolver dónde están los modelos en orden de preferencia:
-                // 1. ~/Babel/modelos_usb  (instalación estándar / usuario)
-                // 2. {exe_dir}/modelos_usb (USB o dev con symlink)
-                // 3. {resources}/servidor/modelos_usb (puesto por preparar_usb.sh)
-                // 4. {resources}/modelos_usb (bundle con modelos integrados)
-                // Si ninguno existe, se omite BABEL_DIR_USB y el servidor usa su default.
-                let modelos_dir: Option<std::path::PathBuf> = [
-                    Some(babel_dir().join("modelos_usb")),
-                    exe_dir.as_ref().map(|d| d.join("modelos_usb")),
-                    app.path().resource_dir().ok().map(|r| r.join("servidor").join("modelos_usb")),
-                    app.path().resource_dir().ok().map(|r| r.join("modelos_usb")),
-                ]
-                .into_iter()
-                .flatten()
-                .find(|p| p.is_dir());
-
-                if let Some(ref m) = modelos_dir {
-                    log::info!("[Servidor] modelos en {}", m.display());
-                } else {
-                    log::warn!("[Servidor] modelos no encontrados — la traducción puede fallar");
-                }
-
-                // Preferir Python del bundle (legacy) cuando está disponible: tiene
-                // transformers y todas las dependencias que el sidecar PyInstaller no
-                // incluye (tokenization_small100 → PreTrainedTokenizer). El sidecar
-                // se usa solo como fallback cuando no hay Python bundleado (instalación
-                // mínima desde DMG sin USB).
-                let child_result = if !legacy_exists && sidecar_exists {
-                    let bin = sidecar_path.unwrap();
-                    log::info!("[Servidor] lanzando sidecar (sin Python bundle): {}", bin.display());
-                    let mut cmd = std::process::Command::new(&bin);
-                    cmd .env("BABEL_NLLB_TOKEN", &token)
-                        .env("TRANSFORMERS_OFFLINE", "1")
-                        .env("HF_DATASETS_OFFLINE", "1")
-                        .env("TOKENIZERS_PARALLELISM", "false")
-                        .env("PYTHONDONTWRITEBYTECODE", "1");
-                    if let Some(ref m) = modelos_dir {
-                        cmd.env("BABEL_DIR_USB", m);
-                    }
-                    cmd.spawn()
-                } else {
-                    let res = app.path().resource_dir().unwrap();
-                    let py_bin = res.join("python").join("bin").join("python3");
-                    let servidor = res.join("servidor").join("server.py");
-                    log::info!("[Servidor] lanzando Python bundle: {}", servidor.display());
-                    // PYTHONDONTWRITEBYTECODE evita que Python cree archivos .pyc
-                    // dentro del bundle, lo que invalidaría la firma codesign.
-                    #[cfg(target_os = "macos")]
-                    let _ = std::process::Command::new("xattr")
-                        .args(["-d", "com.apple.quarantine", py_bin.to_str().unwrap_or("")])
+            // TRADUCTOR (Python/sidecar en :5002) — ARRANQUE BAJO DEMANDA.
+            // Ya NO se lanza al abrir Babel: en equipos de 8 GB el servidor Python
+            // (SMaLL-100, ~1-2 GB) compite por RAM con la IA Qwen y la ralentiza. Se
+            // lanza cuando el usuario abre el traductor o traduce, vía el comando
+            // `asegurar_servidor_traduccion` (frontend) → `lanzar_servidor_traduccion`.
+            // Aquí solo limpiamos un servidor_babel huérfano de una sesión anterior
+            // (crash/SIGKILL sin cierre limpio) para dejar el puerto 5002 libre.
+            {
+                let exe_dir0 = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+                let tenemos_sidecar = exe_dir0
+                    .as_ref()
+                    .map(|d| d.join("servidor_babel").exists())
+                    .unwrap_or(false)
+                    || app.path().resource_dir().ok().map(|res| {
+                        res.join("python").join("bin").join("python3").exists()
+                            && res.join("servidor").join("server.py").exists()
+                    }).unwrap_or(false);
+                let puerto_ocupado = std::net::TcpStream::connect_timeout(
+                    &"127.0.0.1:5002".parse::<std::net::SocketAddr>().unwrap(),
+                    std::time::Duration::from_millis(300),
+                ).is_ok();
+                if puerto_ocupado && tenemos_sidecar {
+                    // SIGKILL: el bootstrap PyInstaller muere en <100 ms. pkill -f
+                    // captura también el hijo forkeado que escucha en 5002.
+                    let _ = std::process::Command::new("pkill")
+                        .args(["-KILL", "-f", "servidor_babel"])
                         .output();
-                    let mut cmd2 = std::process::Command::new(&py_bin);
-                    cmd2.arg(&servidor)
-                        .env("BABEL_NLLB_TOKEN", &token)
-                        .env("TRANSFORMERS_OFFLINE", "1")
-                        .env("HF_DATASETS_OFFLINE", "1")
-                        .env("TOKENIZERS_PARALLELISM", "false")
-                        .env("PYTHONDONTWRITEBYTECODE", "1");
-                    if let Some(ref m) = modelos_dir {
-                        cmd2.env("BABEL_DIR_USB", m);
-                    }
-                    cmd2.spawn()
-                };
-
-                let handle = app.handle().clone();
-                match child_result {
-                    Ok(child) => {
-                        log::info!("[Servidor] sidecar PID {}", child.id());
-                        SERVIDOR_ESTADO.store(1, std::sync::atomic::Ordering::Relaxed);
-                        *USB_CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
-
-                        std::thread::spawn(move || {
-                            let addr: std::net::SocketAddr = "127.0.0.1:5002".parse().unwrap();
-                            let tc = std::time::Duration::from_secs(1);
-                            let mut listo = false;
-                            for _ in 0..120 {
-                                std::thread::sleep(std::time::Duration::from_secs(2));
-                                // Verificar con HTTP /ping (no solo TCP) para saber que
-                                // Flask está respondiendo, no solo que el proceso existe.
-                                if std::net::TcpStream::connect_timeout(&addr, tc).is_ok() {
-                                    let ok = ureq::get("http://127.0.0.1:5002/ping")
-                                        .timeout(std::time::Duration::from_secs(3))
-                                        .call()
-                                        .map(|r| r.status() == 200)
-                                        .unwrap_or(false);
-                                    if ok {
-                                        log::info!("[Servidor] listo en 127.0.0.1:5002");
-                                        SERVIDOR_ESTADO.store(2, std::sync::atomic::Ordering::Relaxed);
-                                        let _ = handle.emit("servidor-usb-listo", ());
-                                        listo = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if !listo {
-                                log::error!("[Servidor] timeout: no respondió en 240 s");
-                                SERVIDOR_ESTADO.store(3, std::sync::atomic::Ordering::Relaxed);
-                                let _ = handle.emit(
-                                    "servidor-error",
-                                    "El traductor no arrancó en 4 minutos. Cierra y vuelve a abrir Babel.",
-                                );
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        log::error!("[Servidor] fallo al lanzar: {}", e);
-                        SERVIDOR_ESTADO.store(3, std::sync::atomic::Ordering::Relaxed);
-                        let msg = format!("No se pudo lanzar el traductor: {}. Reinicia Babel.", e);
-                        std::thread::spawn(move || {
-                            std::thread::sleep(std::time::Duration::from_secs(3));
-                            let _ = handle.emit("servidor-error", msg);
-                        });
-                    }
+                    std::thread::sleep(std::time::Duration::from_millis(800));
+                    log::info!("[Servidor] servidor_babel huérfano eliminado al arrancar");
                 }
-            } else if !puerto_libre {
-                log::info!("[Servidor] puerto 5002 ocupado — usando servidor externo");
-                SERVIDOR_ESTADO.store(2, std::sync::atomic::Ordering::Relaxed);
             }
 
             // Dev/externo: tomar token del entorno si el modo USB no lo fijó ya (idempotente)
@@ -6869,6 +7280,9 @@ fn main() {
             renombrar_buzon,
             guardar_documento_sin_traducir,
             guardar_documento_desde_bytes,
+            guardar_documento_pdf_desde_docx,
+            actualizar_documento_guardado,
+            leer_docx_editable,
             preparar_temp_bytes,
             importar_archivo_dialogo,
             importar_carpeta_dialogo,
@@ -6927,6 +7341,7 @@ fn main() {
             registro_diario::marcar_primera_vez_registro,
             registro_diario::obtener_ips_historial,
             estado_servidor_cmd,
+            asegurar_servidor_traduccion,
             rat_detector::estado_bloqueo_rat,
             rat_detector::solicitar_desbloqueo_a_pares,
             rat_detector::desbloquear_rat_bip39,
@@ -7115,5 +7530,65 @@ mod tests_formatos_no_soportados {
         assert!(hint_formato_no_soportado("xyz").is_none());
         assert!(hint_formato_no_soportado("").is_none());
         assert!(hint_formato_no_soportado("zip").is_none());
+    }
+}
+
+#[cfg(test)]
+mod tests_docx_editable {
+    use super::*;
+
+    // Construye un DOCX con encabezado, alineación centrada, negrita, color y tamaño
+    // para verificar que el round-trip a HTML editable conserva ese formato.
+    fn construir_docx() -> Vec<u8> {
+        use docx_rs::*;
+        let docx = Docx::new()
+            .add_paragraph(
+                Paragraph::new()
+                    .style("Heading1")
+                    .add_run(Run::new().add_text("Titulo")),
+            )
+            .add_paragraph(
+                Paragraph::new()
+                    .align(AlignmentType::Center)
+                    .add_run(Run::new().add_text("centrado ").bold())
+                    .add_run(Run::new().add_text("rojo").color("FF0000").size(28)),
+            );
+        let mut cur = std::io::Cursor::new(Vec::new());
+        docx.build().pack(&mut cur).expect("empaquetar docx");
+        cur.into_inner()
+    }
+
+    #[test]
+    fn test_helpers_estilo() {
+        assert_eq!(nivel_heading_docx("Heading1"), Some(1));
+        assert_eq!(nivel_heading_docx("Heading 3"), Some(3));
+        assert_eq!(nivel_heading_docx("heading-2"), Some(2));
+        assert_eq!(nivel_heading_docx("Title"), Some(1));
+        assert_eq!(nivel_heading_docx("Normal"), None);
+        assert_eq!(nivel_heading_docx("Heading9"), None);
+        assert_eq!(css_align_docx("center"), Some("center"));
+        assert_eq!(css_align_docx("both"), Some("justify"));
+        assert_eq!(css_align_docx("left"), None);
+    }
+
+    #[test]
+    fn test_docx_editable_conserva_formato() {
+        let html = docx_a_html_impl(&construir_docx(), true).expect("html editable");
+        assert!(html.starts_with("html:"), "prefijo html: — {html}");
+        assert!(html.contains("<h1"), "conserva encabezado — {html}");
+        assert!(html.contains("text-align:center"), "conserva alineación — {html}");
+        assert!(html.contains("<strong>centrado"), "conserva negrita — {html}");
+        let low = html.to_lowercase();
+        assert!(low.contains("color:#ff0000"), "conserva color — {html}");
+        assert!(html.contains("font-size:"), "conserva tamaño — {html}");
+        // El modo editable NO debe traer el div de solo lectura del visor.
+        assert!(!html.contains("font-family:Georgia"), "sin wrapper del visor — {html}");
+    }
+
+    #[test]
+    fn test_docx_visor_incluye_wrapper() {
+        let html = docx_a_html_impl(&construir_docx(), false).expect("html visor");
+        assert!(html.contains("font-family:Georgia"), "visor con wrapper — {html}");
+        assert!(html.contains("<h1"), "visor conserva encabezado — {html}");
     }
 }

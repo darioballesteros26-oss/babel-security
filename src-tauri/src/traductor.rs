@@ -30,7 +30,7 @@ pub fn resetear_cancelacion() {
 
 /// Rutas candidatas de LibreOffice (headless) por plataforma. El último es el
 /// comando pelado, que se resuelve por PATH.
-const RUTAS_SOFFICE: &[&str] = &[
+pub(crate) const RUTAS_SOFFICE: &[&str] = &[
     "/Applications/LibreOffice.app/Contents/MacOS/soffice",
     "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
     "/opt/homebrew/bin/soffice",
@@ -59,7 +59,7 @@ const RUTAS_PDFTOPPM: &[&str] = &[
 ///  2. El primer `candidato` que existe en disco, o cuyo nombre es un comando "pelado"
 ///     (sin separador de ruta → se resuelve vía PATH).
 ///  3. `por_defecto` como último recurso.
-fn resolver_binario(candidatos: &[&str], por_defecto: &str) -> String {
+pub(crate) fn resolver_binario(candidatos: &[&str], por_defecto: &str) -> String {
     if let Ok(dir) = std::env::var("BABEL_TOOLS_DIR") {
         if !dir.is_empty() {
             let p = std::path::Path::new(&dir).join(por_defecto);
@@ -97,7 +97,7 @@ fn esperar_proceso(child: &mut std::process::Child, segs: u64, mut tick: impl Fn
 }
 
 /// Lanza `cmd` y espera hasta `segs` a que termine. true si terminó con éxito.
-fn ejecutar_con_timeout(cmd: &mut std::process::Command, segs: u64) -> bool {
+pub(crate) fn ejecutar_con_timeout(cmd: &mut std::process::Command, segs: u64) -> bool {
     match cmd.spawn() {
         Ok(mut child) => esperar_proceso(&mut child, segs, || {}),
         Err(_) => false,

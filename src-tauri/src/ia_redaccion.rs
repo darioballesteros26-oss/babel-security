@@ -181,7 +181,34 @@ fn detectar_referencia_sesion_anterior(texto: &str) -> bool {
     frases.iter().any(|f| t.contains(f))
 }
 
-fn preparar_mensaje(mensaje: &str) -> String {
+// Tope de caracteres del mensaje del usuario (incluye el documento que la interfaz
+// antepone). Con ctx=16384 y max_tokens=1536, tras restar system+prefijo+RAG (~6K
+// tokens) y un margen, quedan ~8K tokens ≈ ~24 000 caracteres para el mensaje. Pasarse
+// haría que llama.cpp rechace la petición con HTTP 400 (exceed_context_size_error).
+const MAX_MENSAJE_CHARS: usize = 24_000;
+
+/// Trunca en un límite de carácter UTF-8 válido, añadiendo un aviso visible si recorta.
+fn acotar_mensaje(mensaje: &str) -> std::borrow::Cow<'_, str> {
+    if mensaje.chars().count() <= MAX_MENSAJE_CHARS {
+        return std::borrow::Cow::Borrowed(mensaje);
+    }
+    let recortado: String = mensaje.chars().take(MAX_MENSAJE_CHARS).collect();
+    log::warn!(
+        "[IA] mensaje/documento demasiado largo ({} chars) — truncado a {} para no exceder el contexto",
+        mensaje.chars().count(),
+        MAX_MENSAJE_CHARS
+    );
+    std::borrow::Cow::Owned(format!(
+        "{recortado}\n\n[AVISO DEL SISTEMA: el documento era demasiado largo y se ha \
+recortado para poder procesarlo. Trabaja solo con la parte incluida y advierte al \
+usuario de que faltan páginas.]"
+    ))
+}
+
+fn preparar_mensaje(mensaje_original: &str) -> String {
+    let mensaje_acotado = acotar_mensaje(mensaje_original);
+    let mensaje = mensaje_acotado.as_ref();
+
     let mut alertas = detectar_fechas_imposibles(mensaje);
     alertas.extend(detectar_fechas_palabras_imposibles(mensaje));
     if !alertas.is_empty() {
@@ -228,20 +255,45 @@ impl IaRedaccionState {
     }
 }
 
-const NOMBRE_MODELO: &str = "Qwen3-4B-Q6_K.gguf";
+// Modelos candidatos EN ORDEN DE PREFERENCIA. El Q4_K_M (~2.5 GB) es más ligero y
+// mucho más rápido en CPU — clave para Macs sin GPU utilizable (p. ej. MacBook Neo,
+// A18 Pro) y con 8 GB. Si no está, se cae al Q6_K (~3.1 GB, máxima calidad).
+const MODELOS_CANDIDATOS: &[&str] = &[
+    "Qwen3-4B-Q4_K_M.gguf",
+    "Qwen3-4B-Q6_K.gguf",
+];
 
-// Busca el modelo en: 1) Resources/modelos_ia/ (bundle USB), 2) ~/Babel/modelos_ia/
+// Nombre por defecto para el mensaje de error si no se encuentra ninguno.
+const NOMBRE_MODELO: &str = MODELOS_CANDIDATOS[0];
+
+// Busca el primer modelo candidato presente en: 1) Resources/modelos_ia/ (bundle),
+// 2) ~/Babel/modelos_ia/. Devuelve la primera coincidencia según MODELOS_CANDIDATOS.
 fn ruta_modelo(app: &tauri::AppHandle) -> PathBuf {
+    let mut dirs_busqueda: Vec<PathBuf> = Vec::new();
     if let Ok(res) = app.path().resource_dir() {
-        let bundle = res.join("modelos_ia").join(NOMBRE_MODELO);
-        if bundle.exists() {
-            return bundle;
+        dirs_busqueda.push(res.join("modelos_ia"));
+    }
+    dirs_busqueda.push(
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join("Babel")
+            .join("modelos_ia"),
+    );
+
+    for dir in &dirs_busqueda {
+        for nombre in MODELOS_CANDIDATOS {
+            let ruta = dir.join(nombre);
+            if ruta.exists() {
+                return ruta;
+            }
         }
     }
-    dirs::home_dir()
+
+    // Ninguno encontrado: devolver la ruta esperada del preferido para el mensaje de error.
+    dirs_busqueda
+        .into_iter()
+        .next()
         .unwrap_or_default()
-        .join("Babel")
-        .join("modelos_ia")
         .join(NOMBRE_MODELO)
 }
 
@@ -288,6 +340,12 @@ pub async fn iniciar_ia_redaccion(
         return Ok("activo".into());
     }
 
+    // EXCLUSIÓN MUTUA: liberar la RAM del traductor Python (SMaLL-100, ~1-2 GB) antes
+    // de cargar Qwen. En equipos de 8 GB ambos no caben a la vez y la coexistencia
+    // provoca swap → la IA tarda minutos en responder. Al matarlo, SERVIDOR_ESTADO
+    // vuelve a 0 y el traductor se relanzará solo cuando el usuario regrese a él.
+    crate::matar_servidor_traduccion();
+
     let modelo = ruta_modelo(&app);
     if !modelo.exists() {
         let msg = format!(
@@ -319,7 +377,11 @@ pub async fn iniciar_ia_redaccion(
     // Pre-warm the legal library BM25 index while the model loads (~200 ms once)
     tauri::async_runtime::spawn_blocking(ia_biblioteca::precalentar);
 
-    let hilos = num_cpus::get().min(4).to_string();
+    // Hilos para llama-server: usar todos los núcleos MENOS uno. Dejar un núcleo libre
+    // evita que la generación acapare la CPU y «congele» la interfaz. Antes se topaba a
+    // 4 (conservador); en el A18 Pro del Neo (6 núcleos) esto sube a 5, acelerando
+    // prefill y generación. Mínimo 4 para no quedarnos cortos en equipos de 2 núcleos.
+    let hilos = num_cpus::get().saturating_sub(1).max(4).to_string();
     let modelo_str = modelo.to_string_lossy().to_string();
     let llama_bin = ruta_llama_server(&app);
     let puerto_str = PUERTO.to_string();
@@ -327,35 +389,140 @@ pub async fn iniciar_ia_redaccion(
     // Al instalar desde DMG en otro Mac, macOS aplica com.apple.quarantine a todos
     // los archivos del bundle pero solo lo limpia del ejecutable principal al aprobar
     // la app. Los binarios en Resources/binaries/ retienen la quarantine y macOS
-    // bloquea su ejecución. Eliminarla explícitamente antes de lanzar.
+    // bloquea su ejecución (Gatekeeper mata el proceso con SIGKILL). Eliminarla
+    // explícitamente antes de lanzar y registrar el resultado: si falla (bundle
+    // read-only por App Translocation, permisos), el proceso morirá al arrancar y
+    // el diagnóstico del log lo dejará claro.
     #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("xattr")
-        .args(["-d", "com.apple.quarantine", &llama_bin])
-        .output();
-
-    let child = match Command::new(&llama_bin)
-        .args([
-            "--model",        &modelo_str,
-            "--host",         HOST,
-            "--port",         &puerto_str,
-            "--ctx-size",     "8192",   // system+prefijo usan ~4226 tokens; 8K necesario
-            "--n-gpu-layers", "99",
-            "--threads",      &hilos,
-            "--parallel",     "1",
-            "--flash-attn",   "on",    // menos pico de memoria en atención
-            "--cache-type-k", "q4_0",  // KV cache quantizado: −857 MB wired vs f16
-            "--cache-type-v", "q4_0",
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
     {
-        Ok(c) => c,
-        Err(e) => {
-            let msg = format!("No se pudo arrancar llama-server: {e}");
-            *state.estado.lock().await = format!("error:{msg}");
-            return Err(msg);
+        match std::process::Command::new("xattr")
+            .args(["-d", "com.apple.quarantine", &llama_bin])
+            .output()
+        {
+            Ok(o) if o.status.success() => {}
+            Ok(_) => log::debug!("[IA] xattr quarantine ya limpio o no presente en llama-server"),
+            Err(e) => log::warn!("[IA] no se pudo ejecutar xattr sobre llama-server: {e}"),
         }
+    }
+
+    let log_path = crate::babel_dir().join("llama-server.log");
+
+    // Arranque con reintento GPU → CPU. Primero intentamos con Metal (--n-gpu-layers 99),
+    // que es rápido en Macs con GPU utilizable. Si el proceso muere al cargar (p. ej.
+    // "no usable GPU found" en chips A-series antiguos como el A18 Pro del MacBook Neo,
+    // cuya GPU este build de llama.cpp no reconoce), reintentamos en CPU puro
+    // (--n-gpu-layers 0): más lento pero funciona en cualquier Mac.
+    // Recordar entre sesiones qué backend funcionó. En Macs sin GPU utilizable (p. ej.
+    // el A18 Pro del MacBook Neo) el intento con Metal SIEMPRE falla y obliga a cargar
+    // el modelo de 2,3 GB dos veces (GPU→CPU), duplicando el tiempo de arranque y la
+    // sensación de «congelado». Si la última vez ganó CPU, arrancamos directo en CPU.
+    let hint_path = crate::babel_dir().join("ia_backend.txt");
+    let hint = std::fs::read_to_string(&hint_path).unwrap_or_default();
+    let intentos: Vec<(&str, &str)> = if hint.trim() == "cpu" {
+        log::info!("[IA] backend recordado: CPU — se omite el intento de GPU");
+        vec![("0", "CPU")]
+    } else {
+        vec![("99", "GPU (Metal)"), ("0", "CPU")]
+    };
+    let mut ultimo_error = String::new();
+
+    for (i, (gpu_layers, etiqueta)) in intentos.iter().enumerate() {
+        *state.estado.lock().await = "cargando".into();
+        log::info!("[IA] Arrancando llama-server en modo {etiqueta} (--n-gpu-layers {gpu_layers})");
+
+        match arrancar_llama(
+            &state, &llama_bin, &modelo_str, &puerto_str, &hilos, gpu_layers, &log_path,
+        )
+        .await
+        {
+            Arranque::Activo => {
+                // Persistir el backend ganador para la próxima sesión.
+                let _ = std::fs::write(&hint_path, if *gpu_layers == "0" { "cpu" } else { "gpu" });
+                *state.estado.lock().await = "activo".into();
+                return Ok("activo".into());
+            }
+            Arranque::Parado => return Ok("parado".into()),
+            Arranque::Fallo(msg) => {
+                ultimo_error = msg;
+                if i + 1 < intentos.len() {
+                    log::warn!(
+                        "[IA] Arranque en {etiqueta} falló ({ultimo_error}). Reintentando en CPU…"
+                    );
+                    // Asegurar que el proceso muerto quedó recogido y el puerto libre
+                    if let Some(mut p) = state.proceso.lock().await.take() {
+                        let _ = p.kill().await;
+                    }
+                    LLAMA_PID.store(0, Ordering::Release);
+                    sleep(Duration::from_millis(1000)).await;
+                }
+            }
+        }
+    }
+
+    let msg = format!("El asistente de IA no pudo arrancar. {ultimo_error}");
+    log::error!("[IA] {msg}");
+    *state.estado.lock().await = format!("error:{msg}");
+    Err(msg)
+}
+
+/// Resultado de un intento de arranque de llama-server.
+enum Arranque {
+    Activo,
+    Parado,        // el usuario canceló mientras cargaba
+    Fallo(String), // razón del fallo (incluye cola del log)
+}
+
+/// Lanza llama-server con el número de capas GPU indicado y espera hasta que
+/// responda, muera, o el usuario cancele. Captura stdout+stderr en `log_path`.
+#[allow(clippy::too_many_arguments)]
+async fn arrancar_llama(
+    state: &IaRedaccionState,
+    llama_bin: &str,
+    modelo_str: &str,
+    puerto_str: &str,
+    hilos: &str,
+    gpu_layers: &str,
+    log_path: &std::path::Path,
+) -> Arranque {
+    // Capturar stdout+stderr de llama-server en ~/Babel/llama-server.log. Antes se
+    // descartaban (Stdio::null) y cualquier fallo de arranque (dylib ausente, RAM
+    // insuficiente, quarantine, GPU no válida, modelo corrupto) era invisible: el
+    // usuario esperaba 5 minutos hasta un timeout genérico. Con el log reportamos
+    // la causa real y decidimos si reintentar en CPU.
+    let log_stdout = std::fs::File::create(log_path).ok();
+    let log_stderr = log_stdout.as_ref().and_then(|f| f.try_clone().ok());
+
+    let mut cmd = Command::new(llama_bin);
+    cmd.args([
+        "--model",        modelo_str,
+        "--host",         HOST,
+        "--port",         puerto_str,
+        // system(~2K)+prefijo(~2K)+RAG(~1.7K) ya gastan ~6K; con un documento cargado
+        // el prompt supera fácilmente 8192 → llama.cpp devuelve HTTP 400
+        // (exceed_context_size_error). 16384 da holgura para documentos medianos.
+        // KV en q4_0 mantiene el coste de RAM bajo (~590 MB a 16K, cabe en 8 GB).
+        "--ctx-size",     "16384",
+        "--n-gpu-layers", gpu_layers,
+        "--threads",      hilos,
+        "--parallel",     "1",
+        "--flash-attn",   "on",    // menos pico de memoria en atención
+        "--cache-type-k", "q4_0",  // KV cache quantizado: −857 MB wired vs f16
+        "--cache-type-v", "q4_0",
+    ]);
+    // ggml carga sus backends (Metal, CPU por chip, BLAS) como plugins .so en runtime.
+    // Van empaquetados JUNTO a llama-server (Resources/binaries/) y ggml escanea el
+    // directorio del propio ejecutable, así que los encuentra sin Homebrew. Sin esos
+    // .so no hay backend alguno → "no usable GPU found" + fallo de carga del modelo.
+    // (No usamos GGML_BACKEND_PATH: espera la ruta a UN fichero .so, no una carpeta.)
+
+    match (log_stdout, log_stderr) {
+        (Some(out), Some(err)) => { cmd.stdout(out).stderr(err); }
+        _ => { cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()); }
+    }
+
+    let child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return Arranque::Fallo(format!("No se pudo ejecutar llama-server: {e}")),
     };
 
     // Registrar PID antes de mover el child al Mutex para que rat_detector pueda
@@ -365,32 +532,70 @@ pub async fn iniciar_ia_redaccion(
     }
     *state.proceso.lock().await = Some(child);
 
-    // Esperar respuesta — hasta 5 minutos (desde USB Qwen 3.1 GB puede tardar más)
+    // Esperar respuesta — hasta 5 minutos (Qwen 3.1 GB en CPU puede tardar más)
     for _ in 0..150u32 {
         sleep(Duration::from_millis(2000)).await;
 
         // Salir limpiamente si alguien llamó parar_ia_redaccion mientras cargaba
         if *state.estado.lock().await == "inactivo" {
-            return Ok("parado".into());
+            return Arranque::Parado;
+        }
+
+        // Detectar muerte temprana del proceso: si llama-server salió, no tiene
+        // sentido esperar 5 minutos. Devolvemos la causa real del log para que el
+        // llamador decida si reintentar (p. ej. GPU → CPU).
+        let salida = {
+            let mut guard = state.proceso.lock().await;
+            match guard.as_mut().and_then(|c| c.try_wait().ok().flatten()) {
+                Some(status) => {
+                    *guard = None;
+                    Some(status)
+                }
+                None => None,
+            }
+        };
+        if let Some(status) = salida {
+            LLAMA_PID.store(0, Ordering::Release);
+            let detalle = leer_cola_log(log_path);
+            return Arranque::Fallo(format!("llama-server terminó ({status}). {detalle}"));
         }
 
         if ping_servidor().await {
-            *state.estado.lock().await = "activo".into();
-            return Ok("activo".into());
+            return Arranque::Activo;
         }
     }
 
-    // Timeout — matar proceso y reportar error
+    // Timeout — matar proceso y reportar
     if let Some(mut p) = state.proceso.lock().await.take() {
         let _ = p.kill().await;
         LLAMA_PID.store(0, Ordering::Release);
     }
-    let msg = format!(
-        "El modelo no respondió en 5 minutos. Comprueba que {} existe y hay suficiente RAM.",
-        modelo.display()
-    );
-    *state.estado.lock().await = format!("error:{msg}");
-    Err(msg)
+    Arranque::Fallo(format!(
+        "El modelo no respondió en 5 minutos. {}",
+        leer_cola_log(log_path)
+    ))
+}
+
+/// Lee las últimas líneas del log de llama-server para incluir la causa real del
+/// fallo en el mensaje de error mostrado al usuario. Devuelve cadena vacía si no
+/// hay log o no contiene nada útil.
+fn leer_cola_log(log_path: &std::path::Path) -> String {
+    let contenido = match std::fs::read_to_string(log_path) {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    let cola: Vec<&str> = contenido
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .rev()
+        .take(3)
+        .collect();
+    if cola.is_empty() {
+        return String::new();
+    }
+    let mut lineas: Vec<&str> = cola;
+    lineas.reverse();
+    format!("Detalle técnico: {}", lineas.join(" | "))
 }
 
 #[tauri::command]
@@ -437,7 +642,7 @@ pub async fn enviar_mensaje_ia(
             { "role": "user",   "content": mensaje_con_prefijo }
         ],
         "temperature": 0.3,
-        "max_tokens": 2048,
+        "max_tokens": 1536,
         "repeat_penalty": 1.15,
         "stream": false
     });
@@ -448,7 +653,7 @@ pub async fn enviar_mensaje_ia(
     let raw = tauri::async_runtime::spawn_blocking(move || {
         ureq::post(&url)
             .set("Content-Type", "application/json")
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(600)) // amplio: en CPU (Macs sin GPU utilizable) la generación es lenta
             .send_string(&body_str)
             .map_err(|e| format!("Error al contactar el asistente: {e}"))?
             .into_string()
@@ -568,7 +773,7 @@ pub async fn enviar_mensaje_ia_stream(
             { "role": "user",   "content": mensaje_con_prefijo }
         ],
         "temperature": 0.3,
-        "max_tokens": 2048,
+        "max_tokens": 1536,
         "repeat_penalty": 1.15,
         "stream": true
     });
@@ -581,7 +786,7 @@ pub async fn enviar_mensaje_ia_stream(
 
         let response = ureq::post(&url)
             .set("Content-Type", "application/json")
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(600)) // amplio: en CPU (Macs sin GPU utilizable) la generación es lenta
             .send_string(&body_str)
             .map_err(|e| {
                 let msg = format!("Error al contactar el asistente: {e}");

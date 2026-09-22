@@ -40,19 +40,35 @@ const BUILD_FINGERPRINT: &str = env!("BABEL_BUILD_FINGERPRINT");
 
 /// Ejecuta ambas capas de verificación. Debe llamarse al arranque de la app,
 /// ANTES de que el usuario pueda cifrar o descifrar documentos.
+///
+/// DECISIÓN DE DISEÑO (bloqueo): solo la capa 2 (huella de build) es BLOQUEANTE.
+/// La capa 1 (codesign) es INFORMATIVA — se registra pero nunca bloquea al usuario.
+/// Motivo: distribuimos con firma AD-HOC (sin Developer ID), que según Apple no
+/// aporta garantía anti-tamper real (cualquiera puede re-firmar ad-hoc). En cambio,
+/// codesign sí produce FALSOS POSITIVOS que dejan al usuario fuera:
+///   - un módulo de la stdlib de Python sin .pyc previo que se compila en runtime,
+///   - cualquier archivo que el intérprete escriba dentro de Resources/,
+///   - App Translocation al abrir desde una ruta no estándar.
+/// Todos ellos rompen el sello codesign sin que haya manipulación maliciosa.
+/// La huella de build (constante embebida vs ~/Babel/.integridad) sí detecta la
+/// sustitución del binario y NO depende del estado mutable del bundle.
+/// TODO: cuando el Developer ID + notarización estén activos, volver a hacer
+/// bloqueante la capa 1 (y añadir --check-notarization).
 pub fn verificar_integridad_binario() {
     let capa1 = verificar_codesign();
     let capa2 = verificar_huella_build();
 
-    if !capa1 || !capa2 {
-        log::error!(
-            "[INTEGRIDAD] Verificación fallida — codesign:{} huella:{}",
-            capa1,
-            capa2
+    if !capa1 {
+        log::warn!(
+            "[INTEGRIDAD] codesign no verificó (informativo, no bloquea con firma ad-hoc)."
         );
+    }
+
+    if !capa2 {
+        log::error!("[INTEGRIDAD] Huella de build no coincide — binario sustituido.");
         marcar_fallida();
     } else {
-        log::info!("[INTEGRIDAD] Binario íntegro (codesign:ok huella:ok)");
+        log::info!("[INTEGRIDAD] Binario íntegro (codesign:{} huella:ok)", capa1);
     }
 }
 
@@ -89,8 +105,10 @@ fn verificar_codesign() -> bool {
             return true;
         }
 
+        // Sin --deep: no recursar en Python env ni binarios anidados que no tienen
+        // firma Developer ID. El sello del bundle principal es suficiente para ad-hoc.
         let out = std::process::Command::new("codesign")
-            .args(["--verify", "--deep"])
+            .args(["--verify"])
             .arg(&bundle)
             .output();
 
