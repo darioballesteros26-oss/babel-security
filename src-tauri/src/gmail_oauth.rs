@@ -36,9 +36,6 @@ pub const CLIENT_SECRET: &str = match option_env!("BABEL_GOOGLE_CLIENT_SECRET") 
 // ──────────────────────────────────────────────────────────────────────────────
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
-const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
 const OAUTH_FILE: &str = "oauth_gmail.babel";
 
 // mail.google.com: acceso IMAP/SMTP. email: permite leer el email del usuario vía userinfo.

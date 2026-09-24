@@ -43,12 +43,6 @@ const RUTAS_PDFTOTEXT: &[&str] = &[
     "/usr/bin/pdftotext",
     "pdftotext",
 ];
-const RUTAS_PDFTOPPM: &[&str] = &[
-    "/opt/homebrew/bin/pdftoppm",
-    "/usr/local/bin/pdftoppm",
-    "/usr/bin/pdftoppm",
-    "pdftoppm",
-];
 
 /// Resuelve la ruta de una herramienta externa (soffice, pdftoppm, …).
 ///
@@ -133,7 +127,6 @@ pub fn descomprimir_b64(b64: &str) -> Result<Vec<u8>, String> {
 }
 
 use chrono;
-use hex;
 use imap;
 use mailparse;
 use mailparse::MailHeaderMap;

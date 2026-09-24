@@ -3745,6 +3745,11 @@ async function abrirModalFirma(): Promise<void> {
   _rutaFirmaModal = ruta;
   _rutaCertModal  = "";
 
+  // La firma usa el servidor Python (:5002), que arranca bajo demanda y tarda ~30 s
+  // en calentar. Lo lanzamos ya, en segundo plano, mientras el usuario elige el
+  // certificado y escribe la contraseña, para que al pulsar FIRMAR esté listo.
+  invoke("asegurar_servidor_traduccion").catch(() => {});
+
   const btnCert = document.getElementById("btn-elegir-cert");
   if (btnCert) btnCert.textContent = "Seleccionar certificado…";
   const nombreEl  = document.getElementById("firma-cert-nombre");

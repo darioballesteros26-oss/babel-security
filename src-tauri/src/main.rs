@@ -1335,11 +1335,6 @@ fn cifrar_y_guardar_desde_bytes(
         .unwrap_or_default()
         .as_secs();
 
-    let nombre_base = std::path::Path::new(nombre_archivo)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(nombre_archivo);
-
     // Nombre opaco en disco: 8 bytes aleatorios reemplazan el nombre original.
     // El nombre visible se almacena en el índice cifrado .nomindex.babel.
     let mut opaco_bytes = [0u8; 8];
@@ -2648,6 +2643,38 @@ fn asegurar_servidor_traduccion(app: tauri::AppHandle) -> String {
     crate::ia_redaccion::matar_llama_si_activo();
     lanzar_servidor_traduccion(&app);
     estado_servidor_cmd()
+}
+
+/// Garantiza que el servidor Python (:5002) esté arrancado Y respondiendo antes de
+/// usar sus endpoints de firma. A diferencia de `asegurar_servidor_traduccion` —que
+/// vuelve enseguida con estado "cargando"— aquí BLOQUEAMOS hasta que `/ping` responde:
+/// `/firmar` y `/cert_titular` fallan con "Servidor no disponible" si el servidor aún
+/// no está vivo, y la firma no pasaba antes por el traductor (único sitio que lo
+/// arrancaba bajo demanda). Debe llamarse dentro de `spawn_blocking` porque hace sleeps.
+/// La 1ª vez puede tardar ~30 s: server.py carga el modelo de traducción antes de abrir
+/// el puerto (ver server.py `__main__`).
+fn esperar_servidor_firma(app: &tauri::AppHandle) -> Result<(), String> {
+    lanzar_servidor_traduccion(app);
+    let addr: std::net::SocketAddr = "127.0.0.1:5002".parse().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+    loop {
+        if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300)).is_ok()
+            && ureq::get("http://127.0.0.1:5002/ping")
+                .timeout(std::time::Duration::from_secs(3))
+                .call()
+                .map(|r| r.status() == 200)
+                .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(
+                "El servidor de firma no respondió a tiempo. Reinicia Babel e inténtalo de nuevo."
+                    .into(),
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
 }
 
 // COMANDO 7 — Traducir documento vía drag & drop nativo
@@ -6873,10 +6900,12 @@ async fn seleccionar_cert_p12(app: tauri::AppHandle) -> Result<Option<String>, S
 /// Lee el nombre del titular del certificado .p12 via /cert_titular del servidor local.
 #[tauri::command]
 async fn titular_del_cert(
+    app: tauri::AppHandle,
     ruta_cert: String,
     password: String,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        esperar_servidor_firma(&app)?;
         let password = Zeroizing::new(password);
         let p12_bytes = Zeroizing::new(
             std::fs::read(&ruta_cert)
@@ -6892,6 +6921,7 @@ async fn titular_del_cert(
 /// El certificado .p12 se lee desde disco, nunca se guarda en el vault.
 #[tauri::command]
 async fn firmar_pdf_cifrado(
+    app:       tauri::AppHandle,
     ruta_pdf:  String,
     ruta_cert: String,
     password:  String,
@@ -6908,6 +6938,7 @@ async fn firmar_pdf_cifrado(
         .map_err(|_| "Error".to_string())?
         .clone();
     tauri::async_runtime::spawn_blocking(move || {
+        esperar_servidor_firma(&app)?;
         let password = Zeroizing::new(password);
         let en_guardados = validar_ruta_en(&ruta_pdf, guardados_dir()).is_ok();
         validar_ruta_en(&ruta_pdf, guardados_dir())

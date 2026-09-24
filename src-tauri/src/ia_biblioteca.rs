@@ -8,14 +8,12 @@ static BIBLIOTECA: OnceLock<Option<IndiceJuridico>> = OnceLock::new();
 
 #[derive(Deserialize, Clone)]
 pub struct FragmentoJuridico {
-    pub ley: String,
     pub abrev: String,
     pub articulo: String,
     pub titulo: Option<String>,
     pub capitulo: Option<String>,
     pub seccion: Option<String>,
     pub texto: String,
-    pub fecha_consolidada: String,
 }
 
 struct IndiceJuridico {
@@ -358,14 +356,12 @@ mod tests {
 
     fn fragmento(abrev: &str, articulo: &str, texto: &str) -> FragmentoJuridico {
         FragmentoJuridico {
-            ley: format!("Ley {}", abrev),
             abrev: abrev.into(),
             articulo: articulo.into(),
             titulo: None,
             capitulo: None,
             seccion: None,
             texto: texto.into(),
-            fecha_consolidada: "2026-01-01".into(),
         }
     }
 

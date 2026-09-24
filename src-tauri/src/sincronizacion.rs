@@ -25,7 +25,6 @@ use std::sync::{Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use aes_gcm::aead::rand_core::RngCore as _;
 use hmac::{Hmac, Mac};
 use hkdf::Hkdf;
 use rand::RngCore;
