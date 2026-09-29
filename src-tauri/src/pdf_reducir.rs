@@ -219,7 +219,7 @@ fn medir_colocacion_imagenes(doc: &Document) -> HashMap<ObjectId, (f64, f64)> {
             _ => continue,
         };
         let recursos = match page_dict.get(b"Resources") {
-            Ok(o) => resolver_dict(doc, o).unwrap_or_else(Dictionary::new),
+            Ok(o) => resolver_dict(doc, o).unwrap_or_default(),
             _ => Dictionary::new(),
         };
         let bytes = contenido_pagina(doc, page_id);
@@ -1189,7 +1189,7 @@ fn pixels_son_binarios(pixels: &[u8]) -> bool {
 /// Empaqueta píxeles 8-bit B/N en formato 1-bit MSB-first (convención PDF):
 /// 0=negro → bit 0, 255=blanco → bit 1.
 fn pack_1bit(pixels: &[u8], w: u32, h: u32) -> Vec<u8> {
-    let row_bytes = (w as usize + 7) / 8;
+    let row_bytes = (w as usize).div_ceil(8);
     let mut out = vec![0u8; row_bytes * h as usize];
     for row in 0..h as usize {
         for col in 0..w as usize {

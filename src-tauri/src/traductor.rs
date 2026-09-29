@@ -1,4 +1,3 @@
-use base64;
 use base64::Engine;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -126,12 +125,8 @@ pub fn descomprimir_b64(b64: &str) -> Result<Vec<u8>, String> {
     }
 }
 
-use chrono;
-use imap;
-use mailparse;
 use mailparse::MailHeaderMap;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
@@ -753,7 +748,7 @@ fn partir_en_oraciones(texto: &str) -> Vec<String> {
                 // o termina en dígito (ej. "5.") — en ambos casos MarianMT
                 // necesita el contexto siguiente para traducir bien.
                 let previa = actual
-                    .trim_end_matches(|c: char| matches!(c, '.' | '!' | '?'))
+                    .trim_end_matches(['.', '!', '?'])
                     .split_whitespace()
                     .last()
                     .unwrap_or("");

@@ -27,12 +27,8 @@ mod ia_redaccion;
 mod acceso_masivo;
 
 use base64::Engine;
-use chrono;
-use hex;
 use rand::RngCore;
 use seguridad::{NivelAcceso, UsuarioBabel};
-use serde;
-use serde_json;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -101,7 +97,7 @@ fn verificar_finder_token(urls: &[String]) -> bool {
         None => return false,
     };
     urls.iter().any(|url| {
-        let qs = url.splitn(2, '?').nth(1).unwrap_or("");
+        let qs = url.split_once('?').map(|x| x.1).unwrap_or("");
         qs.split('&').any(|par| {
             if let Some(val) = par.strip_prefix("token=") {
                 val.len() == esperado.len()
@@ -689,7 +685,7 @@ fn crear_acceso_bunker(maestra: String, usuario: String, pass: String) -> Result
         .map_err(|e| format!("Error cifrando: {}", e))?;
     json.zeroize();
 
-    escribir_privado(&babel_path("usuarios.babel"), &cifrado)
+    escribir_privado(babel_path("usuarios.babel"), &cifrado)
         .map_err(|e| format!("Error guardando: {}", e))?;
 
     Ok(format!(
@@ -747,11 +743,11 @@ fn verificar_login_interno(
             let restante = (expira - ahora).min(600);
             return Err(format!("Bloqueado. Espera {} segundos.", restante));
         } else {
-            let _ = fs::remove_file(&babel_path("bloqueo.tmp"));
+            let _ = fs::remove_file(babel_path("bloqueo.tmp"));
         }
     }
 
-    let cifrado = fs::read(&babel_path("usuarios.babel"))
+    let cifrado = fs::read(babel_path("usuarios.babel"))
         .map_err(|_| "No se encontró el búnker.".to_string())?;
 
     let salt = traductor::cargar_o_crear_salt();
@@ -1211,7 +1207,7 @@ const LIMITE_IMPORT_BYTES: u64 = 150 * 1024 * 1024;
 // con pérdida de resolución (JPEG downsampling o raw→JPEG). Se usa para emitir
 // el evento "compresion-lossy" desde los comandos de importación interactiva.
 thread_local! {
-    static ULTIMA_IMPORTACION_LOSSY: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    static ULTIMA_IMPORTACION_LOSSY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 // Núcleo compartido: lee un archivo en claro desde una ruta del sistema, lo cifra
@@ -2143,7 +2139,7 @@ fn nombre_base_ya_guardado(nombre_base: &str, subclave_hex: Option<&str>) -> boo
                 let fname_str = fname.to_string_lossy();
                 if fname_str.ends_with(".babel") && !fname_str.starts_with('.') {
                     let sin_ext = &fname_str[..fname_str.len() - 6];
-                    let sin_prefix = sin_ext.splitn(2, '_').nth(1).unwrap_or(sin_ext);
+                    let sin_prefix = sin_ext.split_once('_').map(|x| x.1).unwrap_or(sin_ext);
                     let sin_ts = sin_prefix.rsplit_once('_').map(|(s, _)| s).unwrap_or(sin_prefix);
                     let sin_idioma = sin_ts.splitn(2, '_').collect::<Vec<_>>();
                     let base = if sin_idioma.len() == 2
@@ -3110,7 +3106,7 @@ fn nombre_exportacion(ruta: &str, ext: &str) -> String {
     let stem = Path::new(ruta).file_stem()
         .map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "archivo".into());
     // Strip user prefix (numeric first segment)
-    let s = stem.splitn(2, '_').nth(1).unwrap_or(&stem).to_string();
+    let s = stem.split_once('_').map(|x| x.1).unwrap_or(&stem).to_string();
     // Strip language-pair prefix "xx-xx_"
     let b = s.as_bytes();
     let s = if b.len() > 6 && b[2] == b'-' && b[5] == b'_'
@@ -4400,7 +4396,7 @@ fn docx_a_html_impl(raw_bytes: &[u8], editable: bool) -> Result<String, String> 
         nombres.sort();
         for nombre in &nombres {
             if let Ok(mut f) = zip.by_name(nombre) {
-                let ext = nombre.split('.').last().unwrap_or("png").to_lowercase();
+                let ext = nombre.split('.').next_back().unwrap_or("png").to_lowercase();
                 let mime = match ext.as_str() {
                     "jpg" | "jpeg" => "image/jpeg",
                     "gif" => "image/gif",
@@ -4859,7 +4855,7 @@ fn save_settings(settings: AppSettings, sesion: tauri::State<SesionActiva>) -> R
     let data = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
     let cifrado = seguridad::blindar_documento(&data, &subclave_hex)
         .map_err(|e| format!("Error cifrando ajustes: {}", e))?;
-    escribir_privado(&babel_path("settings.babel"), cifrado).map_err(|e| e.to_string())?;
+    escribir_privado(babel_path("settings.babel"), cifrado).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -4877,13 +4873,13 @@ fn load_settings(sesion: tauri::State<SesionActiva>) -> Result<AppSettings, Stri
         timeout_sesion_minutos: 60,
     };
 
-    if let Ok(cifrado) = fs::read(&babel_path("settings.babel")) {
+    if let Ok(cifrado) = fs::read(babel_path("settings.babel")) {
         if let Ok(json) = seguridad::descifrar_documento(cifrado, &subclave_hex) {
             return serde_json::from_str(&json).map_err(|e| e.to_string());
         }
     }
 
-    if let Ok(data) = fs::read_to_string(&babel_path("settings.json")) {
+    if let Ok(data) = fs::read_to_string(babel_path("settings.json")) {
         if let Ok(settings) = serde_json::from_str::<AppSettings>(&data) {
             // migrate plaintext settings to encrypted
             if !subclave_hex.is_empty() {
@@ -4959,7 +4955,7 @@ fn generar_frase_recuperacion(
     let cifrado_recuperacion = seguridad::blindar_documento(&datos_recovery, &recovery_key_hex)
         .map_err(|e| format!("Error cifrando recovery.babel: {}", e))?;
     datos_recovery.zeroize();
-    escribir_privado(&babel_path("recovery.babel"), &cifrado_recuperacion)
+    escribir_privado(babel_path("recovery.babel"), &cifrado_recuperacion)
         .map_err(|e| format!("Error guardando recovery.babel: {}", e))?;
     escribir_version_recovery(3);
 
@@ -4969,7 +4965,7 @@ fn generar_frase_recuperacion(
     let subclave_hex = Zeroizing::new(hex::encode(subclave.as_ref()));
     let cifrado_mnemonic = seguridad::blindar_documento(&palabras.join(" "), &subclave_hex)
         .map_err(|e| format!("Error cifrando mnemonic.babel: {}", e))?;
-    escribir_privado(&babel_path("mnemonic.babel"), &cifrado_mnemonic)
+    escribir_privado(babel_path("mnemonic.babel"), &cifrado_mnemonic)
         .map_err(|e| format!("Error guardando mnemonic.babel: {}", e))?;
     Ok(palabras)
 }
@@ -5005,7 +5001,7 @@ fn recuperar_y_autenticar(
         .map_err(|e| format!("Error derivando subclave: {}", e))?;
     let subclave_hex = Zeroizing::new(hex::encode(subclave.as_ref()));
 
-    let cifrado = fs::read(&babel_path("usuarios.babel"))
+    let cifrado = fs::read(babel_path("usuarios.babel"))
         .map_err(|_| "No se encontró el búnker.".to_string())?;
     let json = seguridad::descifrar_documento(cifrado, &subclave_hex)
         .map_err(|_| "Llave maestra incorrecta.".to_string())?;
@@ -5053,7 +5049,7 @@ fn recuperar_con_frase_interno(
             let restante = (expira - ahora).min(600);
             return Err(format!("Bloqueado. Espera {} segundos.", restante));
         } else {
-            let _ = fs::remove_file(&babel_path("bloqueo.tmp"));
+            let _ = fs::remove_file(babel_path("bloqueo.tmp"));
         }
     }
     if palabras.len() != 12 {
@@ -5071,7 +5067,7 @@ fn recuperar_con_frase_interno(
     let key_v2 = seguridad::derivar_clave_recuperacion_v2(palabras, &recovery_salt)?;
     let key_v2_hex = Zeroizing::new(hex::encode(key_v2.as_ref()));
 
-    let cifrado = fs::read(&babel_path("recovery.babel")).map_err(|_| {
+    let cifrado = fs::read(babel_path("recovery.babel")).map_err(|_| {
         "No se encontró archivo de recuperación.".to_string()
     })?;
 
@@ -5167,7 +5163,7 @@ fn ver_frase_recuperacion(sesion: tauri::State<SesionActiva>) -> Result<Vec<Stri
         return Err("No hay sesión activa.".into());
     }
 
-    let cifrado = fs::read(&babel_path("mnemonic.babel")).map_err(|_| {
+    let cifrado = fs::read(babel_path("mnemonic.babel")).map_err(|_| {
         "No se encontró la frase de recuperación. Genérala desde Configuración.".to_string()
     })?;
 
@@ -5192,7 +5188,7 @@ fn obtener_usuario_con_maestra(
             let restante = (expira - ahora).min(600);
             return Err(format!("Bloqueado. Espera {} segundos.", restante));
         } else {
-            let _ = fs::remove_file(&babel_path("bloqueo.tmp"));
+            let _ = fs::remove_file(babel_path("bloqueo.tmp"));
         }
     }
 
@@ -5200,7 +5196,7 @@ fn obtener_usuario_con_maestra(
     let subclave = seguridad::derivar_subclave(maestra.as_bytes(), "babel-usuarios-v1", &salt)
         .map_err(|e| format!("Error derivando subclave: {}", e))?;
     let subclave_hex = Zeroizing::new(hex::encode(subclave.as_ref()));
-    let cifrado = fs::read(&babel_path("usuarios.babel"))
+    let cifrado = fs::read(babel_path("usuarios.babel"))
         .map_err(|_| "No se encontro el bunker.".to_string())?;
     let json = match seguridad::descifrar_documento(cifrado, &subclave_hex) {
         Ok(j) => j,
@@ -5233,7 +5229,7 @@ fn aceptar_terminos() -> Result<(), String> {
         .unwrap_or_default()
         .as_secs()
         .to_string();
-    escribir_privado(&babel_path("terminos.babel"), ts).map_err(|e| format!("Error: {}", e))
+    escribir_privado(babel_path("terminos.babel"), ts).map_err(|e| format!("Error: {}", e))
 }
 
 // Extrae la parte <email@dominio> del remitente para comparar sin display name.
@@ -6497,7 +6493,7 @@ async fn compartir_directo(
             }
             let _ = tx.send(result);
         }).map_err(|e| format!("Error en hilo principal: {}", e))?;
-        return rx.await.map_err(|_| "Error de comunicación interna".to_string())?;
+        rx.await.map_err(|_| "Error de comunicación interna".to_string())?
         // _guard sale de scope aquí → borrar_seguro
     }
 
@@ -6932,7 +6928,7 @@ async fn titular_del_cert(
             std::fs::read(&ruta_cert)
                 .map_err(|_| "No se pudo leer el certificado.".to_string())?,
         );
-        traductor::titular_via_servidor(&p12_bytes, &*password)
+        traductor::titular_via_servidor(&p12_bytes, &password)
     })
     .await
     .map_err(|e| format!("Error interno: {}", e))?
@@ -6992,7 +6988,7 @@ async fn firmar_pdf_cifrado(
         );
         // 4. Firmar via servidor Flask (POST /firmar)
         let pdf_firmado = Zeroizing::new(
-            traductor::firmar_via_servidor(&pdf_bytes, &p12_bytes, &*password)?,
+            traductor::firmar_via_servidor(&pdf_bytes, &p12_bytes, &password)?,
         );
         // 5. Guardar PDF firmado en vault
         cifrar_y_guardar_desde_bytes(&nombre_final, &pdf_firmado, &subclave_hex, &id_usuario)?;

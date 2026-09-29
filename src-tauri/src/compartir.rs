@@ -512,7 +512,7 @@ pub fn generar_password_aleatoria() -> String {
 
     let mut buf = [0u8; 2];
     OsRng.fill_bytes(&mut buf);
-    let digitos = (u16::from_le_bytes(buf) % 900 + 100) as u16; // 100-999
+    let digitos = (u16::from_le_bytes(buf) % 900 + 100); // 100-999
 
     format!("{}-{}-{}-{}", palabra(), palabra(), palabra(), digitos)
 }

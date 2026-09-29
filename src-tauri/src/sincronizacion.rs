@@ -374,7 +374,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             let emparejados = if subclave.is_empty() {
                 vec![]
             } else {
-                cargar_emparejados(&*subclave)
+                cargar_emparejados(&subclave)
             };
             let par_opt = emparejados.iter().find(|d| d.ip_ultima == ip_origen);
             let es_par = par_opt.is_some();
@@ -419,7 +419,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
             let emparejados = if subclave.is_empty() {
                 vec![]
             } else {
-                cargar_emparejados(&*subclave)
+                cargar_emparejados(&subclave)
             };
             let par_opt = emparejados.iter().find(|d| d.ip_ultima == ip_origen);
             let es_par = par_opt.is_some();
@@ -531,7 +531,7 @@ fn manejar_solicitud_sinc(stream: TcpStream, ip_origen: String, nombre_local: St
                 let hmac_resp = hmac_sinc("resp_ok", ts_resp);
                 let tenemos_b2 = if crate::buzon_b2::leer_config_raw().is_some() { "1" } else { "0" };
                 // Cifrar la clave compartida con AES-GCM antes de enviarla (envelope).
-                let clave_cifrada = envelope_cifrar(ts_resp, &*clave_z);
+                let clave_cifrada = envelope_cifrar(ts_resp, &clave_z);
                 let mi_hw_id_b = crate::custodia::obtener_hw_id();
                 let msg = format!(
                     "BABEL_SINC_OK:{}:{}:{}:{}:{}:{}\n",
@@ -821,7 +821,7 @@ pub fn aceptar_y_generar_clave(
     // Generar clave compartida aleatoria
     let mut clave = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut clave);
-    let clave_hex = hex::encode(&clave);
+    let clave_hex = hex::encode(clave);
     clave.zeroize();
 
     // Reemplazar si ya existía emparejamiento con esta IP
@@ -928,7 +928,7 @@ fn manejar_reintento_b2(stream: TcpStream, ip_origen: String, _nombre_local: &st
                 return;
             }
         };
-        let emparejados = cargar_emparejados(&*subclave);
+        let emparejados = cargar_emparejados(&subclave);
         let clave_hex = match emparejados.iter().find(|d| d.ip_ultima == ip_origen) {
             Some(d) => d.clave_hex.clone(),
             None => {

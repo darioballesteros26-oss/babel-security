@@ -95,7 +95,7 @@ fn cargar_intentos_archivo() -> u8 {
 fn guardar_intentos_archivo(v: u8) {
     let mut datos = vec![v];
     datos.extend_from_slice(&tag_bip39_intentos(v));
-    let _ = crate::escribir_privado_atomico(&ruta_bip39_intentos(), &datos);
+    let _ = crate::escribir_privado_atomico(ruta_bip39_intentos(), &datos);
 }
 
 fn borrar_intentos_archivo() {
@@ -536,7 +536,7 @@ pub fn enviar_confirmacion_desbloqueo(ip_bloqueado: &str, nombre_local: &str) ->
     // Buscar la clave compartida con el dispositivo bloqueado para HMAC por-par.
     let par_clave_hex: Option<String> =
         crate::sincronizacion::obtener_subclave_sesion_copy().and_then(|subclave| {
-            crate::sincronizacion::cargar_emparejados(&*subclave)
+            crate::sincronizacion::cargar_emparejados(&subclave)
                 .into_iter()
                 .find(|d| d.ip_ultima == ip_bloqueado)
                 .map(|d| d.clave_hex)

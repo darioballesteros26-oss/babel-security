@@ -64,7 +64,7 @@ fn detectar_fechas_imposibles(texto: &str) -> Vec<String> {
 }
 
 fn es_bisiesto(anio: u32) -> bool {
-    (anio % 4 == 0 && anio % 100 != 0) || (anio % 400 == 0)
+    (anio.is_multiple_of(4) && !anio.is_multiple_of(100)) || anio.is_multiple_of(400)
 }
 
 fn max_dias_febrero(anio: Option<u32>) -> u32 {
@@ -110,7 +110,7 @@ fn detectar_fechas_palabras_imposibles(texto: &str) -> Vec<String> {
             // Normalizar acentos solo para búsqueda de palabras (no para indexar texto original)
             let antes_norm: String = antes_lower
                 .replace('á', "a").replace('é', "e").replace('í', "i")
-                .replace('ó', "o").replace('ú', "u").replace('ü', "u");
+                .replace('ó', "o").replace(['ú', 'ü'], "u");
             let antes_trim = antes_norm.trim_end();
 
             // Si ya termina en dígito → lo gestiona detectar_fechas_imposibles
@@ -141,7 +141,7 @@ fn detectar_fechas_palabras_imposibles(texto: &str) -> Vec<String> {
                 let despues = abs + patron.len();
                 let anio: Option<u32> = {
                     let r = texto_lower[despues..]
-                        .trim_start_matches(|c: char| c == ' ' || c == '\t')
+                        .trim_start_matches([' ', '\t'])
                         .trim_start_matches("de ")
                         .trim_start();
                     let s: String = r.chars().take_while(|c| c.is_ascii_digit()).collect();

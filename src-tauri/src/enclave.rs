@@ -78,7 +78,7 @@ fn obtener_uuid_plano() -> String {
                     .and_then(|l| l.split('"').nth(3))
                     .map(|u| u.to_string())
             })
-            .unwrap_or_else(|| hostname_fallback())
+            .unwrap_or_else(hostname_fallback)
     }
     #[cfg(target_os = "windows")]
     {

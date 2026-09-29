@@ -185,7 +185,6 @@ fn dimensiones_jpeg(jpeg: &[u8]) -> Result<(u32, u32), String> {
     let mut r = image::ImageReader::new(std::io::Cursor::new(jpeg));
     r.set_format(ImageFormat::Jpeg);
     r.into_dimensions()
-        .map(|(w, h)| (w, h))
         .map_err(|e| format!("Error leyendo dimensiones JPEG: {e}"))
 }
 

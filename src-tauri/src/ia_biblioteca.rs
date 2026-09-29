@@ -45,8 +45,7 @@ fn tokenizar(texto: &str) -> Vec<String> {
         .replace('é', "e")
         .replace('í', "i")
         .replace('ó', "o")
-        .replace('ú', "u")
-        .replace('ü', "u")
+        .replace(['ú', 'ü'], "u")
         .replace('ñ', "n");
     lower
         .split(|c: char| !c.is_alphanumeric())

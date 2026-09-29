@@ -164,8 +164,8 @@ where
                 // firmado el SO rechaza la escritura y el archivo queda en disco.
                 let mut original_no_borrado = false;
                 if let Some(orig) = &entrada.original {
-                    if ruta_original_segura(orig) {
-                        if orig.exists() {
+                    if ruta_original_segura(orig)
+                        && orig.exists() {
                             let orig_str = orig.to_string_lossy().to_string();
                             crate::borrar_seguro(&orig_str);
                             // Comprobar si el borrado tuvo efecto (falla en sandbox).
@@ -177,7 +177,6 @@ where
                                 );
                             }
                         }
-                    }
                 }
                 if let Some(sc) = &entrada.sidecar {
                     let _ = fs::remove_file(sc);

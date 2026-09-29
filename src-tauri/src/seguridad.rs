@@ -53,10 +53,8 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chrono::Local;
-use dirs;
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
-use num_cpus;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -219,9 +217,9 @@ pub fn descifrar_documento(paquete: Vec<u8>, clave_hex: &str) -> Result<String, 
         .map_err(|_| "Descifrado fallido".to_string())?;
 
     let plaintext_z = Zeroizing::new(plaintext);
-    let resultado = String::from_utf8(plaintext_z.to_vec())
-        .map_err(|_| "El contenido descifrado no es UTF-8 válido".to_string());
-    resultado
+    
+    String::from_utf8(plaintext_z.to_vec())
+        .map_err(|_| "El contenido descifrado no es UTF-8 válido".to_string())
 }
 
 // CAPA 2 — GESTIÓN DE CONTRASEÑAS
@@ -328,7 +326,7 @@ impl AntiKeylogger {
             // Desarrollo
             "rust-analyzer", "rust-analyzer-proc-macro-srv",
         ];
-        lista_blanca.iter().any(|&p| nombre == p)
+        lista_blanca.contains(&nombre)
     }
 
     /// Filtra apps que legítimamente usan Accessibility o Input Monitoring en macOS.
@@ -361,7 +359,7 @@ impl AntiKeylogger {
             // Accesibilidad real
             "com.apple.VoiceOver",
         ];
-        legitimas.iter().any(|&l| bundle_id == l)
+        legitimas.contains(&bundle_id)
     }
 
     /// Escanea procesos activos por nombre y ruta.
@@ -454,7 +452,7 @@ impl AntiKeylogger {
         let exe_str = exe.to_string_lossy();
 
         let firmado = Command::new("codesign")
-            .args(&["--verify", "--strict", "--", exe_str.as_ref()])
+            .args(["--verify", "--strict", "--", exe_str.as_ref()])
             .output()
             .ok()?
             .status
@@ -466,7 +464,7 @@ impl AntiKeylogger {
 
         // codesign -dv escribe la cadena de certificados en stderr
         let info = Command::new("codesign")
-            .args(&["-dv", "--", exe_str.as_ref()])
+            .args(["-dv", "--", exe_str.as_ref()])
             .output()
             .ok()?;
 
@@ -653,7 +651,7 @@ impl AntiKeylogger {
         let pid_lista: Vec<String> = candidatos.iter().map(|(_, pid, _)| pid.to_string()).collect();
 
         let output = match Command::new("lsof")
-            .args(&["-iTCP", "-n", "-P", "-p", &pid_lista.join(",")])
+            .args(["-iTCP", "-n", "-P", "-p", &pid_lista.join(",")])
             .output()
         {
             Ok(o) => o,
@@ -1100,7 +1098,7 @@ impl AntiKeylogger {
     fn detectar_clientes_hid_sospechosos() -> Vec<String> {
         use std::process::Command;
         let output = match Command::new("ioreg")
-            .args(&["-n", "IOHIDSystem", "-l", "-w0"])
+            .args(["-n", "IOHIDSystem", "-l", "-w0"])
             .output()
         {
             Ok(o) => o,
@@ -1542,7 +1540,7 @@ fn escribir_chain_tip(ruta: &str, hash: &[u8; 32]) {
             let mut buf = [0u8; 64];
             buf[..32].copy_from_slice(hash);
             buf[32..].copy_from_slice(&firma);
-            let _ = crate::escribir_privado(format!("{}.tip", ruta), &buf);
+            let _ = crate::escribir_privado(format!("{}.tip", ruta), buf);
             return;
         }
     }
@@ -1978,7 +1976,7 @@ pub fn detectar_captura_pantalla() -> EstadoCaptura {
     s.refresh_processes();
     let mut vistos_alta = std::collections::HashSet::new();
     let mut vistos_baja = std::collections::HashSet::new();
-    for (_pid, proceso) in s.processes() {
+    for proceso in s.processes().values() {
         let nombre = proceso.name().to_lowercase();
 
         let mut clasificado = false;

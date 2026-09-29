@@ -132,7 +132,7 @@ fn guardar_peers_trusted(peers: &HashMap<String, String>, subclave_hex: &str) {
     }
     if let Ok(json) = serde_json::to_string(peers) {
         if let Ok(cifrado) = crate::seguridad::blindar_documento(&json, subclave_hex) {
-            let _ = crate::escribir_privado_atomico(&ruta_peers_trusted(), &cifrado);
+            let _ = crate::escribir_privado_atomico(ruta_peers_trusted(), &cifrado);
         }
     }
 }
@@ -682,7 +682,7 @@ static CERTS_AUTORIZADOS_MUTEX: Mutex<()> = Mutex::new(());
 
 // IP del peer actual pasada al verificador vía thread-local (una conexión = un hilo).
 thread_local! {
-    static PEER_IP_ACTUAL: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
+    static PEER_IP_ACTUAL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
 // Thread-safe: serializa el TOFU del cliente para evitar race condition
@@ -707,7 +707,7 @@ fn ahora_unix() -> u64 {
 fn clave_privada_p2p_enc(subclave_hex: &str) -> Option<Zeroizing<String>> {
     if subclave_hex.len() < 64 { return None; }
     let ikm = Zeroizing::new(hex::decode(subclave_hex).ok()?);
-    let hk = Hkdf::<Sha256>::new(None, &*ikm);
+    let hk = Hkdf::<Sha256>::new(None, &ikm);
     let mut okm = [0u8; 32];
     hk.expand(b"babel-p2p-clave-privada-v2", &mut okm).ok()?;
     let result = Zeroizing::new(hex::encode(okm));

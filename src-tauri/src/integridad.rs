@@ -100,7 +100,7 @@ fn verificar_codesign() -> bool {
         // dentro del bundle en cuanto se lee, lo que rompe el sello de codesign aunque
         // el binario sea íntegro. Saltamos el check de codesign en esos volúmenes —
         // la capa 2 (huella BUILD_FINGERPRINT) sigue protegiendo el binario.
-        if bundle.to_str().map_or(false, |s| s.starts_with("/Volumes/")) {
+        if bundle.to_str().is_some_and(|s| s.starts_with("/Volumes/")) {
             log::info!("[INTEGRIDAD] App en volumen externo — check codesign omitido (normal en USB)");
             return true;
         }

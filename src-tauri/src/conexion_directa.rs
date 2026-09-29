@@ -90,7 +90,7 @@ fn obtener_addr_stun(socket: &UdpSocket) -> Result<SocketAddr, String> {
             };
             return Ok(SocketAddr::from((std::net::Ipv4Addr::from(ip), port)));
         }
-        i += largo + if largo % 4 != 0 { 4 - (largo % 4) } else { 0 };
+        i += largo + if !largo.is_multiple_of(4) { 4 - (largo % 4) } else { 0 };
     }
     Err("XOR-MAPPED-ADDRESS no encontrado en respuesta STUN".into())
 }
