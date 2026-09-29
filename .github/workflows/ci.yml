@@ -1,0 +1,54 @@
+name: CI
+
+# Caza regresiones en cada push/PR: compila y corre la suite de tests Rust (misma
+# plataforma que el release, macOS arm64), pasa clippy (informativo) y valida la
+# sintaxis del sidecar Python. cargo test es la puerta que hace fallar el CI.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust-tests:
+    runs-on: macos-latest # arm64, igual que release.yml (deps macOS-only: objc, CoreFoundation)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar toolchain Rust (con clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache de dependencias Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # PDFium se carga en runtime (Pdfium::bind_to_library); los tests que unen PDFs lo
+      # necesitan presente. Misma versión y ruta que release.yml.
+      - name: Descargar PDFium (macOS arm64)
+        run: |
+          mkdir -p src-tauri/binaries/pdfium
+          curl -sL https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7961/pdfium-mac-arm64.tgz -o /tmp/pdfium.tgz
+          tar xzf /tmp/pdfium.tgz -C /tmp lib/libpdfium.dylib
+          cp /tmp/lib/libpdfium.dylib src-tauri/binaries/pdfium/
+
+      - name: Tests (puerta del CI)
+        working-directory: src-tauri
+        run: cargo test --bin babel-interfaz
+
+      - name: Clippy (informativo, no bloquea)
+        working-directory: src-tauri
+        run: cargo clippy --bin babel-interfaz
+        continue-on-error: true
+
+  python-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validar sintaxis del sidecar
+        run: python -m py_compile servidor_babel/*.py
