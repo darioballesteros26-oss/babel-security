@@ -4,7 +4,7 @@
 // Genera archivos HTML autocontenidos que cualquier persona puede descifrar
 // desde el navegador (WebCrypto API) sin instalar nada.
 //
-// Cifrado: PBKDF2-SHA256 (250.000 iteraciones) + AES-256-GCM
+// Cifrado: PBKDF2-SHA256 (600.000 iteraciones, OWASP 2023) + AES-256-GCM
 // Tabla de contactos: JSON cifrado con la clave maestra del usuario.
 
 use std::collections::HashMap;
@@ -156,6 +156,14 @@ fn js_str(s: &str) -> String {
 
 // ── PBKDF2-SHA256 + AES-256-GCM ───────────────────────────────────────────
 
+/// Iteraciones PBKDF2-SHA256 para los archivos compartidos. Estos archivos SALEN del
+/// dispositivo (email / HTML autónomo), así que la contraseña es su única defensa:
+/// usamos 600.000, el mínimo recomendado por OWASP (2023) para PBKDF2-SHA256.
+/// FUENTE ÚNICA: la usan el cifrado, el descifrado (tests) y el `const ITER` del HTML;
+/// mantenerlas sincronizadas es obligatorio o el descifrado en el navegador fallaría.
+/// (Los HTML ya compartidos llevan su propio ITER incrustado y siguen descifrando.)
+const ITERACIONES_PBKDF2: u32 = 600_000;
+
 /// Cifra el payload. Devuelve base64(salt[16] || iv[12] || ciphertext).
 pub fn cifrar_con_pbkdf2(payload: &[u8], password: &str) -> Result<String, String> {
     use pbkdf2::pbkdf2_hmac;
@@ -169,7 +177,7 @@ pub fn cifrar_con_pbkdf2(payload: &[u8], password: &str) -> Result<String, Strin
     OsRng.fill_bytes(&mut iv_bytes);
 
     let mut key_bytes = Zeroizing::new([0u8; 32]);
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, 250_000, key_bytes.as_mut());
+    pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, ITERACIONES_PBKDF2, key_bytes.as_mut());
 
     let key = Key::<Aes256Gcm>::from_slice(key_bytes.as_ref());
     let cipher = Aes256Gcm::new(key);
@@ -208,7 +216,7 @@ pub fn descifrar_con_pbkdf2(b64: &str, password: &str) -> Result<Vec<u8>, String
     let ciphertext = &combined[28..];
 
     let mut key_bytes = Zeroizing::new([0u8; 32]);
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, 250_000, key_bytes.as_mut());
+    pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, ITERACIONES_PBKDF2, key_bytes.as_mut());
 
     let key = Key::<Aes256Gcm>::from_slice(key_bytes.as_ref());
     let cipher = Aes256Gcm::new(key);
@@ -371,7 +379,7 @@ button:disabled{{opacity:.4;cursor:default}}
 </div>
 <script>
 const DATA="{b64}";
-const ITER=250000;
+const ITER={ITERACIONES_PBKDF2};
 let blobUrl=null;
 
 function togglePwd(){{
