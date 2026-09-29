@@ -22,9 +22,6 @@ pub const VENTANA_SECS_LOG: u64 = VENTANA_SECS;
 static VENTANA: Mutex<Vec<Instant>> = Mutex::new(Vec::new());
 static BLOQUEADO: AtomicBool = AtomicBool::new(false);
 
-pub fn es_bloqueado() -> bool {
-    BLOQUEADO.load(Ordering::Acquire)
-}
 
 /// Registra un descifrado de archivo en la ventana deslizante.
 /// Si se superan MAX_ACCESOS en VENTANA_SECS segundos:
@@ -135,19 +132,13 @@ mod tests {
             lista.push(Instant::now());
         }
         reset_tras_login();
-        assert!(!es_bloqueado(), "reset debe limpiar el bloqueo");
+        assert!(
+            !BLOQUEADO.load(Ordering::SeqCst),
+            "reset debe limpiar el bloqueo"
+        );
         assert!(
             VENTANA.lock().unwrap().is_empty(),
             "reset debe vaciar la ventana"
         );
-    }
-
-    #[test]
-    fn bloqueado_rechaza_sin_app() {
-        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        BLOQUEADO.store(true, Ordering::SeqCst);
-        assert!(es_bloqueado());
-        BLOQUEADO.store(false, Ordering::SeqCst);
-        assert!(!es_bloqueado());
     }
 }

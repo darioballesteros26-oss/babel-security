@@ -113,25 +113,6 @@ impl<'de> Deserialize<'de> for CustodiaIndex {
 }
 
 impl CustodiaIndex {
-    /// Un archivo es accesible si no tiene entrada (legacy) o si el hw_id local
-    /// o el de algún dispositivo emparejado está en su lista de autorizados.
-    pub fn es_autorizado(
-        &self,
-        nombre: &str,
-        hw_id_local: &str,
-        hw_ids_pareados: &[String],
-    ) -> bool {
-        match self.entradas.get(nombre) {
-            None => true, // sin entrada → archivo legacy, sin restricción
-            Some(entries) => {
-                entries.iter().any(|e| e.matches_hw_id(hw_id_local))
-                    || entries
-                        .iter()
-                        .any(|e| hw_ids_pareados.iter().any(|p| e.matches_hw_id(p)))
-            }
-        }
-    }
-
     /// Registra hw_id como autorizado para el archivo. Sin duplicados.
     pub fn agregar(&mut self, nombre: &str, hw_id: &str) {
         let entry = HwEntry::from_hw_id(hw_id);
@@ -174,10 +155,6 @@ impl CustodiaIndex {
     /// Elimina la entrada de un archivo del índice.
     pub fn quitar(&mut self, nombre: &str) {
         self.entradas.remove(nombre);
-    }
-
-    pub fn tiene_entrada(&self, nombre: &str) -> bool {
-        self.entradas.contains_key(nombre)
     }
 }
 
@@ -335,6 +312,14 @@ pub fn verificar_y_limpiar(subclave_hex: &str, hw_ids_pareados: &[String]) -> Ve
 mod tests {
     use super::*;
 
+    /// Helper de test: expresa "¿este archivo está autorizado en este hardware?" a
+    /// través de la función de PRODUCCIÓN `archivos_no_autorizados` (la que usa
+    /// `verificar_y_limpiar` al login). Un archivo está autorizado si no aparece en
+    /// la lista de no autorizados. Sustituye al antiguo método `es_autorizado`.
+    fn autorizado(idx: &CustodiaIndex, nombre: &str, hw: &str, pareados: &[String]) -> bool {
+        !idx.archivos_no_autorizados(hw, pareados).contains(&nombre.to_string())
+    }
+
     #[test]
     fn hw_id_no_vacio() {
         let id = obtener_hw_id();
@@ -344,16 +329,16 @@ mod tests {
     #[test]
     fn sin_entrada_siempre_autorizado() {
         let idx = CustodiaIndex::default();
-        assert!(idx.es_autorizado("archivo.babel", "hw-A", &[]));
-        assert!(idx.es_autorizado("archivo.babel", "hw-A", &["hw-B".into()]));
+        assert!(autorizado(&idx, "archivo.babel", "hw-A", &[]));
+        assert!(autorizado(&idx, "archivo.babel", "hw-A", &["hw-B".into()]));
     }
 
     #[test]
     fn hw_local_en_lista_es_autorizado() {
         let mut idx = CustodiaIndex::default();
         idx.agregar("doc.babel", "hw-A");
-        assert!(idx.es_autorizado("doc.babel", "hw-A", &[]));
-        assert!(idx.es_autorizado("doc.babel", "hw-A", &["hw-X".into()]));
+        assert!(autorizado(&idx, "doc.babel", "hw-A", &[]));
+        assert!(autorizado(&idx, "doc.babel", "hw-A", &["hw-X".into()]));
     }
 
     #[test]
@@ -361,7 +346,7 @@ mod tests {
         let mut idx = CustodiaIndex::default();
         idx.agregar("doc.babel", "hw-A");
         let pareados = vec!["hw-A".to_string()];
-        assert!(idx.es_autorizado("doc.babel", "hw-B", &pareados));
+        assert!(autorizado(&idx, "doc.babel", "hw-B", &pareados));
     }
 
     #[test]
@@ -369,8 +354,8 @@ mod tests {
         let mut idx = CustodiaIndex::default();
         idx.agregar("doc.babel", "hw-A");
         let pareados = vec!["hw-B".to_string()];
-        assert!(!idx.es_autorizado("doc.babel", "hw-C", &pareados));
-        assert!(!idx.es_autorizado("doc.babel", "hw-C", &[]));
+        assert!(!autorizado(&idx, "doc.babel", "hw-C", &pareados));
+        assert!(!autorizado(&idx, "doc.babel", "hw-C", &[]));
     }
 
     #[test]
@@ -389,8 +374,8 @@ mod tests {
         idx.agregar("a.babel", "hw-A");
         idx.agregar("b.babel", "hw-A");
         idx.autorizar_hw_en_todos("hw-B");
-        assert!(idx.es_autorizado("a.babel", "hw-B", &[]));
-        assert!(idx.es_autorizado("b.babel", "hw-B", &[]));
+        assert!(autorizado(&idx, "a.babel", "hw-B", &[]));
+        assert!(autorizado(&idx, "b.babel", "hw-B", &[]));
     }
 
     #[test]
@@ -422,13 +407,13 @@ mod tests {
     fn quitar_elimina_entrada() {
         let mut idx = CustodiaIndex::default();
         idx.agregar("doc.babel", "hw-A");
-        assert!(idx.tiene_entrada("doc.babel"));
+        assert!(idx.entradas.contains_key("doc.babel"));
         idx.quitar("doc.babel");
         assert!(
-            !idx.tiene_entrada("doc.babel"),
+            !idx.entradas.contains_key("doc.babel"),
             "quitar debe eliminar la entrada del índice"
         );
-        assert!(idx.es_autorizado("doc.babel", "hw-X", &[]));
+        assert!(autorizado(&idx, "doc.babel", "hw-X", &[]));
     }
 
     #[test]
@@ -493,9 +478,9 @@ mod tests {
         let mut idx = CustodiaIndex::default();
         let hw_se = "se:04aabbccddeeff";
         idx.agregar("doc.babel", hw_se);
-        assert!(idx.es_autorizado("doc.babel", hw_se, &[]));
-        assert!(!idx.es_autorizado("doc.babel", "se:04FFFFFF", &[]));
-        assert!(!idx.es_autorizado("doc.babel", "04aabbccddeeff", &[])); // sin prefijo
+        assert!(autorizado(&idx, "doc.babel", hw_se, &[]));
+        assert!(!autorizado(&idx, "doc.babel", "se:04FFFFFF", &[]));
+        assert!(!autorizado(&idx, "doc.babel", "04aabbccddeeff", &[])); // sin prefijo
     }
 
     #[test]
@@ -504,18 +489,18 @@ mod tests {
         // correctamente como Vec<HwEntry> con tipo="uuid".
         let json_v1 = r#"{"entradas":{"doc.babel":["UUID-VIEJO-1","UUID-VIEJO-2"]}}"#;
         let idx: CustodiaIndex = serde_json::from_str(json_v1).expect("debe deserializar formato v1");
-        assert!(idx.tiene_entrada("doc.babel"));
-        assert!(idx.es_autorizado("doc.babel", "UUID-VIEJO-1", &[]));
-        assert!(idx.es_autorizado("doc.babel", "UUID-VIEJO-2", &[]));
-        assert!(!idx.es_autorizado("doc.babel", "UUID-DESCONOCIDO", &[]));
+        assert!(idx.entradas.contains_key("doc.babel"));
+        assert!(autorizado(&idx, "doc.babel", "UUID-VIEJO-1", &[]));
+        assert!(autorizado(&idx, "doc.babel", "UUID-VIEJO-2", &[]));
+        assert!(!autorizado(&idx, "doc.babel", "UUID-DESCONOCIDO", &[]));
     }
 
     #[test]
     fn migracion_v2_hwentry_preserva_tipo() {
         let json_v2 = r#"{"entradas":{"doc.babel":[{"tipo":"se","id":"04abcdef"}]}}"#;
         let idx: CustodiaIndex = serde_json::from_str(json_v2).expect("debe deserializar formato v2");
-        assert!(idx.es_autorizado("doc.babel", "se:04abcdef", &[]));
-        assert!(!idx.es_autorizado("doc.babel", "04abcdef", &[]));
+        assert!(autorizado(&idx, "doc.babel", "se:04abcdef", &[]));
+        assert!(!autorizado(&idx, "doc.babel", "04abcdef", &[]));
     }
 
     #[test]
