@@ -52,13 +52,14 @@ def cargar_modelo():
         if _translator is not None:
             return
         print(f"[MADLAD] Cargando desde {DIR_MODELO} ...")
-        # intra_threads=4: 4 cores por traducción. 0 (todos) causaba contención de
-        # memoria y cuelgues con lotes grandes en máquinas con poca RAM libre.
+        # intra_threads: cores por traducción (suelo 4). 0 (todos) causaba contención de
+        # memoria y cuelgues con lotes grandes en máquinas con poca RAM libre; hilos_intra()
+        # deja 2 núcleos libres y topa en 8 para no reintroducir esa contención.
         _translator = ctranslate2.Translator(
             DIR_MODELO,
             device="cpu",
             inter_threads=1,
-            intra_threads=4,
+            intra_threads=comun.hilos_intra(),
             compute_type="int8",
         )
         if not os.path.isfile(os.path.join(DIR_MODELO, "spiece.model")):

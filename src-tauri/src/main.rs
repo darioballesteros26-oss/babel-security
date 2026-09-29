@@ -1279,18 +1279,17 @@ fn cifrar_y_guardar_desde_bytes(
         return Err("El archivo supera el límite de 150 MB.".into());
     }
 
-    // Auto-optimización: todo PDF que entra a Babel pasa por cinco etapas sin pérdida
+    // Auto-optimización: todo PDF que entra a Babel pasa por tres etapas sin pérdida
     // visible, conservando texto y vectores intactos. El resultado solo se acepta si
     // es más pequeño que la entrada; si alguna etapa no mejora, se descarta su salida.
-    //   1. reducir: recomprime imágenes JPEG sobredimensionadas (~170 DPI, q82).
-    //   2. deduplicar_imagenes: elimina copias redundantes de la misma imagen
-    //      (logos, sellos, marcas de agua repetidas en múltiples páginas).
-    //   3. subset_fuentes: elimina los glifos no usados de las fuentes TrueType
+    //   1. optimizar_imagenes_pdf: recompresión + dedup de imágenes en UNA sola
+    //      carga/guardado — JPEG/DCTDecode sobredimensionados → downsample ~170 DPI q82;
+    //      imágenes en crudo o FlateDecode → B/N puro a 1-bit+FlateDecode (≡ JBIG2) y
+    //      color/gris a JPEG q85; y funde copias byte-idénticas (logos, sellos, marcas
+    //      de agua repetidas en múltiples páginas).
+    //   2. subset_fuentes: elimina los glifos no usados de las fuentes TrueType
     //      embebidas (aplica a PDFs generados por Word, LibreOffice, Acrobat).
-    //   4. comprimir_imagenes: imágenes en crudo o FlateDecode →
-    //      B/N puro: 1-bit+FlateDecode (≡ JBIG2, soporte universal);
-    //      color/gris: JPEG q85 (DCTDecode, sin pérdida perceptible).
-    //   5. comprimir_streams: FlateDecode nivel 9 sobre streams sin filtro
+    //   3. comprimir_streams: FlateDecode nivel 9 sobre streams sin filtro
     //      (streams de contenido, fuentes subsetadas, ToUnicode, perfiles ICC…).
     // Resetear flag lossy al inicio de cada importación.
     ULTIMA_IMPORTACION_LOSSY.with(|c| c.set(false));
@@ -1304,26 +1303,22 @@ fn cifrar_y_guardar_desde_bytes(
         if r.is_some() { ULTIMA_IMPORTACION_LOSSY.with(|c| c.set(true)); }
         r
     } else if detectar_ext(contenido) == "pdf" {
-        let tras_reducir = pdf_reducir::reducir(contenido);
-        // reducir: downsampling JPEG = lossy.
-        if tras_reducir.is_some() { ULTIMA_IMPORTACION_LOSSY.with(|c| c.set(true)); }
-        let base1: &[u8] = tras_reducir.as_deref().unwrap_or(contenido);
-        let tras_dedup = pdf_reducir::deduplicar_imagenes(base1);
-        let base2: &[u8] = tras_dedup.as_deref().unwrap_or(base1);
-        let tras_subset = pdf_reducir::subset_fuentes(base2);
-        let base3: &[u8] = tras_subset.as_deref().unwrap_or(base2);
-        let tras_comprimir = pdf_reducir::comprimir_imagenes(base3);
-        // comprimir_imagenes: puede aplicar JPEG q85 a imágenes color/gris = lossy.
-        if tras_comprimir.is_some() { ULTIMA_IMPORTACION_LOSSY.with(|c| c.set(true)); }
-        let base4: &[u8] = tras_comprimir.as_deref().unwrap_or(base3);
-        let tras_streams = pdf_reducir::comprimir_streams(base4);
+        // Etapa 1 fusionada: recompresión de imágenes (JPEG/DCTDecode sobredimensionados +
+        // crudo/FlateDecode → 1-bit/JPEG) Y deduplicación de imágenes byte-idénticas, todo
+        // en una sola carga/guardado de lopdf. Devuelve además si hubo recompresión lossy.
+        let tras_imagenes = pdf_reducir::optimizar_imagenes_pdf(contenido);
+        // Solo la recompresión es lossy; la dedup es byte-idéntica y no cuenta.
+        if let Some((_, true)) = &tras_imagenes { ULTIMA_IMPORTACION_LOSSY.with(|c| c.set(true)); }
+        let tras_imagenes: Option<Vec<u8>> = tras_imagenes.map(|(b, _)| b);
+        let base1: &[u8] = tras_imagenes.as_deref().unwrap_or(contenido);
+        let tras_subset = pdf_reducir::subset_fuentes(base1);
+        let base2: &[u8] = tras_subset.as_deref().unwrap_or(base1);
+        let tras_streams = pdf_reducir::comprimir_streams(base2);
         // Prioridad: salida más compacta (etapa posterior gana porque acumula todas las anteriores).
-        match (tras_streams, tras_comprimir, tras_subset, tras_dedup, tras_reducir) {
-            (Some(s), _, _, _, _) => Some(s),
-            (None, Some(c), _, _, _) => Some(c),
-            (None, None, Some(s), _, _) => Some(s),
-            (None, None, None, Some(d), _) => Some(d),
-            (None, None, None, None, r) => r,
+        match (tras_streams, tras_subset, tras_imagenes) {
+            (Some(s), _, _) => Some(s),
+            (None, Some(s), _) => Some(s),
+            (None, None, i) => i,
         }
     } else {
         None
@@ -1368,11 +1363,11 @@ fn cifrar_y_guardar_desde_bytes(
 }
 
 #[tauri::command]
-fn guardar_documento_sin_traducir(
+async fn guardar_documento_sin_traducir(
     app: tauri::AppHandle,
     nombre_archivo: String,
     ruta_completa: String,
-    sesion: tauri::State<SesionActiva>,
+    sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
     crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
@@ -1386,8 +1381,17 @@ fn guardar_documento_sin_traducir(
         .map_err(|_| "Error".to_string())?
         .clone();
 
-    let ruta = cifrar_y_guardar_desde_ruta(&nombre_archivo, &ruta_completa, &subclave_hex, &id_usuario)?;
-    if ULTIMA_IMPORTACION_LOSSY.with(|c| c.get()) {
+    // spawn_blocking: la lectura del archivo + el pipeline pesado no deben bloquear el
+    // event-loop. El flag lossy (thread_local) se lee dentro de la closure y se devuelve.
+    let (ruta, lossy) = tauri::async_runtime::spawn_blocking(move || {
+        let ruta = cifrar_y_guardar_desde_ruta(&nombre_archivo, &ruta_completa, &subclave_hex, &id_usuario)?;
+        let lossy = ULTIMA_IMPORTACION_LOSSY.with(|c| c.get());
+        Ok::<_, String>((ruta, lossy))
+    })
+    .await
+    .map_err(|e| format!("Error de tarea interna: {e}"))??;
+
+    if lossy {
         let _ = app.emit("compresion-lossy", ());
     }
     Ok(ruta)
@@ -1398,11 +1402,11 @@ fn guardar_documento_sin_traducir(
 // archivo, no su ruta). Evita depender del drag-drop nativo de wry (que en macOS
 // reciente aborta el proceso por un unwrap sobre el pasteboard).
 #[tauri::command]
-fn guardar_documento_desde_bytes(
+async fn guardar_documento_desde_bytes(
     app: tauri::AppHandle,
     nombre_archivo: String,
     contenido_b64: String,
-    sesion: tauri::State<SesionActiva>,
+    sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<String, String> {
     crate::rat_detector::verificar_no_bloqueado_rat()?;
     let subclave_hex = sesion.subclave_hex()?;
@@ -1423,8 +1427,20 @@ fn guardar_documento_desde_bytes(
         return Err("El archivo supera el límite de 150 MB.".into());
     }
 
-    let ruta = cifrar_y_guardar_desde_bytes(&nombre_archivo, &bytes, &subclave_hex, &id_usuario)?;
-    if ULTIMA_IMPORTACION_LOSSY.with(|c| c.get()) {
+    // spawn_blocking libera el event-loop mientras corre el pipeline pesado
+    // (recompresión de imágenes, subset de fuentes, cifrado). El flag lossy es un
+    // thread_local fijado DENTRO de cifrar_y_guardar_desde_bytes, así que hay que
+    // leerlo en ESTE mismo hilo de bloqueo y devolverlo: leerlo tras el .await daría
+    // siempre false (correría en otro hilo del pool async).
+    let (ruta, lossy) = tauri::async_runtime::spawn_blocking(move || {
+        let ruta = cifrar_y_guardar_desde_bytes(&nombre_archivo, &bytes, &subclave_hex, &id_usuario)?;
+        let lossy = ULTIMA_IMPORTACION_LOSSY.with(|c| c.get());
+        Ok::<_, String>((ruta, lossy))
+    })
+    .await
+    .map_err(|e| format!("Error de tarea interna: {e}"))??;
+
+    if lossy {
         let _ = app.emit("compresion-lossy", ());
     }
     Ok(ruta)
@@ -1497,14 +1513,19 @@ async fn guardar_documento_pdf_desde_docx(
         .file_stem().and_then(|s| s.to_str()).unwrap_or("documento").to_string();
     let nombre_pdf = format!("{stem}.pdf");
 
-    let ruta = tauri::async_runtime::spawn_blocking(move || {
+    // El flag lossy es un thread_local fijado dentro de cifrar_y_guardar_desde_bytes:
+    // se lee en el hilo de bloqueo y se devuelve. (Antes se leía tras el .await, en otro
+    // hilo del pool async, así que daba siempre false y el evento nunca se emitía.)
+    let (ruta, lossy) = tauri::async_runtime::spawn_blocking(move || {
         let pdf = docx_bytes_a_pdf(&docx)?;
-        cifrar_y_guardar_desde_bytes(&nombre_pdf, &pdf, &subclave_hex, &id_usuario)
+        let ruta = cifrar_y_guardar_desde_bytes(&nombre_pdf, &pdf, &subclave_hex, &id_usuario)?;
+        let lossy = ULTIMA_IMPORTACION_LOSSY.with(|c| c.get());
+        Ok::<_, String>((ruta, lossy))
     })
     .await
     .map_err(|e| format!("Error de tarea interna: {e}"))??;
 
-    if ULTIMA_IMPORTACION_LOSSY.with(|c| c.get()) {
+    if lossy {
         let _ = app.emit("compresion-lossy", ());
     }
     Ok(ruta)

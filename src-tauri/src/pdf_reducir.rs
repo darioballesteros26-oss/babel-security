@@ -14,7 +14,7 @@
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::{ColorType, GenericImageView, ImageFormat};
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 use std::collections::{BTreeSet, HashMap};
 
 // Lado mayor máximo tras reducir (~170 DPI en A4). Por encima de esto, downsample.
@@ -25,100 +25,18 @@ const CALIDAD: u8 = 82;
 /// Reduce el peso de un PDF re-encodando sus imágenes JPEG grandes. Devuelve
 /// `Some(bytes)` solo si el resultado es más pequeño; `None` si no había nada que
 /// reducir o no compensó (el llamador conserva el original).
+///
+/// En producción el pipeline usa `comprimir_imagenes_pdf` (fusiona esta etapa con
+/// `comprimir_imagenes` en una sola carga/guardado). Esta función se conserva como
+/// unidad de test enfocada del camino DCTDecode.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn reducir(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut doc = Document::load_mem(bytes).ok()?;
     let n_paginas = doc.get_pages().len();
-
-    // Pass 1: IDs usados como máscara de otra imagen (alfa/transparencia) → no tocar.
-    let mut mascaras: BTreeSet<ObjectId> = BTreeSet::new();
-    for obj in doc.objects.values() {
-        if let Object::Stream(s) = obj {
-            for clave in [b"SMask".as_ref(), b"Mask".as_ref()] {
-                if let Ok(Object::Reference(id)) = s.dict.get(clave) {
-                    mascaras.insert(*id);
-                }
-            }
-        }
-    }
-
-    let mut cambiado = false;
-    for (id, obj) in doc.objects.iter_mut() {
-        if mascaras.contains(id) {
-            continue;
-        }
-        let Object::Stream(s) = obj else { continue };
-        if !es_imagen(&s.dict) || es_image_mask(&s.dict) || !filtro_es_dct(&s.dict) {
-            continue;
-        }
-
-        // El contenido de un stream DCTDecode ES el JPEG tal cual. Decodificamos con
-        // límites de tamaño y de memoria: un JPEG "bomba" (cabecera que declara dimensiones
-        // gigantescas) no debe reservar cientos de MB y tumbar la app. Este reductor corre
-        // AUTOMÁTICAMENTE en cada PDF importado, así que es una vía de DoS a blindar.
-        let mut reader = image::ImageReader::new(std::io::Cursor::new(&s.content));
-        reader.set_format(ImageFormat::Jpeg);
-        let mut limites = image::Limits::default();
-        limites.max_image_width = Some(20_000);
-        limites.max_image_height = Some(20_000);
-        limites.max_alloc = Some(512 * 1024 * 1024); // tope de reserva por imagen
-        reader.limits(limites);
-        let Ok(img) = reader.decode() else {
-            continue; // corrupta, o excede los límites → dejar la imagen intacta
-        };
-        let (w, h) = img.dimensions();
-        let maxdim = w.max(h);
-        if maxdim <= CAP_PX {
-            continue; // no sobredimensionada → no recomprimir (evita pérdida generacional)
-        }
-
-        let factor = CAP_PX as f32 / maxdim as f32;
-        let nw = ((w as f32 * factor).round() as u32).max(1);
-        let nh = ((h as f32 * factor).round() as u32).max(1);
-        let peq = img.resize_exact(nw, nh, FilterType::CatmullRom);
-
-        // Conservar gris vs color para no triplicar el tamaño de un escaneo en gris.
-        let gris = matches!(
-            img.color(),
-            ColorType::L8 | ColorType::La8 | ColorType::L16 | ColorType::La16
-        );
-        let mut buf: Vec<u8> = Vec::new();
-        let enc_ok = if gris {
-            JpegEncoder::new_with_quality(&mut buf, CALIDAD).encode_image(&peq.to_luma8())
-        } else {
-            JpegEncoder::new_with_quality(&mut buf, CALIDAD).encode_image(&peq.to_rgb8())
-        };
-        if enc_ok.is_err() || buf.len() + 32 >= s.content.len() {
-            continue; // fallo o no mejora → dejar la imagen original
-        }
-
-        s.dict.set("Width", nw as i64);
-        s.dict.set("Height", nh as i64);
-        s.dict.set("BitsPerComponent", 8i64);
-        s.dict.set(
-            "ColorSpace",
-            Object::Name(if gris { b"DeviceGray".to_vec() } else { b"DeviceRGB".to_vec() }),
-        );
-        s.dict.set("Filter", Object::Name(b"DCTDecode".to_vec()));
-        s.dict.remove(b"DecodeParms");
-        s.dict.remove(b"DecodeParams");
-        s.set_content(buf);
-        cambiado = true;
-    }
-
-    if !cambiado {
+    if !aplicar_a_imagenes(&mut doc, reducir_stream_dct) {
         return None;
     }
-    let mut out: Vec<u8> = Vec::new();
-    doc.save_to(&mut out).ok()?;
-    if out.len() >= bytes.len() {
-        return None; // no compensó
-    }
-    // Auto-validación: el PDF resultante debe recargar y conservar el nº de páginas.
-    // Si no, se descarta (el llamador conserva el original).
-    match Document::load_mem(&out) {
-        Ok(d) if d.get_pages().len() == n_paginas => Some(out),
-        _ => None,
-    }
+    guardar_si_mejora(&mut doc, bytes.len(), n_paginas)
 }
 
 fn es_imagen(d: &Dictionary) -> bool {
@@ -129,41 +47,68 @@ fn es_image_mask(d: &Dictionary) -> bool {
     matches!(d.get(b"ImageMask"), Ok(Object::Boolean(true)))
 }
 
-// Solo DCTDecode "puro" (nombre o array de un elemento). Filtros encadenados o
-// distintos (CCITT, JBIG2, Flate) se dejan intactos.
-fn filtro_es_dct(d: &Dictionary) -> bool {
-    match d.get(b"Filter") {
-        Ok(Object::Name(n)) => n == b"DCTDecode",
-        Ok(Object::Array(a)) => {
-            a.len() == 1 && matches!(&a[0], Object::Name(n) if n == b"DCTDecode")
+// ── HELPERS SOBRE `&mut Document` (permiten encadenar varias transformaciones en
+//    UNA sola carga/guardado; los usa la pasada fusionada `optimizar_imagenes_pdf`
+//    y también las funciones standalone de test) ─────────────────────────────
+
+/// IDs usados como máscara (SMask/Mask) de otra imagen → alfa/transparencia, no tocar.
+fn recolectar_mascaras(doc: &Document) -> BTreeSet<ObjectId> {
+    let mut mascaras: BTreeSet<ObjectId> = BTreeSet::new();
+    for obj in doc.objects.values() {
+        if let Object::Stream(s) = obj {
+            for clave in [b"SMask".as_ref(), b"Mask".as_ref()] {
+                if let Ok(Object::Reference(id)) = s.dict.get(clave) {
+                    mascaras.insert(*id);
+                }
+            }
         }
-        _ => false,
+    }
+    mascaras
+}
+
+/// Itera todas las imágenes del documento (saltando máscaras, ImageMask y no-imágenes)
+/// y aplica `f` a cada stream. Devuelve `true` si `f` modificó alguna.
+fn aplicar_a_imagenes(doc: &mut Document, mut f: impl FnMut(&mut Stream) -> bool) -> bool {
+    let mascaras = recolectar_mascaras(doc);
+    let mut cambiado = false;
+    for (id, obj) in doc.objects.iter_mut() {
+        if mascaras.contains(id) {
+            continue;
+        }
+        let Object::Stream(s) = obj else { continue };
+        if !es_imagen(&s.dict) || es_image_mask(&s.dict) {
+            continue;
+        }
+        if f(s) {
+            cambiado = true;
+        }
+    }
+    cambiado
+}
+
+/// Serializa el documento y solo acepta el resultado si es más pequeño que
+/// `original_len` bytes Y conserva `n_paginas` al recargarlo (auto-validación).
+/// Devuelve `None` si no compensó o el PDF resultante no valida.
+fn guardar_si_mejora(doc: &mut Document, original_len: usize, n_paginas: usize) -> Option<Vec<u8>> {
+    let mut out: Vec<u8> = Vec::new();
+    doc.save_to(&mut out).ok()?;
+    if out.len() >= original_len {
+        return None; // no compensó
+    }
+    match Document::load_mem(&out) {
+        Ok(d) if d.get_pages().len() == n_paginas => Some(out),
+        _ => None,
     }
 }
 
-// ── DEDUPLICACIÓN DE IMÁGENES ──────────────────────────────────────────────
-//
-// Detecta imagen XObjects byte-idénticos (mismo stream comprimido + mismos
-// parámetros clave) y elimina las copias redundantes haciendo que todas las
-// páginas referencien el mismo objeto canónico. Garantía total de fidelidad
-// visual: mismo hash SHA-256 del stream ⟹ mismo stream ⟹ misma imagen
-// decodificada, sin excepciones.
-//
-// Casos cubiertos: logos, sellos, marcas de agua repetidas en múltiples páginas;
-// imágenes con y sin canal alfa (SMask). Las imágenes con SMask incluyen los
-// bytes del SMask en la huella, de modo que solo se deduplicán cuando ambos
-// el plano de color y el alfa son byte-idénticos.
-
-/// Elimina imágenes duplicadas de un PDF. Devuelve `Some(bytes)` solo si se
-/// encontraron duplicados y el resultado es más pequeño que la entrada;
-/// `None` en caso contrario (el llamador conserva el original).
-pub fn deduplicar_imagenes(bytes: &[u8]) -> Option<Vec<u8>> {
+/// Deduplica imágenes byte-idénticas del documento en memoria: fusiona las copias
+/// redundantes haciendo que todas las referencias apunten al objeto canónico y
+/// elimina los duplicados. Devuelve `true` si eliminó al menos un duplicado.
+/// La huella incluye parámetros visuales + bytes del stream + bytes del SMask, así
+/// que solo fusiona imágenes visualmente idénticas (color y alfa por igual).
+fn deduplicar_en_doc(doc: &mut Document) -> bool {
     use sha2::{Digest, Sha256};
 
-    let mut doc = Document::load_mem(bytes).ok()?;
-    let n_paginas = doc.get_pages().len();
-
-    // Recolectar IDs de todos los Image XObjects del documento.
     let ids_imagen: Vec<ObjectId> = doc
         .objects
         .iter()
@@ -178,14 +123,9 @@ pub fn deduplicar_imagenes(bytes: &[u8]) -> Option<Vec<u8>> {
         .collect();
 
     if ids_imagen.len() < 2 {
-        return None; // imposible tener duplicados con menos de 2 imágenes
+        return false; // imposible tener duplicados con menos de 2 imágenes
     }
 
-    // Calcular la huella de cada imagen. La huella incluye:
-    //   - parámetros visuales clave (Width, Height, BitsPerComponent, ColorSpace, Filter)
-    //   - bytes crudos del stream comprimido
-    //   - bytes del SMask (canal alfa) si existe
-    // Dos imágenes con la misma huella son visualmente idénticas por definición.
     let mut canonico: HashMap<Vec<u8>, ObjectId> = HashMap::new();
     let mut reemplazar: HashMap<ObjectId, ObjectId> = HashMap::new(); // duplicado → canónico
 
@@ -206,8 +146,6 @@ pub fn deduplicar_imagenes(bytes: &[u8]) -> Option<Vec<u8>> {
             Ok(Object::Name(n)) => n.clone(),
             _ => b"".to_vec(),
         };
-        // Incluir los bytes del SMask en la huella para garantizar que el canal alfa
-        // también es idéntico antes de deduplicar.
         let smask_bytes: Vec<u8> = match stream.dict.get(b"SMask") {
             Ok(Object::Reference(smask_id)) => {
                 if let Some(Object::Stream(sm)) = doc.objects.get(smask_id) {
@@ -241,40 +179,261 @@ pub fn deduplicar_imagenes(bytes: &[u8]) -> Option<Vec<u8>> {
     }
 
     if reemplazar.is_empty() {
-        return None;
+        return false;
     }
 
-    // Actualizar TODAS las referencias del documento: sustituir cada referencia a un
-    // objeto duplicado por la referencia al objeto canónico. Recorremos todos los
-    // objetos del documento (incluidos form XObjects, Resources compartidos, etc.)
-    // para cubrir todos los puntos desde los que se podría referenciar la imagen.
     let ids_obj: Vec<ObjectId> = doc.objects.keys().cloned().collect();
     for oid in ids_obj {
         if let Some(obj) = doc.objects.get_mut(&oid) {
             actualizar_refs_en_objeto(obj, &reemplazar);
         }
     }
-    // También el trailer (poco probable que referencie imágenes, pero por completitud).
     for (_, v) in doc.trailer.iter_mut() {
         actualizar_refs_en_objeto(v, &reemplazar);
     }
-
-    // Eliminar los objetos duplicados; ya no hay referencias activas a ellos.
     for dup_id in reemplazar.keys() {
         doc.objects.remove(dup_id);
     }
 
-    let mut out: Vec<u8> = Vec::new();
-    doc.save_to(&mut out).ok()?;
+    true
+}
 
-    if out.len() >= bytes.len() {
-        return None; // sin mejora neta
+// Solo DCTDecode "puro" (nombre o array de un elemento). Filtros encadenados o
+// distintos (CCITT, JBIG2, Flate) se dejan intactos.
+fn filtro_es_dct(d: &Dictionary) -> bool {
+    match d.get(b"Filter") {
+        Ok(Object::Name(n)) => n == b"DCTDecode",
+        Ok(Object::Array(a)) => {
+            a.len() == 1 && matches!(&a[0], Object::Name(n) if n == b"DCTDecode")
+        }
+        _ => false,
     }
-    // Validar: el PDF resultante debe cargarse y conservar el número de páginas.
-    match Document::load_mem(&out) {
-        Ok(d) if d.get_pages().len() == n_paginas => Some(out),
-        _ => None,
+}
+
+// ── HELPERS POR-STREAM (compartidos por `reducir`, `comprimir_imagenes` y la
+//    pasada fusionada `comprimir_imagenes_pdf`) ─────────────────────────────
+//
+// Cada helper aplica su transformación a UN stream de imagen y devuelve `true`
+// si lo modificó. El llamador es responsable de haber filtrado antes las
+// máscaras (SMask/Mask), los ImageMask y los objetos que no son imagen; el
+// resto de guardas (filtro, dimensiones, colorspace…) viven dentro del helper,
+// de modo que ambos son seguros de encadenar sobre el mismo stream.
+
+/// Re-encoda el JPEG (DCTDecode) de un stream de imagen sobredimensionado a
+/// ~CAP_PX de lado mayor y calidad CALIDAD. No toca nada si el stream no es
+/// DCTDecode, no está sobredimensionado, o el resultado no es más pequeño.
+fn reducir_stream_dct(s: &mut Stream) -> bool {
+    if !filtro_es_dct(&s.dict) {
+        return false;
     }
+    // El contenido de un stream DCTDecode ES el JPEG tal cual. Decodificamos con
+    // límites de tamaño y de memoria: un JPEG "bomba" (cabecera que declara dimensiones
+    // gigantescas) no debe reservar cientos de MB y tumbar la app. Este reductor corre
+    // AUTOMÁTICAMENTE en cada PDF importado, así que es una vía de DoS a blindar.
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(&s.content));
+    reader.set_format(ImageFormat::Jpeg);
+    let mut limites = image::Limits::default();
+    limites.max_image_width = Some(20_000);
+    limites.max_image_height = Some(20_000);
+    limites.max_alloc = Some(512 * 1024 * 1024); // tope de reserva por imagen
+    reader.limits(limites);
+    let Ok(img) = reader.decode() else {
+        return false; // corrupta, o excede los límites → dejar la imagen intacta
+    };
+    let (w, h) = img.dimensions();
+    let maxdim = w.max(h);
+    if maxdim <= CAP_PX {
+        return false; // no sobredimensionada → no recomprimir (evita pérdida generacional)
+    }
+
+    let factor = CAP_PX as f32 / maxdim as f32;
+    let nw = ((w as f32 * factor).round() as u32).max(1);
+    let nh = ((h as f32 * factor).round() as u32).max(1);
+    let peq = img.resize_exact(nw, nh, FilterType::CatmullRom);
+
+    // Conservar gris vs color para no triplicar el tamaño de un escaneo en gris.
+    let gris = matches!(
+        img.color(),
+        ColorType::L8 | ColorType::La8 | ColorType::L16 | ColorType::La16
+    );
+    let mut buf: Vec<u8> = Vec::new();
+    let enc_ok = if gris {
+        JpegEncoder::new_with_quality(&mut buf, CALIDAD).encode_image(&peq.to_luma8())
+    } else {
+        JpegEncoder::new_with_quality(&mut buf, CALIDAD).encode_image(&peq.to_rgb8())
+    };
+    if enc_ok.is_err() || buf.len() + 32 >= s.content.len() {
+        return false; // fallo o no mejora → dejar la imagen original
+    }
+
+    s.dict.set("Width", nw as i64);
+    s.dict.set("Height", nh as i64);
+    s.dict.set("BitsPerComponent", 8i64);
+    s.dict.set(
+        "ColorSpace",
+        Object::Name(if gris { b"DeviceGray".to_vec() } else { b"DeviceRGB".to_vec() }),
+    );
+    s.dict.set("Filter", Object::Name(b"DCTDecode".to_vec()));
+    s.dict.remove(b"DecodeParms");
+    s.dict.remove(b"DecodeParams");
+    s.set_content(buf);
+    true
+}
+
+/// Recomprime una imagen almacenada en crudo o FlateDecode (sin predictor):
+/// B/N puro → 1 bit/px + FlateDecode; color/gris → JPEG q85 (DCTDecode). No toca
+/// nada si el filtro no encaja, hay predictor, el colorspace no es Device{Gray,RGB},
+/// bpc ≠ 8, la imagen es minúscula, o el resultado no es más pequeño.
+fn comprimir_stream_raw(s: &mut Stream) -> bool {
+    // DCTDecode → ya lo gestiona `reducir_stream_dct`.
+    if filtro_es_dct(&s.dict) {
+        return false;
+    }
+    // CCITTFaxDecode / JBIG2Decode → ya optimizados para B/N.
+    if filtro_es_ccitt_o_jbig2(&s.dict) {
+        return false;
+    }
+    // Solo FlateDecode sin predictor, o sin filtro (píxeles crudos).
+    let tiene_flate = filtro_es_flate(&s.dict);
+    let sin_filtro = filtro_es_ninguno(&s.dict);
+    if !tiene_flate && !sin_filtro {
+        return false;
+    }
+    // Predictor activo: decompressed_content() no unaplicaría el predictor.
+    if tiene_predictor(&s.dict) {
+        return false;
+    }
+
+    let w = match s.dict.get(b"Width").ok().and_then(|o| o.as_i64().ok()) {
+        Some(v) if v > 0 => v as u32,
+        _ => return false,
+    };
+    let h = match s.dict.get(b"Height").ok().and_then(|o| o.as_i64().ok()) {
+        Some(v) if v > 0 => v as u32,
+        _ => return false,
+    };
+    let bpc = s.dict.get(b"BitsPerComponent").ok()
+        .and_then(|o| o.as_i64().ok())
+        .unwrap_or(8);
+    if bpc != 8 {
+        return false; // 1-bit y 16-bit se dejan intactos
+    }
+    let canales: u8 = match s.dict.get(b"ColorSpace") {
+        Ok(Object::Name(n)) => match n.as_slice() {
+            b"DeviceGray" => 1,
+            b"DeviceRGB" => 3,
+            _ => return false, // CMYK, Indexed u otros: no tocar
+        },
+        _ => return false,
+    };
+    // Ignorar imágenes con Decode array personalizado (puede invertir colores).
+    if s.dict.get(b"Decode").is_ok() {
+        return false;
+    }
+
+    let original_len = s.content.len();
+    // Umbral mínimo: imágenes muy pequeñas no compensan el esfuerzo.
+    if original_len < 4096 {
+        return false;
+    }
+    // Anti-bomba: límite de reserva de memoria (mismo que en `reducir`).
+    let tam_raw = w as usize * h as usize * canales as usize;
+    if tam_raw > 512 * 1024 * 1024 {
+        return false;
+    }
+
+    let pixels: Vec<u8> = if sin_filtro {
+        s.content.clone()
+    } else {
+        // FlateDecode: descomprimir.
+        match s.decompressed_content() {
+            Ok(p) => p,
+            Err(_) => return false,
+        }
+    };
+
+    // Verificar que el tamaño coincide con los metadatos (detecta predictores
+    // ocultos o streams corruptos antes de intentar recomprimir).
+    if pixels.len() != tam_raw {
+        return false;
+    }
+
+    let es_bw = canales == 1 && pixels_son_binarios(&pixels);
+
+    let (nuevo_content, nuevo_filtro, nuevo_bpc) = if es_bw {
+        // 1 bit/px + FlateDecode — equivalente a JBIG2 en soporte universal.
+        let packed = pack_1bit(&pixels, w, h);
+        let compressed = match zlib_comprimir(&packed) {
+            Some(c) => c,
+            None => return false,
+        };
+        (compressed, b"FlateDecode" as &[u8], 1i64)
+    } else {
+        // Re-encodar como JPEG q85 (sin pérdida perceptible).
+        let mut buf: Vec<u8> = Vec::new();
+        let ok = if canales == 1 {
+            match image::GrayImage::from_raw(w, h, pixels.clone()) {
+                Some(img) => {
+                    JpegEncoder::new_with_quality(&mut buf, 85).encode_image(&img).is_ok()
+                }
+                None => false,
+            }
+        } else {
+            match image::RgbImage::from_raw(w, h, pixels.clone()) {
+                Some(img) => {
+                    JpegEncoder::new_with_quality(&mut buf, 85).encode_image(&img).is_ok()
+                }
+                None => false,
+            }
+        };
+        if !ok {
+            return false;
+        }
+        (buf, b"DCTDecode" as &[u8], 8i64)
+    };
+
+    // Solo reemplazar si el nuevo contenido es genuinamente más pequeño.
+    if nuevo_content.len() + 32 >= original_len {
+        return false;
+    }
+
+    s.dict.remove(b"Filter");
+    s.dict.remove(b"DecodeParms");
+    s.dict.remove(b"DecodeParams");
+    s.dict.set("Filter", Object::Name(nuevo_filtro.to_vec()));
+    s.dict.set("BitsPerComponent", nuevo_bpc);
+    s.set_content(nuevo_content);
+    true
+}
+
+// ── DEDUPLICACIÓN DE IMÁGENES ──────────────────────────────────────────────
+//
+// Detecta imagen XObjects byte-idénticos (mismo stream comprimido + mismos
+// parámetros clave) y elimina las copias redundantes haciendo que todas las
+// páginas referencien el mismo objeto canónico. Garantía total de fidelidad
+// visual: mismo hash SHA-256 del stream ⟹ mismo stream ⟹ misma imagen
+// decodificada, sin excepciones.
+//
+// Casos cubiertos: logos, sellos, marcas de agua repetidas en múltiples páginas;
+// imágenes con y sin canal alfa (SMask). Las imágenes con SMask incluyen los
+// bytes del SMask en la huella, de modo que solo se deduplicán cuando ambos
+// el plano de color y el alfa son byte-idénticos.
+
+/// Elimina imágenes duplicadas de un PDF. Devuelve `Some(bytes)` solo si se
+/// encontraron duplicados y el resultado es más pequeño que la entrada;
+/// `None` en caso contrario (el llamador conserva el original).
+///
+/// En producción el pipeline usa `optimizar_imagenes_pdf` (fusiona esta dedup con
+/// la recompresión de imágenes en una sola carga/guardado). Esta función se conserva
+/// como unidad de test enfocada.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn deduplicar_imagenes(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut doc = Document::load_mem(bytes).ok()?;
+    let n_paginas = doc.get_pages().len();
+    if !deduplicar_en_doc(&mut doc) {
+        return None;
+    }
+    guardar_si_mejora(&mut doc, bytes.len(), n_paginas)
 }
 
 /// Sustituye recursivamente en `obj` todas las referencias que aparezcan en
@@ -666,191 +825,49 @@ pub fn subset_fuentes(bytes: &[u8]) -> Option<Vec<u8>> {
 // Garantías: nunca reemplaza si no mejora el tamaño, no toca máscaras,
 // no toca imágenes con predictor activo (riesgo de corrupción), valida
 // el PDF resultante con nº de páginas antes de aceptarlo.
-
-struct CandImagen {
-    id: ObjectId,
-    w: u32,
-    h: u32,
-    canales: u8, // 1 = DeviceGray, 3 = DeviceRGB
-    pixels: Vec<u8>,
-    original_len: usize,
-}
-
+//
+// En producción el pipeline usa `comprimir_imagenes_pdf` (fusiona esta etapa con
+// `reducir` en una sola carga/guardado). Esta función se conserva como unidad de
+// test enfocada del camino crudo/FlateDecode.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn comprimir_imagenes(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut doc = Document::load_mem(bytes).ok()?;
     let n_paginas = doc.get_pages().len();
-
-    // Recopilar IDs de máscaras para no tocarlas (canal alfa / transparencia).
-    let mut mascaras: BTreeSet<ObjectId> = BTreeSet::new();
-    for obj in doc.objects.values() {
-        if let Object::Stream(s) = obj {
-            for clave in [b"SMask".as_ref(), b"Mask".as_ref()] {
-                if let Ok(Object::Reference(id)) = s.dict.get(clave) {
-                    mascaras.insert(*id);
-                }
-            }
-        }
-    }
-
-    // Primera pasada: recopilar candidatos (clonamos lo que necesitamos para
-    // no mantener referencias inmutables al mutar doc después).
-    let mut candidatos: Vec<CandImagen> = Vec::new();
-
-    for (id, obj) in &doc.objects {
-        if mascaras.contains(id) {
-            continue;
-        }
-        let Object::Stream(s) = obj else { continue };
-        if !es_imagen(&s.dict) || es_image_mask(&s.dict) {
-            continue;
-        }
-        // DCTDecode → ya lo gestiona `reducir`.
-        if filtro_es_dct(&s.dict) {
-            continue;
-        }
-        // CCITTFaxDecode / JBIG2Decode → ya optimizados para B/N.
-        if filtro_es_ccitt_o_jbig2(&s.dict) {
-            continue;
-        }
-        // Solo FlateDecode sin predictor, o sin filtro (píxeles crudos).
-        let tiene_flate = filtro_es_flate(&s.dict);
-        let sin_filtro = filtro_es_ninguno(&s.dict);
-        if !tiene_flate && !sin_filtro {
-            continue;
-        }
-        // Predictor activo: decompressed_content() no unaplicaría el predictor.
-        if tiene_predictor(&s.dict) {
-            continue;
-        }
-
-        let w = match s.dict.get(b"Width").ok().and_then(|o| o.as_i64().ok()) {
-            Some(v) if v > 0 => v as u32,
-            _ => continue,
-        };
-        let h = match s.dict.get(b"Height").ok().and_then(|o| o.as_i64().ok()) {
-            Some(v) if v > 0 => v as u32,
-            _ => continue,
-        };
-        let bpc = s.dict.get(b"BitsPerComponent").ok()
-            .and_then(|o| o.as_i64().ok())
-            .unwrap_or(8);
-        if bpc != 8 {
-            continue; // 1-bit y 16-bit se dejan intactos
-        }
-        let canales: u8 = match s.dict.get(b"ColorSpace") {
-            Ok(Object::Name(n)) => match n.as_slice() {
-                b"DeviceGray" => 1,
-                b"DeviceRGB" => 3,
-                _ => continue, // CMYK, Indexed u otros: no tocar
-            },
-            _ => continue,
-        };
-        // Ignorar imágenes con Decode array personalizado (puede invertir colores).
-        if s.dict.get(b"Decode").is_ok() {
-            continue;
-        }
-
-        let original_len = s.content.len();
-        // Umbral mínimo: imágenes muy pequeñas no compensan el esfuerzo.
-        if original_len < 4096 {
-            continue;
-        }
-        // Anti-bomba: límite de reserva de memoria (mismo que en `reducir`).
-        let tam_raw = w as usize * h as usize * canales as usize;
-        if tam_raw > 512 * 1024 * 1024 {
-            continue;
-        }
-
-        let pixels: Vec<u8> = if sin_filtro {
-            s.content.clone()
-        } else {
-            // FlateDecode: descomprimir.
-            match s.decompressed_content() {
-                Ok(p) => p,
-                Err(_) => continue,
-            }
-        };
-
-        // Verificar que el tamaño coincide con los metadatos (detecta predictores
-        // ocultos o streams corruptos antes de intentar recomprimir).
-        if pixels.len() != tam_raw {
-            continue;
-        }
-
-        candidatos.push(CandImagen { id: *id, w, h, canales, pixels, original_len });
-    }
-
-    if candidatos.is_empty() {
+    if !aplicar_a_imagenes(&mut doc, comprimir_stream_raw) {
         return None;
     }
+    guardar_si_mejora(&mut doc, bytes.len(), n_paginas)
+}
 
-    let mut cambiado = false;
+/// Optimización de imágenes en UNA sola carga/guardado de lopdf: fusiona tres
+/// etapas que antes eran pasadas independientes (cada una con su `load_mem`+`save_to`):
+///   1. `reducir`             — JPEG/DCTDecode sobredimensionados → downsample q82.
+///   2. `comprimir_imagenes`  — crudo/FlateDecode → 1-bit o JPEG q85.
+///   3. `deduplicar_imagenes` — funde imágenes byte-idénticas repetidas.
+///
+/// La recompresión (1+2) corre ANTES que la dedup (3): comprimir es determinista,
+/// así que dos imágenes de origen idéntico producen streams idénticos que la dedup
+/// sigue fusionando por hash — mismo resultado final que ejecutarlas por separado,
+/// pero ahorrando dos ciclos completos de carga/guardado.
+///
+/// Devuelve `Some((bytes, lossy))` solo si algo cambió Y el resultado es más pequeño.
+/// `lossy` indica si la RECOMPRESIÓN (1+2) tocó algo (downsample o JPEG q85 sobre
+/// color/gris); la dedup (3) es byte-idéntica y NO cuenta como lossy. Así el llamador
+/// solo avisa de pérdida cuando de verdad la hubo, no cuando solo se dedujo.
+pub fn optimizar_imagenes_pdf(bytes: &[u8]) -> Option<(Vec<u8>, bool)> {
+    let mut doc = Document::load_mem(bytes).ok()?;
+    let n_paginas = doc.get_pages().len();
 
-    for cand in candidatos {
-        let es_bw = cand.canales == 1 && pixels_son_binarios(&cand.pixels);
+    // 1+2: recompresión. Cada imagen encaja como mucho en una rama (DCT vs crudo/Flate);
+    // el `||` corta en cuanto una aplica y el helper que no corresponde devuelve `false`.
+    let lossy = aplicar_a_imagenes(&mut doc, |s| reducir_stream_dct(s) || comprimir_stream_raw(s));
+    // 3: dedup (lossless) sobre los streams ya recomprimidos.
+    let dedup = deduplicar_en_doc(&mut doc);
 
-        let (nuevo_content, nuevo_filtro, nuevo_bpc) = if es_bw {
-            // 1 bit/px + FlateDecode — equivalente a JBIG2 en soporte universal.
-            let packed = pack_1bit(&cand.pixels, cand.w, cand.h);
-            let compressed = match zlib_comprimir(&packed) {
-                Some(c) => c,
-                None => continue,
-            };
-            (compressed, b"FlateDecode" as &[u8], 1i64)
-        } else {
-            // Re-encodar como JPEG q85 (sin pérdida perceptible).
-            let mut buf: Vec<u8> = Vec::new();
-            let ok = if cand.canales == 1 {
-                match image::GrayImage::from_raw(cand.w, cand.h, cand.pixels.clone()) {
-                    Some(img) => {
-                        JpegEncoder::new_with_quality(&mut buf, 85).encode_image(&img).is_ok()
-                    }
-                    None => false,
-                }
-            } else {
-                match image::RgbImage::from_raw(cand.w, cand.h, cand.pixels.clone()) {
-                    Some(img) => {
-                        JpegEncoder::new_with_quality(&mut buf, 85).encode_image(&img).is_ok()
-                    }
-                    None => false,
-                }
-            };
-            if !ok {
-                continue;
-            }
-            (buf, b"DCTDecode" as &[u8], 8i64)
-        };
-
-        // Solo reemplazar si el nuevo contenido es genuinamente más pequeño.
-        if nuevo_content.len() + 32 >= cand.original_len {
-            continue;
-        }
-
-        if let Some(Object::Stream(s)) = doc.objects.get_mut(&cand.id) {
-            s.dict.remove(b"Filter");
-            s.dict.remove(b"DecodeParms");
-            s.dict.remove(b"DecodeParams");
-            s.dict.set("Filter", Object::Name(nuevo_filtro.to_vec()));
-            s.dict.set("BitsPerComponent", nuevo_bpc);
-            s.set_content(nuevo_content);
-            cambiado = true;
-        }
-    }
-
-    if !cambiado {
+    if !lossy && !dedup {
         return None;
     }
-
-    let mut out: Vec<u8> = Vec::new();
-    doc.save_to(&mut out).ok()?;
-
-    if out.len() >= bytes.len() {
-        return None;
-    }
-    match Document::load_mem(&out) {
-        Ok(d) if d.get_pages().len() == n_paginas => Some(out),
-        _ => None,
-    }
+    guardar_si_mejora(&mut doc, bytes.len(), n_paginas).map(|out| (out, lossy))
 }
 
 fn filtro_es_ccitt_o_jbig2(d: &Dictionary) -> bool {
@@ -948,23 +965,29 @@ pub fn reducir_docx(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut cambiado = false;
 
     for i in 0..archivo.len() {
-        // Leer nombre y contenido de imágenes media en un solo borrow del archivo.
+        // Leer nombre y contenido de imágenes media / texto en un solo borrow del archivo.
         // ZipFile se libera al salir del bloque para poder volver a indexar con raw_copy.
-        let (nombre, contenido_jpeg, contenido_png) = {
+        // `comp_orig` = tamaño comprimido original de la entrada (para keep-smaller del XML).
+        let (nombre, contenido_jpeg, contenido_png, contenido_texto, comp_orig) = {
             let mut entrada = archivo.by_index(i).ok()?;
             let nombre = entrada.name().to_string();
-            let (jpeg, png) = if es_jpeg_media(&nombre) {
+            let comp_orig = entrada.compressed_size();
+            let (jpeg, png, texto) = if es_jpeg_media(&nombre) {
                 let mut c = Vec::new();
                 entrada.read_to_end(&mut c).ok()?;
-                (Some(c), None)
+                (Some(c), None, None)
             } else if es_png_media(&nombre) {
                 let mut c = Vec::new();
                 entrada.read_to_end(&mut c).ok()?;
-                (None, Some(c))
+                (None, Some(c), None)
+            } else if es_texto_recomprimible(&nombre) {
+                let mut c = Vec::new();
+                entrada.read_to_end(&mut c).ok()?;
+                (None, None, Some(c))
             } else {
-                (None, None)
+                (None, None, None)
             };
-            (nombre, jpeg, png)
+            (nombre, jpeg, png, texto, comp_orig)
         }; // ZipFile liberado aquí → archivo libre de nuevo
 
         let opciones_stored = zip::write::SimpleFileOptions::default()
@@ -988,6 +1011,26 @@ pub fn reducir_docx(bytes: &[u8]) -> Option<Vec<u8>> {
             };
             escritor.start_file(&nombre, opciones_stored).ok()?;
             escritor.write_all(&datos).ok()?;
+        } else if let Some(texto) = contenido_texto {
+            // Partes de texto (XML/rels): Word y LibreOffice suelen comprimir a nivel
+            // medio. Medimos un re-deflate a nivel máximo y solo reescribimos si gana de
+            // verdad (margen de 8 B para cubrir la diferencia con el deflate del zip);
+            // si no, se copia en crudo. Lossless: solo cambia la tasa de compresión.
+            let mut medidor = flate2::write::DeflateEncoder::new(
+                Vec::new(), flate2::Compression::best());
+            medidor.write_all(&texto).ok()?;
+            let recomp_len = medidor.finish().ok()?.len() as u64;
+            if recomp_len + 8 < comp_orig {
+                let opciones_deflate = zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated)
+                    .compression_level(Some(9));
+                escritor.start_file(&nombre, opciones_deflate).ok()?;
+                escritor.write_all(&texto).ok()?;
+                cambiado = true;
+            } else {
+                let entrada_raw = archivo.by_index_raw(i).ok()?;
+                escritor.raw_copy_file(entrada_raw).ok()?;
+            }
         } else {
             // Copiar el resto de archivos en crudo sin re-comprimir.
             let entrada_raw = archivo.by_index_raw(i).ok()?;
@@ -1022,6 +1065,14 @@ fn es_png_media(nombre: &str) -> bool {
     let n = nombre.to_ascii_lowercase();
     (n.starts_with("word/media/") || n.starts_with("ppt/media/") || n.starts_with("xl/media/"))
         && n.ends_with(".png")
+}
+
+/// Verdadero si la entrada es una parte de texto XML del OOXML (document.xml, styles.xml,
+/// [Content_Types].xml, *.rels…). Son las partes más voluminosas y compresibles del ZIP,
+/// candidatas a un re-deflate a nivel máximo (Word/LibreOffice comprimen a nivel medio).
+fn es_texto_recomprimible(nombre: &str) -> bool {
+    let n = nombre.to_ascii_lowercase();
+    n.ends_with(".xml") || n.ends_with(".rels")
 }
 
 /// Intenta reducir bytes PNG crudos: downsample Lanczos a CAP_PX si el lado mayor
@@ -2777,5 +2828,33 @@ mod tests {
             reducir_docx(&buf).is_none(),
             "DOCX sin imágenes JPEG no debe modificarse"
         );
+    }
+
+    // TEST: DOCX con XML voluminoso ALMACENADO sin comprimir → reducir_docx lo re-deflata
+    // a nivel máximo y devuelve un ZIP más pequeño y legible, sin tocar el contenido.
+    #[test]
+    fn docx_xml_grande_se_recomprime() {
+        use std::io::{Read, Write};
+        // XML repetitivo (muy compresible) guardado como Stored (sin comprimir).
+        let xml = format!("<w:document>{}</w:document>", "<w:p><w:r><w:t>hola</w:t></w:r></w:p>".repeat(4000));
+        let mut buf = Vec::new();
+        {
+            let cursor = std::io::Cursor::new(&mut buf);
+            let mut w = zip::ZipWriter::new(cursor);
+            let stored = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            w.start_file("word/document.xml", stored).unwrap();
+            w.write_all(xml.as_bytes()).unwrap();
+            w.finish().unwrap();
+        }
+
+        let reducido = reducir_docx(&buf).expect("el XML grande sin comprimir debe recomprimirse");
+        assert!(reducido.len() < buf.len(), "el DOCX recomprimido debe pesar menos");
+
+        // El contenido del XML se conserva byte a byte (solo cambia la compresión del ZIP).
+        let mut archivo = zip::ZipArchive::new(std::io::Cursor::new(&reducido)).unwrap();
+        let mut recuperado = String::new();
+        archivo.by_name("word/document.xml").unwrap().read_to_string(&mut recuperado).unwrap();
+        assert_eq!(recuperado, xml, "el XML no debe alterarse, solo recomprimirse");
     }
 }

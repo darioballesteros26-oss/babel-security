@@ -3,7 +3,7 @@ import os
 import time
 import hmac
 import threading
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -47,21 +47,27 @@ else:
 print(f"[server] modelo {_MODELO_NOMBRE} ({_MOTIVO})", flush=True)
 
 # Cache de traducciones: evita re-traducir párrafos idénticos en el mismo documento.
-# Clave (texto, par, beam) → traducción. FIFO simple: borra la mitad al llegar al límite.
-_cache_trad: dict = {}
+# Clave (texto, par, beam) → traducción. LRU real vía OrderedDict: cada acierto reordena
+# la clave al final (más reciente) y al llenarse se evicta la MENOS usada recientemente,
+# no la más antigua por inserción. Así un término frecuente insertado pronto no se pierde.
+_cache_trad: "OrderedDict[tuple, str]" = OrderedDict()
 _CACHE_MAX = 4096
 
 
 def _cache_get(texto: str, par: str, beam: int):
-    return _cache_trad.get((texto, par, beam))
+    key = (texto, par, beam)
+    val = _cache_trad.get(key)
+    if val is not None:
+        _cache_trad.move_to_end(key)  # marcar como usado recientemente
+    return val
 
 
 def _cache_set(texto: str, par: str, beam: int, resultado: str) -> None:
-    if len(_cache_trad) >= _CACHE_MAX:
-        n = _CACHE_MAX // 2
-        for k in list(_cache_trad)[:n]:
-            del _cache_trad[k]
-    _cache_trad[(texto, par, beam)] = resultado
+    key = (texto, par, beam)
+    _cache_trad[key] = resultado
+    _cache_trad.move_to_end(key)
+    while len(_cache_trad) > _CACHE_MAX:
+        _cache_trad.popitem(last=False)  # evicta el menos usado recientemente
 
 
 def _traducir_uno(texto: str, par: str, beam: int) -> str:
@@ -212,11 +218,22 @@ def _cargar_ocr() -> bool:
         try:
             from llama_cpp import Llama
             from llama_cpp.llama_chat_format import MTMDChatHandler
-            handler = MTMDChatHandler(clip_model_path=proj, verbose=False, use_gpu=True)
-            _OCR_LLM = Llama(model_path=lm, chat_handler=handler,
-                              n_ctx=4096, n_gpu_layers=-1, verbose=False)
-            print("[server] PaddleOCR-VL cargado en memoria", flush=True)
-            return True
+            # Reintento GPU → CPU, igual que llama-server en ia_redaccion.rs: en Macs sin
+            # Metal utilizable (p. ej. el A18 Pro del MacBook Neo) forzar la GPU hace fallar
+            # la carga. Probamos primero Metal (rápido) y, si peta, caemos a CPU puro.
+            ultimo_error = None
+            for use_gpu, n_gpu_layers, etiqueta in ((True, -1, "GPU (Metal)"), (False, 0, "CPU")):
+                try:
+                    handler = MTMDChatHandler(clip_model_path=proj, verbose=False, use_gpu=use_gpu)
+                    _OCR_LLM = Llama(model_path=lm, chat_handler=handler,
+                                      n_ctx=4096, n_gpu_layers=n_gpu_layers, verbose=False)
+                    print(f"[server] PaddleOCR-VL cargado en memoria ({etiqueta})", flush=True)
+                    return True
+                except Exception as e:
+                    ultimo_error = e
+                    _OCR_LLM = None
+                    print(f"[server] Carga OCR en {etiqueta} falló: {e}", file=sys.stderr)
+            raise ultimo_error
         except Exception as e:
             print(f"[server] Error cargando PaddleOCR-VL: {e}", file=sys.stderr)
             return False

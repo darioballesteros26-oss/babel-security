@@ -114,7 +114,7 @@ pub fn derivar_subclave(
     contexto: &str,
     salt_argon2: &[u8; 32],
 ) -> Result<Zeroizing<[u8; 32]>, String> {
-    // Argon2id con 64MB de RAM, 3 iteraciones, 4 hilos en paralelo.
+    // Argon2id con 128 MB de RAM (131072 KiB), 4 iteraciones, 4 hilos en paralelo.
     // Estos parámetros hacen que atacar la clave por fuerza bruta sea extremadamente
     // costoso incluso con hardware especializado.
     let params = Params::new(131072, 4, 4, None)

@@ -5,7 +5,19 @@ la tokenización, que sí difiere (prefijo <2xx> de MADLAD vs tgt_lang en el sou
 SMaLL-100), vive en cada módulo.
 """
 
+import os
+
 _PUNTUACION_FINAL = frozenset('.!?:;…»"\'')
+
+
+def hilos_intra() -> int:
+    """Núcleos que CTranslate2 usa por traducción (intra_threads).
+    Antes era 4 fijo: 0 (todos) provocaba contención de memoria y cuelgues con lotes
+    grandes en máquinas con poca RAM. Mantenemos ese suelo de 4 y no bajamos de ahí,
+    pero en máquinas con más núcleos subimos moderadamente dejando 2 libres, con tope
+    de 8 para no reintroducir la contención en equipos grandes."""
+    n = os.cpu_count() or 4
+    return min(8, max(4, n - 2))
 
 
 def normalizar(texto: str) -> tuple[str, bool]:

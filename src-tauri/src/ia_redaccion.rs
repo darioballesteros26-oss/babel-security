@@ -508,6 +508,11 @@ async fn arrancar_llama(
         "--flash-attn",   "on",    // menos pico de memoria en atención
         "--cache-type-k", "q4_0",  // KV cache quantizado: −857 MB wired vs f16
         "--cache-type-v", "q4_0",
+        // El SYSTEM_PROMPT (~2K tokens) es un prefijo CONSTANTE en cada petición.
+        // --cache-reuse deja que el slot reaproveche el KV ya calculado de ese prefijo
+        // común en vez de re-hacer el prefill entero cada mensaje. En CPU (Macs sin GPU
+        // utilizable) eso ahorra varios segundos de latencia por turno, sin coste de RAM.
+        "--cache-reuse",  "256",
     ]);
     // ggml carga sus backends (Metal, CPU por chip, BLAS) como plugins .so en runtime.
     // Van empaquetados JUNTO a llama-server (Resources/binaries/) y ggml escanea el
@@ -642,8 +647,10 @@ pub async fn enviar_mensaje_ia(
             { "role": "user",   "content": mensaje_con_prefijo }
         ],
         "temperature": 0.3,
+        "top_p": 0.9,
+        "min_p": 0.05,
         "max_tokens": 1536,
-        "repeat_penalty": 1.15,
+        "repeat_penalty": 1.1,
         "stream": false
     });
 
@@ -773,8 +780,10 @@ pub async fn enviar_mensaje_ia_stream(
             { "role": "user",   "content": mensaje_con_prefijo }
         ],
         "temperature": 0.3,
+        "top_p": 0.9,
+        "min_p": 0.05,
         "max_tokens": 1536,
-        "repeat_penalty": 1.15,
+        "repeat_penalty": 1.1,
         "stream": true
     });
 
