@@ -33,7 +33,8 @@ const CALIDAD: u8 = 82;
 pub fn reducir(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut doc = Document::load_mem(bytes).ok()?;
     let n_paginas = doc.get_pages().len();
-    if !aplicar_a_imagenes(&mut doc, reducir_stream_dct) {
+    // Sin medición de colocación: usa el tope fijo CAP_PX (comportamiento clásico).
+    if !aplicar_a_imagenes(&mut doc, |_id, s| reducir_stream_dct(s, CAP_PX)) {
         return None;
     }
     guardar_si_mejora(&mut doc, bytes.len(), n_paginas)
@@ -67,8 +68,10 @@ fn recolectar_mascaras(doc: &Document) -> BTreeSet<ObjectId> {
 }
 
 /// Itera todas las imágenes del documento (saltando máscaras, ImageMask y no-imágenes)
-/// y aplica `f` a cada stream. Devuelve `true` si `f` modificó alguna.
-fn aplicar_a_imagenes(doc: &mut Document, mut f: impl FnMut(&mut Stream) -> bool) -> bool {
+/// y aplica `f(id, stream)` a cada una. Se pasa el `ObjectId` para que el llamador
+/// pueda consultar información por-imagen (p. ej. su colocación/DPI). Devuelve `true`
+/// si `f` modificó alguna.
+fn aplicar_a_imagenes(doc: &mut Document, mut f: impl FnMut(ObjectId, &mut Stream) -> bool) -> bool {
     let mascaras = recolectar_mascaras(doc);
     let mut cambiado = false;
     for (id, obj) in doc.objects.iter_mut() {
@@ -79,7 +82,7 @@ fn aplicar_a_imagenes(doc: &mut Document, mut f: impl FnMut(&mut Stream) -> bool
         if !es_imagen(&s.dict) || es_image_mask(&s.dict) {
             continue;
         }
-        if f(s) {
+        if f(*id, s) {
             cambiado = true;
         }
     }
@@ -99,6 +102,259 @@ fn guardar_si_mejora(doc: &mut Document, original_len: usize, n_paginas: usize) 
         Ok(d) if d.get_pages().len() == n_paginas => Some(out),
         _ => None,
     }
+}
+
+// ── MEDICIÓN DE COLOCACIÓN (DPI EFECTIVO) ──────────────────────────────────
+//
+// Una imagen puede embeber muchísima más resolución de la que se ve: p. ej. una foto
+// de 3000 px colocada a 3 cm en la página. El tope fijo CAP_PX no lo detecta (la deja
+// a 2000 px). Aquí recorremos los content streams (páginas + Form XObjects anidados)
+// rastreando la matriz de transformación (CTM) para calcular, por imagen, el mayor
+// tamaño con el que se DIBUJA en puntos PDF. Con eso podemos recortarla a OBJETIVO_DPI
+// sobre su tamaño real de colocación en vez de a un tope de píxeles a ciegas.
+//
+// Seguridad de diseño: si NO podemos determinar la colocación de una imagen (content
+// stream ilegible, recurso no resuelto, etc.), se usa CAP_PX — nunca recortamos más
+// agresivo sin prueba de la colocación. Y solo se aplica si recorta ≥10% (evita pérdida
+// generacional trivial). La validación PDFium + keep-smaller del pipeline siguen activas.
+
+/// DPI objetivo sobre el tamaño de COLOCACIÓN. 300 DPI = calidad de impresión; por
+/// encima, los píxeles extra no aportan nada visible.
+const OBJETIVO_DPI: f64 = 300.0;
+/// Tope de anidamiento de Form XObjects (evita recursión infinita en PDFs malformados).
+const LIMITE_PROFUNDIDAD_FORM: u32 = 12;
+
+/// Matriz afín 2D del PDF `[a b c d e f]`. Un punto `[x y 1]` se transforma por
+/// `[x y 1] · M`, con `M = [[a b 0],[c d 0],[e f 1]]`.
+#[derive(Clone, Copy)]
+struct Matriz { a: f64, b: f64, c: f64, d: f64, e: f64, f: f64 }
+
+impl Matriz {
+    fn identidad() -> Self { Matriz { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 0.0, f: 0.0 } }
+
+    /// `self · base`. En la convención del operador `cm`, el CTM nuevo = M · CTM_viejo
+    /// (la matriz del operando se aplica a las coordenadas de usuario ANTES que el CTM).
+    fn por(&self, base: &Matriz) -> Matriz {
+        Matriz {
+            a: self.a * base.a + self.b * base.c,
+            b: self.a * base.b + self.b * base.d,
+            c: self.c * base.a + self.d * base.c,
+            d: self.c * base.b + self.d * base.d,
+            e: self.e * base.a + self.f * base.c + base.e,
+            f: self.e * base.b + self.f * base.d + base.f,
+        }
+    }
+
+    /// Tamaño (ancho, alto) en puntos del cuadro unidad `[0,1]²` transformado por la
+    /// matriz — que es exactamente el rectángulo donde se dibuja un XObject imagen.
+    fn tamano_unidad(&self) -> (f64, f64) {
+        (
+            (self.a * self.a + self.b * self.b).sqrt(),
+            (self.c * self.c + self.d * self.d).sqrt(),
+        )
+    }
+}
+
+fn num_a_f64(o: &Object) -> Option<f64> {
+    match o {
+        Object::Integer(i) => Some(*i as f64),
+        Object::Real(r) => Some(*r as f64),
+        _ => None,
+    }
+}
+
+/// Resuelve un objeto que puede ser `Dictionary` o `Reference`→`Dictionary`.
+fn resolver_dict(doc: &Document, o: &Object) -> Option<Dictionary> {
+    match o {
+        Object::Dictionary(d) => Some(d.clone()),
+        Object::Reference(id) => match doc.get_object(*id) {
+            Ok(Object::Dictionary(d)) => Some(d.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Contenido de un stream descomprimido (los content streams reales van en FlateDecode);
+/// si no tiene filtro o falla, cae al contenido crudo.
+fn contenido_descomprimido(s: &Stream) -> Vec<u8> {
+    s.decompressed_content().unwrap_or_else(|_| s.content.clone())
+}
+
+/// Concatena el contenido descomprimido de todos los content streams de una página.
+fn contenido_pagina(doc: &Document, page_id: ObjectId) -> Vec<u8> {
+    let mut out = Vec::new();
+    let page = match doc.get_object(page_id) {
+        Ok(Object::Dictionary(d)) => d,
+        _ => return out,
+    };
+    match page.get(b"Contents") {
+        Ok(Object::Reference(id)) => {
+            if let Ok(Object::Stream(s)) = doc.get_object(*id) {
+                out.extend_from_slice(&contenido_descomprimido(s));
+            }
+        }
+        Ok(Object::Array(arr)) => {
+            for item in arr {
+                if let Object::Reference(id) = item {
+                    if let Ok(Object::Stream(s)) = doc.get_object(*id) {
+                        out.extend_from_slice(&contenido_descomprimido(s));
+                        out.push(b' ');
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+/// Para cada Image XObject, calcula el MAYOR tamaño de colocación (en puntos PDF) con
+/// el que se dibuja en todo el documento. Recorre páginas y Form XObjects anidados.
+fn medir_colocacion_imagenes(doc: &Document) -> HashMap<ObjectId, (f64, f64)> {
+    let mut medidas: HashMap<ObjectId, (f64, f64)> = HashMap::new();
+    for (_, page_id) in doc.get_pages() {
+        let page_dict = match doc.get_object(page_id) {
+            Ok(Object::Dictionary(d)) => d.clone(),
+            _ => continue,
+        };
+        let recursos = match page_dict.get(b"Resources") {
+            Ok(o) => resolver_dict(doc, o).unwrap_or_else(Dictionary::new),
+            _ => Dictionary::new(),
+        };
+        let bytes = contenido_pagina(doc, page_id);
+        if bytes.is_empty() {
+            continue;
+        }
+        recorrer_content(doc, &bytes, &recursos, Matriz::identidad(), 0, &mut medidas);
+    }
+    medidas
+}
+
+/// Recorre un content stream rastreando el CTM (`q`/`Q`/`cm`) y registra la colocación
+/// de cada `Do` de imagen; en `Do` de Form XObject, recurre componiendo el CTM.
+fn recorrer_content(
+    doc: &Document,
+    bytes: &[u8],
+    recursos: &Dictionary,
+    ctm_base: Matriz,
+    profundidad: u32,
+    medidas: &mut HashMap<ObjectId, (f64, f64)>,
+) {
+    use lopdf::content::Content;
+    let content = match Content::decode(bytes) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let xobjects = match recursos.get(b"XObject") {
+        Ok(o) => resolver_dict(doc, o),
+        _ => None,
+    };
+
+    let mut pila: Vec<Matriz> = Vec::new();
+    let mut ctm = ctm_base;
+
+    for op in &content.operations {
+        match op.operator.as_str() {
+            "q" => pila.push(ctm),
+            "Q" => {
+                if let Some(m) = pila.pop() {
+                    ctm = m;
+                }
+            }
+            "cm" => {
+                let n: Vec<f64> = op.operands.iter().take(6).filter_map(num_a_f64).collect();
+                if n.len() == 6 {
+                    let m = Matriz { a: n[0], b: n[1], c: n[2], d: n[3], e: n[4], f: n[5] };
+                    ctm = m.por(&ctm);
+                }
+            }
+            "Do" => {
+                let nombre = match op.operands.first() {
+                    Some(Object::Name(n)) => n.clone(),
+                    _ => continue,
+                };
+                let xo = match &xobjects {
+                    Some(d) => d,
+                    None => continue,
+                };
+                let xid = match xo.get(&nombre) {
+                    Ok(Object::Reference(id)) => *id,
+                    _ => continue,
+                };
+                let (subtype, xdict, contenido) = match doc.get_object(xid) {
+                    Ok(Object::Stream(s)) => {
+                        let st = match s.dict.get(b"Subtype") {
+                            Ok(Object::Name(n)) => n.clone(),
+                            _ => continue,
+                        };
+                        (st, s.dict.clone(), contenido_descomprimido(s))
+                    }
+                    _ => continue,
+                };
+
+                if subtype == b"Image" {
+                    let (w, h) = ctm.tamano_unidad();
+                    let e = medidas.entry(xid).or_insert((0.0, 0.0));
+                    if w > e.0 { e.0 = w; }
+                    if h > e.1 { e.1 = h; }
+                } else if subtype == b"Form" {
+                    if profundidad >= LIMITE_PROFUNDIDAD_FORM {
+                        continue;
+                    }
+                    let m_form = match xdict.get(b"Matrix") {
+                        Ok(Object::Array(arr)) => {
+                            let n: Vec<f64> = arr.iter().filter_map(num_a_f64).collect();
+                            if n.len() == 6 {
+                                Matriz { a: n[0], b: n[1], c: n[2], d: n[3], e: n[4], f: n[5] }
+                            } else {
+                                Matriz::identidad()
+                            }
+                        }
+                        _ => Matriz::identidad(),
+                    };
+                    let ctm_form = m_form.por(&ctm);
+                    let form_recursos = match xdict.get(b"Resources") {
+                        Ok(o) => resolver_dict(doc, o).unwrap_or_else(|| recursos.clone()),
+                        _ => recursos.clone(),
+                    };
+                    recorrer_content(doc, &contenido, &form_recursos, ctm_form, profundidad + 1, medidas);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Lado mayor objetivo (px) para una imagen: el MÍNIMO entre el tope global CAP_PX y el
+/// tamaño necesario para OBJETIVO_DPI en su mayor colocación conocida. Si la colocación
+/// es desconocida o el recorte por DPI sería <10%, devuelve CAP_PX (comportamiento
+/// clásico): nunca somos más agresivos que el tope sin prueba de colocación.
+fn objetivo_lado(id: ObjectId, s: &Stream, medidas: &HashMap<ObjectId, (f64, f64)>) -> u32 {
+    let pw = s.dict.get(b"Width").ok().and_then(|o| o.as_i64().ok()).unwrap_or(0);
+    let ph = s.dict.get(b"Height").ok().and_then(|o| o.as_i64().ok()).unwrap_or(0);
+    if pw <= 0 || ph <= 0 {
+        return CAP_PX;
+    }
+    let (pw, ph) = (pw as f64, ph as f64);
+    let maxdim = pw.max(ph);
+
+    let dpi_lado: f64 = match medidas.get(&id) {
+        Some(&(wpts, hpts)) if wpts > 0.5 && hpts > 0.5 => {
+            // Píxeles necesarios para OBJETIVO_DPI en cada eje, sin superar los actuales.
+            let nec_w = (wpts / 72.0 * OBJETIVO_DPI).min(pw);
+            let nec_h = (hpts / 72.0 * OBJETIVO_DPI).min(ph);
+            // Factor conservador: el MAYOR de los dos ratios mantiene AMBOS ejes ≥ DPI objetivo.
+            let factor = (nec_w / pw).max(nec_h / ph);
+            let lado = maxdim * factor;
+            // Significancia: solo vale la pena si recorta ≥10% (si no, no compensa el re-encode).
+            if lado <= maxdim * 0.9 { lado } else { f64::INFINITY }
+        }
+        _ => f64::INFINITY, // colocación desconocida → sin cota por DPI; manda CAP_PX
+    };
+
+    let objetivo = (CAP_PX as f64).min(dpi_lado);
+    (objetivo.ceil() as u32).max(1)
 }
 
 /// Deduplica imágenes byte-idénticas del documento en memoria: fusiona las copias
@@ -219,13 +475,16 @@ fn filtro_es_dct(d: &Dictionary) -> bool {
 // resto de guardas (filtro, dimensiones, colorspace…) viven dentro del helper,
 // de modo que ambos son seguros de encadenar sobre el mismo stream.
 
-/// Re-encoda el JPEG (DCTDecode) de un stream de imagen sobredimensionado a
-/// ~CAP_PX de lado mayor y calidad CALIDAD. No toca nada si el stream no es
-/// DCTDecode, no está sobredimensionado, o el resultado no es más pequeño.
-fn reducir_stream_dct(s: &mut Stream) -> bool {
+/// Re-encoda el JPEG (DCTDecode) de un stream de imagen a un lado mayor máximo de
+/// `objetivo_lado` px y calidad CALIDAD. `objetivo_lado` es normalmente CAP_PX, pero
+/// el pipeline lo baja por imagen según su DPI efectivo de colocación (ver
+/// `optimizar_imagenes_pdf`). No toca nada si el stream no es DCTDecode, ya está por
+/// debajo del objetivo, o el resultado no es más pequeño.
+fn reducir_stream_dct(s: &mut Stream, objetivo_lado: u32) -> bool {
     if !filtro_es_dct(&s.dict) {
         return false;
     }
+    let objetivo = objetivo_lado.max(1);
     // El contenido de un stream DCTDecode ES el JPEG tal cual. Decodificamos con
     // límites de tamaño y de memoria: un JPEG "bomba" (cabecera que declara dimensiones
     // gigantescas) no debe reservar cientos de MB y tumbar la app. Este reductor corre
@@ -242,11 +501,11 @@ fn reducir_stream_dct(s: &mut Stream) -> bool {
     };
     let (w, h) = img.dimensions();
     let maxdim = w.max(h);
-    if maxdim <= CAP_PX {
-        return false; // no sobredimensionada → no recomprimir (evita pérdida generacional)
+    if maxdim <= objetivo {
+        return false; // ya por debajo del objetivo → no recomprimir (evita pérdida generacional)
     }
 
-    let factor = CAP_PX as f32 / maxdim as f32;
+    let factor = objetivo as f32 / maxdim as f32;
     let nw = ((w as f32 * factor).round() as u32).max(1);
     let nh = ((h as f32 * factor).round() as u32).max(1);
     let peq = img.resize_exact(nw, nh, FilterType::CatmullRom);
@@ -833,7 +1092,7 @@ pub fn subset_fuentes(bytes: &[u8]) -> Option<Vec<u8>> {
 pub fn comprimir_imagenes(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut doc = Document::load_mem(bytes).ok()?;
     let n_paginas = doc.get_pages().len();
-    if !aplicar_a_imagenes(&mut doc, comprimir_stream_raw) {
+    if !aplicar_a_imagenes(&mut doc, |_id, s| comprimir_stream_raw(s)) {
         return None;
     }
     guardar_si_mejora(&mut doc, bytes.len(), n_paginas)
@@ -858,9 +1117,17 @@ pub fn optimizar_imagenes_pdf(bytes: &[u8]) -> Option<(Vec<u8>, bool)> {
     let mut doc = Document::load_mem(bytes).ok()?;
     let n_paginas = doc.get_pages().len();
 
-    // 1+2: recompresión. Cada imagen encaja como mucho en una rama (DCT vs crudo/Flate);
-    // el `||` corta en cuanto una aplica y el helper que no corresponde devuelve `false`.
-    let lossy = aplicar_a_imagenes(&mut doc, |s| reducir_stream_dct(s) || comprimir_stream_raw(s));
+    // Medir el tamaño de colocación de cada imagen ANTES de mutar: permite recortar por
+    // DPI efectivo (una foto grande colocada pequeña no necesita su resolución completa).
+    let medidas = medir_colocacion_imagenes(&doc);
+
+    // 1+2: recompresión. El objetivo de píxeles por imagen es min(CAP_PX, cota por DPI).
+    // Cada imagen encaja como mucho en una rama (DCT vs crudo/Flate); el `||` corta en
+    // cuanto una aplica y el helper que no corresponde devuelve `false`.
+    let lossy = aplicar_a_imagenes(&mut doc, |id, s| {
+        let objetivo = objetivo_lado(id, s, &medidas);
+        reducir_stream_dct(s, objetivo) || comprimir_stream_raw(s)
+    });
     // 3: dedup (lossless) sobre los streams ya recomprimidos.
     let dedup = deduplicar_en_doc(&mut doc);
 
@@ -1315,6 +1582,105 @@ mod tests {
         // Imagen 800px (< CAP) → no hay reducción → None.
         let pdf = pdf_con_imagen(&jpeg_grande(800), 800);
         assert!(reducir(&pdf).is_none(), "no debería tocar imágenes pequeñas");
+    }
+
+    // ── Tests de medición de colocación / recorte por DPI ───────────────────
+
+    /// Devuelve el Width de la (única) imagen del PDF cargado.
+    fn ancho_imagen(bytes: &[u8]) -> i64 {
+        let doc = Document::load_mem(bytes).unwrap();
+        for obj in doc.objects.values() {
+            if let Object::Stream(s) = obj {
+                if es_imagen(&s.dict) {
+                    return s.dict.get(b"Width").unwrap().as_i64().unwrap();
+                }
+            }
+        }
+        panic!("no hay imagen en el PDF");
+    }
+
+    // PDF de 1 página que dibuja un Form XObject (con Matrix de escala) que a su vez
+    // dibuja la imagen en su cuadro unidad. La colocación efectiva de la imagen en la
+    // página es `escala_form` × `escala_form` puntos. Prueba la composición de CTM.
+    fn pdf_imagen_en_form(jpeg: &[u8], lado_px: i64, escala_form: i64) -> Vec<u8> {
+        let mut doc = Document::with_version("1.5");
+        let img_id = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Image",
+                "Width" => lado_px, "Height" => lado_px,
+                "ColorSpace" => "DeviceRGB", "BitsPerComponent" => 8i64,
+                "Filter" => "DCTDecode",
+            },
+            jpeg.to_vec(),
+        ));
+        let form_id = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
+                "Matrix" => vec![escala_form.into(), 0.into(), 0.into(), escala_form.into(), 0.into(), 0.into()],
+                "Resources" => dictionary! { "XObject" => dictionary! { "Im0" => img_id } },
+            },
+            b"/Im0 Do".to_vec(),
+        ));
+        let content_id = doc.add_object(Stream::new(dictionary! {}, b"/Fm0 Do".to_vec()));
+        let pages_id = doc.new_object_id();
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 4000.into(), 4000.into()],
+            "Contents" => content_id,
+            "Resources" => dictionary! { "XObject" => dictionary! { "Fm0" => form_id } },
+        });
+        doc.objects.insert(pages_id, Object::Dictionary(dictionary! {
+            "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1i64,
+        }));
+        let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog_id);
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn medir_colocacion_cm_directo() {
+        // pdf_con_imagen coloca con `q 200 0 0 200 0 0 cm` → 200×200 puntos.
+        let pdf = pdf_con_imagen(&jpeg_grande(100), 100);
+        let doc = Document::load_mem(&pdf).unwrap();
+        let medidas = medir_colocacion_imagenes(&doc);
+        let (w, h) = *medidas.values().next().expect("debe medir la imagen");
+        assert!((w - 200.0).abs() < 0.5 && (h - 200.0).abs() < 0.5, "colocación medida: {w}x{h}");
+    }
+
+    #[test]
+    fn medir_colocacion_form_anidado() {
+        // Form con Matrix de escala 200; su contenido dibuja la imagen en el cuadro unidad
+        // → colocación efectiva 200×200. Prueba la composición de CTM en Forms.
+        let pdf = pdf_imagen_en_form(&jpeg_grande(100), 100, 200);
+        let doc = Document::load_mem(&pdf).unwrap();
+        let medidas = medir_colocacion_imagenes(&doc);
+        let (w, h) = *medidas.values().next().expect("debe medir la imagen dentro del form");
+        assert!((w - 200.0).abs() < 0.5 && (h - 200.0).abs() < 0.5, "colocación (form): {w}x{h}");
+    }
+
+    #[test]
+    fn dpi_recorta_imagen_sobredimensionada() {
+        // 3000px colocada a 200pt (2.78") ≈ 1080 DPI. A 300 DPI objetivo → ~833px,
+        // MUY por debajo del tope clásico CAP_PX (2000). Prueba que el recorte por DPI actúa.
+        let pdf = pdf_con_imagen(&jpeg_grande(3000), 3000);
+        let (reducido, lossy) = optimizar_imagenes_pdf(&pdf).expect("debe optimizar");
+        assert!(lossy, "el downsample de resolución es lossy");
+        let ancho = ancho_imagen(&reducido);
+        assert!(ancho > 700 && ancho < 950, "ancho tras recorte DPI: {ancho} (esperado ~833)");
+    }
+
+    #[test]
+    fn dpi_no_recorta_mas_que_cap_en_colocacion_grande() {
+        // 3000px colocada a 3000pt (~72 DPI): ya está "justa"; el recorte por DPI NO debe
+        // bajar de CAP_PX. Debe comportarse como el tope clásico (~2000).
+        let pdf = pdf_imagen_en_form(&jpeg_grande(3000), 3000, 3000);
+        let (reducido, _) = optimizar_imagenes_pdf(&pdf).expect("debe optimizar a CAP_PX");
+        let ancho = ancho_imagen(&reducido);
+        assert!(ancho > 1800 && ancho <= 2000, "ancho: {ancho} (esperado ~CAP_PX 2000)");
     }
 
     // ── Tests de deduplicación ──────────────────────────────────────────────
