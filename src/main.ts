@@ -2339,6 +2339,14 @@ function actualizarSeleccionGuardados(): void {
   document.getElementById("btn-convertir-img-pdf-g")?.classList.toggle("hidden", !todasImagenes);
   document.getElementById("wrap-redactar-g")?.classList.toggle("hidden", !unico);
   document.getElementById("btn-firmar-g")?.classList.toggle("hidden", !unicoPdf);
+  // "Seleccionar páginas" solo aplica a PDFs (extrae páginas de un PDF); en el menú
+  // EDITAR se oculta para el resto de formatos (DOCX, imágenes, txt…), junto a su separador.
+  const btnPaginas = document.querySelector<HTMLElement>('#menu-redactar [data-action="seleccionar-paginas"]');
+  if (btnPaginas) {
+    btnPaginas.style.display = unicoPdf ? "block" : "none";
+    const sepPaginas = btnPaginas.previousElementSibling as HTMLElement | null;
+    if (sepPaginas) sepPaginas.style.display = unicoPdf ? "block" : "none";
+  }
   document.getElementById("ui-importar")?.classList.toggle("hidden", hay);
   document.getElementById("ui-crear-archivo")?.classList.toggle("hidden", hay);
 }
