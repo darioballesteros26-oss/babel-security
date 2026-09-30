@@ -448,14 +448,29 @@ mod tests {
 #[cfg(test)]
 mod test_mep {
     use super::*;
+
+    /// La biblioteca jurídica (index.json, ~3200 fragmentos) NO está en el repo: es data
+    /// bundled en ~/Babel/biblioteca_juridica. Estos son tests de INTEGRACIÓN del corpus
+    /// real; si no está disponible (p. ej. un CI limpio), se omiten en vez de fallar.
+    fn corpus_o_skip() -> bool {
+        if obtener_biblioteca().is_some() {
+            true
+        } else {
+            eprintln!("[test_mep] biblioteca jurídica no disponible — test omitido");
+            false
+        }
+    }
+
     #[test]
     fn mep_recuperado_en_query_calificacion() {
+        if !corpus_o_skip() { return; }
         let (bloque, _) = buscar_normativa("Redacta una calificación provisional de la acusación por delito de estafa", 8000);
         assert!(bloque.contains("MEP") || bloque.contains("Modelo de calificación"),
             "Debe recuperar modelo MEP para calificación: {}", &bloque[..200.min(bloque.len())]);
     }
     #[test]
     fn mep_o_ley_recuperado_en_query_denuncia() {
+        if !corpus_o_skip() { return; }
         let (bloque, _) = buscar_normativa("Redacta una denuncia por robo con fuerza en domicilio", 8000);
         // Para queries de crimen específico, la ley (CP art. 238) es lo más relevante.
         // MEP puede o no aparecer en el top-6 dependiendo del ranking BM25.
@@ -464,6 +479,7 @@ mod test_mep {
     }
     #[test]
     fn mep_recuperado_en_query_habeas_corpus() {
+        if !corpus_o_skip() { return; }
         let (bloque, _) = buscar_normativa("Redacta un habeas corpus para persona detenida más de 72 horas", 8000);
         assert!(bloque.contains("MEP") || bloque.contains("habeas corpus") || bloque.contains("LOHC"),
             "Debe recuperar modelo habeas corpus: {}", &bloque[..200.min(bloque.len())]);
