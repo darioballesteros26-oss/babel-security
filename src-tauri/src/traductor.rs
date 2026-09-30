@@ -1165,6 +1165,7 @@ fn encontrar_script_servidor(python3: &str, nombre_script: &str) -> Option<Strin
 ///     Y la siguiente empieza en minúscula → une con espacio (continuación de oración).
 ///   - Las líneas en blanco siempre son separadores de párrafo (no se cruzan).
 ///   - Encabezados (todo-mayúsculas cortos o markdown #) no se unen.
+///
 /// Extrae el prefijo Markdown de una línea (heading, lista) para protegerlo durante
 /// la traducción. Devuelve (prefijo, texto_limpio); ambos son subslices de `s`.
 fn separar_prefijo_md(s: &str) -> (&str, &str) {
@@ -1178,8 +1179,8 @@ fn separar_prefijo_md(s: &str) -> (&str, &str) {
         }
     }
     // Unordered list
-    if s.starts_with("- ") { return (&s[..2], &s[2..]); }
-    if s.starts_with("* ") { return (&s[..2], &s[2..]); }
+    if let Some(r) = s.strip_prefix("- ") { return (&s[..2], r); }
+    if let Some(r) = s.strip_prefix("* ") { return (&s[..2], r); }
     // Ordered list: 1. 12. etc.
     let b = s.as_bytes();
     let mut n = 0;
@@ -1299,19 +1300,19 @@ pub fn markdown_a_html(md: &str) -> String {
         }
 
         // Headings
-        if trimmed.starts_with("### ") {
+        if let Some(r) = trimmed.strip_prefix("### ") {
             flush_para!(); close_lists!(); close_table!();
-            html.push_str(&format!("<h3>{}</h3>", inline_fmt(&trimmed[4..])));
+            html.push_str(&format!("<h3>{}</h3>", inline_fmt(r)));
             continue;
         }
-        if trimmed.starts_with("## ") {
+        if let Some(r) = trimmed.strip_prefix("## ") {
             flush_para!(); close_lists!(); close_table!();
-            html.push_str(&format!("<h2>{}</h2>", inline_fmt(&trimmed[3..])));
+            html.push_str(&format!("<h2>{}</h2>", inline_fmt(r)));
             continue;
         }
-        if trimmed.starts_with("# ") {
+        if let Some(r) = trimmed.strip_prefix("# ") {
             flush_para!(); close_lists!(); close_table!();
-            html.push_str(&format!("<h1>{}</h1>", inline_fmt(&trimmed[2..])));
+            html.push_str(&format!("<h1>{}</h1>", inline_fmt(r)));
             continue;
         }
 

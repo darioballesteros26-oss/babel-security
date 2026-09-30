@@ -313,9 +313,9 @@ impl SesionActiva {
 pub fn babel_dir() -> std::path::PathBuf {
     // BABEL_DATA_DIR permite correr múltiples instancias con datos separados (pruebas).
     if let Ok(custom) = std::env::var("BABEL_DATA_DIR") {
-        let expanded = if custom.starts_with("~/") {
+        let expanded = if let Some(resto) = custom.strip_prefix("~/") {
             let home = std::env::var("HOME").unwrap_or_default();
-            format!("{}/{}", home, &custom[2..])
+            format!("{}/{}", home, resto)
         } else {
             custom
         };

@@ -100,11 +100,11 @@ pub struct ResultadoSeguridad {
 /// Deriva una subclave única para cada propósito (usuarios, diccionario, bóveda).
 ///
 /// Dos capas:
-///   1. Argon2id   → convierte la clave maestra en material criptográfico robusto.
-///                   Resistente a ataques de diccionario y fuerza bruta por GPU.
-///   2. HKDF-SHA256 → expande ese material en subclaves distintas según el contexto.
-///                    "babel-usuarios-v1" y "traduccion-v1" producen claves diferentes
-///                    aunque la clave maestra sea la misma.
+/// 1. Argon2id → convierte la clave maestra en material criptográfico robusto.
+///    Resistente a ataques de diccionario y fuerza bruta por GPU.
+/// 2. HKDF-SHA256 → expande ese material en subclaves distintas según el contexto.
+///    "babel-usuarios-v1" y "traduccion-v1" producen claves diferentes aunque la
+///    clave maestra sea la misma.
 ///
 /// Devuelve Result — nunca hace panic. Si falla, el error sube hasta quien llama.
 pub fn derivar_subclave(

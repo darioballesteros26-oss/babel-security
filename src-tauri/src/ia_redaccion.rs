@@ -156,9 +156,8 @@ fn detectar_fechas_palabras_imposibles(texto: &str) -> Vec<String> {
 
                 if dia > max {
                     alertas.push(format!(
-                        "\"{}\" ({} tiene máximo {} días)",
-                        format!("{} de {}", palabra_dia, mes_nombre),
-                        mes_nombre, max
+                        "\"{} de {}\" ({} tiene máximo {} días)",
+                        palabra_dia, mes_nombre, mes_nombre, max
                     ));
                 }
             }

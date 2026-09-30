@@ -49,6 +49,7 @@ const BUILD_FINGERPRINT: &str = env!("BABEL_BUILD_FINGERPRINT");
 ///   - un módulo de la stdlib de Python sin .pyc previo que se compila en runtime,
 ///   - cualquier archivo que el intérprete escriba dentro de Resources/,
 ///   - App Translocation al abrir desde una ruta no estándar.
+///
 /// Todos ellos rompen el sello codesign sin que haya manipulación maliciosa.
 /// La huella de build (constante embebida vs ~/Babel/.integridad) sí detecta la
 /// sustitución del binario y NO depende del estado mutable del bundle.
