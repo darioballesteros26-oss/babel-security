@@ -34,14 +34,13 @@ jobs:
           tar xzf /tmp/pdfium.tgz -C /tmp lib/libpdfium.dylib
           cp /tmp/lib/libpdfium.dylib src-tauri/binaries/pdfium/
 
-      # tauri_build valida que el externalBin del sidecar (binaries/servidor_babel-<triple>)
-      # exista. El sidecar real se compila aparte (build_sidecar.sh) y los tests no lo usan,
-      # así que basta un placeholder ejecutable para que build.rs no falle.
-      - name: Placeholder del sidecar (para tauri_build)
-        run: |
-          mkdir -p src-tauri/binaries
-          printf '#!/bin/sh\n' > src-tauri/binaries/servidor_babel-aarch64-apple-darwin
-          chmod +x src-tauri/binaries/servidor_babel-aarch64-apple-darwin
+      # tauri_build valida que existan todos los externalBin (sidecar) y resources (modelos
+      # ~330MB) declarados en tauri.conf.json. En un checkout limpio no están y los tests NO
+      # los usan, así que los quitamos del config para el build de test (PDFium sí se necesita
+      # en runtime y se descarga arriba). Los binarios/modelos reales se añaden en release.yml.
+      - name: Quitar externalBin/resources del config (para el build de test)
+        run: >
+          python3 -c "import json; p='src-tauri/tauri.conf.json'; c=json.load(open(p)); c.get('bundle',{}).pop('externalBin',None); c.get('bundle',{}).pop('resources',None); json.dump(c,open(p,'w'),indent=2)"
 
       - name: Tests (puerta del CI)
         working-directory: src-tauri
