@@ -23,6 +23,16 @@ static VENTANA: Mutex<Vec<Instant>> = Mutex::new(Vec::new());
 static BLOQUEADO: AtomicBool = AtomicBool::new(false);
 
 
+/// Núcleo puro de la ventana deslizante: expira las entradas de más de
+/// VENTANA_SECS, registra `ahora` y devuelve si se alcanza el umbral de bloqueo.
+/// Extraído de `registrar_descifrado` para poder testear la decisión destructiva
+/// (bloqueo de sesión) sin un `AppHandle` vivo.
+fn registrar_en_ventana(lista: &mut Vec<Instant>, ahora: Instant) -> bool {
+    lista.retain(|&t| ahora.duration_since(t).as_secs() < VENTANA_SECS);
+    lista.push(ahora);
+    lista.len() >= MAX_ACCESOS
+}
+
 /// Registra un descifrado de archivo en la ventana deslizante.
 /// Si se superan MAX_ACCESOS en VENTANA_SECS segundos:
 ///   - bloquea la sesión
@@ -41,9 +51,7 @@ pub fn registrar_descifrado(app: &tauri::AppHandle, subclave_hex: &str) -> Resul
     let supera = {
         let ahora = Instant::now();
         let mut lista = VENTANA.lock().unwrap_or_else(|e| e.into_inner());
-        lista.retain(|&t| ahora.duration_since(t).as_secs() < VENTANA_SECS);
-        lista.push(ahora);
-        lista.len() >= MAX_ACCESOS
+        registrar_en_ventana(&mut lista, ahora)
     };
 
     if supera {
@@ -121,6 +129,68 @@ mod tests {
         assert!(lista.is_empty(), "entrada antigua debe expirar de la ventana");
         drop(lista);
         limpiar();
+    }
+
+    // ── Integración de la ruta destructiva (bloqueo de sesión) ──────────────────
+    // Objetivo: que un usuario LEGÍTIMO nunca se bloquee, y que una ráfaga de
+    // extracción automática SÍ. Usamos instantes sintéticos para controlar el tiempo
+    // sin dormir el test.
+
+    use std::time::Duration;
+
+    #[test]
+    fn atacante_rafaga_bloquea_al_quinto() {
+        let base = Instant::now();
+        let mut lista = Vec::new();
+        let mut disparo = None;
+        for i in 0..MAX_ACCESOS {
+            // Ráfaga: 10 ms entre descifrados (imposible para un humano).
+            let t = base + Duration::from_millis((i as u64) * 10);
+            if registrar_en_ventana(&mut lista, t) {
+                disparo = Some(i);
+                break;
+            }
+        }
+        assert_eq!(
+            disparo,
+            Some(MAX_ACCESOS - 1),
+            "una ráfaga de {} descifrados debe bloquear en el último",
+            MAX_ACCESOS
+        );
+    }
+
+    #[test]
+    fn usuario_ritmo_humano_nunca_bloquea() {
+        // 1 descifrado cada 3 s durante 30 s: un usuario revisando documentos.
+        // Con ventana de 10 s nunca hay 5 simultáneos → jamás debe bloquear.
+        let base = Instant::now();
+        let mut lista = Vec::new();
+        let mut bloqueo = false;
+        for i in 0..10u64 {
+            bloqueo |= registrar_en_ventana(&mut lista, base + Duration::from_secs(i * 3));
+        }
+        assert!(!bloqueo, "un ritmo humano (1 cada 3 s) no debe bloquear nunca");
+    }
+
+    #[test]
+    fn rafaga_con_pausa_no_bloquea_por_ventana_deslizante() {
+        // 4 descifrados rápidos (bajo el umbral), pausa > ventana, y otros 4 rápidos.
+        // Las primeras 4 entradas expiran, así que nunca se acumulan 5 → no bloquea.
+        let base = Instant::now();
+        let mut lista = Vec::new();
+        let mut bloqueo = false;
+        for i in 0..(MAX_ACCESOS - 1) as u64 {
+            bloqueo |= registrar_en_ventana(&mut lista, base + Duration::from_millis(i * 10));
+        }
+        let despues = base + Duration::from_secs(VENTANA_SECS + 1);
+        for i in 0..(MAX_ACCESOS - 1) as u64 {
+            bloqueo |= registrar_en_ventana(&mut lista, despues + Duration::from_millis(i * 10));
+        }
+        assert!(
+            !bloqueo,
+            "4 + pausa > {}s + 4 no debe bloquear (la ventana descarta las viejas)",
+            VENTANA_SECS
+        );
     }
 
     #[test]

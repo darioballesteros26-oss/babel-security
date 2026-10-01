@@ -513,4 +513,115 @@ mod tests {
         let len = idx.entradas.get("f.babel").unwrap().len();
         assert_eq!(len, 1, "no debe haber duplicado por id idéntico");
     }
+
+    // ── Integración de la RUTA DESTRUCTIVA (verificar_y_limpiar BORRA de disco) ──
+    // Ejercen el borrado real sobre un ~/Babel TEMPORAL vía BABEL_DATA_DIR; nunca
+    // tocan el vault real. Se serializan entre sí porque comparten esa variable de
+    // entorno global. EnvGuard restaura el entorno y borra el temp incluso en panic.
+
+    static FS_IT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvGuard(std::path::PathBuf);
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("BABEL_DATA_DIR");
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Prepara un ~/Babel temporal único y apunta BABEL_DATA_DIR a él.
+    fn preparar_temp() -> (std::sync::MutexGuard<'static, ()>, EnvGuard) {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let g = FS_IT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let n = N.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir()
+            .join(format!("babel_custodia_it_{}_{}", std::process::id(), n));
+        let _ = fs::remove_dir_all(&dir);
+        std::env::set_var("BABEL_DATA_DIR", &dir);
+        (g, EnvGuard(dir))
+    }
+
+    fn clave_test() -> String {
+        "ab".repeat(32) // 32 bytes en hex = clave AES-256 válida
+    }
+
+    fn crear_guardado(nombre: &str) -> std::path::PathBuf {
+        let guardados = crate::babel_dir().join("guardados");
+        fs::create_dir_all(&guardados).unwrap();
+        let ruta = guardados.join(nombre);
+        fs::write(&ruta, b"ciphertext simulado").unwrap();
+        ruta
+    }
+
+    #[test]
+    fn it_borra_ajenos_preserva_propios_y_legacy() {
+        let (_g, _env) = preparar_temp();
+        let subclave = clave_test();
+        let hw_local = obtener_hw_id();
+        assert!(!hw_local.is_empty());
+
+        // "mio" ligado a este equipo; "ajeno" a hw desconocido; "legacy" sin entrada.
+        let mut idx = CustodiaIndex::default();
+        idx.agregar("mio.babel", &hw_local);
+        idx.agregar("ajeno.babel", "uuid-atacante-9999");
+        guardar_custodia(&idx, &subclave);
+
+        let mio = crear_guardado("mio.babel");
+        let ajeno = crear_guardado("ajeno.babel");
+        let legacy = crear_guardado("legacy.babel");
+
+        let eliminados = verificar_y_limpiar(&subclave, &[]);
+
+        assert!(mio.exists(), "el archivo del propio equipo NO debe borrarse");
+        assert!(legacy.exists(), "un archivo sin entrada de custodia NO debe borrarse");
+        assert!(!ajeno.exists(), "el archivo ligado a otro hardware SÍ debe borrarse");
+        assert_eq!(eliminados.len(), 1, "solo 1 eliminado reportado");
+    }
+
+    #[test]
+    fn it_indice_corrupto_es_failsafe_no_borra_nada() {
+        // El caso que más daño haría en producción: si el índice no se puede
+        // descifrar, NUNCA debe borrar los archivos del usuario.
+        let (_g, _env) = preparar_temp();
+        let subclave = clave_test();
+
+        let sinc = crate::babel_dir().join("sinc");
+        fs::create_dir_all(&sinc).unwrap();
+        fs::write(sinc.join("custodia.babel"), b"\x00\x01 basura indescifrable").unwrap();
+
+        let a = crear_guardado("a.babel");
+        let b = crear_guardado("b.babel");
+
+        let eliminados = verificar_y_limpiar(&subclave, &[]);
+
+        assert!(eliminados.is_empty(), "índice indescifrable debe ser fail-safe");
+        assert!(a.exists() && b.exists(), "no se debe borrar nada con índice corrupto");
+    }
+
+    #[test]
+    fn it_subclave_vacia_no_borra_nada() {
+        let (_g, _env) = preparar_temp();
+        let x = crear_guardado("x.babel");
+        let eliminados = verificar_y_limpiar("", &[]);
+        assert!(eliminados.is_empty());
+        assert!(x.exists(), "sin subclave no se debe borrar nada");
+    }
+
+    #[test]
+    fn it_dispositivo_emparejado_no_borra() {
+        let (_g, _env) = preparar_temp();
+        let subclave = clave_test();
+
+        let mut idx = CustodiaIndex::default();
+        idx.agregar("del_par.babel", "hw-DISPOSITIVO-B");
+        guardar_custodia(&idx, &subclave);
+        let archivo = crear_guardado("del_par.babel");
+
+        // hw-DISPOSITIVO-B se pasa como par emparejado → autorizado → NO se borra.
+        let eliminados = verificar_y_limpiar(&subclave, &["hw-DISPOSITIVO-B".to_string()]);
+
+        assert!(eliminados.is_empty(), "un archivo de un dispositivo emparejado NO debe borrarse");
+        assert!(archivo.exists());
+    }
 }
