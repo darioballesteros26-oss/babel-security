@@ -2938,6 +2938,7 @@ fn ocr_via_servidor(ruta_pdf: &str) -> Option<String> {
 
 
 fn traducir_batch_via_servidor(textos: &[&str], par: &str) -> Result<Vec<String>, String> {
+    crate::marcar_actividad_traduccion();
     let mut body = serde_json::json!({
         "textos": textos,
         "par": par,
@@ -2962,6 +2963,7 @@ fn traducir_batch_via_servidor(textos: &[&str], par: &str) -> Result<Vec<String>
 
 /// Traduce un texto llamando al servidor Python local (127.0.0.1:5002/traducir).
 pub fn traducir_via_servidor(texto: &str, par: &str) -> Result<String, String> {
+    crate::marcar_actividad_traduccion();
     const MAX_BYTES: usize = 50_000;
     if texto.len() > MAX_BYTES {
         return Err(format!("Texto demasiado grande ({} bytes, máx {} KB)", texto.len(), MAX_BYTES / 1000));

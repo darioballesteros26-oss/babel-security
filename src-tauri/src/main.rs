@@ -2584,6 +2584,9 @@ fn lanzar_servidor_traduccion(app: &tauri::AppHandle) {
             log::info!("[Servidor] sidecar PID {}", child.id());
             SERVIDOR_ESTADO.store(1, std::sync::atomic::Ordering::Relaxed);
             *USB_CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
+            // La cuenta atrás de inactividad empieza al abrir el traductor.
+            marcar_actividad_traduccion();
+            iniciar_watchdog_traduccion(app.clone());
 
             std::thread::spawn(move || {
                 let addr: std::net::SocketAddr = "127.0.0.1:5002".parse().unwrap();
@@ -2646,6 +2649,60 @@ pub(crate) fn matar_servidor_traduccion() {
     log::info!("[Servidor] traductor detenido para liberar RAM");
 }
 
+// ── Auto-cierre del traductor por inactividad ───────────────────────────────────
+// El servidor Python arranca al abrir el traductor; si pasan 15 min sin ninguna
+// traducción (ni firma) se cierra solo para liberar RAM. Reabrir el traductor lo
+// relanza. Solo cierra el servidor que lanzó Babel (USB_CHILD), nunca uno externo
+// de desarrollo.
+const IDLE_TRADUCTOR_SECS: u64 = 15 * 60;
+static ULTIMA_ACTIVIDAD_TRAD: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+static WATCHDOG_TRAD_ACTIVO: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Registra actividad del traductor (traducción o firma) para reiniciar la cuenta
+/// atrás de inactividad. Pública: la llaman las funciones de traducción.
+pub fn marcar_actividad_traduccion() {
+    if let Ok(mut g) = ULTIMA_ACTIVIDAD_TRAD.lock() {
+        *g = Some(std::time::Instant::now());
+    }
+}
+
+/// Decisión pura (testeable): ¿debe cerrarse el traductor por inactividad?
+/// Solo si está LISTO (estado 2), lo lanzamos nosotros (es_nuestro) y lleva
+/// al menos IDLE_TRADUCTOR_SECS sin actividad.
+fn debe_cerrar_traductor(estado: u8, es_nuestro: bool, inactivo_secs: u64) -> bool {
+    estado == 2 && es_nuestro && inactivo_secs >= IDLE_TRADUCTOR_SECS
+}
+
+/// Lanza (una sola vez) el vigilante que cierra el servidor tras IDLE_TRADUCTOR_SECS
+/// sin actividad. Comprueba cada 60 s.
+fn iniciar_watchdog_traduccion(app: tauri::AppHandle) {
+    if WATCHDOG_TRAD_ACTIVO.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return; // ya corriendo
+    }
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let estado = SERVIDOR_ESTADO.load(std::sync::atomic::Ordering::Relaxed);
+            let es_nuestro = USB_CHILD.lock().map(|g| g.is_some()).unwrap_or(false);
+            let inactivo = ULTIMA_ACTIVIDAD_TRAD
+                .lock()
+                .ok()
+                .and_then(|g| *g)
+                .map(|t| t.elapsed().as_secs())
+                .unwrap_or(0);
+            if debe_cerrar_traductor(estado, es_nuestro, inactivo) {
+                matar_servidor_traduccion();
+                let _ = app.emit("traductor-cerrado-inactividad", ());
+                log::info!(
+                    "[Servidor] traductor cerrado por inactividad ({} min sin traducir)",
+                    inactivo / 60
+                );
+            }
+        }
+    });
+}
+
 // Comando invocado por el frontend al abrir el traductor o al traducir. Garantiza que
 // el servidor de traducción esté arrancando/listo. Libera primero la RAM de la IA Qwen
 // (matar_llama_si_activo) para que traductor e IA no coexistan en 8 GB. Devuelve el
@@ -2672,6 +2729,7 @@ fn asegurar_servidor_traduccion(app: tauri::AppHandle) -> String {
 /// el puerto (ver server.py `__main__`).
 fn esperar_servidor_firma(app: &tauri::AppHandle) -> Result<(), String> {
     lanzar_servidor_traduccion(app);
+    marcar_actividad_traduccion(); // firmar cuenta como actividad: no cerrar el servidor en pleno proceso
     let addr: std::net::SocketAddr = "127.0.0.1:5002".parse().unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
     loop {
@@ -7477,6 +7535,36 @@ mod tests_sidecar {
 
         // Restaurar para no afectar otros tests
         SERVIDOR_ESTADO.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    // ── Auto-cierre del traductor por inactividad ───────────────────────────
+    #[test]
+    fn inactividad_cierra_solo_si_listo_nuestro_y_pasado_el_umbral() {
+        // Caso a cerrar: listo + nuestro + superado el umbral.
+        assert!(debe_cerrar_traductor(2, true, IDLE_TRADUCTOR_SECS));
+        assert!(debe_cerrar_traductor(2, true, IDLE_TRADUCTOR_SECS + 120));
+    }
+
+    #[test]
+    fn inactividad_no_cierra_en_casos_seguros() {
+        // Justo por debajo del umbral → no cerrar.
+        assert!(!debe_cerrar_traductor(2, true, IDLE_TRADUCTOR_SECS - 1));
+        // Servidor externo de dev (no es nuestro) → nunca cerrar.
+        assert!(!debe_cerrar_traductor(2, false, IDLE_TRADUCTOR_SECS + 999));
+        // Servidor no listo (cargando/reposo/error) → no cerrar.
+        assert!(!debe_cerrar_traductor(1, true, IDLE_TRADUCTOR_SECS + 999));
+        assert!(!debe_cerrar_traductor(0, true, IDLE_TRADUCTOR_SECS + 999));
+        assert!(!debe_cerrar_traductor(3, true, IDLE_TRADUCTOR_SECS + 999));
+    }
+
+    #[test]
+    fn marcar_actividad_reinicia_el_contador() {
+        marcar_actividad_traduccion();
+        let seg = ULTIMA_ACTIVIDAD_TRAD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|t| t.elapsed().as_secs());
+        assert!(matches!(seg, Some(s) if s < 5), "la actividad recién marcada debe ser reciente");
     }
 
     // Verifica que el health-check detecta un puerto abierto.
