@@ -610,7 +610,7 @@ fn hay_captura_de_pantalla() -> seguridad::EstadoCaptura {
 
 // Escaneo de keyloggers/RATs bajo demanda, para lanzarlo JUSTO al mostrar el login o
 // el desbloqueo — el momento exacto en que se teclea la maestra — en vez de esperar
-// al monitor periódico de 5 min. Es async + spawn_blocking porque analizar_entorno()
+// al monitor periódico de 15 s. Es async + spawn_blocking porque analizar_entorno()
 // llama a codesign/ioreg/sqlite y no debe bloquear el event-loop.
 #[tauri::command]
 async fn escanear_keylogger_ahora() -> Vec<String> {

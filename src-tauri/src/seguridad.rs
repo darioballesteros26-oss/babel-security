@@ -1981,7 +1981,10 @@ pub fn detectar_captura_pantalla() -> EstadoCaptura {
 
         let mut clasificado = false;
         for app in apps_captura_alta() {
-            if nombre.contains(app) && vistos_alta.insert(*app) {
+            // Match EXACTO (no substring): la lista de alta confianza dispara el
+            // overlay a pantalla completa, así que "obs" no debe casar con
+            // procesos ajenos que contengan esa subcadena (p. ej. "...observer").
+            if nombre == *app && vistos_alta.insert(*app) {
                 bloqueo.push(format!(
                     "Grabación/compartición de pantalla activa: {}",
                     proceso.name()

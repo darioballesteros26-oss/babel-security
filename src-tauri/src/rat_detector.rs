@@ -1,7 +1,7 @@
 // Detección de herramientas de acceso remoto (RAT) y bloqueo silencioso de Babel.
 //
 // Flujo principal:
-//   1. Monitor periódico (cada 30 s) escanea procesos conocidos.
+//   1. Monitor periódico (cada 15 s) escanea procesos conocidos.
 //   2. Si detecta un RAT → RAT_BLOQUEADO=true + emite "rat-detectado" al frontend.
 //   3. El frontend muestra overlay de bloqueo; el backend rechaza comandos críticos.
 //   4. Desbloqueo por dos vías:
@@ -164,7 +164,9 @@ pub fn verificar_no_bloqueado_rat() -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 const PROCESOS_RAT: &[(&str, &str, bool)] = &[
-    // (nombre_proceso, label_usuario, solo_si_hay_conexión_ESTABLISHED)
+    // (substring_del_proceso, label_usuario, solo_si_hay_conexión_ESTABLISHED).
+    // El nombre es un substring en minúsculas: "TeamViewer" casa también con
+    // "TeamViewer_Desktop"/"TeamViewerd" (servicio activo sin la app abierta).
     ("TeamViewer",           "TeamViewer",              false),
     ("AnyDesk",              "AnyDesk",                 false),
     ("remoting_host",        "Chrome Remote Desktop",   false),
@@ -181,7 +183,8 @@ const PROCESOS_RAT: &[(&str, &str, bool)] = &[
     ("Remotix",              "Remotix",                 false),
     ("GoToAssistLauncher",   "GoTo Assist",             false),
     ("Vine Server",          "Vine VNC",                false),
-    // screensharingd siempre corre como daemon; solo se bloquea si hay sesión ESTABLISHED.
+    // screensharingd es on-demand y corre como root; se bloquea solo si netstat
+    // ve una conexión VNC ESTABLISHED (sesión real, no un arranque transitorio).
     ("screensharingd",       "Screen Sharing de macOS", true),
 ];
 
@@ -209,39 +212,48 @@ const PROCESOS_RAT: &[(&str, &str, bool)] = &[];
 
 // ── Detección de procesos ─────────────────────────────────────────────────────
 
-#[cfg(target_os = "macos")]
-fn proceso_activo(nombre: &str) -> bool {
-    std::process::Command::new("pgrep")
-        .args(["-x", nombre])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+/// Nombres de todos los procesos vivos, en minúsculas. Usa sysinfo en vez de
+/// `pgrep -x` por dos motivos:
+///   • `pgrep -x` hace match EXACTO contra argv[0]; falla con demonios lanzados
+///     por ruta completa (p. ej. "/sbin/launchd" no casa con "launchd").
+///   • sysinfo ve también procesos de root y devuelve el nombre base, de modo que
+///     un match por substring captura variantes como "TeamViewer_Desktop".
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn nombres_procesos_lower() -> Vec<String> {
+    use sysinfo::{ProcessExt, System, SystemExt};
+    let mut s = System::new();
+    s.refresh_processes();
+    s.processes().values().map(|p| p.name().to_lowercase()).collect()
 }
 
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn nombres_procesos_lower() -> Vec<String> {
+    Vec::new()
+}
+
+/// ¿Hay una sesión de Compartir Pantalla / Remote Management conectada ahora mismo?
+/// Usa `netstat -an`, que lee la tabla de sockets del kernel independientemente del
+/// usuario dueño del proceso. `lsof -i` como usuario normal NO ve los sockets de
+/// screensharingd (corre como root) y daba un falso negativo en el vector más
+/// probable: la Compartición de Pantalla nativa de macOS.
 #[cfg(target_os = "macos")]
 fn screen_sharing_con_sesion_activa() -> bool {
-    std::process::Command::new("lsof")
-        .args(["-i", "TCP:5900", "-n", "-P"])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains("ESTABLISHED"))
-        .unwrap_or(false)
-}
-
-#[cfg(target_os = "windows")]
-fn proceso_activo(nombre: &str) -> bool {
-    std::process::Command::new("tasklist")
-        .args(["/FI", &format!("IMAGENAME eq {}", nombre), "/NH"])
+    std::process::Command::new("netstat")
+        .args(["-an"])
         .output()
         .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .to_lowercase()
-                .contains(&nombre.to_lowercase())
+            String::from_utf8_lossy(&o.stdout).lines().any(|l| {
+                // netstat formatea el puerto tras un punto: "192.168.1.5.5900".
+                // ends_with(".5900") evita casar con 59000 y similares.
+                l.contains("ESTABLISHED")
+                    && l.split_whitespace().any(|tok| tok.ends_with(".5900"))
+            })
         })
         .unwrap_or(false)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn proceso_activo(_: &str) -> bool {
+#[cfg(not(target_os = "macos"))]
+fn screen_sharing_con_sesion_activa() -> bool {
     false
 }
 
@@ -254,26 +266,23 @@ pub fn detectar_rat_activo() -> Option<String> {
         .cloned()
         .unwrap_or_default();
 
+    // Un solo escaneo de la lista de procesos para toda la comprobación.
+    let nombres = nombres_procesos_lower();
+
     for (proceso, label, requiere_conexion) in PROCESOS_RAT {
         if confiables.contains(*label) {
             continue;
         }
-        #[cfg(target_os = "macos")]
-        {
-            let activo = if *requiere_conexion {
-                screen_sharing_con_sesion_activa()
-            } else {
-                proceso_activo(proceso)
-            };
-            if activo {
-                return Some(label.to_string());
-            }
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            if proceso_activo(proceso) {
-                return Some(label.to_string());
-            }
+        let activo = if *requiere_conexion {
+            // screensharingd es on-demand y corre como root: la señal fiable de
+            // sesión real es una conexión ESTABLISHED en el puerto VNC (5900).
+            screen_sharing_con_sesion_activa()
+        } else {
+            let objetivo = proceso.to_lowercase();
+            nombres.iter().any(|n| n.contains(&objetivo))
+        };
+        if activo {
+            return Some(label.to_string());
         }
     }
     None
@@ -306,7 +315,9 @@ pub fn iniciar_monitor_rat(app: tauri::AppHandle) {
                     activar_bloqueo_rat(&proceso, &app);
                 }
             }
-            thread::sleep(Duration::from_secs(30));
+            // 15 s: acota la ventana en que un RAT podría observar antes de que
+            // se tape el contenido. El escaneo (sysinfo + netstat) es barato.
+            thread::sleep(Duration::from_secs(15));
         }
     });
 }
@@ -692,8 +703,8 @@ mod tests {
     #[test]
     fn proceso_inventado_no_detectado() {
         // "babel_inexistente_xyz_99999" no debe existir en ningún entorno CI limpio.
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
-        assert!(!proceso_activo("babel_inexistente_xyz_99999"));
+        let nombres = nombres_procesos_lower();
+        assert!(!nombres.iter().any(|n| n.contains("babel_inexistente_xyz_99999")));
     }
 
     #[test]
