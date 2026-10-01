@@ -3180,6 +3180,7 @@ async fn preparar_union_pdfs(
     rutas: Vec<String>,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<Vec<PdfUnionInfo>, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?; // descifra PDFs del vault
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -3229,6 +3230,7 @@ async fn contar_paginas_pdf(
     ruta: String,
     sesion: tauri::State<'_, SesionActiva>,
 ) -> Result<usize, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?; // descifra el PDF del vault
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -5157,6 +5159,7 @@ fn recuperar_con_frase_interno(
 
 #[tauri::command]
 fn ver_frase_recuperacion(sesion: tauri::State<SesionActiva>) -> Result<Vec<String>, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?; // no revelar la frase maestra con un RAT activo
     let subclave_hex = sesion.subclave_hex()?;
 
     if subclave_hex.is_empty() {
@@ -6577,6 +6580,7 @@ fn ver_password_contacto(
     contacto: String,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?; // no revelar contraseñas guardadas con un RAT activo
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
@@ -6664,6 +6668,7 @@ fn compartir_a_url(
     bundle_id: Option<String>,
     sesion: tauri::State<SesionActiva>,
 ) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?; // no exfiltrar contenido descifrado con un RAT activo
     let subclave_hex = sesion.subclave_hex()?;
     if subclave_hex.is_empty() {
         return Err("No hay sesión activa.".into());
