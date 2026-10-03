@@ -372,6 +372,13 @@ pub fn asegurar_ia_persistente(app: &tauri::AppHandle) {
     };
     let babel = crate::babel_dir();
 
+    // IMPORTANTE: toda copia va primero a un destino TEMPORAL y solo al terminar se
+    // renombra al definitivo (rename atómico, mismo volumen ~/Babel). Si la copia se
+    // interrumpe (p. ej. cierran la app a mitad del primer arranque), el destino final
+    // nunca llega a existir → en el siguiente arranque se reintenta. Sin esto, una copia
+    // a medias dejaría un modelo/runtime incompleto pero "con aspecto de completo" que
+    // el check de existencia daría por bueno y nunca se recopiaría (IA rota).
+
     // 1) Modelo → ~/Babel/modelos_ia/
     let destino_modelos = babel.join("modelos_ia");
     for nombre in MODELOS_CANDIDATOS {
@@ -379,9 +386,14 @@ pub fn asegurar_ia_persistente(app: &tauri::AppHandle) {
         let destino = destino_modelos.join(nombre);
         if origen.exists() && !destino.exists() {
             let _ = std::fs::create_dir_all(&destino_modelos);
-            match std::fs::copy(&origen, &destino) {
+            let tmp = destino_modelos.join(format!(".{nombre}.tmp"));
+            let _ = std::fs::remove_file(&tmp); // restos de un intento anterior
+            match std::fs::copy(&origen, &tmp).and_then(|_| std::fs::rename(&tmp, &destino)) {
                 Ok(_) => log::info!("[IA] modelo persistido en {}", destino.display()),
-                Err(e) => log::warn!("[IA] no se pudo persistir el modelo: {e}"),
+                Err(e) => {
+                    log::warn!("[IA] no se pudo persistir el modelo: {e}");
+                    let _ = std::fs::remove_file(&tmp);
+                }
             }
         }
     }
@@ -389,23 +401,30 @@ pub fn asegurar_ia_persistente(app: &tauri::AppHandle) {
     // 2) Runtime (llama-server + backends ggml + dylibs) → ~/Babel/ia_stack/
     let llama_bundle = res.join("binaries").join("llama-server");
     let stack = babel.join("ia_stack");
-    let llama_persistente = stack.join("Resources").join("binaries").join("llama-server");
-    if llama_bundle.exists() && !llama_persistente.exists() {
+    if llama_bundle.exists() && !stack.exists() {
+        let tmp = babel.join(".ia_stack.tmp");
+        let _ = std::fs::remove_dir_all(&tmp); // restos de un intento anterior
         let r_bin = copiar_dir_recursivo(
             &res.join("binaries"),
-            &stack.join("Resources").join("binaries"),
+            &tmp.join("Resources").join("binaries"),
         );
         // Contents/Frameworks = el padre de Resources (resource_dir) → ../Frameworks.
         let r_fw = match res.parent().map(|c| c.join("Frameworks")) {
-            Some(fw) if fw.exists() => copiar_dir_recursivo(&fw, &stack.join("Frameworks")),
+            Some(fw) if fw.exists() => copiar_dir_recursivo(&fw, &tmp.join("Frameworks")),
             _ => Ok(()),
         };
         match (r_bin, r_fw) {
-            (Ok(()), Ok(())) => log::info!("[IA] runtime de IA persistido en {}", stack.display()),
+            (Ok(()), Ok(())) => match std::fs::rename(&tmp, &stack) {
+                Ok(()) => log::info!("[IA] runtime de IA persistido en {}", stack.display()),
+                Err(e) => {
+                    log::warn!("[IA] no se pudo renombrar el runtime de IA: {e}");
+                    let _ = std::fs::remove_dir_all(&tmp);
+                }
+            },
             (b, f) => {
                 log::warn!("[IA] fallo al persistir el runtime de IA: {:?} {:?}", b.err(), f.err());
-                // Dejar a medias es peor que nada: limpiar para reintentar la próxima vez.
-                let _ = std::fs::remove_dir_all(&stack);
+                // Dejar a medias es peor que nada: limpiar el temporal para reintentar.
+                let _ = std::fs::remove_dir_all(&tmp);
             }
         }
     }
