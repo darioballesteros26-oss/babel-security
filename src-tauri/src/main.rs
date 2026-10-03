@@ -7282,6 +7282,15 @@ fn main() {
                 }
             });
 
+            // ── Persistencia del stack de IA en ~/Babel ───────────────────────────
+            // Si esta build trae el stack de IA (instalación desde DMG), lo copiamos a
+            // ~/Babel en segundo plano para que SOBREVIVA a las actualizaciones (que
+            // reemplazan el .app sin el stack). Idempotente: no hace nada si ya está.
+            let handle_ia = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                ia_redaccion::asegurar_ia_persistente(&handle_ia);
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {

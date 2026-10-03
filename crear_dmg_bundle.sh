@@ -5,7 +5,8 @@ set -euo pipefail
 
 INTERFAZ="$(cd "$(dirname "$0")" && pwd)"
 BUILD_APP="$INTERFAZ/src-tauri/target/release/bundle/macos/Security Babel.app"
-VERSION="0.2.8"
+# Versión leída de tauri.conf.json (antes estaba hardcodeada y derivaba del real).
+VERSION="$(grep -m1 '"version"' "$INTERFAZ/src-tauri/tauri.conf.json" | sed 's/.*: *"//;s/".*//')"
 DMG_OUT="$HOME/Desktop/Security Babel_Full_${VERSION}.dmg"
 TMPDIR_BUILD=$(mktemp -d)
 APP_DEST="$TMPDIR_BUILD/Security Babel.app"

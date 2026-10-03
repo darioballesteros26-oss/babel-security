@@ -296,7 +296,9 @@ fn ruta_modelo(app: &tauri::AppHandle) -> PathBuf {
         .join(NOMBRE_MODELO)
 }
 
-// Busca llama-server en: 1) Resources/binaries/ (bundle USB), 2) Homebrew
+// Busca llama-server en: 1) Resources/binaries/ (bundle del DMG),
+// 2) ~/Babel/ia_stack (persistido desde un DMG anterior; SOBREVIVE a las
+// actualizaciones, que solo reemplazan el .app), 3) Homebrew (desarrollo).
 fn ruta_llama_server(app: &tauri::AppHandle) -> String {
     if let Ok(res) = app.path().resource_dir() {
         let bundled = res.join("binaries").join("llama-server");
@@ -304,10 +306,109 @@ fn ruta_llama_server(app: &tauri::AppHandle) -> String {
             return bundled.to_string_lossy().into_owned();
         }
     }
+    let persistente = crate::babel_dir()
+        .join("ia_stack")
+        .join("Resources")
+        .join("binaries")
+        .join("llama-server");
+    if persistente.exists() {
+        return persistente.to_string_lossy().into_owned();
+    }
     if std::path::Path::new("/opt/homebrew/bin/llama-server").exists() {
         return "/opt/homebrew/bin/llama-server".into();
     }
     "/usr/local/bin/llama-server".into()
+}
+
+// ── Persistencia del stack de IA en ~/Babel (sobrevive a las actualizaciones) ─
+// El .app.tar.gz del auto-update NO incluye el stack de IA (modelo Qwen +
+// llama-server + backends ggml + dylibs, ~3 GB) para que el update pese poco. Por
+// eso, al actualizar, una instalación hecha desde el DMG completo perdería la IA.
+// Solución: la PRIMERA vez que arranca una build que SÍ trae el stack (instalación
+// desde DMG), lo copiamos a ~/Babel; a partir de ahí la app lo encuentra ahí aunque
+// una actualización reemplace el .app. Además deja el modelo DESACOPLADO: cambiarlo
+// en el futuro es sustituir el fichero en ~/Babel, sin rehacer la app.
+//
+// Se replica la estructura del bundle para respetar los rpaths de llama-server
+// (@loader_path/../../Frameworks): en ~/Babel/ia_stack/ van Resources/binaries/
+// (llama-server + *.so) y Frameworks/ (*.dylib). El modelo va a ~/Babel/modelos_ia/
+// (ruta_modelo ya lo busca ahí). NO son datos sensibles → permisos normales, no 0600.
+static IA_PERSISTIDA: AtomicBool = AtomicBool::new(false);
+
+fn copiar_dir_recursivo(origen: &std::path::Path, destino: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(destino)?;
+    for entrada in std::fs::read_dir(origen)? {
+        let entrada = entrada?;
+        let tipo = entrada.file_type()?;
+        let dst = destino.join(entrada.file_name());
+        if tipo.is_dir() {
+            copiar_dir_recursivo(&entrada.path(), &dst)?;
+        } else if tipo.is_symlink() {
+            // Copiar el fichero real al que apunta (evita symlinks colgantes en ~/Babel).
+            let real = std::fs::read_link(entrada.path())?;
+            let real_abs = if real.is_absolute() { real } else { origen.join(real) };
+            if real_abs.is_file() {
+                std::fs::copy(&real_abs, &dst)?;
+            }
+        } else {
+            // fs::copy preserva los bits de permiso en Unix (llama-server queda 0755).
+            std::fs::copy(entrada.path(), &dst)?;
+        }
+    }
+    Ok(())
+}
+
+/// Copia el stack de IA del bundle a ~/Babel la primera vez (si el bundle lo trae y
+/// ~/Babel aún no lo tiene). Idempotente y barato cuando ya está hecho. No hace nada
+/// en builds de actualización (que no traen el stack) ni si ya se copió. Pesado
+/// (~2,3 GB) solo la primera vez tras instalar un DMG → llamar en segundo plano.
+pub fn asegurar_ia_persistente(app: &tauri::AppHandle) {
+    if IA_PERSISTIDA.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let res = match app.path().resource_dir() {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let babel = crate::babel_dir();
+
+    // 1) Modelo → ~/Babel/modelos_ia/
+    let destino_modelos = babel.join("modelos_ia");
+    for nombre in MODELOS_CANDIDATOS {
+        let origen = res.join("modelos_ia").join(nombre);
+        let destino = destino_modelos.join(nombre);
+        if origen.exists() && !destino.exists() {
+            let _ = std::fs::create_dir_all(&destino_modelos);
+            match std::fs::copy(&origen, &destino) {
+                Ok(_) => log::info!("[IA] modelo persistido en {}", destino.display()),
+                Err(e) => log::warn!("[IA] no se pudo persistir el modelo: {e}"),
+            }
+        }
+    }
+
+    // 2) Runtime (llama-server + backends ggml + dylibs) → ~/Babel/ia_stack/
+    let llama_bundle = res.join("binaries").join("llama-server");
+    let stack = babel.join("ia_stack");
+    let llama_persistente = stack.join("Resources").join("binaries").join("llama-server");
+    if llama_bundle.exists() && !llama_persistente.exists() {
+        let r_bin = copiar_dir_recursivo(
+            &res.join("binaries"),
+            &stack.join("Resources").join("binaries"),
+        );
+        // Contents/Frameworks = el padre de Resources (resource_dir) → ../Frameworks.
+        let r_fw = match res.parent().map(|c| c.join("Frameworks")) {
+            Some(fw) if fw.exists() => copiar_dir_recursivo(&fw, &stack.join("Frameworks")),
+            _ => Ok(()),
+        };
+        match (r_bin, r_fw) {
+            (Ok(()), Ok(())) => log::info!("[IA] runtime de IA persistido en {}", stack.display()),
+            (b, f) => {
+                log::warn!("[IA] fallo al persistir el runtime de IA: {:?} {:?}", b.err(), f.err());
+                // Dejar a medias es peor que nada: limpiar para reintentar la próxima vez.
+                let _ = std::fs::remove_dir_all(&stack);
+            }
+        }
+    }
 }
 
 fn base_url() -> String {
@@ -398,6 +499,14 @@ pub async fn iniciar_ia_redaccion(
     // provoca swap → la IA tarda minutos en responder. Al matarlo, SERVIDOR_ESTADO
     // vuelve a 0 y el traductor se relanzará solo cuando el usuario regrese a él.
     crate::matar_servidor_traduccion();
+
+    // Opción B: asegurar que el stack de IA está en ~/Babel (para que sobreviva a las
+    // actualizaciones). Barato si ya se hizo; la primera vez (instalación desde DMG)
+    // copia ~2,3 GB → en spawn_blocking para no bloquear el executor async.
+    {
+        let app2 = app.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || asegurar_ia_persistente(&app2)).await;
+    }
 
     let modelo = ruta_modelo(&app);
     if !modelo.exists() {
