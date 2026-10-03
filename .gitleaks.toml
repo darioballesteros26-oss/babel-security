@@ -1,0 +1,17 @@
+# Configuración de gitleaks para el escaneo de secretos (CI: .github/workflows/security.yml).
+# Usa las reglas por defecto y excluye rutas sin secretos reales (artefactos de build,
+# dependencias y la config local de Claude), para evitar falsos positivos.
+title = "Babel Security — gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Rutas sin secretos del código fuente"
+paths = [
+  '''src-tauri/target/.*''',
+  '''node_modules/.*''',
+  '''\.claude/.*''',
+  '''.*\.rmeta$''',
+  '''.*\.lock$''',
+]

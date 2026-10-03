@@ -1,8 +1,10 @@
 name: Security Audit
 
-# Audita las dependencias Rust contra la base de avisos de RustSec en cada push/PR
-# y cada lunes. La política (crates ignorados ya triados, bans, fuentes) está en
-# src-tauri/deny.toml. VERDE con lo conocido; ROJO si entra una vulnerabilidad NUEVA.
+# Dos comprobaciones en cada push/PR y cada lunes:
+#  · deny    — avisos de seguridad RustSec + bans + fuentes + licencias (política en
+#              src-tauri/deny.toml). VERDE con lo triado; ROJO si entra algo NUEVO.
+#  · secrets — gitleaks sobre el checkout (config .gitleaks.toml). ROJO si se cuela
+#              una credencial/token en el código.
 on:
   push:
     branches: [main]
@@ -19,4 +21,17 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: ./src-tauri/Cargo.toml
-          command: check advisories bans sources
+          command: check advisories bans sources licenses
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar gitleaks
+        run: |
+          VER=$(curl -sSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+                | grep -oE '"tag_name": *"v[0-9.]+"' | grep -oE '[0-9.]+')
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+      - name: Escanear secretos
+        run: gitleaks dir . -c .gitleaks.toml --no-banner --redact

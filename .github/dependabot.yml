@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Dependencias Rust (la app Tauri). Dependabot abrirá PRs cuando salga una versión
+  # nueva — incluido el día que docx-rs/plist actualicen quick-xml (la vuln que queda).
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Dependencias del frontend (Vite/TS).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Acciones de los workflows de GitHub.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
