@@ -29,30 +29,58 @@ jobs:
           tar xzf /tmp/pdfium.tgz -C /tmp lib/libpdfium.dylib
           cp /tmp/lib/libpdfium.dylib src-tauri/binaries/pdfium/
 
+      # El sidecar (binaries/servidor_babel) NO está en git (.gitignore) → hay que
+      # construirlo aquí, o `tauri build` falla por el externalBin. Así el firma.py
+      # actual (sello emisor/CA, etc.) viaja dentro del .app.tar.gz del update.
+      # OCR (PaddleOCR-VL) usa llama-cpp-python en import perezoso: se omite aquí
+      # (compila eterno en CI) → OCR degradado, el resto del servidor funciona.
+      - name: Preparar Python para el sidecar
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Construir sidecar (servidor_babel)
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pyinstaller flask flask-cors ctranslate2 sentencepiece \
+            pymupdf pymupdf4llm pyhanko pyhanko-certvalidator transformers
+          cd servidor_babel && bash build_sidecar.sh
+
       - name: Instalar dependencias npm
         run: npm ci
 
-      - name: Build Mac (.dmg) firmado para auto-update
+      - name: Build Mac (.app.tar.gz + .dmg) firmado para auto-update
         run: npm run tauri build -- --target aarch64-apple-darwin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: Generar latest.json
+      # El updater de Tauri v2 consume el .app.tar.gz (+ .sig), NO el .dmg.
+      # El .dmg se sube aparte solo para instalación manual nueva.
+      - name: Preparar artefactos de update (.app.tar.gz + latest.json)
         run: |
-          DMG=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
-          SIG="${DMG}.sig"
-          if [ ! -f "$SIG" ]; then
-            echo "✗ No se generó la firma .sig — verifica que TAURI_SIGNING_PRIVATE_KEY está configurado en los Secrets del repositorio."
+          BUNDLE=src-tauri/target/aarch64-apple-darwin/release/bundle
+          TARGZ=$(find "$BUNDLE/macos" -name "*.app.tar.gz" | head -1)
+          SIG="${TARGZ}.sig"
+          if [ -z "$TARGZ" ] || [ ! -f "$SIG" ]; then
+            echo "✗ No se generó el .app.tar.gz firmado. Comprueba:"
+            echo "  · \"createUpdaterArtifacts\": true en tauri.conf.json"
+            echo "  · El Secret TAURI_SIGNING_PRIVATE_KEY (contenido de la clave minisign)."
             exit 1
           fi
+          VER_NUM="${GITHUB_REF_NAME#v}"
+          REPO="darioballesteros26-oss/babel-security"
+          # Nombre versionado; en la URL del asset GitHub convierte los espacios en puntos.
+          ASSET="Security Babel_${VER_NUM}_aarch64.app.tar.gz"
+          ASSET_URL="Security.Babel_${VER_NUM}_aarch64.app.tar.gz"
+          mkdir -p dist
+          cp "$TARGZ" "dist/$ASSET"
+          cp "$SIG"   "dist/$ASSET.sig"
+          cp "$BUNDLE/dmg/"*.dmg dist/ 2>/dev/null || true
           FIRMA=$(cat "$SIG")
           FECHA=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          VER_NUM="${GITHUB_REF_NAME#v}"
-          DMG_NOMBRE=$(basename "$DMG" | sed 's/ /%20/g')
-          REPO="darioballesteros26-oss/babel-security"
-          cat > latest.json <<EOF
+          cat > dist/latest.json <<EOF
           {
             "version": "$VER_NUM",
             "notes": "Ver notas en https://github.com/$REPO/releases/tag/$GITHUB_REF_NAME",
@@ -60,21 +88,19 @@ jobs:
             "platforms": {
               "darwin-aarch64": {
                 "signature": "$FIRMA",
-                "url": "https://github.com/$REPO/releases/download/$GITHUB_REF_NAME/$DMG_NOMBRE"
+                "url": "https://github.com/$REPO/releases/download/$GITHUB_REF_NAME/$ASSET_URL"
               }
             }
           }
           EOF
           echo "latest.json generado:"
-          cat latest.json
+          cat dist/latest.json
 
       - name: Subir artifacts Mac
         uses: actions/upload-artifact@v4
         with:
-          name: mac-dmg
-          path: |
-            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            latest.json
+          name: mac
+          path: dist/*
 
   build-windows:
     runs-on: windows-latest
@@ -133,7 +159,7 @@ jobs:
       - name: Descargar artifacts Mac
         uses: actions/download-artifact@v4
         with:
-          name: mac-dmg
+          name: mac
           path: dist/mac
 
       - name: Descargar artifacts Windows
@@ -142,7 +168,7 @@ jobs:
           name: windows-installers
           path: dist/win
 
-      - name: Crear GitHub Release y subir instaladores
+      - name: Crear GitHub Release y subir artefactos
         uses: softprops/action-gh-release@v2
         with:
           name: "Babel Security ${{ github.ref_name }}"
@@ -150,11 +176,12 @@ jobs:
             ## Babel Security ${{ github.ref_name }}
 
             ### Descargas
-
             | Plataforma | Archivo |
             |---|---|
             | macOS (Apple Silicon) | `Security Babel_*_aarch64.dmg` |
             | Windows (64-bit) | `Security Babel_*_x64-setup.exe` o `.msi` |
+
+            > La actualización automática (macOS) usa `*_aarch64.app.tar.gz` + `latest.json`.
 
             ### Instalación Mac
             1. Descarga el `.dmg` y ábrelo
@@ -166,8 +193,10 @@ jobs:
             2. Ejecuta el instalador como administrador
             3. Abre **Security Babel** desde el menú inicio
           files: |
-            dist/mac/*.dmg
+            dist/mac/*.app.tar.gz
+            dist/mac/*.app.tar.gz.sig
             dist/mac/latest.json
+            dist/mac/*.dmg
             dist/win/*.msi
             dist/win/*.exe
           draft: false

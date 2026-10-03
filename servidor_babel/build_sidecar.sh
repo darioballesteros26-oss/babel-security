@@ -38,7 +38,7 @@ fi
 cd "$SCRIPT_DIR"
 
 # Localizar python con PyInstaller y las dependencias del servidor.
-# Prioridad: babel_env local > pyenv > homebrew > sistema.
+# Prioridad: babel_env local > pyenv > homebrew > sistema > python del PATH (CI).
 _PY=""
 for _candidate in \
   "$HOME/Desktop/Babel copia/babel_env/bin/python3" \
@@ -46,7 +46,10 @@ for _candidate in \
   "$HOME/.pyenv/shims/python3" \
   "/opt/homebrew/bin/python3" \
   "/usr/local/bin/python3" \
-  "/usr/bin/python3"; do
+  "/usr/bin/python3" \
+  "$(command -v python3 2>/dev/null || true)" \
+  "$(command -v python 2>/dev/null || true)"; do
+  [ -n "$_candidate" ] || continue
   if [ -x "$_candidate" ] && "$_candidate" -m PyInstaller --version &>/dev/null; then
     _PY="$_candidate"
     break
