@@ -11,15 +11,15 @@ unmaintained = "workspace"
 # al parsear ficheros no confiables o edge-cases de validación TLS — ni RCE ni fuga de
 # claves. Pendientes de arreglar (bump mayor / upstream). Revisar y quitar al corregir.
 ignore = [
-  "RUSTSEC-2026-0187", # lopdf stack overflow (PDF anidado) → pendiente subir a 0.42
-  "RUSTSEC-2026-0194", # quick-xml run time cuadrático (DOCX) → vía docx-rs/plist (upstream)
-  "RUSTSEC-2026-0195", # quick-xml alloc de namespaces (DOCX) → idem
-  "RUSTSEC-2026-0049", # rustls-webpki CRL → vía rustls 0.22 directo, pendiente 0.23
-  "RUSTSEC-2026-0098", # rustls-webpki name constraints
-  "RUSTSEC-2026-0099", # rustls-webpki wildcard
-  "RUSTSEC-2026-0104", # rustls-webpki panic al parsear CRL
-  "RUSTSEC-2026-0192", # ttf-parser unmaintained (dep directa, subset de fuentes en pdf_reducir)
+  # quick-xml (DoS al parsear DOCX/XML): BLOQUEADO UPSTREAM — lo fijan docx-rs 0.4.20 y
+  # plist←tauri; no es subible por nosotros sin forkear. Quitar cuando actualicen.
+  "RUSTSEC-2026-0194", # quick-xml run time cuadrático
+  "RUSTSEC-2026-0195", # quick-xml alloc de namespaces
+  # ttf-parser sin mantenimiento (dep directa, subset de fuentes). No es vulnerabilidad.
+  "RUSTSEC-2026-0192",
 ]
+# RESUELTO 2026-10-03 (ya no se ignoran): lopdf 0.32→0.45 (RUSTSEC-2026-0187) tras quitar
+# pdf-extract (dep muerta); rustls 0.22→0.23 (RUSTSEC-2026-0049/0098/0099/0104 de webpki).
 
 [bans]
 # El árbol de Tauri trae duplicados normales (p. ej. zip, rustls en 2 versiones).

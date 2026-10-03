@@ -7075,6 +7075,12 @@ fn main() {
 
     env_logger::init();
 
+    // rustls 0.23 exige un proveedor cripto por defecto instalado ANTES de usar
+    // Client/ServerConfig::builder() (si no, panic en runtime). Antes (0.22) ring
+    // era el proveedor implícito. Lo instalamos aquí; usamos ring (no aws-lc-rs,
+    // que necesita toolchain C y complicaría el empaquetado portable del bundle).
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // Al instalar desde DMG en otro Mac, macOS añade com.apple.quarantine a todos
     // los archivos del bundle pero solo lo limpia del ejecutable principal al aprobar.
     // Binarios en Resources/binaries/ (llama-server) y Resources/python/ retienen
