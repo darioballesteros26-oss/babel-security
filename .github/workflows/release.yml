@@ -97,7 +97,7 @@ jobs:
           cat dist/latest.json
 
       - name: Subir artifacts Mac
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mac
           path: dist/*
@@ -143,7 +143,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Subir instaladores Windows
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-installers
           path: |
