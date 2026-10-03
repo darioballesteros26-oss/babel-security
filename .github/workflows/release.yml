@@ -169,7 +169,7 @@ jobs:
           path: dist/win
 
       - name: Crear GitHub Release y subir artefactos
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: "Babel Security ${{ github.ref_name }}"
           body: |
