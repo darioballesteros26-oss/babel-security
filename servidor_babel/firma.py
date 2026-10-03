@@ -84,7 +84,8 @@ def _nombre_campo_libre(usados) -> str:
     return f"{base}_{i}"
 
 
-def _incrustar_sello(pdf_bytes: bytes, titular: str, desplaz: float = 0.0) -> bytes:
+def _incrustar_sello(pdf_bytes: bytes, titular: str, desplaz: float = 0.0,
+                     emisor: str = "") -> bytes:
     """Dibuja el sello «FIRMADO DIGITALMENTE …» como CONTENIDO de la 1ª página.
 
     Clave del diseño: el sello va en el content stream de la página (operador
@@ -94,15 +95,23 @@ def _incrustar_sello(pdf_bytes: bytes, titular: str, desplaz: float = 0.0) -> by
     mostraran—, pero SÍ renderiza el contenido de la página. Así el sello se ve
     en cualquier visor. La validez criptográfica la aporta la firma PAdES que se
     añade después (invisible) en `_firmar`.
+
+    `emisor`: nombre corto de la autoridad de certificación (ACA, FNMT, …). Si
+    se conoce, el encabezado pasa a «FIRMADO CON <emisor>».
     """
     x0, y0, x1_pag, y1_pag, _rot = _geometria_pagina(pdf_bytes)
     ancho = x1_pag - x0
     margen = 24.0
-    caja_ancho = min(300.0, max(140.0, ancho - 2 * margen))
+    caja_ancho = min(320.0, max(140.0, ancho - 2 * margen))
     caja_alto = 64.0
 
+    # Encabezado con la CA si se conoce. Escapamos '%' para no romper el
+    # formateo %(...)s que hace pyhanko con text_params.
+    emisor = (emisor or "").strip().replace("%", "%%")
+    encabezado = f"FIRMADO CON {emisor}" if emisor else "FIRMADO DIGITALMENTE"
+
     estilo = TextStampStyle(
-        stamp_text="FIRMADO DIGITALMENTE\n%(signer)s\n%(ts)s",
+        stamp_text=encabezado + "\n%(signer)s\n%(ts)s",
         border_width=2,
         border_color=(0.13, 0.55, 0.13),  # verde: señal de firma correcta
         timestamp_format="%d/%m/%Y %H:%M",
@@ -131,6 +140,7 @@ def _firmar(pdf_bytes: bytes, p12_bytes: bytes, password: str, titular: str = ""
     )
     if not titular:
         titular = _titular(p12_bytes, password)
+    emisor = _emisor(p12_bytes, password)
 
     # Los PDF cifrados/protegidos no se pueden firmar sin la contraseña de apertura:
     # damos un mensaje claro en vez del críptico "No key available to decrypt".
@@ -149,7 +159,7 @@ def _firmar(pdf_bytes: bytes, p12_bytes: bytes, password: str, titular: str = ""
     desplaz = apilado * (64.0 + 8.0)
 
     # 1) Sello VISIBLE incrustado en el contenido de la página (se ve en todo visor).
-    pdf_sellado = _incrustar_sello(pdf_bytes, titular, desplaz)
+    pdf_sellado = _incrustar_sello(pdf_bytes, titular, desplaz, emisor)
 
     # 2) Firma digital PAdES INVISIBLE sobre el PDF ya sellado. La marca visual la
     #    aporta el contenido del paso 1; la firma solo aporta validez criptográfica,
@@ -181,6 +191,55 @@ def _titular(p12_bytes: bytes, password: str) -> str:
         return cert.subject.rfc4514_string()
     except Exception as e:
         raise ValueError(f"No se pudo leer el certificado: {e}")
+
+
+# Autoridades de certificación conocidas (uso jurídico en España). Se busca la
+# primera cuya marca aparezca en el emisor del certificado; el orden importa
+# poco porque son excluyentes en la práctica. Clave = marca a buscar (mayúsc.),
+# valor = nombre corto a mostrar en el sello.
+_CAS_CONOCIDAS = [
+    ("ABOGAC", "ACA"),          # Autoridad de Certificación de la Abogacía
+    ("ACABOGACIA", "ACA"),
+    ("FNMT", "FNMT"),           # Fábrica Nacional de Moneda y Timbre
+    ("CAMERFIRMA", "Camerfirma"),
+    ("IZENPE", "Izenpe"),
+    ("FIRMAPROFESIONAL", "Firmaprofesional"),
+    ("FIRMA PROFESIONAL", "Firmaprofesional"),
+    ("DNIE", "DNIe"),           # DNI electrónico (Dirección General de la Policía)
+    ("POLICIA", "DNIe"),
+    ("ANF ", "ANF AC"),
+    ("SIGNE", "Signe"),
+    ("EADTRUST", "EADTrust"),
+]
+
+
+def _emisor(p12_bytes: bytes, password: str) -> str:
+    """Nombre corto de la autoridad de certificación (emisor) del certificado.
+
+    Devuelve "ACA", "FNMT", … si reconoce la CA por su emisor; si no, cae al
+    Organization o Common Name del emisor; "" si no se puede leer. No lanza:
+    la firma no debe fallar por no poder etiquetar la CA.
+    """
+    try:
+        from cryptography.hazmat.primitives.serialization import pkcs12
+        from cryptography.x509.oid import NameOID
+        pwd = password.encode() if password else None
+        _, cert, _ = pkcs12.load_key_and_certificates(p12_bytes, pwd)
+
+        def _attr(name, oid):
+            a = name.get_attributes_for_oid(oid)
+            return a[0].value if a else ""
+
+        org = _attr(cert.issuer, NameOID.ORGANIZATION_NAME)
+        cn = _attr(cert.issuer, NameOID.COMMON_NAME)
+        blob = f"{cert.issuer.rfc4514_string()} {org} {cn}".upper()
+        for marca, nombre in _CAS_CONOCIDAS:
+            if marca in blob:
+                return nombre
+        # CA no catalogada: mostrar su organización (o CN) tal cual.
+        return org or cn or ""
+    except Exception:
+        return ""
 
 
 def registrar_rutas(app, verificar_token):
