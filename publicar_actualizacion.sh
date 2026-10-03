@@ -84,10 +84,13 @@ fi
 verde "  ✓ Todo correcto (main, limpio, versión $VER_NUM, sidecar al día)."
 
 # ── Build ────────────────────────────────────────────────────────────────────
-# Con createUpdaterArtifacts:true, el build genera el .app.tar.gz (lo firmamos a
-# mano después con `tauri signer`, el método más robusto y el que funciona aquí).
+# createUpdaterArtifacts:true hace que `tauri build` intente FIRMAR el .app.tar.gz;
+# sin la clave en el entorno sale con error (y set -e cortaría). Le pasamos la clave
+# del updater → build en 0 y .sig generado. (Luego renombramos a nombre versionado
+# y re-firmamos ese fichero para dejar el trusted comment coherente.)
 echo "▸ Construyendo Babel ${VERSION}…"
-npm --prefix "$ROOT" run tauri build -- --target "$TARGET"
+TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+  npm --prefix "$ROOT" run tauri build -- --target "$TARGET"
 
 [ -f "$TARGZ_SRC" ] || { rojo "✗ No se generó el .app.tar.gz ($TARGZ_SRC)"; exit 1; }
 
