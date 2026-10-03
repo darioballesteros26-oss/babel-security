@@ -86,7 +86,7 @@ verde "  ✓ Todo correcto (main, limpio, versión $VER_NUM, sidecar al día)."
 # ── Build ────────────────────────────────────────────────────────────────────
 # Con createUpdaterArtifacts:true, el build genera el .app.tar.gz (lo firmamos a
 # mano después con `tauri signer`, el método más robusto y el que funciona aquí).
-echo "▸ Construyendo Babel $VERSION…"
+echo "▸ Construyendo Babel ${VERSION}…"
 npm --prefix "$ROOT" run tauri build -- --target "$TARGET"
 
 [ -f "$TARGZ_SRC" ] || { rojo "✗ No se generó el .app.tar.gz ($TARGZ_SRC)"; exit 1; }
