@@ -157,13 +157,13 @@ jobs:
       contents: write
     steps:
       - name: Descargar artifacts Mac
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: mac
           path: dist/mac
 
       - name: Descargar artifacts Windows
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: windows-installers
           path: dist/win
