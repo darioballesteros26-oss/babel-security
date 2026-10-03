@@ -21,7 +21,7 @@ python3 -m py_compile servidor_babel/*.py
 npm run tauri dev
 
 # Empaquetado (DMG completo con modelos, ~3 GB)
-./crear_dmg_bundle.sh            # bundle app + firma.py crudo
+./crear_dmg_bundle.sh            # UN comando: compila la app + bundle con modelos/llama-server + firma.py crudo
 ./servidor_babel/build_sidecar.sh   # sidecar PyInstaller (para updates .app.tar.gz)
 ./preparar_usb.sh                # pack USB (~5.5 GB con modelos)
 ```

@@ -13,6 +13,24 @@ APP_DEST="$TMPDIR_BUILD/Security Babel.app"
 
 rm -f "$DMG_OUT"
 
+echo "[0/9] Construyendo la app (frontend + Rust + bundle)..."
+# Flujo en UN solo comando: este script compila la app y luego la empaqueta.
+# bundle.createUpdaterArtifacts:true (necesario para el canal de actualización) hace
+# que `tauri build` intente firmar el .app.tar.gz. Le pasamos la clave del updater si
+# existe → el build termina en 0. Sin clave, la firma del .app.tar.gz falla PERO el
+# .app se genera igual, así que toleramos ese fallo concreto y validamos el .app abajo.
+UPDATE_KEY="$HOME/.babel-update-key"
+if [ -f "$UPDATE_KEY" ]; then
+  TAURI_SIGNING_PRIVATE_KEY="$(cat "$UPDATE_KEY")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+    npm --prefix "$INTERFAZ" run tauri build
+else
+  echo "   (sin ~/.babel-update-key: se ignora el fallo de firma del .app.tar.gz; el .app igual se genera)"
+  npm --prefix "$INTERFAZ" run tauri build || true
+fi
+if [ ! -d "$BUILD_APP" ]; then
+  echo "ERROR: no se generó la app en $BUILD_APP (¿falló la compilación?)"; exit 1
+fi
+
 echo "[1/9] App base..."
 cp -R "$BUILD_APP" "$APP_DEST"
 mkdir -p "$APP_DEST/Contents/Frameworks"
