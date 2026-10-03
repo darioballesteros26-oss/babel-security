@@ -1,6 +1,6 @@
 [package]
 name = "babel-interfaz"
-version = "0.2.10"
+version = "0.2.11"
 edition = "2021"
 license = "LicenseRef-Proprietary"
 publish = false  # app de escritorio, nunca se publica a crates.io (y cargo-deny la salta)
