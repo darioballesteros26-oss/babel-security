@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tauri::{Emitter, Manager};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
@@ -325,6 +325,60 @@ async fn ping_servidor() -> bool {
     })
     .await
     .unwrap_or(false)
+}
+
+// Pre-calienta el fichero del modelo en la caché de disco del sistema SIN instanciar
+// el modelo. Objetivo: cuando el usuario abra el asistente, la carga lea el .gguf
+// (~2,5 GB) desde RAM en vez de disco → se evita el «tirón» de I/O en frío. NO se
+// retiene memoria del modelo (la caché de disco es desechable: el sistema la libera
+// si el traductor necesita RAM), por lo que es seguro en equipos de 8 GB donde IA y
+// traductor se excluyen mutuamente. No es «cargar medio modelo» (eso no existe:
+// la inferencia necesita todas las capas); es calentar solo la lectura del fichero.
+// Idempotente: solo se ejecuta una vez por sesión.
+static PREFETCH_HECHO: AtomicBool = AtomicBool::new(false);
+
+/// Lee el .gguf del modelo en segundo plano para dejarlo en la caché de disco.
+/// Dispararlo al entrar en REDACTAR (antes de pulsar «iniciar asistente») hace que
+/// el arranque posterior no sufra el pico de I/O de leer 2,5 GB en frío.
+#[tauri::command]
+pub async fn precalentar_modelo_ia(app: tauri::AppHandle) -> Result<(), String> {
+    // Solo una vez por sesión: repetir no aporta (ya estaría en caché).
+    if PREFETCH_HECHO.swap(true, Ordering::AcqRel) {
+        return Ok(());
+    }
+    // Si el modelo ya está cargado/cargando, el fichero ya está en RAM: nada que hacer.
+    if LLAMA_PID.load(Ordering::Acquire) != 0 {
+        return Ok(());
+    }
+    let ruta = ruta_modelo(&app);
+    if !ruta.exists() {
+        return Ok(()); // sin modelo instalado: nada que precalentar
+    }
+
+    // Lectura secuencial descartando los bytes: trae las páginas del .gguf a la caché
+    // de disco sin copiarlas a ninguna estructura que las retenga. En SSD son ~1-2 s.
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Read;
+        let mut f = match std::fs::File::open(&ruta) {
+            Ok(f) => f,
+            Err(e) => {
+                log::debug!("[IA] prefetch: no se pudo abrir el modelo: {e}");
+                return;
+            }
+        };
+        let mut buf = vec![0u8; 4 * 1024 * 1024]; // en heap: 4 MB en pila desbordaría
+        let mut total: u64 = 0;
+        loop {
+            match f.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => total += n as u64,
+                Err(_) => break,
+            }
+        }
+        log::info!("[IA] prefetch del modelo completado: {} MB en caché", total / (1024 * 1024));
+    });
+
+    Ok(())
 }
 
 #[tauri::command]

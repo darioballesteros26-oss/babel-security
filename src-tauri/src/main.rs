@@ -7460,6 +7460,7 @@ fn main() {
             rat_detector::rechazar_solicitud_desbloqueo_rat,
             rat_detector::obtener_solicitud_desbloqueo_rat,
             integridad::obtener_estado_integridad,
+            ia_redaccion::precalentar_modelo_ia,
             ia_redaccion::iniciar_ia_redaccion,
             ia_redaccion::parar_ia_redaccion,
             ia_redaccion::estado_ia_redaccion,

@@ -3541,6 +3541,11 @@ function abrirEditorTiptap(edit?: { ruta: string; titulo: string; html: string }
   const contenedor = document.getElementById("editor-contenido");
   if (!pantalla || !contenedor) return;
 
+  // Pre-calentar el fichero del modelo IA en la caché de disco (sin cargarlo en RAM):
+  // si el usuario pulsa luego el asistente, el arranque no sufre el tirón de leer
+  // ~2,5 GB en frío. Es idempotente y no bloquea (fire-and-forget).
+  void invoke("precalentar_modelo_ia").catch(() => { /* sin modelo: ignorar */ });
+
   _editorRutaCifrada = null;
   _editorRutaEdicion = edit?.ruta ?? null;
   _carpetaEditorSeleccionada = "todos";
