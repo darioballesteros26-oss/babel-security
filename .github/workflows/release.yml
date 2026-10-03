@@ -35,7 +35,7 @@ jobs:
       # OCR (PaddleOCR-VL) usa llama-cpp-python en import perezoso: se omite aquí
       # (compila eterno en CI) → OCR degradado, el resto del servidor funciona.
       - name: Preparar Python para el sidecar
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
