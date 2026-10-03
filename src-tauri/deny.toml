@@ -1,5 +1,5 @@
 # deny.toml — política de cargo-deny para la auditoría de dependencias en CI.
-# CI (ver .github/workflows/security.yml): `cargo deny check advisories bans sources`.
+# CI (ver .github/workflows/security.yml): `cargo deny check advisories bans sources licenses`.
 # Objetivo: VERDE con lo ya triado, ROJO solo si entra una vulnerabilidad NUEVA.
 
 [advisories]
