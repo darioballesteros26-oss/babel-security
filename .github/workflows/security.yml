@@ -1,16 +1,22 @@
 name: Security Audit
+
+# Audita las dependencias Rust contra la base de avisos de RustSec en cada push/PR
+# y cada lunes. La política (crates ignorados ya triados, bans, fuentes) está en
+# src-tauri/deny.toml. VERDE con lo conocido; ROJO si entra una vulnerabilidad NUEVA.
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
-    - cron: '0 8 * * 1'  # cada lunes
+    - cron: '0 8 * * 1'  # cada lunes 08:00 UTC
 
 jobs:
-  audit:
+  deny:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
+      - uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: src-tauri
+          manifest-path: ./src-tauri/Cargo.toml
+          command: check advisories bans sources

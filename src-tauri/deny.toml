@@ -1,0 +1,30 @@
+# deny.toml — política de cargo-deny para la auditoría de dependencias en CI.
+# CI (ver .github/workflows/security.yml): `cargo deny check advisories bans sources`.
+# Objetivo: VERDE con lo ya triado, ROJO solo si entra una vulnerabilidad NUEVA.
+
+[advisories]
+version = 2
+# Unmaintained: avisar solo de dependencias DIRECTAS del workspace; las transitivas
+# (GTK/glib/unic/paste/ttf-parser… que en macOS ni se usan) no deben hacer fallar el CI.
+unmaintained = "workspace"
+# Avisos ya TRIADOS el 2026-10-03 (ver memoria auditoria_deps_20261003). Todos son DoS
+# al parsear ficheros no confiables o edge-cases de validación TLS — ni RCE ni fuga de
+# claves. Pendientes de arreglar (bump mayor / upstream). Revisar y quitar al corregir.
+ignore = [
+  "RUSTSEC-2026-0187", # lopdf stack overflow (PDF anidado) → pendiente subir a 0.42
+  "RUSTSEC-2026-0194", # quick-xml run time cuadrático (DOCX) → vía docx-rs/plist (upstream)
+  "RUSTSEC-2026-0195", # quick-xml alloc de namespaces (DOCX) → idem
+  "RUSTSEC-2026-0049", # rustls-webpki CRL → vía rustls 0.22 directo, pendiente 0.23
+  "RUSTSEC-2026-0098", # rustls-webpki name constraints
+  "RUSTSEC-2026-0099", # rustls-webpki wildcard
+  "RUSTSEC-2026-0104", # rustls-webpki panic al parsear CRL
+  "RUSTSEC-2026-0192", # ttf-parser unmaintained (dep directa, subset de fuentes en pdf_reducir)
+]
+
+[bans]
+# El árbol de Tauri trae duplicados normales (p. ej. zip, rustls en 2 versiones).
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
