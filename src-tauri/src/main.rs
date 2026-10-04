@@ -4874,7 +4874,11 @@ fn ia_pdftotext(ruta: &str) -> Result<String, String> {
 }
 
 fn ia_truncar(texto: &str) -> String {
-    const MAX: usize = 16_000;
+    // Tope ALTO: ya no recortamos a lo que cabe en una pasada. El documento completo
+    // llega a la interfaz, que lo resume por bloques (resumir_documento_si_largo) si no
+    // cabe en el contexto. Este tope solo evita cargar ficheros patológicamente enormes
+    // (~400 000 car. ≈ 130 páginas); más allá, ni el resumen por bloques daría abasto.
+    const MAX: usize = 400_000;
     let t = texto.trim();
     if t.len() <= MAX {
         return t.to_string();
@@ -4886,7 +4890,7 @@ fn ia_truncar(texto: &str) -> String {
     }
     let corte = t[..boundary].rfind(|c: char| c.is_whitespace()).unwrap_or(boundary);
     format!(
-        "{}\n\n[... documento truncado a 16 000 caracteres ...]",
+        "{}\n\n[... documento truncado a 400 000 caracteres por tamaño excesivo ...]",
         t[..corte].trim_end()
     )
 }
@@ -7481,6 +7485,7 @@ fn main() {
             ia_redaccion::estado_ia_redaccion,
             ia_redaccion::enviar_mensaje_ia,
             ia_redaccion::enviar_mensaje_ia_stream,
+            ia_redaccion::resumir_documento_si_largo,
             seleccionar_cert_p12,
             titular_del_cert,
             firmar_pdf_cifrado,

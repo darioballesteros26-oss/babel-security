@@ -254,10 +254,16 @@ impl IaRedaccionState {
     }
 }
 
-// Modelos candidatos EN ORDEN DE PREFERENCIA. El Q4_K_M (~2.5 GB) es más ligero y
-// mucho más rápido en CPU — clave para Macs sin GPU utilizable (p. ej. MacBook Neo,
-// A18 Pro) y con 8 GB. Si no está, se cae al Q6_K (~3.1 GB, máxima calidad).
+// Modelos candidatos EN ORDEN DE PREFERENCIA.
+// Qwen3-4B-Instruct-2507 (ago. 2025) es un salto de calidad sobre el Qwen3-4B original
+// (mejor seguimiento de instrucciones y redacción) MISMO tamaño y velocidad, y la
+// variante Instruct NO «piensa» (no emite <think>), lo que encaja con /no_think y evita
+// gastar tokens. Q4_K_M (~2.3 GB) para 8 GB; Q6_K (~3.1 GB, <4 GB) para 16 GB+.
+// Se dejan los Qwen3-4B antiguos como RESPALDO: una instalación previa sigue funcionando
+// hasta que se descargue el 2507 a ~/Babel/modelos_ia/.
 const MODELOS_CANDIDATOS: &[&str] = &[
+    "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "Qwen3-4B-Instruct-2507-Q6_K.gguf",
     "Qwen3-4B-Q4_K_M.gguf",
     "Qwen3-4B-Q6_K.gguf",
 ];
@@ -279,8 +285,12 @@ fn ruta_modelo(app: &tauri::AppHandle) -> PathBuf {
             .join("modelos_ia"),
     );
 
-    for dir in &dirs_busqueda {
-        for nombre in MODELOS_CANDIDATOS {
+    // Iterar por PREFERENCIA DE MODELO primero (y dentro, por directorio): así el mejor
+    // modelo disponible gana esté donde esté. Clave tras introducir el 2507: si el bundle
+    // (Resources) aún trae el Qwen3-4B viejo pero ~/Babel/modelos_ia ya tiene el 2507
+    // descargado, se usa el 2507 — sin necesidad de rehacer el DMG.
+    for nombre in MODELOS_CANDIDATOS {
+        for dir in &dirs_busqueda {
             let ruta = dir.join(nombre);
             if ruta.exists() {
                 return ruta;
@@ -574,15 +584,35 @@ pub async fn iniciar_ia_redaccion(
     // explícitamente antes de lanzar y registrar el resultado: si falla (bundle
     // read-only por App Translocation, permisos), el proceso morirá al arrancar y
     // el diagnóstico del log lo dejará claro.
+    //
+    // CLAVE PARA METAL (GPU): ggml carga sus backends (libggml-metal.so, CPU, BLAS)
+    // como plugins vía dlopen EN RUNTIME. Si esos .so conservan la cuarentena, macOS
+    // se niega a cargarlos → "no usable GPU found" → la IA cae a CPU (8× más lenta en
+    // prefill). Por eso NO basta con limpiar llama-server: hay que limpiar TODA la
+    // carpeta de binarios (los .so) y Frameworks (los .dylib). Recursivo (-r).
     #[cfg(target_os = "macos")]
     {
-        match std::process::Command::new("xattr")
-            .args(["-d", "com.apple.quarantine", &llama_bin])
-            .output()
-        {
-            Ok(o) if o.status.success() => {}
-            Ok(_) => log::debug!("[IA] xattr quarantine ya limpio o no presente en llama-server"),
-            Err(e) => log::warn!("[IA] no se pudo ejecutar xattr sobre llama-server: {e}"),
+        use std::path::Path;
+        let binaries_dir = Path::new(&llama_bin)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+        // Frameworks está en ../../Frameworks respecto a Resources/binaries (vale tanto
+        // para el bundle .app como para el stack persistido en ~/Babel/ia_stack).
+        let frameworks_dir = binaries_dir.join("..").join("..").join("Frameworks");
+        for dir in [&binaries_dir, &frameworks_dir] {
+            if !dir.exists() {
+                continue;
+            }
+            match std::process::Command::new("xattr")
+                .args(["-r", "-d", "com.apple.quarantine"])
+                .arg(dir)
+                .output()
+            {
+                Ok(o) if o.status.success() => log::info!("[IA] quarantine limpiada en {}", dir.display()),
+                Ok(_) => log::debug!("[IA] quarantine ya limpia o ausente en {}", dir.display()),
+                Err(e) => log::warn!("[IA] no se pudo limpiar quarantine en {}: {e}", dir.display()),
+            }
         }
     }
 
@@ -597,9 +627,15 @@ pub async fn iniciar_ia_redaccion(
     // el A18 Pro del MacBook Neo) el intento con Metal SIEMPRE falla y obliga a cargar
     // el modelo de 2,3 GB dos veces (GPU→CPU), duplicando el tiempo de arranque y la
     // sensación de «congelado». Si la última vez ganó CPU, arrancamos directo en CPU.
+    // El recuerdo lleva una ETIQUETA DE VERSIÓN ("cpu:v2"). Así, tras el fix de la
+    // cuarentena de los .so (que desbloquea Metal), toda máquina que quedó clavada en
+    // CPU con el formato antiguo ("cpu" a secas) vuelve a PROBAR Metal una vez: su hint
+    // no coincide con "cpu:v2" → se intenta GPU primero. Si Metal funciona (debería en
+    // cualquier Apple Silicon), se guarda "gpu:v2" y queda rápido para siempre.
+    const HINT_VER: &str = "v2";
     let hint_path = crate::babel_dir().join("ia_backend.txt");
     let hint = std::fs::read_to_string(&hint_path).unwrap_or_default();
-    let intentos: Vec<(&str, &str)> = if hint.trim() == "cpu" {
+    let intentos: Vec<(&str, &str)> = if hint.trim() == format!("cpu:{HINT_VER}") {
         log::info!("[IA] backend recordado: CPU — se omite el intento de GPU");
         vec![("0", "CPU")]
     } else {
@@ -617,8 +653,11 @@ pub async fn iniciar_ia_redaccion(
         .await
         {
             Arranque::Activo => {
-                // Persistir el backend ganador para la próxima sesión.
-                let _ = std::fs::write(&hint_path, if *gpu_layers == "0" { "cpu" } else { "gpu" });
+                // Persistir el backend ganador (con etiqueta de versión) para la próxima sesión.
+                let _ = std::fs::write(
+                    &hint_path,
+                    if *gpu_layers == "0" { format!("cpu:{HINT_VER}") } else { format!("gpu:{HINT_VER}") },
+                );
                 *state.estado.lock().await = "activo".into();
                 return Ok("activo".into());
             }
@@ -861,6 +900,136 @@ pub async fn enviar_mensaje_ia(
     // Aplicar el mismo pipeline de limpieza que el modo streaming
     let limpio = limpiar_pasos_internos(&limpiar_thinking(&content));
     Ok(limpio.lines().map(limpiar_md).collect::<Vec<_>>().join("\n").trim().to_string())
+}
+
+// ── RESUMEN POR BLOQUES (map-reduce) para documentos largos ──────────────────
+// Un documento más largo que la ventana de contexto no cabe de una vez. En vez de
+// recortarlo, lo leemos ENTERO por bloques: resumimos cada bloque conservando los
+// datos clave y, si la unión de resúmenes sigue sin caber, repetimos (reduce).
+
+// Si el documento cabe holgadamente de una vez, no se resume (se usa tal cual).
+const UMBRAL_RESUMEN_CHARS: usize = 15_000;
+// Tamaño de cada bloque que se envía al modelo para resumir.
+const BLOQUE_RESUMEN_CHARS: usize = 12_000;
+// Máximo de vueltas de reducción (evita bucles en documentos enormes).
+const MAX_VUELTAS_RESUMEN: usize = 2;
+
+const SYSTEM_RESUMEN: &str = "/no_think Eres un extractor de datos fiel. Recibes un FRAGMENTO de un \
+documento más largo. Tu única tarea es extraer de forma COMPACTA todos los datos y hechos relevantes de \
+ESTE fragmento: nombres, fechas, cantidades, cláusulas, obligaciones, plazos, referencias, identificadores \
+y hechos. Copia los datos LITERALES tal cual aparecen (fechas, cifras y nombres exactos). NO inventes nada, \
+NO añadas información que no esté en el fragmento, NO saques conclusiones ni redactes. Responde en español, \
+en viñetas breves. Si el fragmento no contiene datos relevantes, responde «(sin datos relevantes)».";
+
+// Divide el texto en bloques de ~`tam` caracteres, retrocediendo a un salto de línea
+// o espacio para no cortar palabras/frases por la mitad.
+fn dividir_en_bloques(texto: &str, tam: usize) -> Vec<String> {
+    let chars: Vec<char> = texto.chars().collect();
+    let mut bloques = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let mut fin = (i + tam).min(chars.len());
+        if fin < chars.len() {
+            let limite = i + tam / 2; // no retroceder más de la mitad del bloque
+            let mut j = fin;
+            while j > limite && chars[j] != '\n' && !chars[j].is_whitespace() {
+                j -= 1;
+            }
+            if j > limite {
+                fin = j;
+            }
+        }
+        bloques.push(chars[i..fin].iter().collect());
+        i = fin;
+    }
+    bloques
+}
+
+// Llamada no-streaming directa al modelo con un system prompt a medida (sin el
+// PREFIJO_CONTROL ni RAG de la redacción: aquí solo queremos extraer datos).
+async fn llamar_modelo_simple(system: &str, user: String, max_tokens: u32) -> Result<String, String> {
+    let body = serde_json::json!({
+        "model": "qwen3",
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user",   "content": user }
+        ],
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "max_tokens": max_tokens,
+        "stream": false
+    });
+    let url = format!("{}/v1/chat/completions", base_url());
+    let body_str = body.to_string();
+
+    let raw = tauri::async_runtime::spawn_blocking(move || {
+        ureq::post(&url)
+            .set("Content-Type", "application/json")
+            .timeout(std::time::Duration::from_secs(600))
+            .send_string(&body_str)
+            .map_err(|e| format!("Error al contactar el asistente: {e}"))?
+            .into_string()
+            .map_err(|e| format!("Error leyendo respuesta: {e}"))
+    })
+    .await
+    .map_err(|e| format!("Error de tarea interna: {e}"))??;
+
+    let json: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("Respuesta inesperada del modelo: {e}"))?;
+    let content = json["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    Ok(limpiar_thinking(&content).trim().to_string())
+}
+
+/// Si el documento es más largo de lo que cabe en el contexto, lo resume ENTERO por
+/// bloques (map-reduce) y devuelve el resumen; si cabe, lo devuelve sin tocar.
+/// Emite `ia-resumen-progreso` por cada bloque para que la interfaz muestre el avance.
+#[tauri::command]
+pub async fn resumir_documento_si_largo(
+    texto: String,
+    state: tauri::State<'_, IaRedaccionState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+
+    // Cabe de una vez → no hace falta resumir.
+    if texto.chars().count() <= UMBRAL_RESUMEN_CHARS {
+        return Ok(texto);
+    }
+    if *state.estado.lock().await != "activo" {
+        return Err("El asistente no está activo.".into());
+    }
+
+    let mut nivel = texto;
+    let mut vuelta = 0;
+    loop {
+        let bloques = dividir_en_bloques(&nivel, BLOQUE_RESUMEN_CHARS);
+        let total = bloques.len();
+        let mut resumenes = Vec::with_capacity(total);
+        for (idx, bloque) in bloques.into_iter().enumerate() {
+            let _ = app.emit(
+                "ia-resumen-progreso",
+                serde_json::json!({ "bloque": idx + 1, "total": total, "vuelta": vuelta + 1 }),
+            );
+            let user = format!("FRAGMENTO {}/{} del documento:\n\n{}", idx + 1, total, bloque);
+            let resumen = llamar_modelo_simple(SYSTEM_RESUMEN, user, 800).await?;
+            resumenes.push(format!("— Parte {}/{} —\n{}", idx + 1, total, resumen));
+        }
+        nivel = resumenes.join("\n\n");
+        vuelta += 1;
+        if nivel.chars().count() <= UMBRAL_RESUMEN_CHARS || vuelta >= MAX_VUELTAS_RESUMEN {
+            break;
+        }
+    }
+
+    let _ = app.emit("ia-resumen-progreso", serde_json::json!({ "fin": true }));
+    Ok(format!(
+        "[RESUMEN POR BLOQUES — Babel ha leído TODO el documento (demasiado largo para procesarlo de \
+una sola vez) y ha extraído los datos clave de cada parte. Trabaja con estos datos; si necesitas un \
+fragmento literal que no aparezca aquí, pídeselo al usuario.]\n\n{nivel}"
+    ))
 }
 
 const SYSTEM_PROMPT: &str = "/no_think Eres Babel, asistente de redacción documental y jurídica. \
@@ -1108,6 +1277,36 @@ pub async fn enviar_mensaje_ia_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── dividir_en_bloques ───────────────────────────────────────────────
+
+    #[test]
+    fn bloques_cubren_todo_el_texto_sin_perder_caracteres() {
+        let texto = "palabra ".repeat(5000); // 40 000 chars
+        let bloques = dividir_en_bloques(&texto, 12_000);
+        assert!(bloques.len() >= 3, "debe partir en varios bloques");
+        let reconstruido: String = bloques.concat();
+        assert_eq!(reconstruido, texto, "la unión de bloques debe ser el texto íntegro");
+    }
+
+    #[test]
+    fn texto_corto_un_solo_bloque() {
+        let texto = "documento breve";
+        let bloques = dividir_en_bloques(texto, 12_000);
+        assert_eq!(bloques.len(), 1);
+        assert_eq!(bloques[0], texto);
+    }
+
+    #[test]
+    fn corta_en_espacio_no_a_mitad_de_palabra() {
+        // Palabras separadas por espacios: ningún bloque debe empezar/terminar partiendo
+        // una palabra (salvo que no haya espacio en la segunda mitad del bloque).
+        let texto = "alfa beta gamma delta epsilon zeta ".repeat(1000);
+        let bloques = dividir_en_bloques(&texto, 100);
+        assert!(bloques.len() > 1);
+        // La reconstrucción sigue siendo exacta aunque corte por espacios.
+        assert_eq!(bloques.concat(), texto);
+    }
 
     // ── detectar_fechas_palabras_imposibles ──────────────────────────────
 

@@ -38,14 +38,21 @@ mkdir -p "$APP_DEST/Contents/Resources/binaries"
 
 echo "[2/9] Modelo IA Qwen3..."
 mkdir -p "$APP_DEST/Contents/Resources/modelos_ia"
-# Preferir Q4_K_M (ligero, rápido en CPU); caer a Q6_K si no está.
-if [ -f ~/Babel/modelos_ia/Qwen3-4B-Q4_K_M.gguf ]; then
-  cp ~/Babel/modelos_ia/Qwen3-4B-Q4_K_M.gguf "$APP_DEST/Contents/Resources/modelos_ia/"
-  echo "   modelo: Qwen3-4B-Q4_K_M (ligero)"
-else
-  cp ~/Babel/modelos_ia/Qwen3-4B-Q6_K.gguf "$APP_DEST/Contents/Resources/modelos_ia/"
-  echo "   modelo: Qwen3-4B-Q6_K (fallback)"
+# Preferencia: Qwen3-4B-Instruct-2507 Q4_K_M (mejor calidad, mismo tamaño) → su Q6_K →
+# el Qwen3-4B antiguo como último recurso. El primero que exista en ~/Babel/modelos_ia.
+MODELO_IA=""
+for cand in \
+  Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+  Qwen3-4B-Instruct-2507-Q6_K.gguf \
+  Qwen3-4B-Q4_K_M.gguf \
+  Qwen3-4B-Q6_K.gguf; do
+  if [ -f ~/Babel/modelos_ia/"$cand" ]; then MODELO_IA="$cand"; break; fi
+done
+if [ -z "$MODELO_IA" ]; then
+  echo "ERROR: no encuentro ningún modelo Qwen3 en ~/Babel/modelos_ia/"; exit 1
 fi
+cp ~/Babel/modelos_ia/"$MODELO_IA" "$APP_DEST/Contents/Resources/modelos_ia/"
+echo "   modelo: $MODELO_IA"
 
 echo "[3/9] SMaLL-100..."
 mkdir -p "$APP_DEST/Contents/Resources/servidor/modelos_usb"

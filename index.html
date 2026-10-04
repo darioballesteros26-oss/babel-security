@@ -2498,16 +2498,6 @@
       style="flex:1;background:transparent;border:none;border-bottom:1px solid rgba(212,175,55,0.25);
       color:#E8E8E8;font-family:'Times New Roman',Times,serif;font-size:0.9rem;
       letter-spacing:1px;padding:4px 0;outline:none;min-width:0;" />
-    <div id="editor-formato-wrap" style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-      <label for="editor-formato" style="color:#888;font-size:0.5rem;letter-spacing:2px;">FORMATO</label>
-      <select id="editor-formato"
-        style="background:#14141a;color:#E8E8E8;border:1px solid rgba(212,175,55,0.3);border-radius:5px;
-        padding:6px 8px;font-family:'Times New Roman',Times,serif;font-size:0.62rem;letter-spacing:1px;
-        outline:none;cursor:pointer;">
-        <option value="docx">DOCX (editable)</option>
-        <option value="pdf">PDF (final)</option>
-      </select>
-    </div>
     <button type="button" id="editor-btn-guardar" data-action="guardar-documento-editor"
       style="background:linear-gradient(135deg,var(--dorado),#A8860C);border:none;color:#0B0F19;
       padding:8px 18px;border-radius:6px;font-family:'Times New Roman',Times,serif;
@@ -2694,33 +2684,6 @@
 </div>
 
 <!-- ── MODAL SELECTOR CARPETA (dentro del editor) ───────────────────── -->
-<div id="modal-selector-carpeta-editor" class="hidden" style="
-  position:fixed;inset:0;z-index:9500;
-  background:rgba(0,0,0,0.88);backdrop-filter:blur(6px);
-  display:flex;align-items:center;justify-content:center;padding:20px;">
-  <div style="background:#111;border:1px solid rgba(212,175,55,0.35);border-radius:12px;
-    max-width:380px;width:100%;box-shadow:0 0 40px rgba(212,175,55,0.08);">
-    <div style="padding:20px 24px;border-bottom:1px solid rgba(212,175,55,0.12);">
-      <div style="color:var(--dorado);font-size:0.58rem;letter-spacing:3px;font-weight:700;
-        font-family:'Times New Roman',Times,serif;">GUARDAR EN CARPETA</div>
-      <div style="color:#555;font-size:0.62rem;margin-top:5px;font-family:'Times New Roman',Times,serif;
-        letter-spacing:1px;">Elige dónde guardar el documento</div>
-    </div>
-    <div id="selector-carpeta-lista" style="max-height:300px;overflow-y:auto;padding:6px 0;
-      scrollbar-width:thin;scrollbar-color:rgba(212,175,55,0.2) transparent;"></div>
-    <div style="padding:14px 24px;border-top:1px solid rgba(255,255,255,0.05);display:flex;gap:10px;">
-      <button type="button" data-action="confirmar-carpeta-editor" style="
-        flex:1;background:linear-gradient(135deg,var(--dorado),#A8860C);border:none;color:#0B0F19;
-        padding:10px;border-radius:6px;font-family:'Times New Roman',Times,serif;
-        font-size:0.68rem;letter-spacing:2px;font-weight:700;cursor:pointer;">CONFIRMAR</button>
-      <button type="button" data-action="cancelar-carpeta-editor" style="
-        background:transparent;border:1px solid rgba(255,255,255,0.1);color:#555;
-        padding:10px 14px;border-radius:6px;font-family:'Times New Roman',Times,serif;
-        font-size:0.68rem;letter-spacing:2px;cursor:pointer;">EN TODOS</button>
-    </div>
-  </div>
-</div>
-
 <!-- ── PANTALLA REDACCIÓN — vista dividida con separador arrastrable ──── -->
 <div id="pantalla-redaccion" class="hidden" style="
   position:fixed;inset:0;z-index:8500;background:var(--fondo);
@@ -3045,6 +3008,22 @@
       color:#e8e0d0;font-family:'Times New Roman',Times,serif;font-size:0.9rem;
       padding:9px 12px;border-radius:3px;outline:none;margin-bottom:22px;"/>
 
+    <!-- Formato -->
+    <label style="display:block;font-family:'Times New Roman',Times,serif;font-size:0.58rem;
+      letter-spacing:1px;color:rgba(201,168,76,0.45);margin-bottom:10px;">FORMATO</label>
+    <div style="display:flex;gap:8px;margin-bottom:22px;">
+      <label style="flex:1;display:flex;align-items:center;gap:8px;cursor:pointer;
+        padding:10px 14px;border:1px solid rgba(201,168,76,0.2);border-radius:4px;">
+        <input type="radio" name="guardar-doc-formato" value="docx" style="accent-color:#c9a84c;" checked>
+        <span style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;color:#e8e0d0;">DOCX (editable)</span>
+      </label>
+      <label style="flex:1;display:flex;align-items:center;gap:8px;cursor:pointer;
+        padding:10px 14px;border:1px solid rgba(201,168,76,0.2);border-radius:4px;">
+        <input type="radio" name="guardar-doc-formato" value="pdf" style="accent-color:#c9a84c;">
+        <span style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;color:#e8e0d0;">PDF (final)</span>
+      </label>
+    </div>
+
     <!-- Ubicación -->
     <label style="display:block;font-family:'Times New Roman',Times,serif;font-size:0.58rem;
       letter-spacing:1px;color:rgba(201,168,76,0.45);margin-bottom:10px;">GUARDAR EN</label>
@@ -3063,12 +3042,14 @@
 
       <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;
         padding:10px 14px;border:1px solid rgba(201,168,76,0.2);border-radius:4px;">
-        <input type="radio" name="guardar-ia-ubicacion" value="normal" style="margin-top:2px;accent-color:#c9a84c;">
-        <div>
+        <input type="radio" name="guardar-ia-ubicacion" value="carpeta" style="margin-top:2px;accent-color:#c9a84c;">
+        <div style="flex:1;min-width:0;">
           <div style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;color:#e8e0d0;">
-            Guardar en Mis archivos</div>
-          <div style="font-family:'Times New Roman',Times,serif;font-size:0.6rem;
-            color:rgba(201,168,76,0.4);margin-top:3px;">Cifrado en tu bóveda Babel</div>
+            En una carpeta</div>
+          <select id="guardar-ia-carpeta"
+            style="margin-top:6px;width:100%;box-sizing:border-box;background:#111;
+            border:1px solid rgba(201,168,76,0.3);color:#e8e0d0;font-family:'Times New Roman',Times,serif;
+            font-size:0.68rem;padding:7px 8px;border-radius:3px;outline:none;cursor:pointer;"></select>
         </div>
       </label>
     </div>

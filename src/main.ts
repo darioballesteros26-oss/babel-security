@@ -92,8 +92,6 @@ let _renombraEsGuardado = false;
 
 // Editor Tiptap
 let _tiptapEditor: Editor | null = null;
-let _editorRutaCifrada: string | null = null;
-let _carpetaEditorSeleccionada: string = "todos";
 // Modo edición: cuando se abre un DOCX guardado para modificarlo, guarda su ruta
 // (para sobrescribir en sitio). null = documento nuevo.
 let _editorRutaEdicion: string | null = null;
@@ -631,9 +629,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "guardar-redaccion":        void guardarRedaccion(); break;
     case "confirmar-guardar-ia": {
       const inputN = document.getElementById("guardar-ia-nombre") as HTMLInputElement | null;
-      const nombre = inputN?.value.trim() || "Documento redactado";
-      document.getElementById("modal-guardar-ia")?.classList.add("hidden");
-      void _ejecutarGuardarRedaccion(nombre);
+      void _ejecutarGuardarDoc(inputN?.value ?? "");
       break;
     }
     case "cancelar-guardar-ia":
@@ -645,11 +641,6 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "cerrar-chat-ia-redaccion": void cerrarChatIaRedaccion(); break;
     case "toggle-menu-extra-editor": toggleMenuExtraEditor(); break;
     case "abrir-imagen-editor": abrirImagenEditor(); break;
-    case "confirmar-carpeta-editor": void confirmarCarpetaEditor(); break;
-    case "cancelar-carpeta-editor": cancelarCarpetaEditor(); break;
-    case "seleccionar-carpeta-editor":
-      seleccionarCarpetaEnSelector(el.dataset.carpeta ?? "todos", el.dataset.nombre ?? "TODOS");
-      break;
     case "mostrar-input-buzon-guardado": mostrarInputBuzonGuardado(); break;
     case "confirmar-buzon-guardado": confirmarBuzonGuardado(); break;
     case "cancelar-buzon-guardado": cancelarBuzonGuardado(); break;
@@ -3546,16 +3537,8 @@ function abrirEditorTiptap(edit?: { ruta: string; titulo: string; html: string }
   // ~2,5 GB en frío. Es idempotente y no bloquea (fire-and-forget).
   void invoke("precalentar_modelo_ia").catch(() => { /* sin modelo: ignorar */ });
 
-  _editorRutaCifrada = null;
   _editorRutaEdicion = edit?.ruta ?? null;
-  _carpetaEditorSeleccionada = "todos";
   if (tituloInput) tituloInput.value = edit?.titulo ?? "";
-
-  // Selector de formato: en edición el formato es fijo (DOCX en sitio) → ocultarlo.
-  const formatoWrap = document.getElementById("editor-formato-wrap");
-  if (formatoWrap) formatoWrap.style.display = edit ? "none" : "";
-  const formatoSel = document.getElementById("editor-formato") as HTMLSelectElement | null;
-  if (formatoSel && !edit) formatoSel.value = "docx";
 
   if (_tiptapEditor) { _tiptapEditor.destroy(); _tiptapEditor = null; }
   contenedor.innerHTML = "";
@@ -3615,10 +3598,8 @@ function _cerrarPaletasEditor(e: Event): void {
 
 function cerrarEditorTiptap(): void {
   document.getElementById("editor-tiptap")?.classList.add("hidden");
-  document.getElementById("modal-selector-carpeta-editor")?.classList.add("hidden");
   document.removeEventListener("click", _cerrarPaletasEditor, true);
   if (_tiptapEditor) { _tiptapEditor.destroy(); _tiptapEditor = null; }
-  _editorRutaCifrada = null;
   _editorRutaEdicion = null;
 }
 
@@ -3897,6 +3878,12 @@ async function abrirRedaccion(modo: "manual" | "babel"): Promise<void> {
 
   _nombreArchivoRedaccion = nombre;
 
+  // Documento de referencia (el seleccionado): disponible en AMBOS modos para que
+  // el diálogo de guardado pueda ofrecer «guardar junto al documento».
+  _rutaRefDocumento = ruta;
+  _buzonRefDocumento = buzonCard;
+  _nombreDocumentoIa = nombre.replace(/\.babel$/, "").replace(/^\d+_/, "");
+
   // Rellenar panel izquierdo
   const contenidoIzq = document.getElementById("redaccion-contenido-izq");
   if (contenidoIzq) renderizarEnContenedor(texto, contenidoIzq, "100%");
@@ -3945,9 +3932,6 @@ async function abrirRedaccion(modo: "manual" | "babel"): Promise<void> {
   } else {
     // Babel: extraer texto plano ANTES de abrir el panel → siempre disponible al enviar
     _textoDocumentoIa = "";
-    _rutaRefDocumento = ruta;
-    _buzonRefDocumento = buzonCard;
-    _nombreDocumentoIa = nombre.replace(/\.babel$/, "").replace(/^\d+_/, "");
     try {
       _textoDocumentoIa = await invoke<string>("extraer_texto_para_ia", { ruta });
     } catch {
@@ -3983,68 +3967,8 @@ function cerrarPantallaRedaccion(): void {
 }
 
 async function guardarRedaccion(): Promise<void> {
-  if (!_tiptapRedaccion) {
-    mostrarToast("Genera un texto con el asistente y pulsa «✍ Editar» primero.", true);
-    return;
-  }
-  // Mostrar diálogo de nombre y ubicación
-  const nombreBase = _nombreArchivoRedaccion.replace(/\.babel$/, "").replace(/^\d+_/, "") || "Documento redactado";
-  const inputNombre = document.getElementById("guardar-ia-nombre") as HTMLInputElement | null;
-  const labelJunto = document.getElementById("guardar-ia-label-junto");
-  const docRef = document.getElementById("guardar-ia-doc-referencia");
-  const opJunto = document.querySelector<HTMLInputElement>("input[name='guardar-ia-ubicacion'][value='junto']");
-  const opNormal = document.querySelector<HTMLInputElement>("input[name='guardar-ia-ubicacion'][value='normal']");
-
-  if (inputNombre) inputNombre.value = nombreBase;
-  if (labelJunto) labelJunto.textContent = _nombreDocumentoIa
-    ? `Guardar junto a «${_nombreDocumentoIa}»`
-    : "Guardar junto al documento de referencia";
-  if (docRef) docRef.textContent = _nombreDocumentoIa || "—";
-
-  // Si no hay doc de referencia, deshabilitar opción "junto" y marcar "normal"
-  const hayRef = !!_rutaRefDocumento;
-  if (opJunto) { opJunto.disabled = !hayRef; opJunto.checked = hayRef; }
-  if (opNormal) opNormal.checked = !hayRef;
-  const optJuntoLabel = document.getElementById("guardar-ia-opt-junto");
-  if (optJuntoLabel) optJuntoLabel.style.opacity = hayRef ? "1" : "0.4";
-
-  document.getElementById("modal-guardar-ia")?.classList.remove("hidden");
-  inputNombre?.focus();
-  inputNombre?.select();
-}
-
-async function _ejecutarGuardarRedaccion(nombre: string): Promise<void> {
-  if (!_tiptapRedaccion) return;
-  const nombreArchivo = nombre.trim() || "Documento redactado";
-  const nombreFinal = nombreArchivo.endsWith(".docx") ? nombreArchivo : nombreArchivo + ".docx";
-  const btn = document.getElementById("redaccion-btn-guardar") as HTMLButtonElement | null;
-  if (btn) btn.disabled = true;
-
-  // Leer opción de ubicación del modal
-  const opJunto = document.querySelector<HTMLInputElement>("input[name='guardar-ia-ubicacion'][value='junto']");
-  const guardarJunto = opJunto?.checked && !!_buzonRefDocumento && _buzonRefDocumento !== "todos";
-
-  try {
-    const bytes = await tiptapADocx(_tiptapRedaccion.getJSON());
-    const b64 = bytesABase64(bytes);
-    const ruta = await invoke<string>("guardar_documento_desde_bytes", { nombreArchivo: nombreFinal, contenidoB64: b64 });
-    if (guardarJunto) {
-      await invoke("mover_archivo_guardado", { ruta, buzonDestino: _buzonRefDocumento }).catch(() => {});
-    }
-    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreFinal }).catch(() => {});
-    invoke("parar_ia_redaccion").catch(() => {}); // libera KV cache y pesos del modelo tras guardar
-    // Salir a la pantalla de archivos Y seleccionar la carpeta destino (o "todos") para
-    // GARANTIZAR que el documento sea visible aunque estuviera activa otra carpeta.
-    // seleccionarBuzonGuardados ya recarga la lista.
-    document.getElementById("modal-guardar-ia")?.classList.add("hidden");
-    mostrarPantalla("archivos-guardados");
-    seleccionarBuzonGuardados(guardarJunto && _buzonRefDocumento ? _buzonRefDocumento : "todos");
-    mostrarToast("Documento guardado y cifrado", false);
-  } catch (err) {
-    mostrarToast("Error al guardar: " + String(err), true);
-  } finally {
-    if (btn) btn.disabled = false;
-  }
+  // Mismo diálogo de guardado que «nuevo documento» (nombre + formato + dónde guardar).
+  await abrirDialogoGuardarDoc("redaccion");
 }
 
 function ejecutarCmdRedaccion(cmd: string): void {
@@ -4177,9 +4101,54 @@ async function iniciarAsistenteIa(): Promise<void> {
     const msgsEl = document.getElementById("redaccion-ia-mensajes");
     msgsEl?.querySelector(".ia-burbuja-pensando")?.remove();
     if (resultado === "activo") {
-      const saludo = _nombreDocumentoIa
-        ? `He leído «${_nombreDocumentoIa}». Escríbeme qué quieres redactar a partir de ese documento.`
-        : "Listo. ¿Qué necesitas redactar?";
+      // Documento largo → leerlo ENTERO por bloques (map-reduce en Rust) antes de saludar.
+      // El umbral debe coincidir con UMBRAL_RESUMEN_CHARS del backend (15 000); si es más
+      // corto, resumir_documento_si_largo devuelve el texto tal cual sin llamar al modelo.
+      if (_textoDocumentoIa && _textoDocumentoIa.length > 15000) {
+        const burbujaResumen = iaRedaccionAppendMensaje("sistema", "Leyendo el documento por bloques…");
+        const unlistenProg = await listen<{ bloque?: number; total?: number; vuelta?: number; fin?: boolean }>(
+          "ia-resumen-progreso",
+          (ev) => {
+            const p = ev.payload;
+            if (p.fin || !burbujaResumen) return;
+            const repaso = (p.vuelta ?? 1) > 1 ? `, repaso ${p.vuelta}` : "";
+            burbujaResumen.textContent = `Leyendo el documento por bloques… (${p.bloque}/${p.total}${repaso})`;
+          },
+        );
+        try {
+          _textoDocumentoIa = await invoke<string>("resumir_documento_si_largo", { texto: _textoDocumentoIa });
+        } catch (e) {
+          // Si el resumen falla, seguimos con el texto completo: el backend lo acotará
+          // al enviarlo (acotar_mensaje). Mejor eso que bloquear el asistente.
+          iaRedaccionAppendMensaje("sistema", "No se pudo resumir el documento largo; se usará solo el principio.");
+        }
+        unlistenProg();
+        burbujaResumen?.remove();
+      }
+
+      // El saludo refleja la REALIDAD de la extracción: solo decimos «he leído» si de
+      // verdad hay texto del documento (_textoDocumentoIa). Mostramos las palabras
+      // captadas como prueba visible. Si la extracción falló (p. ej. PDF escaneado sin
+      // capa de texto), lo advertimos en vez de aparentar que lo leímos.
+      let saludo: string;
+      if (_textoDocumentoIa) {
+        const resumido = _textoDocumentoIa.startsWith("[RESUMEN POR BLOQUES");
+        if (resumido) {
+          saludo = `He leído «${_nombreDocumentoIa}» COMPLETO (era largo, así que lo he recorrido por `
+            + "bloques y me he quedado con los datos clave de todo el documento). "
+            + "Escríbeme qué quieres redactar.";
+        } else {
+          const palabras = _textoDocumentoIa.trim().split(/\s+/).filter(Boolean).length;
+          saludo = `He leído «${_nombreDocumentoIa}» (≈ ${palabras.toLocaleString("es-ES")} palabras). `
+            + "Escríbeme qué quieres redactar a partir de ese documento.";
+        }
+      } else if (_nombreDocumentoIa) {
+        saludo = `No he podido leer el contenido de «${_nombreDocumentoIa}» `
+          + "(puede ser un PDF escaneado sin texto o un formato no compatible). "
+          + "Pégame aquí el texto y seguimos.";
+      } else {
+        saludo = "Listo. ¿Qué necesitas redactar?";
+      }
       iaRedaccionAppendMensaje("babel", saludo);
       if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.style.opacity = "1"; btnEnviar.style.cursor = "pointer"; }
     } else {
@@ -4712,16 +4681,16 @@ async function guardarDocumentoEditor(_e: Event): Promise<void> {
     tituloInput?.focus();
     return;
   }
-  const nombreDocx = titulo.endsWith(".docx") ? titulo : titulo + ".docx";
-  const btn = document.getElementById("editor-btn-guardar") as HTMLButtonElement | null;
-  if (btn) btn.disabled = true;
 
-  try {
-    const bytes = await tiptapADocx(_tiptapEditor.getJSON());
-    const b64 = bytesABase64(bytes);
-
-    // MODO EDICIÓN — sobrescribir el DOCX existente (mismo nombre y carpeta).
-    if (_editorRutaEdicion) {
+  // MODO EDICIÓN — sobrescribir el DOCX existente en su sitio (formato y carpeta fijos,
+  // sin diálogo): se mantiene el nombre y la ubicación originales.
+  if (_editorRutaEdicion) {
+    const nombreDocx = titulo.endsWith(".docx") ? titulo : titulo + ".docx";
+    const btn = document.getElementById("editor-btn-guardar") as HTMLButtonElement | null;
+    if (btn) btn.disabled = true;
+    try {
+      const bytes = await tiptapADocx(_tiptapEditor.getJSON());
+      const b64 = bytesABase64(bytes);
       await invoke("actualizar_documento_guardado", {
         ruta: _editorRutaEdicion,
         nombreArchivo: nombreDocx,
@@ -4732,11 +4701,115 @@ async function guardarDocumentoEditor(_e: Event): Promise<void> {
       mostrarPantalla("archivos-guardados");
       await cargarArchivosGuardados();
       mostrarToast("✓ Documento actualizado", false);
+    } catch (err) {
+      mostrarToast("Error al guardar: " + String(err), true);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+    return;
+  }
+
+  // DOCUMENTO NUEVO — el formato y la ubicación se eligen en el diálogo de guardar.
+  await abrirDialogoGuardarDoc("editor");
+}
+
+// ── DIÁLOGO ÚNICO DE GUARDADO (nuevo documento y redactar) ───────────────────
+// Un solo modal con Nombre + Formato (DOCX/PDF) + Dónde guardar. Idéntico para
+// ambos flujos; la única diferencia es la opción «junto al documento», que solo
+// se ofrece en redactar (cuando hay un documento de referencia en una carpeta).
+
+let _guardarDocOrigen: "editor" | "redaccion" = "redaccion";
+
+function opcionesCarpetaHTML(nodos: BuzonNodo[]): string {
+  const render = (parentId: string | null, depth: number): string =>
+    nodos.filter(n => n.parent === parentId).map(n => {
+      const indent = "   ".repeat(depth);
+      return `<option value="${escapeHTML(n.id)}">${indent}${escapeHTML(n.nombre)}</option>` +
+        render(n.id, depth + 1);
+    }).join("");
+  return `<option value="todos">TODOS (sin carpeta)</option>` + render(null, 0);
+}
+
+async function abrirDialogoGuardarDoc(origen: "editor" | "redaccion"): Promise<void> {
+  _guardarDocOrigen = origen;
+
+  // Nombre base + si hay un documento de referencia (solo redactar)
+  let nombreBase = "";
+  let hayRef = false;
+  let nombreRef = "";
+  if (origen === "editor") {
+    if (!_tiptapEditor) return;
+    nombreBase = (document.getElementById("editor-titulo") as HTMLInputElement | null)?.value.trim() ?? "";
+  } else {
+    if (!_tiptapRedaccion) {
+      mostrarToast("Genera un texto con el asistente y pulsa «✍ Editar» primero.", true);
       return;
     }
+    nombreBase = _nombreArchivoRedaccion.replace(/\.babel$/, "").replace(/^\d+_/, "") || "Documento redactado";
+    hayRef = !!_rutaRefDocumento && !!_buzonRefDocumento && _buzonRefDocumento !== "todos";
+    nombreRef = _nombreDocumentoIa;
+  }
 
-    // DOCUMENTO NUEVO — respetar el formato elegido (DOCX editable / PDF final).
-    const formato = (document.getElementById("editor-formato") as HTMLSelectElement | null)?.value ?? "docx";
+  const inputNombre = document.getElementById("guardar-ia-nombre") as HTMLInputElement | null;
+  if (inputNombre) inputNombre.value = nombreBase;
+
+  // Formato: por defecto DOCX
+  const fmtDocx = document.querySelector<HTMLInputElement>("input[name='guardar-doc-formato'][value='docx']");
+  if (fmtDocx) fmtDocx.checked = true;
+
+  // Opción «junto al documento» (solo si hay referencia)
+  const optJuntoLabel = document.getElementById("guardar-ia-opt-junto");
+  const opJunto = document.querySelector<HTMLInputElement>("input[name='guardar-ia-ubicacion'][value='junto']");
+  const opCarpeta = document.querySelector<HTMLInputElement>("input[name='guardar-ia-ubicacion'][value='carpeta']");
+  const labelJunto = document.getElementById("guardar-ia-label-junto");
+  const docRef = document.getElementById("guardar-ia-doc-referencia");
+  if (optJuntoLabel) optJuntoLabel.style.display = hayRef ? "" : "none";
+  if (hayRef) {
+    if (labelJunto) labelJunto.textContent = nombreRef ? `Guardar junto a «${nombreRef}»` : "Guardar junto al documento de referencia";
+    if (docRef) docRef.textContent = nombreRef || "—";
+    if (opJunto) opJunto.checked = true;
+  } else if (opCarpeta) {
+    opCarpeta.checked = true;
+  }
+
+  // Desplegable de carpetas
+  let nodos: BuzonNodo[] = [];
+  try { nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados"); } catch { /* sin carpetas */ }
+  const sel = document.getElementById("guardar-ia-carpeta") as HTMLSelectElement | null;
+  if (sel) {
+    sel.innerHTML = opcionesCarpetaHTML(nodos);
+    sel.value = "todos";
+    sel.disabled = !!opJunto?.checked;
+  }
+
+  document.getElementById("modal-guardar-ia")?.classList.remove("hidden");
+  inputNombre?.focus();
+  inputNombre?.select();
+}
+
+async function _ejecutarGuardarDoc(nombre: string): Promise<void> {
+  const origen = _guardarDocOrigen;
+  const ed = origen === "editor" ? _tiptapEditor : _tiptapRedaccion;
+  if (!ed) return;
+
+  const nombreBase = nombre.trim() || (origen === "redaccion" ? "Documento redactado" : "Documento");
+  const formato = document.querySelector<HTMLInputElement>("input[name='guardar-doc-formato']:checked")?.value ?? "docx";
+  const ubic = document.querySelector<HTMLInputElement>("input[name='guardar-ia-ubicacion']:checked")?.value ?? "carpeta";
+
+  // Carpeta destino: «junto» → carpeta del documento de referencia; si no, la del desplegable.
+  let buzonDestino = "todos";
+  if (ubic === "junto") {
+    buzonDestino = _buzonRefDocumento || "todos";
+  } else {
+    buzonDestino = (document.getElementById("guardar-ia-carpeta") as HTMLSelectElement | null)?.value ?? "todos";
+  }
+
+  const nombreDocx = nombreBase.endsWith(".docx") ? nombreBase : nombreBase + ".docx";
+  document.getElementById("modal-guardar-ia")?.classList.add("hidden");
+
+  try {
+    const bytes = await tiptapADocx(ed.getJSON());
+    const b64 = bytesABase64(bytes);
     let ruta: string;
     if (formato === "pdf") {
       mostrarToast("Generando PDF…", false);
@@ -4750,85 +4823,20 @@ async function guardarDocumentoEditor(_e: Event): Promise<void> {
         contenidoB64: b64,
       });
     }
-    _editorRutaCifrada = ruta;
+    if (buzonDestino && buzonDestino !== "todos") {
+      await invoke("mover_archivo_guardado", { ruta, buzonDestino }).catch(() => {});
+    }
     invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreDocx }).catch(() => {});
-    await abrirSelectorCarpetaEditor(ruta, nombreDocx);
+    if (origen === "redaccion") invoke("parar_ia_redaccion").catch(() => {}); // libera KV cache y pesos del modelo
+
+    if (origen === "editor") cerrarEditorTiptap();
+    else cerrarPantallaRedaccion();
+    mostrarPantalla("archivos-guardados");
+    seleccionarBuzonGuardados(buzonDestino && buzonDestino !== "todos" ? buzonDestino : "todos");
+    mostrarToast(formato === "pdf" ? "✓ PDF guardado y cifrado" : "✓ Documento guardado y cifrado", false);
   } catch (err) {
     mostrarToast("Error al guardar: " + String(err), true);
-  } finally {
-    if (btn) btn.disabled = false;
   }
-}
-
-async function abrirSelectorCarpetaEditor(ruta: string, _nombre: string): Promise<void> {
-  _editorRutaCifrada = ruta;
-  _carpetaEditorSeleccionada = "todos";
-  let nodos: BuzonNodo[] = [];
-  try { nodos = await invoke<BuzonNodo[]>("listar_buzones_guardados"); } catch { /* sin carpetas */ }
-
-  const lista = document.getElementById("selector-carpeta-lista");
-  if (lista) {
-    lista.innerHTML = renderSelectorCarpetaEditorHTML(nodos, null, 0);
-  }
-  document.getElementById("modal-selector-carpeta-editor")?.classList.remove("hidden");
-}
-
-function renderSelectorCarpetaEditorHTML(nodos: BuzonNodo[], parentId: string | null, depth: number): string {
-  const items = nodos.filter(n => n.parent === parentId).map(n => {
-    const indent = 24 + depth * 14;
-    const hijos = renderSelectorCarpetaEditorHTML(nodos, n.id, depth + 1);
-    return `
-      <div class="selector-carpeta-item" data-action="seleccionar-carpeta-editor"
-        data-carpeta="${escapeHTML(n.id)}" data-nombre="${escapeHTML(n.nombre)}"
-        style="padding-left:${indent}px;">
-        <span style="margin-right:6px;font-size:0.6rem;opacity:0.5;">◫</span>
-        ${escapeHTML(n.nombre.toUpperCase())}
-      </div>${hijos}`;
-  }).join("");
-
-  if (parentId === null) {
-    return `<div class="selector-carpeta-item seleccionado" data-action="seleccionar-carpeta-editor"
-      data-carpeta="todos" data-nombre="TODOS" style="padding-left:24px;">
-      <span style="margin-right:6px;font-size:0.6rem;opacity:0.5;">◫</span> TODOS
-    </div>${items}`;
-  }
-  return items;
-}
-
-function seleccionarCarpetaEnSelector(carpetaId: string, _nombre: string): void {
-  _carpetaEditorSeleccionada = carpetaId;
-  document.querySelectorAll(".selector-carpeta-item").forEach(el => {
-    el.classList.toggle("seleccionado", (el as HTMLElement).dataset.carpeta === carpetaId);
-  });
-}
-
-async function confirmarCarpetaEditor(): Promise<void> {
-  const ruta = _editorRutaCifrada;
-  if (!ruta) { cancelarCarpetaEditor(); return; }
-  if (_carpetaEditorSeleccionada && _carpetaEditorSeleccionada !== "todos") {
-    try {
-      await invoke("mover_archivo_guardado", { ruta, buzonDestino: _carpetaEditorSeleccionada });
-    } catch (e) {
-      mostrarToast("Error moviendo a carpeta: " + String(e), true);
-    }
-  }
-  document.getElementById("modal-selector-carpeta-editor")?.classList.add("hidden");
-  cerrarEditorTiptap();
-  // Salir a la pantalla de archivos Y seleccionar la carpeta DESTINO (incl. "todos"),
-  // para GARANTIZAR que el documento recién guardado sea visible aunque el usuario
-  // estuviera viendo otra carpeta antes. seleccionarBuzonGuardados ya recarga la lista.
-  mostrarPantalla("archivos-guardados");
-  seleccionarBuzonGuardados(_carpetaEditorSeleccionada || "todos");
-  mostrarToast("✓ Documento guardado y cifrado", false);
-}
-
-function cancelarCarpetaEditor(): void {
-  document.getElementById("modal-selector-carpeta-editor")?.classList.add("hidden");
-  cerrarEditorTiptap();
-  // El documento quedó en "TODOS": mostrar esa vista para que sea visible.
-  mostrarPantalla("archivos-guardados");
-  seleccionarBuzonGuardados("todos");
-  mostrarToast("✓ Documento guardado en TODOS y cifrado", false);
 }
 
 // ── CONVERSIÓN TIPTAP → DOCX ─────────────────────────────────────────────────
@@ -7693,6 +7701,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Diálogo guardar: al elegir «junto al documento» se desactiva el desplegable de carpeta
+  document.querySelectorAll<HTMLInputElement>("input[name='guardar-ia-ubicacion']").forEach(r => {
+    r.addEventListener("change", () => {
+      const junto = document.querySelector<HTMLInputElement>("input[name='guardar-ia-ubicacion'][value='junto']")?.checked;
+      const sel = document.getElementById("guardar-ia-carpeta") as HTMLSelectElement | null;
+      if (sel) sel.disabled = !!junto;
+    });
+  });
+
   // Pantalla de bloqueo: Enter navega entre campos y dispara desbloqueo
   document.getElementById("bloqueo-maestra")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") (document.getElementById("bloqueo-pass") as HTMLInputElement | null)?.focus();
@@ -7718,9 +7735,7 @@ document.addEventListener("DOMContentLoaded", () => {
   guardarIaNombre?.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      const nombre = guardarIaNombre.value.trim() || "Documento redactado";
-      document.getElementById("modal-guardar-ia")?.classList.add("hidden");
-      void _ejecutarGuardarRedaccion(nombre);
+      void _ejecutarGuardarDoc(guardarIaNombre.value);
     } else if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
