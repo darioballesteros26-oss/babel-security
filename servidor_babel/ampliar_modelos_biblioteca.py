@@ -572,6 +572,172 @@ MODELOS = [
      "Y para que así conste, firmo la presente autorización.\n\n"
      "En [CIUDAD], a [FECHA].\n"
      "El autorizante: ____________   (Se acompaña copia del DNI de ambas partes)."),
+
+    # ─────────────────────────── MERCANTIL ───────────────────────────
+    ("solicitud-concurso-acreedores", "Mercantil",
+     "Modelo de solicitud de declaración de concurso (voluntario)",
+     "Elaboración propia — Texto Refundido Ley Concursal (RDL 1/2020)",
+     "AL JUZGADO DE LO MERCANTIL DE [CIUDAD]\n\n"
+     "D./Dña. [PROCURADOR], en nombre de [DEUDOR/SOCIEDAD, CIF], bajo dirección letrada de [ABOGADO], DIGO:\n\n"
+     "Que, al amparo de la Ley Concursal, SOLICITO la declaración de CONCURSO VOLUNTARIO de mi "
+     "representado, por encontrarse en estado de [insolvencia actual/inminente], con base en:\n\n"
+     "HECHOS\n"
+     "PRIMERO.- Identificación del deudor y actividad.\n"
+     "SEGUNDO.- Estado de insolvencia: [imposibilidad de cumplir regularmente las obligaciones exigibles].\n"
+     "TERCERO.- Se acompañan: memoria económica, inventario de bienes y derechos, relación de acreedores, "
+     "y cuentas anuales [si procede].\n\n"
+     "SUPLICO que se declare el concurso de [DEUDOR] y se adopten las medidas legales procedentes.\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
+
+    ("reclamacion-mercantil-factura", "Mercantil",
+     "Modelo de reclamación de deuda mercantil (facturas impagadas entre empresas)",
+     "Elaboración propia — Ley 3/2004 de morosidad en operaciones comerciales",
+     "RECLAMACIÓN DE DEUDA MERCANTIL\n\n"
+     "De [EMPRESA ACREEDORA/CIF] a [EMPRESA DEUDORA/CIF]. En [CIUDAD], a [FECHA].\n\n"
+     "Les reclamamos el importe de [IMPORTE EN CIFRA Y LETRA] €, correspondiente a las facturas "
+     "[NÚMEROS Y FECHAS], vencidas e impagadas, derivadas del contrato/pedido de [OBJETO].\n\n"
+     "Conforme a la Ley 3/2004 de lucha contra la morosidad, procede además el interés de demora y la "
+     "compensación por costes de cobro. Les requerimos el pago en [N] días; en su defecto reclamaremos "
+     "judicialmente (proceso monitorio/ordinario) con intereses y costas.\n\n"
+     "Atentamente, [FIRMA Y CARGO]."),
+
+    # ─────────────────────────── HERENCIAS / FAMILIA ───────────────────────────
+    ("aceptacion-herencia", "Herencias",
+     "Modelo de escrito de aceptación de herencia (a beneficio de inventario o pura y simple)",
+     "Elaboración propia — CC arts. 988 y ss.",
+     "ACEPTACIÓN DE HERENCIA\n\n"
+     "D./Dña. [HEREDERO], con DNI [COMPLETAR], en relación con la herencia causada por el fallecimiento de "
+     "D./Dña. [CAUSANTE] el [FECHA], DECLARA:\n\n"
+     "PRIMERO.- Que es llamado a la herencia en condición de [heredero testamentario / ab intestato], según "
+     "[testamento ante Notario … / declaración de herederos].\n"
+     "SEGUNDO.- Que ACEPTA la herencia [pura y simplemente / A BENEFICIO DE INVENTARIO conforme a los "
+     "arts. 1010 y ss. del Código Civil].\n\n"
+     "[Para formalizar en escritura pública ante Notario, acompañando certificado de defunción, de últimas "
+     "voluntades y el título sucesorio.]\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
+
+    ("solicitud-declaracion-herederos", "Herencias",
+     "Modelo de solicitud de declaración de herederos abintestato (acta notarial)",
+     "Elaboración propia — CC arts. 912 y ss.; Ley del Notariado",
+     "AL NOTARIO DE [CIUDAD]\n\n"
+     "D./Dña. [SOLICITANTE], con DNI [COMPLETAR], SOLICITA la tramitación de ACTA DE NOTORIEDAD de "
+     "DECLARACIÓN DE HEREDEROS ABINTESTATO por fallecimiento de D./Dña. [CAUSANTE], ocurrido el [FECHA] "
+     "en [LUGAR], sin haber otorgado testamento, exponiendo:\n\n"
+     "PRIMERO.- Parentesco del solicitante y demás interesados con el causante.\n"
+     "SEGUNDO.- Relación de posibles herederos: [NOMBRES Y PARENTESCO].\n"
+     "TERCERO.- Se acompañan: certificado de defunción, de últimas voluntades, libro de familia y "
+     "[documentación acreditativa del parentesco].\n\n"
+     "SOLICITA que se tramite el acta y se declaren herederos a quienes legalmente corresponda.\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
+
+    ("demanda-alimentos", "Familia",
+     "Modelo de demanda de alimentos",
+     "Elaboración propia — CC arts. 142 y ss.; LEC",
+     "AL JUZGADO DE PRIMERA INSTANCIA [DE FAMILIA] DE [CIUDAD]\n\n"
+     "D./Dña. [DEMANDANTE], en nombre propio [y/o en representación de los hijos menores], DICE:\n\n"
+     "Que formula DEMANDA DE ALIMENTOS contra D./Dña. [DEMANDADO], obligado conforme a los artículos 142 "
+     "y siguientes del Código Civil, con base en:\n\n"
+     "HECHOS\n"
+     "PRIMERO.- Vínculo que genera la obligación de alimentos [parentesco].\n"
+     "SEGUNDO.- Necesidad del alimentista y posibilidades económicas del alimentante.\n"
+     "TERCERO.- Cuantía solicitada: [IMPORTE] €/mes, actualizable conforme al IPC.\n\n"
+     "SUPLICO que se condene al demandado a abonar una pensión de alimentos de [IMPORTE] €/mes, con efectos "
+     "desde la interposición de la demanda.\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
+
+    ("solicitud-modificacion-medidas", "Familia",
+     "Modelo de demanda de modificación de medidas (divorcio/guarda)",
+     "Elaboración propia — CC art. 90-91; LEC art. 775",
+     "AL JUZGADO DE PRIMERA INSTANCIA [DE FAMILIA] DE [CIUDAD]\n"
+     "Autos de [divorcio/medidas] nº [COMPLETAR]\n\n"
+     "D./Dña. [PROCURADOR], en nombre de [SOLICITANTE], DIGO:\n\n"
+     "Que, al amparo del artículo 775 de la LEC, solicito la MODIFICACIÓN DE LAS MEDIDAS acordadas en "
+     "[sentencia/convenio] de fecha [FECHA], por haberse producido una ALTERACIÓN SUSTANCIAL de las "
+     "circunstancias, consistente en: [CAMBIO: ingresos, traslado, necesidades de los hijos…].\n\n"
+     "SUPLICO que se modifiquen las medidas en el siguiente sentido: [NUEVA PENSIÓN / NUEVO RÉGIMEN DE "
+     "GUARDA Y VISITAS / USO DE VIVIENDA].\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
+
+    ("solicitud-orden-proteccion", "Penal",
+     "Modelo de solicitud de orden de protección (víctima de violencia)",
+     "Elaboración propia — LECrim art. 544 ter",
+     "AL JUZGADO DE [VIOLENCIA SOBRE LA MUJER / INSTRUCCIÓN DE GUARDIA] DE [CIUDAD]\n\n"
+     "D./Dña. [VÍCTIMA], con DNI [COMPLETAR], SOLICITA ORDEN DE PROTECCIÓN al amparo del artículo 544 ter "
+     "de la LECrim, exponiendo:\n\n"
+     "PRIMERO.- Relación con el denunciado: [vínculo].\n"
+     "SEGUNDO.- Hechos y situación de riesgo: [DESCRIPCIÓN DE LOS HECHOS, FECHAS Y AMENAZAS].\n"
+     "TERCERO.- Medidas que se solicitan: [alejamiento, prohibición de comunicación, atribución del uso de "
+     "la vivienda, medidas civiles sobre hijos y pensión].\n\n"
+     "SUPLICA que se acuerde la orden de protección con las medidas penales y civiles interesadas, con "
+     "carácter urgente.\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
+
+    # ─────────────────────────── PROPIEDAD HORIZONTAL ───────────────────────────
+    ("impugnacion-acuerdos-comunidad", "Propiedad horizontal",
+     "Modelo de demanda de impugnación de acuerdos de la junta de propietarios",
+     "Elaboración propia — Ley 49/1960 de Propiedad Horizontal art. 18",
+     "AL JUZGADO DE PRIMERA INSTANCIA DE [CIUDAD]\n\n"
+     "D./Dña. [PROPIETARIO], con DNI [COMPLETAR], propietario del piso/local [IDENTIFICACIÓN] de la "
+     "comunidad sita en [DIRECCIÓN], interpone DEMANDA DE IMPUGNACIÓN DE ACUERDOS, con base en:\n\n"
+     "HECHOS\n"
+     "PRIMERO.- En junta de [FECHA] se adoptó el acuerdo: [DESCRIPCIÓN], que impugno.\n"
+     "SEGUNDO.- Motivos de impugnación (LPH art. 18): [contrario a la ley/estatutos / gravemente lesivo / "
+     "abuso de derecho], y estoy al corriente de pago o he consignado las deudas.\n\n"
+     "SUPLICO que se declare la NULIDAD del acuerdo impugnado, con costas a la comunidad demandada.\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
+
+    ("reclamacion-cuotas-comunidad", "Propiedad horizontal",
+     "Modelo de reclamación de cuotas impagadas de comunidad (monitorio de comunidad)",
+     "Elaboración propia — LPH art. 21; LEC art. 812 y ss.",
+     "AL JUZGADO DE PRIMERA INSTANCIA DE [CIUDAD]\n\n"
+     "D./Dña. [PRESIDENTE/ADMINISTRADOR], en nombre de la COMUNIDAD DE PROPIETARIOS de [DIRECCIÓN], "
+     "formula PETICIÓN INICIAL DE PROCESO MONITORIO frente a D./Dña. [PROPIETARIO DEUDOR], exponiendo:\n\n"
+     "PRIMERO.- El demandado adeuda cuotas de comunidad por importe de [IMPORTE] €, aprobadas en junta y "
+     "liquidadas conforme al artículo 21 de la LPH (se acompaña certificación del acuerdo y la deuda).\n\n"
+     "SUPLICO que se requiera de pago al deudor de [IMPORTE] € más intereses y, en su caso, costas.\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
+
+    # ─────────────────────────── EXTRANJERÍA / TRÁFICO / CONSUMO ──────────────
+    ("solicitud-arraigo", "Extranjería",
+     "Modelo de solicitud de autorización de residencia por arraigo",
+     "Elaboración propia — Ley Orgánica 4/2000 y su Reglamento",
+     "A LA OFICINA DE EXTRANJERÍA DE [PROVINCIA]\n\n"
+     "D./Dña. [SOLICITANTE], con NIE/pasaporte [COMPLETAR], SOLICITA autorización de residencia temporal "
+     "por circunstancias excepcionales (ARRAIGO [social/laboral/familiar/formativo]), exponiendo:\n\n"
+     "PRIMERO.- Permanencia continuada en España desde [FECHA] (se acompaña prueba: empadronamiento, etc.).\n"
+     "SEGUNDO.- [Vínculos familiares / contrato o medios de vida / informe de arraigo del Ayuntamiento].\n"
+     "TERCERO.- Carencia de antecedentes penales.\n\n"
+     "SOLICITA que se conceda la autorización de residencia por arraigo, con la documentación aportada.\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
+
+    ("alegaciones-multa-trafico", "Tráfico",
+     "Modelo de alegaciones / recurso contra sanción de tráfico",
+     "Elaboración propia — RDL 6/2015 (Ley de Tráfico); Ley 39/2015",
+     "A LA [JEFATURA PROVINCIAL DE TRÁFICO / AYUNTAMIENTO DE [CIUDAD]]\n\n"
+     "D./Dña. [INTERESADO], con DNI [COMPLETAR], en relación con el expediente sancionador nº [COMPLETAR] "
+     "por [INFRACCIÓN], formula ALEGACIONES [o RECURSO DE REPOSICIÓN si ya hay resolución], exponiendo:\n\n"
+     "PRIMERO.- [Hechos: por qué no se cometió la infracción / defectos en la notificación / error en los "
+     "datos / falta de prueba / prescripción].\n"
+     "SEGUNDO.- [Fundamentos: garantías del procedimiento sancionador, presunción de inocencia].\n\n"
+     "SOLICITA que se ARCHIVE el expediente o se ANULE la sanción.\n"
+     "OTROSÍ: propongo como prueba [fotografías, testigos, informe técnico].\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
+
+    ("demanda-clausulas-abusivas", "Consumo",
+     "Modelo de demanda por cláusulas abusivas (nulidad y reclamación de cantidades)",
+     "Elaboración propia — RDL 1/2007 (consumidores); Directiva 93/13/CEE",
+     "AL JUZGADO [DE PRIMERA INSTANCIA / DE LO MERCANTIL] DE [CIUDAD]\n\n"
+     "D./Dña. [PROCURADOR], en nombre de [CONSUMIDOR], DICE:\n\n"
+     "Que formula DEMANDA contra [ENTIDAD], solicitando la declaración de NULIDAD por abusiva de la "
+     "cláusula [IDENTIFICACIÓN: suelo / gastos / comisión / interés…] del contrato de [FECHA], y la "
+     "restitución de las cantidades indebidamente cobradas, con base en:\n\n"
+     "HECHOS\n"
+     "PRIMERO.- Contrato suscrito como consumidor: [datos].\n"
+     "SEGUNDO.- Cláusula impugnada y su carácter abusivo (falta de transparencia / desequilibrio).\n"
+     "TERCERO.- Importes cobrados en aplicación de la cláusula: [IMPORTE] €.\n\n"
+     "SUPLICO que se declare la nulidad de la cláusula y se condene a la demandada a restituir [IMPORTE] € "
+     "más intereses, con costas.\n\n"
+     "En [CIUDAD], a [FECHA]. Firmado."),
 ]
 
 
