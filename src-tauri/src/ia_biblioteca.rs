@@ -126,6 +126,50 @@ fn expandir_sinonimos(terminos: &mut Vec<String>) {
     }
 }
 
+/// Extrae CITAS EXPLÍCITAS de la consulta para reforzarlas en la búsqueda:
+/// - números de artículo precedidos de «art»/«artículo»/«arts.» (1-3 dígitos), y
+/// - referencias de jurisprudencia del TC con forma «N/AAAA» (p. ej. STC 1/1995).
+/// Solo se cogen números tras un indicador «art» para NO confundir cifras sueltas del
+/// documento (importes, años, plazos) con artículos. Devuelve refs normalizadas en
+/// minúscula: artículos como "138" y STCs como "1/1995".
+fn referencias_articulo(query: &str) -> Vec<String> {
+    let q = query.to_lowercase();
+    let mut refs: Vec<String> = Vec::new();
+
+    // STC «N/AAAA» (patrón inequívoco: lo cogemos aparezca donde aparezca).
+    for tok in q.split(|c: char| !(c.is_ascii_digit() || c == '/')) {
+        if let Some((a, b)) = tok.split_once('/') {
+            if !a.is_empty()
+                && a.chars().all(|c| c.is_ascii_digit())
+                && b.len() >= 2
+                && b.chars().all(|c| c.is_ascii_digit())
+            {
+                refs.push(tok.to_string());
+            }
+        }
+    }
+
+    // «art[ículo] N»: número de artículo solo tras un indicador, para evitar ruido.
+    let palabras: Vec<&str> = q.split_whitespace().collect();
+    for (i, w) in palabras.iter().enumerate() {
+        if w.starts_with("art") {
+            for j in 1..=2 {
+                if let Some(nw) = palabras.get(i + j) {
+                    let num: String = nw.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    if !num.is_empty() && num.len() <= 3 {
+                        refs.push(num);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    refs.sort();
+    refs.dedup();
+    refs
+}
+
 impl IndiceJuridico {
     fn construir(fragmentos: Vec<FragmentoJuridico>) -> Self {
         let n = fragmentos.len();
@@ -219,6 +263,30 @@ impl IndiceJuridico {
             }
         }
 
+        // BOOST POR CITA EXPLÍCITA: si la consulta cita «art. N» o «STC N/AAAA», el
+        // fragmento de ESE artículo/sentencia debe aparecer sí o sí. Es la señal más
+        // fuerte de intención del usuario, así que domina el ranking BM25 general.
+        // Las refs con «/» son STC (solo casan con fragmentos STC); el resto son números
+        // de artículo (solo casan con leyes, no con STC, para no cruzar "24" con "24/1988").
+        let refs = referencias_articulo(query);
+        if !refs.is_empty() {
+            const BOOST: f32 = 20.0;
+            for (idx, frag) in self.fragmentos.iter().enumerate() {
+                let art = frag.articulo.to_lowercase();
+                let es_stc = frag.abrev == "STC";
+                let casa = refs.iter().any(|r| {
+                    if r.contains('/') {
+                        es_stc && art == *r
+                    } else {
+                        !es_stc && (art == *r || art.starts_with(&format!("{r} ")))
+                    }
+                });
+                if casa {
+                    *scores.entry(idx).or_insert(0.0) += BOOST;
+                }
+            }
+        }
+
         let mut resultados: Vec<(f32, &FragmentoJuridico)> = scores
             .into_iter()
             .filter(|&(_, s)| s >= umbral)
@@ -280,7 +348,9 @@ pub fn buscar_normativa(query: &str, max_chars: usize) -> (String, bool) {
         );
     };
 
-    let resultados_brutos = biblio.buscar(query, 10, 1.0);
+    // Recuperar un conjunto AMPLIO (20) para que, tras el filtro de ámbito por ley, aún
+    // queden holgadamente los 5 que se citan al modelo.
+    let resultados_brutos = biblio.buscar(query, 20, 1.0);
 
     // Post-retrieval scope filter: remove law fragments whose scope of application
     // doesn't match the query context, to avoid cross-law citation errors.
@@ -415,6 +485,48 @@ mod tests {
         let res = idx.buscar("compra de inmuebles hipoteca registro", 3, 1.0);
         // Should not find relevant fragments (all are criminal law, not real estate)
         assert!(res.is_empty() || res[0].0 < 2.0, "query irrelevante no debe devolver resultados de alta puntuación");
+    }
+
+    // ── Boost por cita explícita de artículo / STC ───────────────────────
+
+    #[test]
+    fn referencias_extrae_articulo_y_stc() {
+        assert_eq!(referencias_articulo("según el art. 138 del CP"), vec!["138"]);
+        // STC N/AAAA + artículo, orden alfabético tras sort/dedup
+        assert_eq!(referencias_articulo("ver STC 1/1995 y el artículo 24"), vec!["1/1995", "24"]);
+        // Cifras sueltas del documento (importes, años) NO deben tomarse como artículos
+        assert!(referencias_articulo("pagó 800 euros en el año 2024").is_empty());
+    }
+
+    #[test]
+    fn cita_explicita_de_articulo_sube_al_top() {
+        let idx = indice_prueba();
+        // Pide EXPLÍCITAMENTE el 139 (asesinato): debe ganar al 138 pese a que el texto
+        // genérico de homicidio suele rankear primero.
+        let res = idx.buscar("redacta conforme al art. 139", 3, 0.5);
+        assert!(!res.is_empty());
+        assert_eq!(res[0].1.articulo, "139", "la cita explícita del art. 139 debe quedar top");
+    }
+
+    #[test]
+    fn cita_articulo_procesal_recuperada() {
+        let idx = indice_prueba();
+        // "art. 520 LECrim" debe recuperar ese artículo aunque la consulta no describa el tema.
+        let res = idx.buscar("aplica el art. 520", 3, 0.5);
+        assert!(res.iter().any(|(_, f)| f.articulo == "520"),
+            "la cita del art. 520 debe recuperar el fragmento de LECrim 520");
+    }
+
+    #[test]
+    fn stc_boost_no_cruza_con_numero_de_articulo() {
+        // Un índice con una STC "24/1988" y la CE art. 24: pedir "art. 24" NO debe
+        // disparar la STC 24/1988 (refs de artículo solo casan con leyes, no con STC).
+        let idx = IndiceJuridico::construir(vec![
+            fragmento("CE", "24", "Derecho a la tutela judicial efectiva de jueces y tribunales."),
+            fragmento("STC", "24/1988", "Doctrina del Tribunal Constitucional sobre la presunción de inocencia."),
+        ]);
+        let res = idx.buscar("conforme al art. 24", 2, 0.5);
+        assert_eq!(res[0].1.abrev, "CE", "art. 24 debe casar con la ley CE, no con la STC 24/1988");
     }
 
     #[test]
