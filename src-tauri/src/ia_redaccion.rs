@@ -1091,6 +1091,7 @@ NUNCA escribas «[nombre del acusado], acusado, EXPONE:» en un escrito de acusa
 CONFIDENCIALIDAD ENTRE DOCUMENTOS:\n\
 Nunca incluir en el documento generado información de un expediente o caso distinto al que se está trabajando en la sesión actual. Cada sesión es completamente aislada: no uses datos, nombres, cifras ni contexto de conversaciones anteriores. Si el usuario menciona frases como \"el caso anterior\", \"el cliente anterior\", \"como hicimos antes\", \"aplica las mismas condiciones\", \"igual que el anterior\", \"el contrato que hicimos\", \"el expediente anterior\" o cualquier referencia a trabajo previo fuera de esta sesión, DETENTE y responde: \"No tengo acceso a sesiones o documentos anteriores. Cada sesión es independiente. Por favor, proporciona los datos del documento actual directamente.\"\n\
 \n\
+FORMATO DE SALIDA (OBLIGATORIO Y ESTRICTO): Responde SIEMPRE en texto plano. PROHIBIDO ABSOLUTAMENTE usar: emojis, iconos o símbolos decorativos (🙂, ✅, ⚠, ▸, •, →, ★, etc.); markdown de cualquier tipo (asteriscos **, almohadillas ##, comillas invertidas ` o bloques ```); bloques o fragmentos de código; y marcas de cita tipo «>» o «>>». Para encabezados usa MAYÚSCULAS; para numerar usa «PRIMERO.-», «SEGUNDO.-» o «1.», «2.». Si necesitas avisar de un problema, empieza la frase con «ATENCIÓN:» en texto, nunca con un símbolo. La salida debe poder pegarse tal cual en un documento oficial.\n\
 Responde siempre en español.";
 
 const PREFIJO_CONTROL: &str = "\
@@ -1099,9 +1100,9 @@ PASO 0 — SESIÓN AISLADA: Si el usuario menciona «sesión anterior», «caso 
 PASO 1 — DATOS FALTANTES: Para ESCRITOS PROCESALES (denuncias, querellas, recursos, calificaciones, habeas corpus): los datos mínimos son nombre de las partes, destino (juzgado/tribunal), fecha del escrito y descripción de los hechos. Datos opcionales como DNI, número de colegiado, antecedentes, datos bancarios o testigos → usa [COMPLETAR: descripción] sin bloquear. FORMATO OBLIGATORIO del escrito: empieza SIEMPRE con «AL JUZGADO DE [tipo y número] DE [ciudad]» como primera línea, seguido de la identificación del presentador y su calidad procesal. REGLA CRÍTICA PARA DATOS FALTANTES: si falta MÁS DE UN dato mínimo, LISTA TODOS en una única respuesta numerada — por ejemplo: «Para redactar la denuncia necesito: 1. Nombre de las partes (denunciante y denunciado) 2. Juzgado de destino 3. Fecha del escrito 4. Descripción de los hechos». NUNCA preguntes un dato a la vez cuando faltan varios. Para cualquier otro documento: si falta un dato imprescindible → pregunta al usuario en una única respuesta con todos los datos faltantes. No inventes datos ni uses [PENDIENTE] salvo que el usuario lo pida explícitamente.\n\
 PASO 2 — TEXTO ILEGIBLE: ¿Hay texto corrupto, símbolos extraños, bloques ilegibles o códigos sin sentido (ej. caracteres tipo █▓▒░ o secuencias como XКΘΛ-29)? Si los hay → cítalos literalmente y declara que no puedes reconocerlos ni usarlos.\n\
 PASO 3 — CONTRADICCIONES (dos comprobaciones secuenciales):\n\
-COMPROBACIÓN A — IMPORTES: Busca pares «importe en letras + cifra numérica» (ej. «CINCO MIL euros (8.500 €)», «quinientos euros (500 €)»). Un par solo existe cuando el texto contiene EXPLÍCITAMENTE las palabras del importe seguidas de su cifra entre paréntesis. Para cada par: convierte las letras a número (CIEN=100, DOSCIENTOS=200, TRESCIENTOS=300, CUATROCIENTOS=400, QUINIENTOS=500, SEISCIENTOS=600, SETECIENTOS=700, OCHOCIENTOS=800, NOVECIENTOS=900, MIL=1.000, CINCO MIL=5.000, DIEZ MIL=10.000…) y compara ese valor con la cifra numérica. Escribe: «[letras] → [valor_calculado] / cifra=[cifra]: COINCIDE» o «[letras] → [valor_calculado] / cifra=[cifra]: NO COINCIDE». Ejemplo correcto: «QUINIENTOS euros → 500 / cifra=500: COINCIDE». Ejemplo de error: «CINCO MIL euros → 5.000 / cifra=8.500: NO COINCIDE». En cuanto escribas «NO COINCIDE» → tu respuesta continúa SOLAMENTE con: «⚠ Contradicción de importe: el texto dice [letras] ([valor_calculado] €) pero la cifra es [cifra]. ¿Cuál es el dato correcto?» — y PARA. Si el texto solo tiene cifras numéricas sin versión escrita en palabras (ej. «1.800 €» sola, «12.000 €» sola), no hay par — escribe «A: sin contradicciones» directamente y pasa a B. Si todos los pares COINCIDEN, escribe «A: sin contradicciones» y pasa a B.\n\
-COMPROBACIÓN B — FECHAS (solo si A terminó con «A: sin contradicciones»): Localiza TODAS las fechas, tanto en números («31 de septiembre») como escritas en palabras («treinta y uno de septiembre», «veintinueve de febrero», «treinta y uno de abril»). Convierte las palabras a número cuando sea necesario: uno=1, dos=2, tres=3, cuatro=4, cinco=5, seis=6, siete=7, ocho=8, nueve=9, diez=10, once=11, doce=12, trece=13, catorce=14, quince=15, dieciséis=16, diecisiete=17, dieciocho=18, diecinueve=19, veinte=20, veintiuno=21, veintidós=22, veintitrés=23, veinticuatro=24, veinticinco=25, veintiséis=26, veintisiete=27, veintiocho=28, veintinueve=29, treinta=30, treinta y uno=31. Días máximos por mes: enero/marzo/mayo/julio/agosto/octubre/diciembre=31; abril/junio/septiembre/noviembre=30; febrero=29 (nunca 30 ni 31). Por cada fecha escribe «[fecha]: VÁLIDA» o «[fecha]: IMPOSIBLE». En cuanto escribas «IMPOSIBLE» → tu respuesta continúa SOLAMENTE con: «⚠ Fecha imposible: [fecha completa tal como aparece en el texto]. [mes] tiene como máximo [N] días. ¿Cuál es la fecha correcta?» — y PARA.\n\
-PASO 4 — INSTRUCCIÓN VS. DOCUMENTO: (a) ¿La instrucción es ambigua o incompleta? → pide aclaración. (b) Si la instrucción pide cambiar un dato que ya figura en el documento (plazo, precio, nombre, fecha, condición) → avisa: «⚠ Conflicto: el documento indica [dato original]. La instrucción pide [dato nuevo]. ¿Confirmas este cambio?» y enumera TODOS los conflictos antes de parar.\n\
+COMPROBACIÓN A — IMPORTES: Busca pares «importe en letras + cifra numérica» (ej. «CINCO MIL euros (8.500 €)», «quinientos euros (500 €)»). Un par solo existe cuando el texto contiene EXPLÍCITAMENTE las palabras del importe seguidas de su cifra entre paréntesis. Para cada par: convierte las letras a número (CIEN=100, DOSCIENTOS=200, TRESCIENTOS=300, CUATROCIENTOS=400, QUINIENTOS=500, SEISCIENTOS=600, SETECIENTOS=700, OCHOCIENTOS=800, NOVECIENTOS=900, MIL=1.000, CINCO MIL=5.000, DIEZ MIL=10.000…) y compara ese valor con la cifra numérica. Escribe: «[letras] → [valor_calculado] / cifra=[cifra]: COINCIDE» o «[letras] → [valor_calculado] / cifra=[cifra]: NO COINCIDE». Ejemplo correcto: «QUINIENTOS euros → 500 / cifra=500: COINCIDE». Ejemplo de error: «CINCO MIL euros → 5.000 / cifra=8.500: NO COINCIDE». En cuanto escribas «NO COINCIDE» → tu respuesta continúa SOLAMENTE con: «ATENCIÓN: Contradicción de importe: el texto dice [letras] ([valor_calculado] €) pero la cifra es [cifra]. ¿Cuál es el dato correcto?» — y PARA. Si el texto solo tiene cifras numéricas sin versión escrita en palabras (ej. «1.800 €» sola, «12.000 €» sola), no hay par — escribe «A: sin contradicciones» directamente y pasa a B. Si todos los pares COINCIDEN, escribe «A: sin contradicciones» y pasa a B.\n\
+COMPROBACIÓN B — FECHAS (solo si A terminó con «A: sin contradicciones»): Localiza TODAS las fechas, tanto en números («31 de septiembre») como escritas en palabras («treinta y uno de septiembre», «veintinueve de febrero», «treinta y uno de abril»). Convierte las palabras a número cuando sea necesario: uno=1, dos=2, tres=3, cuatro=4, cinco=5, seis=6, siete=7, ocho=8, nueve=9, diez=10, once=11, doce=12, trece=13, catorce=14, quince=15, dieciséis=16, diecisiete=17, dieciocho=18, diecinueve=19, veinte=20, veintiuno=21, veintidós=22, veintitrés=23, veinticuatro=24, veinticinco=25, veintiséis=26, veintisiete=27, veintiocho=28, veintinueve=29, treinta=30, treinta y uno=31. Días máximos por mes: enero/marzo/mayo/julio/agosto/octubre/diciembre=31; abril/junio/septiembre/noviembre=30; febrero=29 (nunca 30 ni 31). Por cada fecha escribe «[fecha]: VÁLIDA» o «[fecha]: IMPOSIBLE». En cuanto escribas «IMPOSIBLE» → tu respuesta continúa SOLAMENTE con: «ATENCIÓN: Fecha imposible: [fecha completa tal como aparece en el texto]. [mes] tiene como máximo [N] días. ¿Cuál es la fecha correcta?» — y PARA.\n\
+PASO 4 — INSTRUCCIÓN VS. DOCUMENTO: (a) ¿La instrucción es ambigua o incompleta? → pide aclaración. (b) Si la instrucción pide cambiar un dato que ya figura en el documento (plazo, precio, nombre, fecha, condición) → avisa: «ATENCIÓN: Conflicto: el documento indica [dato original]. La instrucción pide [dato nuevo]. ¿Confirmas este cambio?» y enumera TODOS los conflictos antes de parar.\n\
 CONTROL FINAL — ANTES DE GENERAR CUALQUIER TEXTO: ¿Alguno de los pasos 0-4 detectó un problema? Si la respuesta es SÍ → NO GENERES NINGUNA PARTE DEL DOCUMENTO. Ni un encabezado, ni un párrafo, ni una sola línea del borrador. Escribe SOLO el aviso del problema y espera la respuesta del usuario. Si la respuesta es NO → procede a redactar con exactamente lo solicitado, sin añadir cláusulas, secciones ni contenido extra.";
 
 #[tauri::command]
@@ -1277,6 +1278,24 @@ pub async fn enviar_mensaje_ia_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── limpiar_md: fuera emojis, código y markdown ──────────────────────
+
+    #[test]
+    fn limpiar_md_elimina_emojis_y_codigo() {
+        // Emojis y símbolos decorativos fuera; texto y tipografía legal intactos.
+        assert_eq!(limpiar_md("Hecho probado ✅ y grave ⚠"), "Hecho probado  y grave ");
+        assert_eq!(limpiar_md("Claras 🙂 instrucciones →"), "Claras  instrucciones ");
+        assert_eq!(limpiar_md("▸ STC 1/1995 relevante"), " STC 1/1995 relevante");
+        // Markdown y código fuera
+        assert_eq!(limpiar_md("**PRIMERO.-** texto"), "PRIMERO.- texto");
+        assert_eq!(limpiar_md("```rust"), "rust");
+        assert_eq!(limpiar_md("> cita markdown"), "cita markdown");
+        assert_eq!(limpiar_md("algo >> raro"), "algo  raro");
+        // Tipografía legal que DEBE conservarse
+        assert_eq!(limpiar_md("Renta de 800 € «según» art. 9 — vivienda…"),
+                   "Renta de 800 € «según» art. 9 — vivienda…");
+    }
 
     // ── dividir_en_bloques ───────────────────────────────────────────────
 
@@ -1500,8 +1519,44 @@ fn es_linea_interna(linea: &str) -> bool {
 }
 
 // Elimina markdown básico (negrita, subrayado, encabezados ##).
+// ¿Es un emoji o símbolo decorativo/pictográfico? El usuario NO quiere NINGUNO en la
+// respuesta. Se preservan la tipografía legal (€ « » — … º ª, acentos) y los signos
+// normales; se eliminan emojis, dingbats, flechas, formas geométricas (▸ ■ ●), avisos
+// (⚠), selectores de variación y ZWJ.
+fn es_emoji(c: char) -> bool {
+    let u = c as u32;
+    matches!(u,
+        0x1F000..=0x1FAFF   // planos de emoji (caras, objetos, símbolos…)
+        | 0x2600..=0x27BF   // símbolos misceláneos + dingbats (⚠ ✒ ✍ ✓ ★ ☀ ☎…)
+        | 0x2B00..=0x2BFF   // símbolos y flechas misceláneos
+        | 0x25A0..=0x25FF   // formas geométricas (▸ ■ ● ▪ ▫ ◆…)
+        | 0x2190..=0x21FF   // flechas (→ ← ↔…)
+        | 0x2022            // viñeta •
+        | 0x200D            // zero-width joiner
+        | 0xFE00..=0xFE0F   // selectores de variación (emoji)
+        | 0x2139            // ℹ
+    )
+}
+
+// Limpia la salida del modelo: fuera markdown (** __ ## ` ```), artefactos de código
+// (blockquote «>» / «>>») y TODO emoji/símbolo decorativo. Se aplica por línea tanto en
+// streaming como en no-streaming, así que es el único punto de saneado de la respuesta.
 fn limpiar_md(s: &str) -> String {
-    s.replace("**", "").replace("__", "").replace("## ", "").replace("##", "")
+    let mut t = s
+        .replace("```", "")
+        .replace('`', "")
+        .replace("**", "")
+        .replace("__", "")
+        .replace("## ", "")
+        .replace("##", "")
+        .replace(">>", "");
+    // Blockquote markdown al principio de la línea («> texto»)
+    let recortado = t.trim_start();
+    if let Some(resto) = recortado.strip_prefix('>') {
+        t = resto.trim_start().to_string();
+    }
+    // Eliminar emojis y símbolos decorativos
+    t.chars().filter(|&c| !es_emoji(c)).collect()
 }
 
 // Elimina líneas de control interno del texto completo (ruta no-streaming).
