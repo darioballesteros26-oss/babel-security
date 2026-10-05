@@ -1,10 +1,21 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use serde::Deserialize;
 
 static BIBLIOTECA: OnceLock<Option<IndiceJuridico>> = OnceLock::new();
+
+/// Embeddings densos de los fragmentos (opción B del RAG). Orden = mismo que
+/// `IndiceJuridico::fragmentos`. Se rellena en `asegurar_embeddings` (carga de disco o
+/// precálculo). Si queda en None, la búsqueda usa solo BM25 (sin regresión).
+static EMBEDDINGS: Mutex<Option<Vec<Vec<f32>>>> = Mutex::new(None);
+static EMB_PROCESADO: AtomicBool = AtomicBool::new(false);
+
+/// Umbral mínimo de similitud coseno para que un fragmento denso cuente como relevante.
+/// Si tras el filtro no queda nada, la búsqueda cae a BM25 (ver `buscar_normativa`).
+const UMBRAL_COSENO: f32 = 0.30;
 
 #[derive(Deserialize, Clone)]
 pub struct FragmentoJuridico {
@@ -307,6 +318,165 @@ fn ruta_biblioteca() -> PathBuf {
         .join("index.json")
 }
 
+// ── RAG semántico (opción B): embeddings densos + búsqueda híbrida ──────────────────
+
+fn ruta_embeddings_bin() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join("Babel")
+        .join("biblioteca_juridica")
+        .join("embeddings.bin")
+}
+
+/// Texto representativo de un fragmento para embeberlo. DEBE coincidir con el usado al
+/// generar el fichero de embeddings (texto + artículo + abreviatura + título, 900 chars).
+fn doc_text(f: &FragmentoJuridico) -> String {
+    let extra: Vec<&str> = [f.articulo.as_str(), f.abrev.as_str(), f.titulo.as_deref().unwrap_or("")]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect();
+    let full = format!("{} {}", f.texto, extra.join(" "));
+    full.chars().take(900).collect()
+}
+
+/// Formato del fichero: [u32 LE dim][f32 LE × dim × n]. `n` se infiere del tamaño.
+/// Devuelve None (→ BM25) si no existe, está corrupto o el nº de vectores no cuadra.
+fn cargar_embeddings_de_disco(n_frags: usize) -> Option<Vec<Vec<f32>>> {
+    let datos = std::fs::read(ruta_embeddings_bin()).ok()?;
+    if datos.len() < 4 {
+        return None;
+    }
+    let dim = u32::from_le_bytes([datos[0], datos[1], datos[2], datos[3]]) as usize;
+    if dim == 0 {
+        return None;
+    }
+    let total_floats = (datos.len() - 4) / 4;
+    if total_floats % dim != 0 {
+        return None;
+    }
+    let count = total_floats / dim;
+    if count != n_frags {
+        log::warn!("[EMB] embeddings.bin tiene {count} vectores pero hay {n_frags} fragmentos: se ignora");
+        return None;
+    }
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let mut v = Vec::with_capacity(dim);
+        for j in 0..dim {
+            let off = 4 + (i * dim + j) * 4;
+            v.push(f32::from_le_bytes([datos[off], datos[off + 1], datos[off + 2], datos[off + 3]]));
+        }
+        out.push(v);
+    }
+    Some(out)
+}
+
+fn guardar_embeddings_en_disco(embs: &[Vec<f32>]) {
+    let Some(dim) = embs.first().map(|v| v.len()) else { return };
+    let mut buf = Vec::with_capacity(4 + embs.len() * dim * 4);
+    buf.extend_from_slice(&(dim as u32).to_le_bytes());
+    for v in embs {
+        for x in v {
+            buf.extend_from_slice(&x.to_le_bytes());
+        }
+    }
+    let ruta = ruta_embeddings_bin();
+    if let Err(e) = std::fs::write(&ruta, &buf) {
+        log::warn!("[EMB] no se pudieron guardar los embeddings: {e}");
+    } else {
+        log::info!("[EMB] embeddings guardados: {} vectores dim {dim}", embs.len());
+    }
+}
+
+/// En segundo plano al arrancar: deja los embeddings de la biblioteca listos en RAM.
+/// 1) Si existe `embeddings.bin` y cuadra con el nº de fragmentos → lo carga.
+/// 2) Si no, y hay embedder instalado → los precalcula (una vez, ~minutos) y los guarda.
+/// 3) Si no hay embedder → no hace nada (la búsqueda seguirá en BM25).
+pub fn asegurar_embeddings() {
+    if EMB_PROCESADO.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let Some(biblio) = obtener_biblioteca() else { return };
+    let n = biblio.fragmentos.len();
+
+    if let Some(v) = cargar_embeddings_de_disco(n) {
+        *EMBEDDINGS.lock().unwrap() = Some(v);
+        log::info!("[EMB] embeddings cargados de disco ({n} fragmentos)");
+        return;
+    }
+    if !crate::ia_embeddings::disponible() {
+        log::info!("[EMB] sin modelo embedder: la biblioteca usará solo BM25");
+        return;
+    }
+
+    log::info!("[EMB] precalculando embeddings de {n} fragmentos (una sola vez)…");
+    let mut all: Vec<Vec<f32>> = Vec::with_capacity(n);
+    let textos: Vec<String> = biblio
+        .fragmentos
+        .iter()
+        .map(|f| format!("{}{}", crate::ia_embeddings::PREFIJO_DOC, doc_text(f)))
+        .collect();
+    for chunk in textos.chunks(16) {
+        match crate::ia_embeddings::embed(chunk) {
+            Some(mut e) => all.append(&mut e),
+            None => {
+                log::warn!("[EMB] fallo al precalcular embeddings: se usará BM25");
+                return;
+            }
+        }
+    }
+    guardar_embeddings_en_disco(&all);
+    *EMBEDDINGS.lock().unwrap() = Some(all);
+    log::info!("[EMB] embeddings listos ({n} fragmentos)");
+}
+
+/// Búsqueda SEMÁNTICA: coseno entre la consulta y cada fragmento, con BOOST por cita
+/// explícita de artículo/STC (lo único que el denso no hace tan bien como BM25).
+/// Devuelve índices de fragmento ordenados. None si no hay embeddings o el embedder no
+/// responde → el llamador cae a BM25.
+fn buscar_dense(biblio: &IndiceJuridico, query: &str, max: usize) -> Option<Vec<(f32, usize)>> {
+    // Embeber la consulta ANTES de tomar el lock (es una llamada de red).
+    let qv = crate::ia_embeddings::embed_query(query)?;
+    let guard = EMBEDDINGS.lock().ok()?;
+    let embs = guard.as_ref()?;
+    if embs.len() != biblio.fragmentos.len() || embs.first().map(|v| v.len()) != Some(qv.len()) {
+        return None;
+    }
+
+    let refs = referencias_articulo(query);
+    let mut scored: Vec<(f32, usize)> = Vec::with_capacity(embs.len());
+    for (i, e) in embs.iter().enumerate() {
+        // Coseno = producto escalar (ambos vectores están L2-normalizados).
+        let mut cos = 0.0f32;
+        for k in 0..qv.len() {
+            cos += qv[k] * e[k];
+        }
+        // BOOST por cita explícita (misma lógica que BM25): el artículo/STC citado sube
+        // al top sí o sí. Sumar 1.0 lo garantiza (el coseno vive en [-1, 1]).
+        if !refs.is_empty() {
+            let frag = &biblio.fragmentos[i];
+            let art = frag.articulo.to_lowercase();
+            let es_stc = frag.abrev == "STC";
+            let casa = refs.iter().any(|r| {
+                if r.contains('/') {
+                    es_stc && art == *r
+                } else {
+                    !es_stc && (art == *r || art.starts_with(&format!("{r} ")))
+                }
+            });
+            if casa {
+                cos += 1.0;
+            }
+        }
+        if cos >= UMBRAL_COSENO {
+            scored.push((cos, i));
+        }
+    }
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(max);
+    Some(scored)
+}
+
 fn cargar_biblioteca() -> Option<IndiceJuridico> {
     let ruta = ruta_biblioteca();
     if !ruta.exists() {
@@ -350,7 +520,15 @@ pub fn buscar_normativa(query: &str, max_chars: usize) -> (String, bool) {
 
     // Recuperar un conjunto AMPLIO (20) para que, tras el filtro de ámbito por ley, aún
     // queden holgadamente los 5 que se citan al modelo.
-    let resultados_brutos = biblio.buscar(query, 20, 1.0);
+    // HÍBRIDO (opción B): intentar primero la búsqueda SEMÁNTICA (encuentra la ley
+    // aunque el usuario no use las palabras técnicas). Si no hay embeddings, el embedder
+    // no responde, o no supera el umbral, cae a BM25 → cero regresión.
+    let resultados_brutos: Vec<(f32, &FragmentoJuridico)> = match buscar_dense(biblio, query, 20) {
+        Some(idxs) if !idxs.is_empty() => {
+            idxs.into_iter().map(|(s, i)| (s, &biblio.fragmentos[i])).collect()
+        }
+        _ => biblio.buscar(query, 20, 1.0),
+    };
 
     // Post-retrieval scope filter: remove law fragments whose scope of application
     // doesn't match the query context, to avoid cross-law citation errors.
@@ -571,6 +749,21 @@ mod test_mep {
             eprintln!("[test_mep] biblioteca jurídica no disponible — test omitido");
             false
         }
+    }
+
+    #[test]
+    fn embeddings_disco_cuadran_con_fragmentos() {
+        if !corpus_o_skip() { return; }
+        // Solo si el fichero de embeddings existe en este equipo (no se distribuye).
+        if !ruta_embeddings_bin().exists() {
+            eprintln!("[test] embeddings.bin no presente — test omitido");
+            return;
+        }
+        let n = obtener_biblioteca().unwrap().fragmentos.len();
+        let embs = cargar_embeddings_de_disco(n)
+            .expect("embeddings.bin existe pero no carga o el nº de vectores no cuadra");
+        assert_eq!(embs.len(), n, "un vector por fragmento");
+        assert!(embs[0].len() >= 256, "dimensión de embedding razonable (got {})", embs[0].len());
     }
 
     #[test]

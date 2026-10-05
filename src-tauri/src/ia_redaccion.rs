@@ -336,7 +336,7 @@ fn ruta_modelo(app: &tauri::AppHandle) -> PathBuf {
 // Busca llama-server en: 1) Resources/binaries/ (bundle del DMG),
 // 2) ~/Babel/ia_stack (persistido desde un DMG anterior; SOBREVIVE a las
 // actualizaciones, que solo reemplazan el .app), 3) Homebrew (desarrollo).
-fn ruta_llama_server(app: &tauri::AppHandle) -> String {
+pub(crate) fn ruta_llama_server(app: &tauri::AppHandle) -> String {
     if let Ok(res) = app.path().resource_dir() {
         let bundled = res.join("binaries").join("llama-server");
         if bundled.exists() {
@@ -598,6 +598,11 @@ pub async fn iniciar_ia_redaccion(
 
     // Pre-warm the legal library BM25 index while the model loads (~200 ms once)
     tauri::async_runtime::spawn_blocking(ia_biblioteca::precalentar);
+    // Calentar el embedder del RAG semántico (opción B) en paralelo, si está instalado,
+    // para que la primera búsqueda no espere a que arranque. No pasa nada si no existe.
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::ia_embeddings::asegurar_embedder();
+    });
 
     // Hilos para llama-server: usar todos los núcleos MENOS uno. Dejar un núcleo libre
     // evita que la generación acapare la CPU y «congele» la interfaz. Antes se topaba a
@@ -864,6 +869,8 @@ pub async fn parar_ia_redaccion(
         let _ = p.kill().await;
         LLAMA_PID.store(0, Ordering::Release);
     }
+    // Liberar también la RAM del embedder del RAG semántico (si estaba activo).
+    crate::ia_embeddings::detener_embedder();
     *state.estado.lock().await = "inactivo".into();
     Ok(())
 }

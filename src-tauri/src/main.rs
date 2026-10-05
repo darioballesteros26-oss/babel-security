@@ -23,6 +23,7 @@ mod sincronizacion;
 mod nom_cifrado;
 mod traductor;
 mod ia_biblioteca;
+mod ia_embeddings;
 mod ia_redaccion;
 mod acceso_masivo;
 
@@ -7301,6 +7302,13 @@ fn main() {
                 ia_redaccion::asegurar_ia_persistente(&handle_ia);
             });
 
+            // ── RAG semántico (opción B) ──────────────────────────────────────────
+            // Registrar el AppHandle para el embedder y, en segundo plano, precalcular
+            // los embeddings de la biblioteca si faltan (una sola vez). Si no hay modelo
+            // embedder instalado no hace nada: la búsqueda cae a BM25.
+            ia_embeddings::init(app.handle().clone());
+            tauri::async_runtime::spawn_blocking(ia_biblioteca::asegurar_embeddings);
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -7312,6 +7320,7 @@ fn main() {
                     // en el puerto 5002 y rompiendo la siguiente sesión.
                     seguridad::desactivar_entrada_segura_os();
                     crate::ia_redaccion::matar_llama_si_activo();
+                    crate::ia_embeddings::detener_embedder();
                     if let Ok(mut guard) = USB_CHILD.lock() {
                         if let Some(mut c) = guard.take() {
                             let _ = c.kill();
@@ -7329,6 +7338,7 @@ fn main() {
                     // alguna ruta de cierre alternativa (forzado por el SO, etc.).
                     seguridad::desactivar_entrada_segura_os();
                     crate::ia_redaccion::matar_llama_si_activo();
+                    crate::ia_embeddings::detener_embedder();
                     if let Ok(mut guard) = USB_CHILD.lock() {
                         if let Some(mut c) = guard.take() {
                             let _ = c.kill();
