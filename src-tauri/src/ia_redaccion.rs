@@ -13,9 +13,21 @@ static LLAMA_PID: AtomicU32 = AtomicU32::new(0);
 
 /// Mata llama-server inmediatamente si está corriendo. Llamado por rat_detector
 /// al detectar acceso remoto, sin esperar a que el hilo async libere el Mutex del proceso.
+///
+/// SEGURIDAD DE PID: `LLAMA_PID` solo se resetea a 0 en rutas controladas (relanzar,
+/// parar, timeout, muerte durante el arranque). Si llama-server crashea POR SU CUENTA
+/// a mitad de sesión, el PID queda obsoleto; como el SO recicla PIDs, un SIGKILL ciego
+/// podría matar a un proceso ajeno que haya heredado ese número. Por eso, antes de
+/// matar, confirmamos que el proceso con ese PID sigue siendo realmente llama-server
+/// (por el nombre del ejecutable). Si ya no existe o es otro programa, no hacemos nada.
 pub fn matar_llama_si_activo() {
     let pid = LLAMA_PID.swap(0, Ordering::AcqRel);
     if pid == 0 {
+        return;
+    }
+    if !es_proceso_llama(pid) {
+        // PID obsoleto o reciclado por otro programa: NO tocarlo.
+        log::debug!("[IA] PID {} ya no es llama-server; no se mata.", pid);
         return;
     }
     #[cfg(unix)]
@@ -28,7 +40,22 @@ pub fn matar_llama_si_activo() {
             .args(["/PID", &pid.to_string(), "/F"])
             .output();
     }
-    log::warn!("[IA] llama-server (PID {}) detenido por detección RAT.", pid);
+    log::warn!("[IA] llama-server (PID {}) detenido.", pid);
+}
+
+/// Comprueba que el proceso con este PID existe y es llama-server. Defensa contra
+/// reciclaje de PID: solo confirma la identidad por el nombre del ejecutable.
+fn es_proceso_llama(pid: u32) -> bool {
+    use sysinfo::{Pid, PidExt, ProcessExt, System, SystemExt};
+    let mut s = System::new();
+    let spid = Pid::from_u32(pid);
+    if !s.refresh_process(spid) {
+        return false; // el proceso ya no existe
+    }
+    match s.process(spid) {
+        Some(p) => p.name().contains("llama-server"),
+        None => false,
+    }
 }
 
 fn detectar_fechas_imposibles(texto: &str) -> Vec<String> {
@@ -472,17 +499,21 @@ static PREFETCH_HECHO: AtomicBool = AtomicBool::new(false);
 /// el arranque posterior no sufra el pico de I/O de leer 2,5 GB en frío.
 #[tauri::command]
 pub async fn precalentar_modelo_ia(app: tauri::AppHandle) -> Result<(), String> {
-    // Solo una vez por sesión: repetir no aporta (ya estaría en caché).
-    if PREFETCH_HECHO.swap(true, Ordering::AcqRel) {
-        return Ok(());
-    }
     // Si el modelo ya está cargado/cargando, el fichero ya está en RAM: nada que hacer.
     if LLAMA_PID.load(Ordering::Acquire) != 0 {
         return Ok(());
     }
+    // Sin modelo instalado: nada que precalentar. NO marcamos PREFETCH_HECHO aquí, para
+    // que si el usuario instala el modelo más tarde en esta misma sesión el prefetch
+    // pueda ejecutarse la primera vez que de verdad exista el fichero.
     let ruta = ruta_modelo(&app);
     if !ruta.exists() {
-        return Ok(()); // sin modelo instalado: nada que precalentar
+        return Ok(());
+    }
+    // Solo una vez por sesión: repetir no aporta (ya estaría en caché). Se marca aquí,
+    // tras confirmar que hay algo que precalentar, no antes.
+    if PREFETCH_HECHO.swap(true, Ordering::AcqRel) {
+        return Ok(());
     }
 
     // Lectura secuencial descartando los bytes: trae las páginas del .gguf a la caché
