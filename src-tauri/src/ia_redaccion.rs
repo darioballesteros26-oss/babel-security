@@ -894,14 +894,15 @@ pub async fn enviar_mensaje_ia(
     let body = serde_json::json!({
         "model": "qwen3",
         "messages": [
-            { "role": "system", "content": SYSTEM_PROMPT },
+            { "role": "system", "content": system_prompt_con_fecha() },
             { "role": "user",   "content": mensaje_con_prefijo }
         ],
-        "temperature": 0.3,
+        "temperature": 0.2,
         "top_p": 0.9,
         "min_p": 0.05,
         "max_tokens": 1536,
         "repeat_penalty": 1.1,
+        "grammar": GRAMMAR_SIN_MARKDOWN,
         "stream": false
     });
 
@@ -1085,6 +1086,34 @@ CIERRE: termina JUSTO después del documento (la última firma, cláusula o lín
 
 Responde siempre en español.";
 
+/// Devuelve el SYSTEM_PROMPT con la FECHA DE HOY inyectada. Sin esto, el corte de
+/// conocimiento del modelo le hace creer que fechas normales (de este año o próximas)
+/// son "futuras" y las objeta; con la fecha real de referencia deja de hacerlo y puede
+/// calcular plazos correctamente. Se construye en cada petición (barato).
+fn system_prompt_con_fecha() -> String {
+    use chrono::Datelike;
+    const MESES: [&str; 12] = [
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    ];
+    let hoy = chrono::Local::now().date_naive();
+    let mes = MESES[(hoy.month() as usize) - 1];
+    format!(
+        "{SYSTEM_PROMPT}\n\nFECHA ACTUAL: hoy es {} de {} de {}. Úsala como fecha de \
+referencia para cualquier cálculo de plazos. Cualquier fecha que te dé el usuario \
+—de este año o de años próximos— es válida: NO la trates como imposible por ser futura.",
+        hoy.day(), mes, hoy.year()
+    )
+}
+
+// Gramática GBNF (opción C): prohíbe A NIVEL DE MUESTREO los caracteres de markdown
+// que romperían el pegado en un documento oficial: asterisco, almohadilla y comilla
+// invertida. Todo lo demás se permite —acentos, ñ, «», saltos de línea y el guion bajo
+// (que hace falta para las líneas de firma «____»)—. Coste: 0 RAM, 0 descarga. Es un
+// refuerzo del filtro `limpiar_md`: si llama-server considerara la gramática inválida la
+// ignora silenciosamente, así que el peor caso es volver al comportamiento actual.
+const GRAMMAR_SIN_MARKDOWN: &str = "root ::= [^*#`]+";
+
 const PREFIJO_CONTROL: &str = "Redacta el documento solicitado aplicando tus principios. Usa la NORMATIVA adjunta como fuente legal y como guía de estructura. Si falta algún dato esencial, pídelos TODOS juntos en una sola pregunta antes de redactar; si no falta nada esencial, redacta directamente y sin preámbulos.";
 
 #[tauri::command]
@@ -1109,14 +1138,15 @@ pub async fn enviar_mensaje_ia_stream(
     let body = serde_json::json!({
         "model": "qwen3",
         "messages": [
-            { "role": "system", "content": SYSTEM_PROMPT },
+            { "role": "system", "content": system_prompt_con_fecha() },
             { "role": "user",   "content": mensaje_con_prefijo }
         ],
-        "temperature": 0.3,
+        "temperature": 0.2,
         "top_p": 0.9,
         "min_p": 0.05,
         "max_tokens": 1536,
         "repeat_penalty": 1.1,
+        "grammar": GRAMMAR_SIN_MARKDOWN,
         "stream": true
     });
 
