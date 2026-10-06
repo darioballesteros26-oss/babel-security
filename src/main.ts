@@ -613,6 +613,7 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "abrir-crear-archivo": abrirEditorTiptap(); break;
     case "cerrar-editor-tiptap": cerrarEditorTiptap(); break;
     case "guardar-documento-editor": void guardarDocumentoEditor(e); break;
+    case "guardar-documento-pdf": void guardarDocumentoEditorPdf(); break;
     case "tiptap-cmd": ejecutarComandoTiptap(el.dataset.cmd ?? ""); break;
     // Redacción — vista dividida
     case "toggle-menu-redactar":     toggleMenuRedactar(); break;
@@ -4711,6 +4712,41 @@ async function guardarDocumentoEditor(_e: Event): Promise<void> {
 
   // DOCUMENTO NUEVO — el formato y la ubicación se eligen en el diálogo de guardar.
   await abrirDialogoGuardarDoc("editor");
+}
+
+// Pasar a PDF el documento del editor (sirve tanto para uno nuevo como para uno abierto
+// desde un documento ya guardado). Convierte el contenido actual a DOCX y lo guarda como
+// un PDF cifrado nuevo (no sobrescribe el DOCX original: el PDF es un formato distinto).
+async function guardarDocumentoEditorPdf(): Promise<void> {
+  if (!_tiptapEditor) return;
+  const tituloInput = document.getElementById("editor-titulo") as HTMLInputElement | null;
+  const titulo = tituloInput?.value.trim() ?? "";
+  if (!titulo) {
+    mostrarToast("Escribe un título para el documento", true);
+    tituloInput?.focus();
+    return;
+  }
+  const nombreDocx = titulo.endsWith(".docx") ? titulo : titulo + ".docx"; // Rust usa el stem y guarda «.pdf»
+  const btn = document.getElementById("editor-btn-pdf") as HTMLButtonElement | null;
+  if (btn) btn.disabled = true;
+  try {
+    mostrarToast("Generando PDF…", false);
+    const bytes = await tiptapADocx(_tiptapEditor.getJSON());
+    const b64 = bytesABase64(bytes);
+    await invoke<string>("guardar_documento_pdf_desde_docx", {
+      nombreArchivo: nombreDocx,
+      contenidoB64: b64,
+    });
+    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreDocx.replace(/\.docx$/, ".pdf") }).catch(() => {});
+    cerrarEditorTiptap();
+    mostrarPantalla("archivos-guardados");
+    await cargarArchivosGuardados();
+    mostrarToast("✓ Documento guardado en PDF", false);
+  } catch (err) {
+    mostrarToast("Error al generar el PDF: " + String(err), true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ── DIÁLOGO ÚNICO DE GUARDADO (nuevo documento y redactar) ───────────────────

@@ -411,8 +411,8 @@
             onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">⊞ CONVERTIR A PDF</button>
           <button type="button" id="btn-eliminar-sel-g" data-action="eliminar-sel-guardados" class="hidden"
-            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;cursor:pointer;border-radius:2px;transition:background 0.2s;"
-            onmouseenter="this.style.background='rgba(255,107,107,0.08)'"
+            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">✕ ELIMINAR</button>
           <!-- EDITAR — aparece al seleccionar un único archivo -->
           <div id="wrap-redactar-g" class="hidden" style="position:relative;display:inline-block;">
@@ -447,11 +447,11 @@
           </div>
           <button type="button" id="btn-firmar-g" data-action="abrir-firma-digital"
             class="hidden btn-secundario-oro"
-            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;">✒ FIRMAR</button>
+            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;border-color:var(--dorado);">✒ FIRMAR</button>
           <button type="button" data-action="abrir-importar-guardado" id="ui-importar" class="btn-secundario-oro"
-            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;">+ IMPORTAR</button>
+            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;border-color:var(--dorado);">+ IMPORTAR</button>
           <button type="button" data-action="abrir-crear-archivo" id="ui-crear-archivo" class="btn-secundario-oro"
-            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;"
+            style="font-size:0.7rem;padding:6px 12px;letter-spacing:2px;border-color:var(--dorado);"
             title="Crear un archivo de texto cifrado">+ NUEVO DOCUMENTO</button>
         </div>
       </div>
@@ -2503,6 +2503,13 @@
       padding:8px 18px;border-radius:6px;font-family:'Times New Roman',Times,serif;
       font-size:0.68rem;letter-spacing:2px;font-weight:700;cursor:pointer;flex-shrink:0;">
       GUARDAR
+    </button>
+    <button type="button" id="editor-btn-pdf" data-action="guardar-documento-pdf"
+      title="Guardar una copia en PDF"
+      style="background:#0B0F19;border:1px solid var(--dorado);color:var(--dorado);
+      padding:8px 16px;border-radius:6px;font-family:'Times New Roman',Times,serif;
+      font-size:0.68rem;letter-spacing:2px;font-weight:700;cursor:pointer;flex-shrink:0;">
+      A PDF
     </button>
     <button type="button" data-action="cerrar-editor-tiptap"
       style="background:transparent;border:1px solid rgba(255,255,255,0.1);color:#555;
