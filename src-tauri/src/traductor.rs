@@ -1485,6 +1485,11 @@ pub fn procesar_pdf(
         .map(|p| p.to_string_lossy().into_owned());
     let mut _pythons_owned: Vec<String> = Vec::new();
     if let Some(ref b) = _bundled_py { _pythons_owned.push(b.clone()); }
+    // Entorno de desarrollo (~/.cache/babel_usb): en `tauri dev` no existe Resources/python,
+    // así que sin esto la traducción de PDF fallaba en dev (no encontraba pdf2docx).
+    if let Ok(home) = std::env::var("HOME") {
+        _pythons_owned.push(format!("{home}/.cache/babel_usb/python_env_arm64/bin/python3"));
+    }
     for &s in &["/opt/homebrew/bin/python3", "/usr/local/bin/python3"] {
         _pythons_owned.push(s.to_string());
     }
