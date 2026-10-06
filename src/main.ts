@@ -1876,11 +1876,18 @@ function manejarSeleccion(event: Event): void {
   if (archivo) procesarArchivo(archivo);
 }
 
+// Tamaño legible adaptativo: KB para ficheros pequeños, MB/GB según crezcan, en vez de
+// mostrar siempre KB (un fichero grande en KB es ilegible). Entrada en BYTES.
+function formatoTamaño(bytes: number): string {
+  if (bytes >= 1024 ** 3) return (bytes / 1024 ** 3).toFixed(2) + " GB";
+  if (bytes >= 1024 ** 2) return (bytes / 1024 ** 2).toFixed(1) + " MB";
+  return Math.max(1, Math.round(bytes / 1024)) + " KB";
+}
+
 async function procesarArchivo(archivo: File): Promise<void> {
-  const pesoKB = (archivo.size / 1024).toFixed(0);
   const ext = archivo.name.split(".").pop()?.toUpperCase() ?? "FILE";
   await advertirCalidadPdf(archivo.name);
-  añadirMensajeArchivo(archivo.name, `${pesoKB} KB · ${ext}`);
+  añadirMensajeArchivo(archivo.name, `${formatoTamaño(archivo.size)} · ${ext}`);
   mostrarProcesando(true);
 
   try {
@@ -2195,7 +2202,7 @@ async function cargarArchivosGuardados(): Promise<void> {
 
         const fuenteOrig = g.orig ?? g.guardado;
         if (g.trad && fuenteOrig) {
-          const kb = (g.trad.tamaño / 1024).toFixed(0);
+          const kb = formatoTamaño(g.trad.tamaño);
           const idioma = g.trad.idioma.replace("_", "→").toUpperCase();
           return `
 <div class="archivo-card" data-ruta="${escapeHTML(g.trad.ruta)}" data-ruta-orig="${escapeHTML(fuenteOrig.ruta)}" data-base="${escapeHTML(base)}" data-busqueda="${escapeHTML(base.toLowerCase().replace(/[\s_]+/g," ").trim())}" data-guardado="false" data-buzon-id="${escapeHTML(g.trad.buzon_id ?? "todos")}" draggable="true">
@@ -2205,7 +2212,7 @@ async function cargarArchivosGuardados(): Promise<void> {
       <div class="archivo-card-nombre" style="display:flex;align-items:center;gap:8px;"><span class="card-nombre-texto">${nombre}</span>
         <button type="button" data-action="renombrar" style="background:none;border:none;color:var(--dorado);cursor:pointer;font-size:0.85rem;padding:0;opacity:0.7;">✎</button>
       </div>
-      <div class="archivo-card-meta">${kb} KB · <span style="color:var(--dorado);">${escapeHTML(idioma)} · TRAD</span> · AES-256${g.trad.fecha ? ' · ' + escapeHTML(g.trad.fecha) : ''}</div>
+      <div class="archivo-card-meta">${kb} · <span style="color:var(--dorado);">${escapeHTML(idioma)} · TRAD</span> · AES-256${g.trad.fecha ? ' · ' + escapeHTML(g.trad.fecha) : ''}</div>
     </div>
   </div>
   <div class="archivo-card-botones">
@@ -2217,7 +2224,7 @@ async function cargarArchivosGuardados(): Promise<void> {
         }
 
         const a = g.guardado ?? g.trad ?? g.orig!;
-        const kb = (a.tamaño / 1024).toFixed(0);
+        const kb = formatoTamaño(a.tamaño);
         return `
 <div class="archivo-card" data-ruta="${escapeHTML(a.ruta)}" data-base="${escapeHTML(base)}" data-busqueda="${escapeHTML(base.toLowerCase().replace(/[\s_]+/g," ").trim())}" data-guardado="true" data-buzon-id="${escapeHTML(a.buzon_id ?? "todos")}" draggable="true">
   <div class="archivo-card-header">
@@ -2226,7 +2233,7 @@ async function cargarArchivosGuardados(): Promise<void> {
       <div class="archivo-card-nombre" style="display:flex;align-items:center;gap:8px;"><span class="card-nombre-texto">${nombre}</span>
         <button type="button" data-action="renombrar" style="background:none;border:none;color:var(--dorado);cursor:pointer;font-size:0.85rem;padding:0;opacity:0.7;">✎</button>
       </div>
-      <div class="archivo-card-meta">${kb} KB · GUARDADO · AES-256${a.fecha ? ' · ' + escapeHTML(a.fecha) : ''}</div>
+      <div class="archivo-card-meta">${kb} · GUARDADO · AES-256${a.fecha ? ' · ' + escapeHTML(a.fecha) : ''}</div>
     </div>
   </div>
   <div class="archivo-card-botones">
