@@ -2211,7 +2211,7 @@ async function cargarArchivosGuardados(): Promise<void> {
   <div class="archivo-card-botones">
     <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver-comparacion">◫ VER COMPARACIÓN</button>
     <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar-con-opcion">EXPORTAR</button>
-    <button type="button" class="btn-archivo" data-action="mover" style="opacity:0.7;">MOVER</button>
+    <button type="button" class="btn-archivo" data-action="mover" style="color:var(--dorado);border-color:var(--dorado);">MOVER</button>
   </div>
 </div>`;
         }
@@ -2234,7 +2234,7 @@ async function cargarArchivosGuardados(): Promise<void> {
     ${base.toLowerCase().endsWith(".docx") ? '<button type="button" class="btn-archivo" data-action="editar-docx" style="color:var(--dorado);border-color:var(--dorado);">EDITAR</button>' : ''}
     <button type="button" class="btn-archivo" data-action="traducir-guardado" style="color:var(--dorado);border-color:var(--dorado);">TRADUCIR</button>
     <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar">EXPORTAR</button>
-    <button type="button" class="btn-archivo" data-action="mover" style="opacity:0.7;">MOVER</button>
+    <button type="button" class="btn-archivo" data-action="mover" style="color:var(--dorado);border-color:var(--dorado);">MOVER</button>
   </div>
 </div>`;
       }).join("");
