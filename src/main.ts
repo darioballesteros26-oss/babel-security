@@ -2239,6 +2239,7 @@ async function cargarArchivosGuardados(): Promise<void> {
   <div class="archivo-card-botones">
     <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver">VER</button>
     ${base.toLowerCase().endsWith(".docx") ? '<button type="button" class="btn-archivo" data-action="editar-docx" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">EDITAR</button>' : ''}
+    ${base.toLowerCase().endsWith(".docx") ? '<button type="button" class="btn-archivo" data-action="docx-a-pdf" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">A PDF</button>' : ''}
     <button type="button" class="btn-archivo" data-action="traducir-guardado" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">TRADUCIR</button>
     <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar">EXPORTAR</button>
     <button type="button" class="btn-archivo" data-action="mover" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">MOVER</button>
@@ -2288,6 +2289,7 @@ async function cargarArchivosGuardados(): Promise<void> {
           if (terminoBusquedaArchivos) { seleccionarBuzonGuardados(card.dataset.buzonId ?? "todos"); break; }
           verArchivo(ruta, card.dataset.base); break;
         case "editar-docx": void editarDocxGuardado(ruta, base2); break;
+        case "docx-a-pdf": void convertirDocxGuardadoPdf(ruta, base2, card.dataset.buzonId ?? "todos"); break;
         case "traducir-guardado": traducirArchivoGuardado(ruta, card.dataset.base); break;
         case "exportar": exportarArchivo(ruta); break;
         case "exportar-con-opcion": mostrarPopupExportar(btn, ruta, rutaOrig); break;
@@ -3628,6 +3630,31 @@ async function editarDocxGuardado(ruta: string, base: string): Promise<void> {
     abrirEditorTiptap({ ruta, titulo, html });
   } catch (e) {
     mostrarToast("No se pudo abrir para editar: " + String(e), true);
+  }
+}
+
+// Convertir un DOCX GUARDADO a PDF directamente desde la lista de archivos (sin abrir el
+// editor). Convierte, guarda el PDF en la misma carpeta y BORRA el DOCX original → queda
+// solo el PDF. Orden seguro: solo borra el DOCX si el PDF se creó bien.
+async function convertirDocxGuardadoPdf(ruta: string, base: string, buzonId: string): Promise<void> {
+  try {
+    mostrarToast("Generando PDF…", false);
+    const nombreDocx = base.toLowerCase().endsWith(".docx") ? base : base + ".docx";
+    const rutaPdf = await invoke<string>("convertir_docx_guardado_a_pdf", {
+      ruta,
+      nombreArchivo: nombreDocx,
+    });
+    // Mover el PDF a la carpeta del DOCX original (si estaba en una carpeta).
+    if (buzonId && buzonId !== "todos") {
+      await invoke("mover_archivo_guardado", { ruta: rutaPdf, buzonDestino: buzonId }).catch(() => {});
+    }
+    // Reemplazar: borrar el DOCX original (solo tras crear el PDF con éxito).
+    await invoke("eliminar_archivo", { ruta }).catch(() => {});
+    invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreDocx.replace(/\.docx$/i, ".pdf") }).catch(() => {});
+    await cargarArchivosGuardados();
+    mostrarToast("✓ Convertido a PDF (DOCX reemplazado)", false);
+  } catch (err) {
+    mostrarToast("Error al convertir a PDF: " + String(err), true);
   }
 }
 

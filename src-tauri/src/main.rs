@@ -1528,6 +1528,46 @@ async fn guardar_documento_pdf_desde_docx(
     Ok(ruta)
 }
 
+// COMANDO — Convertir un DOCX YA GUARDADO a PDF directamente (sin pasar por el editor).
+// Descifra el DOCX del vault, lo convierte con LibreOffice y guarda el PDF cifrado
+// (mismo pipeline de reducción que cualquier PDF). El frontend borra luego el DOCX
+// original y mueve el PDF a su carpeta → efecto «reemplazar por PDF». Devuelve la ruta
+// del nuevo PDF cifrado. Conserva la fidelidad del DOCX (conversión directa, sin
+// round-trip por el editor).
+#[tauri::command]
+async fn convertir_docx_guardado_a_pdf(
+    app: tauri::AppHandle,
+    ruta: String,
+    nombre_archivo: String,
+    sesion: tauri::State<'_, SesionActiva>,
+) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let id_usuario = sesion.usuario.lock().map_err(|_| "Error".to_string())?.clone();
+
+    let stem = std::path::Path::new(&nombre_archivo)
+        .file_stem().and_then(|s| s.to_str()).unwrap_or("documento").to_string();
+    let nombre_pdf = format!("{stem}.pdf");
+
+    let (ruta_pdf, lossy) = tauri::async_runtime::spawn_blocking(move || {
+        let docx = abrir_descifrado_vault(&ruta, &subclave_hex)?; // valida ruta + descifra
+        let pdf = docx_bytes_a_pdf(&docx)?;
+        let ruta_pdf = cifrar_y_guardar_desde_bytes(&nombre_pdf, &pdf, &subclave_hex, &id_usuario)?;
+        let lossy = ULTIMA_IMPORTACION_LOSSY.with(|c| c.get());
+        Ok::<_, String>((ruta_pdf, lossy))
+    })
+    .await
+    .map_err(|e| format!("Error de tarea interna: {e}"))??;
+
+    if lossy {
+        let _ = app.emit("compresion-lossy", ());
+    }
+    Ok(ruta_pdf)
+}
+
 // COMANDO — Sobrescribir un documento DOCX guardado con contenido editado.
 // Reutiliza el mismo fichero cifrado (misma ruta, nombre y carpeta): editar en sitio.
 #[tauri::command]
@@ -7421,6 +7461,7 @@ fn main() {
             guardar_documento_sin_traducir,
             guardar_documento_desde_bytes,
             guardar_documento_pdf_desde_docx,
+            convertir_docx_guardado_a_pdf,
             actualizar_documento_guardado,
             leer_docx_editable,
             preparar_temp_bytes,
