@@ -54,6 +54,29 @@ fi
 cp ~/Babel/modelos_ia/"$MODELO_IA" "$APP_DEST/Contents/Resources/modelos_ia/"
 echo "   modelo: $MODELO_IA"
 
+echo "[2b/9] Embedder RAG (EmbeddingGemma) + biblioteca jurídica + embeddings..."
+# Embedder para la búsqueda semántica (opción B). Sin él, el RAG cae a solo BM25.
+EMBEDDER="embeddinggemma-300M-Q8_0.gguf"
+if [ -f ~/Babel/modelos_ia/"$EMBEDDER" ]; then
+  cp ~/Babel/modelos_ia/"$EMBEDDER" "$APP_DEST/Contents/Resources/modelos_ia/"
+  echo "   embedder: $EMBEDDER"
+else
+  echo "   AVISO: no está $EMBEDDER → el DMG irá SIN RAG semántico (solo BM25)"
+fi
+# Biblioteca jurídica (index.json) + embeddings precalculados. La app los copia a
+# ~/Babel/biblioteca_juridica en el primer arranque (asegurar_ia_persistente).
+mkdir -p "$APP_DEST/Contents/Resources/biblioteca_juridica"
+if [ -f ~/Babel/biblioteca_juridica/index.json ]; then
+  cp ~/Babel/biblioteca_juridica/index.json "$APP_DEST/Contents/Resources/biblioteca_juridica/"
+  echo "   biblioteca: index.json ($(du -h ~/Babel/biblioteca_juridica/index.json | cut -f1))"
+else
+  echo "   AVISO: no está index.json → el DMG irá SIN biblioteca jurídica (RAG vacío)"
+fi
+if [ -f ~/Babel/biblioteca_juridica/embeddings.bin ]; then
+  cp ~/Babel/biblioteca_juridica/embeddings.bin "$APP_DEST/Contents/Resources/biblioteca_juridica/"
+  echo "   embeddings: embeddings.bin ($(du -h ~/Babel/biblioteca_juridica/embeddings.bin | cut -f1))"
+fi
+
 echo "[3/9] SMaLL-100..."
 mkdir -p "$APP_DEST/Contents/Resources/servidor/modelos_usb"
 cp -R "$INTERFAZ/src-tauri/modelos_usb/small100-int8" "$APP_DEST/Contents/Resources/servidor/modelos_usb/"

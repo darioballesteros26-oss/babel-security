@@ -436,6 +436,50 @@ pub fn asegurar_ia_persistente(app: &tauri::AppHandle) {
         }
     }
 
+    // 1b) Embedder del RAG semántico (opción B) → ~/Babel/modelos_ia/. No está en
+    // MODELOS_CANDIDATOS (esos son los Qwen de chat), así que se copia aparte.
+    {
+        let nombre = "embeddinggemma-300M-Q8_0.gguf";
+        let origen = res.join("modelos_ia").join(nombre);
+        let destino = destino_modelos.join(nombre);
+        if origen.exists() && !destino.exists() {
+            let _ = std::fs::create_dir_all(&destino_modelos);
+            let tmp = destino_modelos.join(format!(".{nombre}.tmp"));
+            let _ = std::fs::remove_file(&tmp);
+            match std::fs::copy(&origen, &tmp).and_then(|_| std::fs::rename(&tmp, &destino)) {
+                Ok(_) => log::info!("[IA] embedder persistido en {}", destino.display()),
+                Err(e) => {
+                    log::warn!("[IA] no se pudo persistir el embedder: {e}");
+                    let _ = std::fs::remove_file(&tmp);
+                }
+            }
+        }
+    }
+
+    // 1c) Biblioteca jurídica (index.json) + embeddings precalculados → ~/Babel/
+    // biblioteca_juridica/. La biblioteca se lee SOLO de ~/Babel (ruta fija, sin
+    // fallback a Resources), así que sin esta copia el RAG estaría vacío en un equipo
+    // nuevo. index.json y embeddings.bin forman un par: se copian juntos.
+    {
+        let destino_bib = babel.join("biblioteca_juridica");
+        for nombre in ["index.json", "embeddings.bin"] {
+            let origen = res.join("biblioteca_juridica").join(nombre);
+            let destino = destino_bib.join(nombre);
+            if origen.exists() && !destino.exists() {
+                let _ = std::fs::create_dir_all(&destino_bib);
+                let tmp = destino_bib.join(format!(".{nombre}.tmp"));
+                let _ = std::fs::remove_file(&tmp);
+                match std::fs::copy(&origen, &tmp).and_then(|_| std::fs::rename(&tmp, &destino)) {
+                    Ok(_) => log::info!("[IA] biblioteca {nombre} persistida"),
+                    Err(e) => {
+                        log::warn!("[IA] no se pudo persistir {nombre}: {e}");
+                        let _ = std::fs::remove_file(&tmp);
+                    }
+                }
+            }
+        }
+    }
+
     // 2) Runtime (llama-server + backends ggml + dylibs) → ~/Babel/ia_stack/
     let llama_bundle = res.join("binaries").join("llama-server");
     let stack = babel.join("ia_stack");
