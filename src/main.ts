@@ -620,6 +620,8 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "redactar-tu-mismo":        void abrirRedaccion("manual"); break;
     case "redactar-con-babel":       void abrirRedaccion("babel"); break;
     case "seleccionar-paginas":      void abrirModalSeleccionarPaginas(); break;
+    case "menu-editar-docx":         void menuEditarDocx(); break;
+    case "menu-docx-a-pdf":          void menuDocxAPdf(); break;
     case "cerrar-modal-paginas":     cerrarModalPaginas(); break;
     case "confirmar-seleccion-paginas": void confirmarSeleccionPaginas(); break;
     case "abrir-firma-digital":      void abrirModalFirma(); break;
@@ -3656,6 +3658,32 @@ async function convertirDocxGuardadoPdf(ruta: string, base: string, buzonId: str
   } catch (err) {
     mostrarToast("Error al convertir a PDF: " + String(err), true);
   }
+}
+
+// Entradas «Editar DOCX» y «Pasar a PDF» del desplegable EDITAR (operan sobre el único
+// archivo seleccionado; validan que sea .docx al pulsar, como «Seleccionar páginas» con PDF).
+function _docxSeleccionadoDelMenu(): { ruta: string; base: string; buzonId: string } | null {
+  document.getElementById("menu-redactar")?.classList.add("hidden");
+  const cb = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
+  const card = cb?.closest(".archivo-card") as HTMLElement | null;
+  const ruta = card?.dataset.ruta;
+  const base = card?.dataset.base ?? "";
+  if (!ruta) return null;
+  if (!base.toLowerCase().endsWith(".docx")) {
+    mostrarToast("Esta opción es solo para documentos DOCX.", true);
+    return null;
+  }
+  return { ruta, base, buzonId: card?.dataset.buzonId ?? "todos" };
+}
+
+function menuEditarDocx(): void {
+  const sel = _docxSeleccionadoDelMenu();
+  if (sel) void editarDocxGuardado(sel.ruta, sel.base);
+}
+
+function menuDocxAPdf(): void {
+  const sel = _docxSeleccionadoDelMenu();
+  if (sel) void convertirDocxGuardadoPdf(sel.ruta, sel.base, sel.buzonId);
 }
 
 // ── COMPARTIR — dropdown fusionado ───────────────────────────────────────────
