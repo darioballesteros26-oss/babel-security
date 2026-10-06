@@ -2211,7 +2211,7 @@ async function cargarArchivosGuardados(): Promise<void> {
   <div class="archivo-card-botones">
     <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver-comparacion">◫ VER COMPARACIÓN</button>
     <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar-con-opcion">EXPORTAR</button>
-    <button type="button" class="btn-archivo" data-action="mover" style="color:var(--dorado);border-color:var(--dorado);">MOVER</button>
+    <button type="button" class="btn-archivo" data-action="mover" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">MOVER</button>
   </div>
 </div>`;
         }
@@ -2231,10 +2231,10 @@ async function cargarArchivosGuardados(): Promise<void> {
   </div>
   <div class="archivo-card-botones">
     <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver">VER</button>
-    ${base.toLowerCase().endsWith(".docx") ? '<button type="button" class="btn-archivo" data-action="editar-docx" style="color:var(--dorado);border-color:var(--dorado);">EDITAR</button>' : ''}
-    <button type="button" class="btn-archivo" data-action="traducir-guardado" style="color:var(--dorado);border-color:var(--dorado);">TRADUCIR</button>
+    ${base.toLowerCase().endsWith(".docx") ? '<button type="button" class="btn-archivo" data-action="editar-docx" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">EDITAR</button>' : ''}
+    <button type="button" class="btn-archivo" data-action="traducir-guardado" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">TRADUCIR</button>
     <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar">EXPORTAR</button>
-    <button type="button" class="btn-archivo" data-action="mover" style="color:var(--dorado);border-color:var(--dorado);">MOVER</button>
+    <button type="button" class="btn-archivo" data-action="mover" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">MOVER</button>
   </div>
 </div>`;
       }).join("");
@@ -4714,9 +4714,9 @@ async function guardarDocumentoEditor(_e: Event): Promise<void> {
   await abrirDialogoGuardarDoc("editor");
 }
 
-// Pasar a PDF el documento del editor (sirve tanto para uno nuevo como para uno abierto
-// desde un documento ya guardado). Convierte el contenido actual a DOCX y lo guarda como
-// un PDF cifrado nuevo (no sobrescribe el DOCX original: el PDF es un formato distinto).
+// Pasar a PDF el documento del editor. Si es un documento NUEVO, guarda un PDF cifrado.
+// Si veníamos de EDITAR un documento ya guardado (DOCX), el PDF lo REEMPLAZA: se borra el
+// DOCX original para que quede solo el PDF (no los dos).
 async function guardarDocumentoEditorPdf(): Promise<void> {
   if (!_tiptapEditor) return;
   const tituloInput = document.getElementById("editor-titulo") as HTMLInputElement | null;
@@ -4726,6 +4726,7 @@ async function guardarDocumentoEditorPdf(): Promise<void> {
     tituloInput?.focus();
     return;
   }
+  const rutaEdicion = _editorRutaEdicion; // capturar antes de cerrar el editor (que lo pone a null)
   const nombreDocx = titulo.endsWith(".docx") ? titulo : titulo + ".docx"; // Rust usa el stem y guarda «.pdf»
   const btn = document.getElementById("editor-btn-pdf") as HTMLButtonElement | null;
   if (btn) btn.disabled = true;
@@ -4738,10 +4739,14 @@ async function guardarDocumentoEditorPdf(): Promise<void> {
       contenidoB64: b64,
     });
     invoke("registrar_evento_diario", { tipo: "importar", detalle: nombreDocx.replace(/\.docx$/, ".pdf") }).catch(() => {});
+    // Documento abierto desde uno guardado → el PDF reemplaza al DOCX de origen.
+    if (rutaEdicion) {
+      try { await invoke("eliminar_archivo", { ruta: rutaEdicion }); } catch { /* si falla, el DOCX queda; no es crítico */ }
+    }
     cerrarEditorTiptap();
     mostrarPantalla("archivos-guardados");
     await cargarArchivosGuardados();
-    mostrarToast("✓ Documento guardado en PDF", false);
+    mostrarToast(rutaEdicion ? "✓ Convertido a PDF (DOCX reemplazado)" : "✓ Documento guardado en PDF", false);
   } catch (err) {
     mostrarToast("Error al generar el PDF: " + String(err), true);
   } finally {
