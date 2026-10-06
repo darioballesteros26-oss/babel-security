@@ -82,7 +82,7 @@ mkdir -p "$APP_DEST/Contents/Resources/servidor/modelos_usb"
 cp -R "$INTERFAZ/src-tauri/modelos_usb/small100-int8" "$APP_DEST/Contents/Resources/servidor/modelos_usb/"
 
 echo "[4/9] Servidor Python..."
-for f in server.py traduccion_comun.py traduccion_small100.py traduccion_madlad.py firma.py; do
+for f in server.py traduccion_comun.py traduccion_small100.py traduccion_madlad.py firma.py html_to_pdf.py; do
   cp "$INTERFAZ/servidor_babel/$f" "$APP_DEST/Contents/Resources/servidor/"
 done
 

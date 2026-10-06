@@ -1443,15 +1443,90 @@ async fn guardar_documento_desde_bytes(
     Ok(ruta)
 }
 
-// Convierte bytes DOCX a PDF con LibreOffice (soffice). Bloqueante — llamar dentro de
-// spawn_blocking. Devuelve los bytes del PDF resultante.
+// Convierte bytes DOCX a PDF. Bloqueante — llamar dentro de spawn_blocking.
+// PRIMARIO (sin dependencias externas, funciona en cualquier Mac): DOCX→HTML
+// (docx_a_html) → PDF con PyMuPDF (Python bundleado + html_to_pdf.py). Fidelidad de
+// texto/estructura. FALLBACK de máxima fidelidad: LibreOffice, solo si está instalado.
 fn docx_bytes_a_pdf(docx: &[u8]) -> Result<Vec<u8>, String> {
-    const SIN_LIBREOFFICE: &str =
-        "Para guardar en PDF hace falta LibreOffice. Instálalo (libreoffice.org) o guarda \
-         en DOCX, que es totalmente editable.";
+    match docx_a_pdf_via_python(docx) {
+        Ok(pdf) => Ok(pdf),
+        Err(e_py) => docx_a_pdf_via_soffice(docx)
+            .map_err(|e_lo| format!("No se pudo convertir a PDF. Motor interno: {e_py}. LibreOffice: {e_lo}")),
+    }
+}
+
+// Python bundleado que importe PyMuPDF. Resuelve el del .app (vía current_exe →
+// Contents/Resources/python), el de desarrollo (~/.cache/babel_usb) y Homebrew.
+fn ruta_python_pymupdf() -> Option<String> {
+    let mut cands: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(contents) = exe.parent().and_then(|p| p.parent()) {
+            cands.push(contents.join("Resources").join("python").join("bin").join("python3"));
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        cands.push(std::path::Path::new(&home).join(".cache/babel_usb/python_env_arm64/bin/python3"));
+    }
+    cands.push("/opt/homebrew/bin/python3".into());
+    cands.push("/usr/local/bin/python3".into());
+    cands.into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .find(|p| {
+            std::process::Command::new(p)
+                .args(["-c", "import pymupdf"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
+}
+
+// Localiza un script del servidor (html_to_pdf.py…) en el bundle del .app
+// (Contents/Resources/servidor) o en el repo de desarrollo (servidor_babel/).
+fn ruta_script_servidor(nombre: &str) -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let mut cands: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(contents) = exe.parent().and_then(|p| p.parent()) {
+        cands.push(contents.join("Resources").join("servidor").join(nombre));
+    }
+    // dev: exe = <repo>/src-tauri/target/debug/babel-interfaz → repo = ancestors()[4]
+    if let Some(repo) = exe.ancestors().nth(4) {
+        cands.push(repo.join("servidor_babel").join(nombre));
+    }
+    cands.into_iter().find(|p| p.exists())
+}
+
+// Primario: DOCX→HTML→PDF con PyMuPDF (sin LibreOffice).
+fn docx_a_pdf_via_python(docx: &[u8]) -> Result<Vec<u8>, String> {
+    let html = docx_a_html(docx)?;
+    // docx_a_html devuelve el markup con prefijo «html:» (convención del visor); hay que
+    // quitarlo o se renderizaría literalmente en el PDF.
+    let html = html.strip_prefix("html:").map(str::to_string).unwrap_or(html);
+    let python3 = ruta_python_pymupdf().ok_or("Python con PyMuPDF no disponible")?;
+    let script = ruta_script_servidor("html_to_pdf.py").ok_or("script html_to_pdf.py no encontrado")?;
+    let sub = tmp_dir().join(nuevo_id());
+    std::fs::create_dir_all(&sub).map_err(|e| format!("Error creando temporal: {e}"))?;
+    let html_tmp = sub.join("in.html");
+    let pdf_out = sub.join("out.pdf");
+    let s_script = script.to_string_lossy().into_owned();
+    let s_html = html_tmp.to_string_lossy().into_owned();
+    let s_pdf = pdf_out.to_string_lossy().into_owned();
+    let resultado = (|| {
+        escribir_privado(&html_tmp, html.as_bytes()).map_err(|e| format!("Error escribiendo HTML: {e}"))?;
+        let mut cmd = std::process::Command::new(&python3);
+        cmd.args([&s_script, &s_html, &s_pdf]);
+        if !traductor::ejecutar_con_timeout(&mut cmd, 120) {
+            return Err("la conversión con PyMuPDF falló".to_string());
+        }
+        std::fs::read(&pdf_out).map_err(|e| format!("no se pudo leer el PDF: {e}"))
+    })();
+    let _ = std::fs::remove_dir_all(&sub);
+    resultado
+}
+
+// Fallback de máxima fidelidad: LibreOffice (soffice), solo si está instalado.
+fn docx_a_pdf_via_soffice(docx: &[u8]) -> Result<Vec<u8>, String> {
+    const SIN_LIBREOFFICE: &str = "LibreOffice no está instalado (fallback).";
     let soffice = traductor::resolver_binario(traductor::RUTAS_SOFFICE, "soffice");
-    // Pre-comprobación: si la ruta resuelta es absoluta y no existe, LibreOffice no está
-    // instalado → mensaje claro y accionable en vez de un fallo genérico de conversión.
     if soffice.contains(std::path::MAIN_SEPARATOR) && !std::path::Path::new(&soffice).exists() {
         return Err(SIN_LIBREOFFICE.to_string());
     }
@@ -1474,7 +1549,6 @@ fn docx_bytes_a_pdf(docx: &[u8]) -> Result<Vec<u8>, String> {
     let resultado = if ok {
         std::fs::read(&pdf_path).map_err(|_| SIN_LIBREOFFICE.to_string())
     } else {
-        // Fallo al lanzar (binario ausente en PATH) o timeout: mismo consejo accionable.
         Err(SIN_LIBREOFFICE.to_string())
     };
     let _ = std::fs::remove_dir_all(&sub);
