@@ -106,7 +106,11 @@ pub fn comprimir_b64(data: &[u8]) -> String {
     if es_binario {
         return base64::engine::general_purpose::STANDARD.encode(data);
     }
-    if let Ok(c) = zstd::encode_all(data, 3) {
+    // Nivel 19 (antes 3): comprime bastante mejor el texto y el contenido no-binario a
+    // cambio de algo más de CPU al guardar (imperceptible en documentos; los binarios ya
+    // comprimidos se saltan arriba). La descompresión es igual de rápida a cualquier nivel
+    // y el frame zstd se autodescribe → los ficheros viejos a nivel 3 siguen abriéndose.
+    if let Ok(c) = zstd::encode_all(data, 19) {
         let mut buf = ZSTD_MAGIC.to_vec();
         buf.extend_from_slice(&c);
         return base64::engine::general_purpose::STANDARD.encode(&buf);
