@@ -507,6 +507,50 @@ pub fn precalentar() {
     let _ = obtener_biblioteca();
 }
 
+/// Leyes muy especializadas que la búsqueda densa a veces cuela en consultas de OTRO
+/// dominio (p. ej. «recurso de reposición tributario» arrastraba el art. 326 LH —
+/// «recursos contra la calificación» registral—). Cada una solo es pertinente si la
+/// consulta menciona su ámbito; si no, se descarta tras la recuperación para evitar
+/// citas cruzadas de ley. Las leyes generales (CC, CP, LEC, LECrim, LGT, LPAC, CE…) NO
+/// se filtran: son de aplicación transversal. Claves en minúsculas y, donde el usuario
+/// suele omitir la tilde, con variante sin acento (p. ej. «pensi» casa «pensión»/«pension»).
+const AMBITO_LEYES: &[(&str, &[&str])] = &[
+    ("LORPM", &["menor ", "menores", "adolescente", "juvenil", "lorpm", "joven"]),
+    ("LOVG",  &["genero", "género", "lovg", "violencia domestica", "violencia doméstica",
+                "violencia de genero", "violencia de género", "maltrato"]),
+    ("LH",    &["hipotec", "registro de la propiedad", "registrador", "finca", "inmueble",
+                "inscripci", "dominio", "asiento registral", "anotacion preventiva",
+                "anotación preventiva", "nota simple", "ley hipotecaria"]),
+    ("LPH",   &["propiedad horizontal", "comunidad de propietarios", "junta de propietarios",
+                "elementos comunes", "cuota de participaci", "administrador de fincas",
+                "derrama", "vecino"]),
+    ("LRC",   &["registro civil", "inscripcion de nacimiento", "inscripción de nacimiento",
+                "defuncion", "defunción", "estado civil"]),
+    ("LGSS",  &["seguridad social", "pensi", "cotizaci", "jubilaci", "prestaci", "incapacidad",
+                "desempleo", "afiliaci", "mutua", "invalidez", "viudedad", "orfandad"]),
+    ("LSC",   &["sociedad", "socio", "capital social", "junta general", "participaciones sociales",
+                "consejo de administracion", "consejo de administración", "mercantil",
+                "sociedades de capital"]),
+    ("CCom",  &["comerciante", "mercantil", "empresario", "letra de cambio", "pagare", "pagaré",
+                "codigo de comercio", "código de comercio", "libros contables"]),
+    ("TRLC",  &["concurso", "concursal", "insolvencia", "acreedor", "administracion concursal",
+                "administración concursal"]),
+    ("LOPDGDD", &["datos personales", "dato personal", "proteccion de datos", "protección de datos",
+                  "privacidad", "tratamiento de datos", "rgpd", "derecho al olvido", "consentimiento"]),
+    ("TRLGDCU", &["consumidor", "usuario", "consumo", "producto defectuoso", "clausula abusiva",
+                  "cláusula abusiva", "contrato a distancia", "desistimiento"]),
+];
+
+/// True si el fragmento pertenece a una ley especializada cuyo ámbito NO aparece en la
+/// consulta (→ se descarta para no cruzar leyes). Las leyes no listadas nunca se descartan.
+fn fuera_de_ambito(abrev: &str, query_lower: &str) -> bool {
+    AMBITO_LEYES
+        .iter()
+        .find(|(ley, _)| *ley == abrev)
+        .map(|(_, claves)| !claves.iter().any(|k| query_lower.contains(k)))
+        .unwrap_or(false)
+}
+
 /// Searches for relevant legal fragments for `query`.
 /// Returns `(formatted_block, found_something)`.
 /// `max_chars`: approximate character budget for the entire normativa block.
@@ -530,29 +574,13 @@ pub fn buscar_normativa(query: &str, max_chars: usize) -> (String, bool) {
         _ => biblio.buscar(query, 20, 1.0),
     };
 
-    // Post-retrieval scope filter: remove law fragments whose scope of application
-    // doesn't match the query context, to avoid cross-law citation errors.
+    // Filtro de ámbito post-recuperación: descarta fragmentos de leyes especializadas
+    // cuyo dominio no aparece en la consulta, para evitar citas cruzadas de ley (ver
+    // AMBITO_LEYES). Las leyes generales no se tocan.
     let query_lower = query.to_lowercase();
-    let es_contexto_menores = ["menor ", "menores", "adolescente", "juvenil", "lorpm", "joven"]
-        .iter()
-        .any(|t| query_lower.contains(t));
-    let es_contexto_violencia_genero = ["genero", "género", "lovg", "violencia doméstica", "violencia de género"]
-        .iter()
-        .any(|t| query_lower.contains(t));
-
     let resultados: Vec<_> = resultados_brutos
         .into_iter()
-        .filter(|(_, frag)| {
-            // LORPM only applies to juveniles: skip for adult criminal contexts
-            if frag.abrev == "LORPM" && !es_contexto_menores {
-                return false;
-            }
-            // LOVG only applies to gender violence contexts
-            if frag.abrev == "LOVG" && !es_contexto_violencia_genero {
-                return false;
-            }
-            true
-        })
+        .filter(|(_, frag)| !fuera_de_ambito(&frag.abrev, &query_lower))
         .collect();
 
     if resultados.is_empty() {
@@ -724,6 +752,33 @@ mod tests {
             assert!(bloque.contains("CP") || bloque.contains("CE") || bloque.contains("LECrim"),
                 "debe incluir referencia a alguna ley");
         }
+    }
+
+    #[test]
+    fn filtro_ambito_excluye_leyes_fuera_de_dominio() {
+        // Consulta tributaria: la Ley Hipotecaria y la mercantil NO deben colarse
+        // (era el bug: art. 326 LH «recursos contra la calificación» en un recurso de
+        // reposición del IRPF).
+        let q = "recurrir en reposición una liquidación del irpf que considero mal calculada"
+            .to_lowercase();
+        assert!(fuera_de_ambito("LH", &q), "LH no es de ámbito tributario");
+        assert!(fuera_de_ambito("LSC", &q), "sociedades de capital no aplica");
+        assert!(fuera_de_ambito("CCom", &q), "código de comercio no aplica");
+        assert!(!fuera_de_ambito("LGT", &q), "LGT (tributaria) NO se filtra");
+        assert!(!fuera_de_ambito("CC", &q), "las leyes generales nunca se filtran");
+
+        // En su propio dominio, la ley especializada se conserva.
+        let reg = "recurso contra la calificación negativa del registrador de la propiedad sobre una finca"
+            .to_lowercase();
+        assert!(!fuera_de_ambito("LH", &reg), "LH debe conservarse en consulta registral");
+        let soc = "constitución de una sociedad de capital y nombramiento del consejo de administración"
+            .to_lowercase();
+        assert!(!fuera_de_ambito("LSC", &soc), "LSC debe conservarse en consulta societaria");
+
+        // Comportamiento previo de LORPM/LOVG intacto.
+        assert!(fuera_de_ambito("LORPM", &"demanda de reclamación de cantidad".to_lowercase()));
+        assert!(!fuera_de_ambito("LORPM", &"delito cometido por un menor de edad".to_lowercase()));
+        assert!(!fuera_de_ambito("LOVG", &"denuncia por violencia de género".to_lowercase()));
     }
 
     #[test]
