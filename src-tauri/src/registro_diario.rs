@@ -296,6 +296,10 @@ pub fn guardar_preferencias_registro(
     prefs.hora = hora;
     prefs.minuto = minuto;
     prefs.segundo = segundo;
+    // Configurar la hora (por la vía que sea) implica que YA no es la primera vez: sin esto,
+    // si se configuraba desde ajustes (no desde el modal inicial), primera_vez se quedaba en
+    // true y el aviso de «acceso tardío» no saltaba nunca.
+    prefs.primera_vez = false;
     guardar_prefs_inner(&prefs, &subclave_hex)
 }
 
