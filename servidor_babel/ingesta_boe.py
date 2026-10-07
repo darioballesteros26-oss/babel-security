@@ -25,6 +25,7 @@ from datetime import date
 INDEX = os.path.expanduser("~/Babel/biblioteca_juridica/index.json")
 
 # (abrev de cita, id BOE, nombre de la ley)  — grandes códigos civil/laboral/administrativo
+# Si algún id del BOE no responde, el script lo salta solo (no corrompe el índice).
 LEYES = [
     ("CC",    "BOE-A-1889-4763",  "Código Civil"),
     ("LEC",   "BOE-A-2000-323",   "Ley 1/2000 de Enjuiciamiento Civil"),
@@ -33,6 +34,19 @@ LEYES = [
     ("LPAC",  "BOE-A-2015-10565", "Ley 39/2015 del Procedimiento Administrativo Común"),
     ("LRJSP", "BOE-A-2015-10566", "Ley 40/2015 de Régimen Jurídico del Sector Público"),
     ("LAU",   "BOE-A-1994-26003", "Ley 29/1994 de Arrendamientos Urbanos"),
+    # ── Ampliación 2026-10-07: grandes leyes que faltaban ──
+    ("LJCA",  "BOE-A-1998-16718", "Ley 29/1998 de la Jurisdicción Contencioso-administrativa"),
+    ("LGT",   "BOE-A-2003-23186", "Ley 58/2003 General Tributaria"),
+    ("LPH",   "BOE-A-1960-10906", "Ley 49/1960 sobre Propiedad Horizontal"),
+    ("LSC",   "BOE-A-2010-10544", "RDL 1/2010 Ley de Sociedades de Capital"),
+    ("LGSS",  "BOE-A-2015-11724", "RDL 8/2015 Ley General de la Seguridad Social"),
+    ("LOPDGDD","BOE-A-2018-16673","LO 3/2018 de Protección de Datos y garantía de derechos digitales"),
+    ("TRLGDCU","BOE-A-2007-20555","RDL 1/2007 Ley General para la Defensa de Consumidores y Usuarios"),
+    ("TRLC",  "BOE-A-2020-4859",  "RDL 1/2020 Texto Refundido de la Ley Concursal"),
+    ("CCom",  "BOE-A-1885-6627",  "Código de Comercio"),
+    ("LH",    "BOE-A-1946-2453",  "Ley Hipotecaria"),
+    ("LJV",   "BOE-A-2015-7391",  "Ley 15/2015 de la Jurisdicción Voluntaria"),
+    ("LRC",   "BOE-A-2011-12628", "Ley 20/2011 del Registro Civil"),
 ]
 
 API = "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/{id}/texto"
