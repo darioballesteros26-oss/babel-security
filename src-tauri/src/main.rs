@@ -3004,11 +3004,18 @@ async fn traducir_archivo_guardado(
 
         let nombre_base = format!("{}.{}", nombre_original, ext);
 
-        // Escribir a tmp/ y traducir — prefijo aleatorio evita colisión si hay dos traducciones simultáneas
+        // Escribir a tmp/ y traducir. El prefijo aleatorio (anti-colisión entre dos
+        // traducciones simultáneas) va como SUBCARPETA, no en el nombre del fichero: así el
+        // `nombre` que procesar_pdf/clonar_y_traducir derivan del stem queda LIMPIO (sin el
+        // pfx) y coincide con lo que busca renombrar_salida_traduccion. Antes el pfx se
+        // colaba en el nombre de salida → renombrar no lo encontraba → falso error
+        // «Archivo de traducción no encontrado» pese a haberse traducido bien.
         let mut raw = [0u8; 4];
         rand::rngs::OsRng.fill_bytes(&mut raw);
         let pfx = hex::encode(raw);
-        let tmp_path = tmp_dir().join(format!("{}_{}", pfx, nombre_base));
+        let sub_tmp = tmp_dir().join(&pfx);
+        std::fs::create_dir_all(&sub_tmp).map_err(|e| format!("Error creando temporal: {}", e))?;
+        let tmp_path = sub_tmp.join(&nombre_base);
         escribir_privado(&tmp_path, &bytes).map_err(|e| format!("Error escribiendo temporal: {}", e))?;
 
         let progreso = |pct: u8, msg: &str| {
@@ -3027,8 +3034,9 @@ async fn traducir_archivo_guardado(
         );
 
         // Limpiar temporal con 3 pasadas (igual que borrar_seguro) — el archivo
-        // contiene bytes descifrados de un documento confidencial.
+        // contiene bytes descifrados de un documento confidencial. Luego la subcarpeta.
         if let Some(s) = tmp_path.to_str() { borrar_seguro(s); }
+        let _ = std::fs::remove_dir_all(&sub_tmp);
 
         resultado?;
 
