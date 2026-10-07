@@ -444,6 +444,7 @@ fn buscar_dense(biblio: &IndiceJuridico, query: &str, max: usize) -> Option<Vec<
     }
 
     let refs = referencias_articulo(query);
+    let intento = intencion_documento(&query.to_lowercase());
     let mut scored: Vec<(f32, usize)> = Vec::with_capacity(embs.len());
     for (i, e) in embs.iter().enumerate() {
         // Coseno = producto escalar (ambos vectores están L2-normalizados).
@@ -451,10 +452,10 @@ fn buscar_dense(biblio: &IndiceJuridico, query: &str, max: usize) -> Option<Vec<
         for k in 0..qv.len() {
             cos += qv[k] * e[k];
         }
+        let frag = &biblio.fragmentos[i];
         // BOOST por cita explícita (misma lógica que BM25): el artículo/STC citado sube
         // al top sí o sí. Sumar 1.0 lo garantiza (el coseno vive en [-1, 1]).
         if !refs.is_empty() {
-            let frag = &biblio.fragmentos[i];
             let art = frag.articulo.to_lowercase();
             let es_stc = frag.abrev == "STC";
             let casa = refs.iter().any(|r| {
@@ -466,6 +467,12 @@ fn buscar_dense(biblio: &IndiceJuridico, query: &str, max: usize) -> Option<Vec<
             });
             if casa {
                 cos += 1.0;
+            }
+        }
+        // BOOST por intención de documento (p. ej. «contencioso-administrativo» → LJCA).
+        if let Some(entrada) = intento {
+            if casa_intencion(frag, entrada) {
+                cos += BOOST_INTENCION;
             }
         }
         if cos >= UMBRAL_COSENO {
@@ -552,6 +559,49 @@ fn fuera_de_ambito(abrev: &str, query_lower: &str) -> bool {
         .find(|(ley, _)| *ley == abrev)
         .map(|(_, claves)| !claves.iter().any(|k| query_lower.contains(k)))
         .unwrap_or(false)
+}
+
+/// Boost por INTENCIÓN de documento. Cuando la consulta nombra explícitamente un tipo de
+/// escrito cuya ley a veces PIERDE el ranking denso frente a otra cercana, se potencia esa
+/// ley (y los modelos MEP de ese tipo). Caso real: «recurso contencioso-administrativo»
+/// (vía JUDICIAL, LJCA) competía con los recursos administrativos de LPAC —que mencionaba
+/// la propia consulta como vía previa agotada— y la LJCA caía fuera del top-5, así que el
+/// redactor escribía un recurso de alzada en vez del contencioso. Las frases son largas y
+/// específicas para no dispararse en falso (p. ej. «divorcio contencioso» NO activa LJCA,
+/// porque exige «contencioso administrativo»). Más débil que el boost por cita (+1.0): empuja.
+const BOOST_INTENCION: f32 = 0.3;
+const INTENCION_LEY: &[(&[&str], &str)] = &[
+    (&["contencioso-administrativo", "contencioso administrativo", "jurisdiccion contencioso",
+       "jurisdicción contencioso"], "LJCA"),
+    (&["concurso de acreedores", "concurso voluntario", "concurso necesario",
+       "declaracion de concurso", "declaración de concurso"], "TRLC"),
+    (&["sociedad de capital", "sociedad limitada", "sociedad de responsabilidad limitada",
+       "sociedad anonima", "sociedad anónima"], "LSC"),
+];
+
+/// Entrada de `INTENCION_LEY` disparada por la consulta, o None si ninguna frase aparece.
+fn intencion_documento(query_lower: &str) -> Option<&'static (&'static [&'static str], &'static str)> {
+    INTENCION_LEY
+        .iter()
+        .find(|(frases, _)| frases.iter().any(|f| query_lower.contains(f)))
+}
+
+/// True si el fragmento debe recibir el boost de intención `entrada`: es de la ley objetivo,
+/// o es un MODELO (MEP) cuyo título menciona una de las frases disparadoras.
+fn casa_intencion(frag: &FragmentoJuridico, entrada: &(&[&str], &str)) -> bool {
+    let (frases, ley) = entrada;
+    if frag.abrev == *ley {
+        return true;
+    }
+    frag.abrev == "MEP"
+        && frag
+            .titulo
+            .as_deref()
+            .map(|t| {
+                let tl = t.to_lowercase();
+                frases.iter().any(|f| tl.contains(f))
+            })
+            .unwrap_or(false)
 }
 
 /// Reparte los `total` huecos de citas conservando el orden por score, pero con como mucho
@@ -851,6 +901,29 @@ mod tests {
         assert_eq!(sel.iter().filter(|f| f.abrev == "MEP").count(), 2, "máx. 2 modelos");
         assert!(sel.iter().filter(|f| f.abrev == "TRLGDCU").count() >= 3,
             "deben entrar al menos 3 artículos de ley");
+    }
+
+    #[test]
+    fn intencion_documento_detecta_contencioso_y_no_divorcio() {
+        // «contencioso-administrativo» → LJCA (era el bug: salía recurso de alzada).
+        let q = "quiero impugnar ante los tribunales, recurso contencioso-administrativo contra el ayuntamiento".to_lowercase();
+        let e = intencion_documento(&q).expect("debe detectar intención contencioso");
+        assert_eq!(e.1, "LJCA");
+        // «divorcio contencioso» NO debe activar LJCA (no contiene «contencioso administrativo»).
+        assert!(intencion_documento(&"demanda de divorcio contencioso".to_lowercase()).is_none(),
+            "divorcio contencioso no debe disparar el boost de LJCA");
+        // Consulta sin frase disparadora.
+        assert!(intencion_documento(&"redacta un contrato de arrendamiento".to_lowercase()).is_none());
+
+        // El boost alcanza a la ley objetivo y al modelo MEP del mismo tipo.
+        let entrada = intencion_documento(&q).unwrap();
+        let ljca = fragmento("LJCA", "25", "actividad administrativa impugnable");
+        assert!(casa_intencion(&ljca, entrada), "la ley LJCA recibe el boost");
+        let mut mep = fragmento("MEP", "recurso-contencioso-interposicion", "texto");
+        mep.titulo = Some("Modelo de escrito de interposición de recurso contencioso-administrativo".into());
+        assert!(casa_intencion(&mep, entrada), "el modelo MEP contencioso recibe el boost");
+        let lpac = fragmento("LPAC", "122", "recurso de alzada");
+        assert!(!casa_intencion(&lpac, entrada), "LPAC (alzada) NO recibe el boost");
     }
 
     #[test]
