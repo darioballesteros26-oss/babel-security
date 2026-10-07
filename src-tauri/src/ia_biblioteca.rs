@@ -526,6 +526,9 @@ const AMBITO_LEYES: &[(&str, &[&str])] = &[
                 "derrama", "vecino"]),
     ("LRC",   &["registro civil", "inscripcion de nacimiento", "inscripción de nacimiento",
                 "defuncion", "defunción", "estado civil"]),
+    ("LGT",   &["tribut", "hacienda", "liquidaci", "irpf", "impuesto", "aeat",
+                "agencia tributaria", "economico-administrativ", "económico-administrativ",
+                "recaudaci", "autoliquidaci", "deuda tributaria", "sancion tributaria"]),
     ("LGSS",  &["seguridad social", "pensi", "cotizaci", "jubilaci", "prestaci", "incapacidad",
                 "desempleo", "afiliaci", "mutua", "invalidez", "viudedad", "orfandad"]),
     ("LSC",   &["sociedad", "socio", "capital social", "junta general", "participaciones sociales",
@@ -549,6 +552,44 @@ fn fuera_de_ambito(abrev: &str, query_lower: &str) -> bool {
         .find(|(ley, _)| *ley == abrev)
         .map(|(_, claves)| !claves.iter().any(|k| query_lower.contains(k)))
         .unwrap_or(false)
+}
+
+/// Reparte los `total` huecos de citas conservando el orden por score, pero con como mucho
+/// `max_mep` MODELOS (MEP). Los MEP aportan ESTRUCTURA, pero si copan todos los huecos
+/// desplazan a la ley sustantiva y el redactor se queda sin artículos reales que citar (→
+/// se los inventa). Reservar huecos a ley/STC garantiza munición legal real; si no hubiera
+/// suficiente ley, los MEP sobrantes rellenan los huecos restantes.
+fn seleccionar_citas<'a>(
+    resultados: &[(f32, &'a FragmentoJuridico)],
+    total: usize,
+    max_mep: usize,
+) -> Vec<&'a FragmentoJuridico> {
+    let mut seleccion: Vec<&FragmentoJuridico> = Vec::with_capacity(total);
+    let mut mep_usados = 0usize;
+    let mut mep_sobrantes: Vec<&FragmentoJuridico> = Vec::new();
+    for item in resultados {
+        if seleccion.len() == total {
+            break;
+        }
+        let frag: &FragmentoJuridico = item.1;
+        if frag.abrev == "MEP" {
+            if mep_usados < max_mep {
+                seleccion.push(frag);
+                mep_usados += 1;
+            } else {
+                mep_sobrantes.push(frag);
+            }
+        } else {
+            seleccion.push(frag);
+        }
+    }
+    for frag in mep_sobrantes {
+        if seleccion.len() == total {
+            break;
+        }
+        seleccion.push(frag);
+    }
+    seleccion
 }
 
 /// Searches for relevant legal fragments for `query`.
@@ -595,7 +636,9 @@ pub fn buscar_normativa(query: &str, max_chars: usize) -> (String, bool) {
     );
     let mut chars_usados = bloque.len();
 
-    for (_, frag) in resultados.iter().take(5) {
+    // Como mucho 2 modelos (MEP) entre las 5 citas: el resto se reserva a ley/STC para que
+    // el redactor reciba artículos reales que citar y no los invente (ver seleccionar_citas).
+    for frag in seleccionar_citas(&resultados, 5, 2) {
         let titulo_str = frag.titulo.as_deref().map(|t| format!(" | {}", t)).unwrap_or_default();
         let texto_truncado = if frag.texto.len() > 800 {
             // Retroceder hasta el límite de carácter UTF-8 más próximo a 800 bytes
@@ -764,8 +807,15 @@ mod tests {
         assert!(fuera_de_ambito("LH", &q), "LH no es de ámbito tributario");
         assert!(fuera_de_ambito("LSC", &q), "sociedades de capital no aplica");
         assert!(fuera_de_ambito("CCom", &q), "código de comercio no aplica");
-        assert!(!fuera_de_ambito("LGT", &q), "LGT (tributaria) NO se filtra");
+        assert!(!fuera_de_ambito("LGT", &q), "LGT SÍ aplica en consulta tributaria (irpf/liquidación)");
         assert!(!fuera_de_ambito("CC", &q), "las leyes generales nunca se filtran");
+
+        // A la inversa: en una reclamación de consumo, la LGT (tributaria) NO debe colarse
+        // (era el residuo: art. 246 LGT «reclamaciones económico-administrativas»).
+        let cons = "reclamación como consumidor por una lavadora averiada, exijo reparación o devolución"
+            .to_lowercase();
+        assert!(fuera_de_ambito("LGT", &cons), "LGT no es de ámbito de consumo");
+        assert!(!fuera_de_ambito("TRLGDCU", &cons), "TRLGDCU se conserva en consulta de consumo");
 
         // En su propio dominio, la ley especializada se conserva.
         let reg = "recurso contra la calificación negativa del registrador de la propiedad sobre una finca"
@@ -779,6 +829,42 @@ mod tests {
         assert!(fuera_de_ambito("LORPM", &"demanda de reclamación de cantidad".to_lowercase()));
         assert!(!fuera_de_ambito("LORPM", &"delito cometido por un menor de edad".to_lowercase()));
         assert!(!fuera_de_ambito("LOVG", &"denuncia por violencia de género".to_lowercase()));
+    }
+
+    #[test]
+    fn seleccion_limita_modelos_a_dos() {
+        // 3 modelos + 3 artículos de ley, todos con score decreciente: el top-5 debe
+        // llevar como mucho 2 MEP y reservar ≥3 huecos a la ley (era el bug: 5 MEP
+        // desplazaban la ley y el modelo inventaba las citas).
+        let frs = vec![
+            fragmento("MEP", "m1", "modelo uno"),
+            fragmento("MEP", "m2", "modelo dos"),
+            fragmento("MEP", "m3", "modelo tres"),
+            fragmento("TRLGDCU", "118", "responsabilidad del vendedor"),
+            fragmento("TRLGDCU", "117", "derechos del consumidor"),
+            fragmento("TRLGDCU", "125", "garantía comercial"),
+        ];
+        let res: Vec<(f32, &FragmentoJuridico)> =
+            frs.iter().enumerate().map(|(i, f)| (1.0 - i as f32 * 0.01, f)).collect();
+        let sel = seleccionar_citas(&res, 5, 2);
+        assert_eq!(sel.len(), 5);
+        assert_eq!(sel.iter().filter(|f| f.abrev == "MEP").count(), 2, "máx. 2 modelos");
+        assert!(sel.iter().filter(|f| f.abrev == "TRLGDCU").count() >= 3,
+            "deben entrar al menos 3 artículos de ley");
+    }
+
+    #[test]
+    fn seleccion_rellena_con_modelos_si_falta_ley() {
+        // Si solo hay modelos disponibles, pueden ocupar todos los huecos (sin ley que meter).
+        let frs = vec![
+            fragmento("MEP", "m1", "uno"),
+            fragmento("MEP", "m2", "dos"),
+            fragmento("MEP", "m3", "tres"),
+        ];
+        let res: Vec<(f32, &FragmentoJuridico)> =
+            frs.iter().enumerate().map(|(i, f)| (1.0 - i as f32 * 0.01, f)).collect();
+        let sel = seleccionar_citas(&res, 5, 2);
+        assert_eq!(sel.len(), 3, "con solo 3 modelos, los 3 entran (rellenan huecos)");
     }
 
     #[test]
