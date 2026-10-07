@@ -1447,7 +1447,7 @@ async fn guardar_documento_desde_bytes(
 // PRIMARIO (sin dependencias externas, funciona en cualquier Mac): DOCX→HTML
 // (docx_a_html) → PDF con PyMuPDF (Python bundleado + html_to_pdf.py). Fidelidad de
 // texto/estructura. FALLBACK de máxima fidelidad: LibreOffice, solo si está instalado.
-fn docx_bytes_a_pdf(docx: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn docx_bytes_a_pdf(docx: &[u8]) -> Result<Vec<u8>, String> {
     match docx_a_pdf_via_python(docx) {
         Ok(pdf) => Ok(pdf),
         Err(e_py) => docx_a_pdf_via_soffice(docx)

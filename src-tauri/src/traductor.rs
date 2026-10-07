@@ -1852,35 +1852,18 @@ pub fn procesar_pdf(
             let _ = fs::rename(&orig_tmp, &orig_final);
         }
 
-        // PASO 3: DOCX traducido → PDF con LibreOffice (PDF entra, PDF sale con layout real)
-        // Descifrar el DOCX babel, convertir a PDF, reemplazar el babel con el PDF.
-        // Si LibreOffice falla, el DOCX babel queda intacto como fallback.
+        // PASO 3: DOCX traducido → PDF (PDF entra, PDF sale). Usa el motor común
+        // crate::docx_bytes_a_pdf: PyMuPDF primero (sin LibreOffice, funciona en cualquier
+        // Mac) y LibreOffice como fallback de máxima fidelidad si está. Si todo falla, el
+        // DOCX babel queda intacto como resultado (traducción válida aunque no sea PDF).
         progreso(95, "GENERANDO PDF...");
-        let soffice_pdf = resolver_binario(RUTAS_SOFFICE, "soffice");
-
         if let Ok(cifrado_bytes) = fs::read(&salida_final) {
             if let Ok(b64_docx) = seguridad::descifrar_documento(cifrado_bytes, subclave_hex) {
                 if let Ok(docx_bytes) = descomprimir_b64(&b64_docx) {
-                    let docx_conv = tmp_dir.join(format!("{}_conv.docx", nombre));
-                    if crate::escribir_privado(&docx_conv, &docx_bytes).is_ok() {
-                        let lo_ok = ejecutar_con_timeout(
-                            std::process::Command::new(soffice_pdf).args([
-                                "--headless", "--convert-to", "pdf",
-                                "--outdir", &tmp_dir.to_string_lossy(),
-                                &docx_conv.to_string_lossy(),
-                            ]),
-                            180,
-                        );
-                        borrar_seguro_local(&docx_conv.to_string_lossy());
-                        if lo_ok {
-                            let pdf_out = tmp_dir.join(format!("{}_conv.pdf", nombre));
-                            if let Ok(pdf_bytes) = fs::read(&pdf_out) {
-                                borrar_seguro_local(&pdf_out.to_string_lossy());
-                                let b64_pdf = comprimir_b64(&pdf_bytes);
-                                if let Ok(cifrado_pdf) = seguridad::blindar_documento(&b64_pdf, subclave_hex) {
-                                    let _ = crate::escribir_privado(&salida_final, cifrado_pdf);
-                                }
-                            }
+                    if let Ok(pdf_bytes) = crate::docx_bytes_a_pdf(&docx_bytes) {
+                        let b64_pdf = comprimir_b64(&pdf_bytes);
+                        if let Ok(cifrado_pdf) = seguridad::blindar_documento(&b64_pdf, subclave_hex) {
+                            let _ = crate::escribir_privado(&salida_final, cifrado_pdf);
                         }
                     }
                 }
