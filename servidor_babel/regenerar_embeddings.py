@@ -12,6 +12,7 @@ import json, os, struct, sys, time, urllib.request
 
 INDEX = os.path.expanduser("~/Babel/biblioteca_juridica/index.json")
 OUT   = os.path.expanduser("~/Babel/biblioteca_juridica/embeddings.bin")
+VERSION = os.path.expanduser("~/Babel/biblioteca_juridica/version.txt")
 URL   = "http://127.0.0.1:8766/v1/embeddings"
 PREFIJO_DOC = "title: none | text: "
 CHUNK = 16
@@ -61,7 +62,11 @@ def main():
         fo.write(struct.pack("<I", dim))
         for v in all_vecs:
             fo.write(struct.pack(f"<{dim}f", *v))
-    print(f"OK: {len(all_vecs)} vectores dim {dim} → {OUT} ({os.path.getsize(OUT)} bytes)")
+    # version.txt = nº de fragmentos. Es la «versión» de la biblioteca (solo crece): la app
+    # la usa para actualizar la biblioteca de usuarios EXISTENTES cuando el DMG trae más.
+    with open(VERSION, "w") as fv:
+        fv.write(str(n))
+    print(f"OK: {len(all_vecs)} vectores dim {dim} → {OUT} ({os.path.getsize(OUT)} bytes); version.txt={n}")
 
 if __name__ == "__main__":
     main()

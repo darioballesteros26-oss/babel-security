@@ -76,6 +76,15 @@ if [ -f ~/Babel/biblioteca_juridica/embeddings.bin ]; then
   cp ~/Babel/biblioteca_juridica/embeddings.bin "$APP_DEST/Contents/Resources/biblioteca_juridica/"
   echo "   embeddings: embeddings.bin ($(du -h ~/Babel/biblioteca_juridica/embeddings.bin | cut -f1))"
 fi
+# version.txt = nº de fragmentos. La app lo usa para ACTUALIZAR la biblioteca de usuarios
+# existentes cuando el DMG trae más fragmentos. Si no existe, se genera del index.
+BIB_RES="$APP_DEST/Contents/Resources/biblioteca_juridica"
+if [ -f ~/Babel/biblioteca_juridica/version.txt ]; then
+  cp ~/Babel/biblioteca_juridica/version.txt "$BIB_RES/"
+elif [ -f "$BIB_RES/index.json" ]; then
+  python3 -c "import json; print(len(json.load(open('$BIB_RES/index.json'))['fragmentos']), end='')" > "$BIB_RES/version.txt"
+fi
+[ -f "$BIB_RES/version.txt" ] && echo "   version: $(cat "$BIB_RES/version.txt") fragmentos"
 
 echo "[3/9] SMaLL-100..."
 mkdir -p "$APP_DEST/Contents/Resources/servidor/modelos_usb"

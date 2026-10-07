@@ -400,6 +400,15 @@ fn copiar_dir_recursivo(origen: &std::path::Path, destino: &std::path::Path) -> 
 /// ~/Babel aún no lo tiene). Idempotente y barato cuando ya está hecho. No hace nada
 /// en builds de actualización (que no traen el stack) ni si ya se copió. Pesado
 /// (~2,3 GB) solo la primera vez tras instalar un DMG → llamar en segundo plano.
+/// Lee la «versión» de una biblioteca jurídica = nº de fragmentos, guardado en version.txt
+/// (la biblioteca solo crece, así que un número mayor = más reciente). Ausente/ilegible → 0.
+fn version_biblioteca(dir: &std::path::Path) -> u64 {
+    std::fs::read_to_string(dir.join("version.txt"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
 pub fn asegurar_ia_persistente(app: &tauri::AppHandle) {
     if IA_PERSISTIDA.swap(true, Ordering::AcqRel) {
         return;
@@ -456,21 +465,33 @@ pub fn asegurar_ia_persistente(app: &tauri::AppHandle) {
         }
     }
 
-    // 1c) Biblioteca jurídica (index.json) + embeddings precalculados → ~/Babel/
-    // biblioteca_juridica/. La biblioteca se lee SOLO de ~/Babel (ruta fija, sin
-    // fallback a Resources), así que sin esta copia el RAG estaría vacío en un equipo
-    // nuevo. index.json y embeddings.bin forman un par: se copian juntos.
+    // 1c) Biblioteca jurídica (index.json + embeddings.bin + version.txt) → ~/Babel/
+    // biblioteca_juridica/. La biblioteca se lee SOLO de ~/Babel (ruta fija, sin fallback a
+    // Resources), así que sin esta copia el RAG estaría vacío en un equipo nuevo.
+    // Se copia si: (a) no hay biblioteca local (instalación nueva), o (b) el bundle trae una
+    // versión MAYOR (más fragmentos) que la instalada → así la AMPLIACIÓN llega también a
+    // usuarios EXISTENTES, sin pisar una biblioteca igual o más nueva (p. ej. local propia).
+    // Los tres ficheros forman un conjunto: se copian juntos, con version.txt al FINAL como
+    // marca de «commit». Si se interrumpe, la versión instalada sigue siendo la vieja y se
+    // reintenta; un index/embeddings a medias cae a BM25 (sin crash) hasta el próximo arranque.
     {
+        let origen_bib = res.join("biblioteca_juridica");
         let destino_bib = babel.join("biblioteca_juridica");
-        for nombre in ["index.json", "embeddings.bin"] {
-            let origen = res.join("biblioteca_juridica").join(nombre);
-            let destino = destino_bib.join(nombre);
-            if origen.exists() && !destino.exists() {
-                let _ = std::fs::create_dir_all(&destino_bib);
+        let v_bundle = version_biblioteca(&origen_bib);
+        let v_instalada = version_biblioteca(&destino_bib);
+        let hay_local = destino_bib.join("index.json").exists();
+        if origen_bib.join("index.json").exists() && (!hay_local || v_bundle > v_instalada) {
+            let _ = std::fs::create_dir_all(&destino_bib);
+            for nombre in ["embeddings.bin", "index.json", "version.txt"] {
+                let origen = origen_bib.join(nombre);
+                if !origen.exists() {
+                    continue;
+                }
+                let destino = destino_bib.join(nombre);
                 let tmp = destino_bib.join(format!(".{nombre}.tmp"));
                 let _ = std::fs::remove_file(&tmp);
                 match std::fs::copy(&origen, &tmp).and_then(|_| std::fs::rename(&tmp, &destino)) {
-                    Ok(_) => log::info!("[IA] biblioteca {nombre} persistida"),
+                    Ok(_) => log::info!("[IA] biblioteca {nombre} (v{v_instalada}→v{v_bundle})"),
                     Err(e) => {
                         log::warn!("[IA] no se pudo persistir {nombre}: {e}");
                         let _ = std::fs::remove_file(&tmp);
