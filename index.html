@@ -1104,6 +1104,15 @@
         padding:16px 24px;border-bottom:1px solid rgba(201,168,76,0.2);">
           <span id="modal-visor-nombre" style="font-family:'Times New Roman', Times, serif,serif;
           color:var(--dorado,#c9a84c);font-size:0.85rem;letter-spacing:0.15em;flex:1;margin-right:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+          <button type="button" id="btn-anadir-texto-pdf" data-action="abrir-editor-texto-pdf"
+            class="hidden"
+            title="Añadir texto encima del PDF (permanente)"
+            style="background:transparent;border:1px solid rgba(201,168,76,0.3);
+            color:rgba(201,168,76,0.7);font-family:'Times New Roman',Times,serif;font-size:0.6rem;
+            letter-spacing:1.5px;cursor:pointer;padding:3px 9px;border-radius:2px;margin-right:10px;
+            transition:border-color 0.2s,color 0.2s;"
+            onmouseenter="this.style.borderColor='rgba(201,168,76,0.7)';this.style.color='#c9a84c'"
+            onmouseleave="this.style.borderColor='rgba(201,168,76,0.3)';this.style.color='rgba(201,168,76,0.7)'">AÑADIR TEXTO</button>
           <button type="button" data-action="abrir-busqueda-visor"
             title="Buscar en el documento (Ctrl+F)"
             style="background:transparent;border:1px solid rgba(201,168,76,0.3);
@@ -1139,6 +1148,36 @@
   font-size:1.05rem;color:var(--texto-principal,#e8e0d0);line-height:1.9;
   word-break:break-word;letter-spacing:0.02em;"></div>
       </div>
+    </div>
+    <!-- ============================================================ -->
+    <!-- MODAL EDITOR DE TEXTO PDF (clic donde quieras)               -->
+    <!-- ============================================================ -->
+    <div id="modal-editor-pdf" class="hidden" style="
+    position:fixed;inset:0;z-index:1002;background:rgba(0,0,0,0.92);
+    display:flex;flex-direction:column;">
+      <div style="display:flex;align-items:center;gap:14px;
+      padding:12px 24px;border-bottom:1px solid rgba(201,168,76,0.25);flex-shrink:0;background:#0d0d0d;">
+        <span style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;letter-spacing:3px;
+        color:var(--dorado,#c9a84c);">AÑADIR TEXTO</span>
+        <span id="editor-pdf-ayuda" style="font-family:'Times New Roman',Times,serif;font-size:0.72rem;
+        color:rgba(232,224,208,0.55);flex:1;">Haz clic en cualquier punto del documento para escribir. Arrastra para mover.</span>
+        <label style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;color:rgba(201,168,76,0.75);
+        display:flex;align-items:center;gap:6px;">Tamaño
+          <input id="editor-pdf-tamano" type="number" min="6" max="96" value="14" step="1"
+          style="width:56px;background:#111;border:1px solid rgba(201,168,76,0.3);color:#e8e0d0;
+          font-family:'Times New Roman',Times,serif;font-size:0.8rem;padding:3px 6px;border-radius:3px;outline:none;"/>
+        </label>
+        <button type="button" data-action="guardar-editor-texto-pdf"
+          style="background:var(--dorado,#c9a84c);border:none;color:#0d0d0d;
+          font-family:'Times New Roman',Times,serif;font-size:0.64rem;letter-spacing:1.5px;font-weight:bold;
+          cursor:pointer;padding:6px 16px;border-radius:3px;">GUARDAR CAMBIOS</button>
+        <button type="button" data-action="cerrar-editor-texto-pdf"
+          style="background:transparent;border:1px solid rgba(201,168,76,0.3);color:rgba(201,168,76,0.7);
+          font-family:'Times New Roman',Times,serif;font-size:0.64rem;letter-spacing:1.5px;
+          cursor:pointer;padding:6px 14px;border-radius:3px;">CANCELAR</button>
+      </div>
+      <div id="editor-pdf-paginas" style="flex:1;overflow:auto;padding:24px;display:flex;
+      flex-direction:column;align-items:center;gap:20px;"></div>
     </div>
     <!-- ============================================================ -->
     <!-- MODAL VISOR PARALELO                                         -->
@@ -2227,12 +2266,13 @@
         <span style="font-size:0.65rem;color:var(--texto-secundario);">.pdf</span>
       </div>
 
-      <!-- Eliminar los PDFs originales tras unir (marcado por defecto) -->
+      <!-- Mantener los PDFs originales tras unir (marcado por defecto = se conservan).
+           Si se desmarca, los originales se eliminan de forma segura tras guardar el unido. -->
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
         font-size:0.63rem;color:var(--texto-secundario);margin-bottom:16px;flex-shrink:0;">
-        <input type="checkbox" id="chk-borrar-originales-union" checked
+        <input type="checkbox" id="chk-mantener-originales-union" checked
           style="accent-color:var(--dorado);width:14px;height:14px;cursor:pointer;">
-        Eliminar los PDFs originales tras unir (no se repetirán)
+        Mantener los PDFs originales tras unir (si lo desmarcas, se eliminan)
       </label>
 
       <!-- Barra de progreso (oculta hasta empezar) -->

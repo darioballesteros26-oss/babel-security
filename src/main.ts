@@ -16,6 +16,9 @@ import { Image as TiptapImage } from "@tiptap/extension-image";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import { Highlight } from "@tiptap/extension-highlight";
+import * as pdfjsLib from "pdfjs-dist";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 // Extensión personalizada de tamaño de fuente (sobre TextStyle)
 const FontSize = Extension.create({
@@ -624,6 +627,9 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "menu-docx-a-pdf":          void menuDocxAPdf(); break;
     case "cerrar-modal-paginas":     cerrarModalPaginas(); break;
     case "confirmar-seleccion-paginas": void confirmarSeleccionPaginas(); break;
+    case "abrir-editor-texto-pdf":   void abrirEditorTextoPdf(); break;
+    case "cerrar-editor-texto-pdf":  cerrarEditorTextoPdf(); break;
+    case "guardar-editor-texto-pdf": void guardarEditorTextoPdf(); break;
     case "abrir-firma-digital":      void abrirModalFirma(); break;
     case "cerrar-modal-firma":       cerrarModalFirma(); break;
     case "seleccionar-cert-p12":     void seleccionarCertP12(); break;
@@ -2241,7 +2247,6 @@ async function cargarArchivosGuardados(): Promise<void> {
   <div class="archivo-card-botones">
     <button type="button" class="btn-archivo btn-archivo-ver" data-action="ver">VER</button>
     ${base.toLowerCase().endsWith(".docx") ? '<button type="button" class="btn-archivo" data-action="editar-docx" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">EDITAR</button>' : ''}
-    ${base.toLowerCase().endsWith(".docx") ? '<button type="button" class="btn-archivo" data-action="docx-a-pdf" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">A PDF</button>' : ''}
     <button type="button" class="btn-archivo" data-action="traducir-guardado" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">TRADUCIR</button>
     <button type="button" class="btn-archivo btn-archivo-exportar" data-action="exportar">EXPORTAR</button>
     <button type="button" class="btn-archivo" data-action="mover" style="color:var(--dorado);border:1px solid var(--dorado);background:transparent;">MOVER</button>
@@ -2722,6 +2727,7 @@ async function verArchivoGuardado(): Promise<void> {
     if (!modal || !modalNombre || !modalContenido) return;
     modalNombre.textContent = escapeHTML(nombre);
     renderizarEnContenedor(texto, modalContenido);
+    prepararEdicionTextoPdf(texto, ruta, nombre);
     modal.classList.remove("hidden");
     invoke("registrar_evento_diario", { tipo: "ver_archivo", detalle: nombre.replace(/\.babel$/, "").replace(/^\d+_/, "") }).catch(() => {});
   } catch (e) {
@@ -3062,7 +3068,7 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
 // Une varios PDFs guardados en uno solo, 100% local (PDFium nativo, en RAM),
 // conservando texto seleccionable. El resultado se guarda cifrado en el buzón.
 
-interface PdfUnionInfo { ruta: string; nombre: string; paginas: number; error: string | null; }
+interface PdfUnionInfo { ruta: string; nombre: string; paginas: number; error: string | null; es_traduccion?: boolean; }
 
 let _bloquesUnion: PdfUnionInfo[] = [];
 let _dragUnionIdx = -1;
@@ -3121,7 +3127,7 @@ function renderBloquesUnion(): void {
       <span style="color:var(--texto-secundario);font-size:0.9rem;">≡</span>
       <span style="color:var(--dorado);font-size:0.7rem;min-width:18px;text-align:center;">${i + 1}</span>
       <span style="flex:1;font-size:0.7rem;color:var(--texto);overflow:hidden;
-        text-overflow:ellipsis;white-space:nowrap;" title="${escapeHTML(b.nombre)}">${escapeHTML(b.nombre)}</span>
+        text-overflow:ellipsis;white-space:nowrap;" title="${escapeHTML(b.nombre)}${b.es_traduccion ? " (versión traducida)" : ""}">${escapeHTML(b.nombre)}${b.es_traduccion ? ` <span style="color:var(--dorado);font-size:0.58rem;letter-spacing:0.5px;">· traducido</span>` : ""}</span>
       <span style="font-size:0.62rem;color:var(--texto-secundario);white-space:nowrap;">${b.paginas} pág.</span>
     </div>`).join("");
 
@@ -3155,8 +3161,11 @@ async function confirmarUnion(): Promise<void> {
   const inputNombre = document.getElementById("input-nombre-union") as HTMLInputElement | null;
   const nombreSalida = (inputNombre?.value ?? "").trim() || "documento_unido";
   const rutas = _bloquesUnion.map(b => b.ruta);
-  const borrarOriginales =
-    (document.getElementById("chk-borrar-originales-union") as HTMLInputElement | null)?.checked ?? true;
+  // La casilla está en positivo ("Mantener los originales"), marcada por defecto.
+  // Se borran solo si el usuario la desmarca explícitamente.
+  const mantenerOriginales =
+    (document.getElementById("chk-mantener-originales-union") as HTMLInputElement | null)?.checked ?? true;
+  const borrarOriginales = !mantenerOriginales;
 
   _unionEnCurso = true;
   const btn = document.getElementById("btn-confirmar-union") as HTMLButtonElement | null;
@@ -5575,6 +5584,7 @@ async function verArchivo(ruta: string, nombreDisplay?: string): Promise<void> {
     if (!modal || !modalNombre || !modalContenido) return;
     modalNombre.textContent = escapeHTML(nombre);
     renderizarEnContenedor(texto, modalContenido);
+    prepararEdicionTextoPdf(texto, ruta, nombre);
     modal.classList.remove("hidden");
     invoke("registrar_evento_diario", { tipo: "ver_archivo", detalle: nombre.replace(/\.babel$/, "").replace(/^\d+_/, "") }).catch(() => {});
   } catch (error) {
@@ -5639,6 +5649,211 @@ function cerrarVisor(): void {
     (contenido as any)._blobUrl = undefined;
     contenido.innerHTML = "";
   }
+  modal?.classList.add("hidden");
+}
+
+// ── EDITOR DE TEXTO PDF (clic donde quieras) ──────────────────────────────────
+// Renderiza el PDF con pdf.js sobre un canvas y deja colocar cajas de texto
+// editables encima en cualquier punto. Al guardar, convierte la posición de cada
+// caja (px CSS) a puntos PDF y manda las anotaciones a Rust, que las incrusta de
+// forma permanente (fuente Helvetica + WinAnsi) y reemplaza el archivo.
+let _pdfEditorBase64: string | null = null;
+let _pdfEditorRuta: string | null = null;
+let _pdfEditorDoc: any = null;
+const _pdfEditorVps = new Map<HTMLElement, any>();
+
+// Decide si el visor puede editarse (solo PDF) y refleja el botón AÑADIR TEXTO.
+function prepararEdicionTextoPdf(texto: string, ruta: string, _nombre: string): void {
+  const btn = document.getElementById("btn-anadir-texto-pdf");
+  if (texto.startsWith("pdf:")) {
+    _pdfEditorBase64 = texto.slice(4);
+    _pdfEditorRuta = ruta;
+    btn?.classList.remove("hidden");
+  } else {
+    _pdfEditorBase64 = null;
+    _pdfEditorRuta = null;
+    btn?.classList.add("hidden");
+  }
+}
+
+function base64ABytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+async function abrirEditorTextoPdf(): Promise<void> {
+  if (!_pdfEditorBase64 || !_pdfEditorRuta) return;
+  const modal = document.getElementById("modal-editor-pdf");
+  const cont = document.getElementById("editor-pdf-paginas");
+  if (!modal || !cont) return;
+
+  cont.innerHTML = "";
+  _pdfEditorVps.clear();
+  modal.classList.remove("hidden");
+
+  try {
+    // Copia de los bytes: pdf.js transfiere/consume el buffer y dejaría el base64
+    // original inservible para un segundo "abrir".
+    const bytes = base64ABytes(_pdfEditorBase64);
+    const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    _pdfEditorDoc = doc;
+
+    const anchoObjetivo = Math.min(900, Math.max(320, cont.clientWidth - 48));
+
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = await doc.getPage(n);
+      const vp1 = page.getViewport({ scale: 1 });
+      const escala = anchoObjetivo / vp1.width;
+      const vp = page.getViewport({ scale: escala });
+
+      const wrap = document.createElement("div");
+      wrap.className = "editor-pdf-pagina";
+      wrap.dataset.pagina = String(n);
+      wrap.dataset.escala = String(escala);
+      wrap.style.cssText =
+        `position:relative;width:${vp.width}px;height:${vp.height}px;` +
+        `box-shadow:0 0 0 1px rgba(201,168,76,0.25);background:#fff;flex-shrink:0;`;
+      _pdfEditorVps.set(wrap, vp);
+
+      const canvas = document.createElement("canvas");
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(vp.width * dpr);
+      canvas.height = Math.floor(vp.height * dpr);
+      canvas.style.cssText = `width:${vp.width}px;height:${vp.height}px;display:block;`;
+      const ctx = canvas.getContext("2d")!;
+      ctx.scale(dpr, dpr);
+      wrap.appendChild(canvas);
+
+      const overlay = document.createElement("div");
+      overlay.className = "editor-pdf-overlay";
+      overlay.style.cssText = `position:absolute;inset:0;cursor:text;`;
+      overlay.addEventListener("mousedown", (ev) => {
+        // Solo crear caja si el clic es en zona vacía (no sobre una caja existente).
+        if (ev.target !== overlay) return;
+        const rect = overlay.getBoundingClientRect();
+        crearCajaTexto(overlay, ev.clientX - rect.left, ev.clientY - rect.top, escala);
+      });
+      wrap.appendChild(overlay);
+
+      cont.appendChild(wrap);
+      await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
+    }
+  } catch (e) {
+    mostrarToast("No se pudo abrir el PDF para editar: " + String(e), true);
+    cerrarEditorTextoPdf();
+  }
+}
+
+// Crea una caja de texto editable en (x,y) px CSS dentro del overlay de una página.
+function crearCajaTexto(overlay: HTMLElement, x: number, y: number, escala: number): void {
+  const tamInput = document.getElementById("editor-pdf-tamano") as HTMLInputElement | null;
+  const tam = Math.max(6, Math.min(96, parseInt(tamInput?.value || "14", 10) || 14));
+
+  const caja = document.createElement("div");
+  caja.className = "editor-pdf-caja";
+  caja.contentEditable = "true";
+  caja.spellcheck = false;
+  caja.dataset.tam = String(tam);
+  caja.style.cssText =
+    `position:absolute;left:${x}px;top:${y}px;min-width:10px;` +
+    `font-family:Helvetica,Arial,sans-serif;font-size:${tam * escala}px;line-height:1.2;` +
+    `color:#000;outline:1px dashed rgba(201,168,76,0.9);padding:0 1px;white-space:pre;` +
+    `background:rgba(255,255,160,0.25);cursor:move;`;
+
+  // Arrastre con umbral: un clic simple coloca el cursor para escribir; mover
+  // más de 4 px reposiciona la caja.
+  caja.addEventListener("mousedown", (ev) => iniciarArrastreCaja(ev, caja, overlay));
+  // Esc borra la caja; también se descartan las vacías al perder el foco.
+  caja.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { ev.preventDefault(); caja.remove(); }
+  });
+  caja.addEventListener("blur", () => {
+    if (!(caja.innerText || "").trim()) caja.remove();
+  });
+
+  overlay.appendChild(caja);
+  setTimeout(() => caja.focus(), 0);
+}
+
+function iniciarArrastreCaja(ev: MouseEvent, caja: HTMLElement, overlay: HTMLElement): void {
+  if (ev.button !== 0) return;
+  const startX = ev.clientX, startY = ev.clientY;
+  const left0 = parseFloat(caja.style.left) || 0;
+  const top0 = parseFloat(caja.style.top) || 0;
+  let arrastrando = false;
+
+  function mover(e: MouseEvent): void {
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (!arrastrando && Math.hypot(dx, dy) < 4) return;
+    arrastrando = true;
+    e.preventDefault(); // al arrastrar, no seleccionar texto
+    const rect = overlay.getBoundingClientRect();
+    const nx = Math.max(0, Math.min(left0 + dx, rect.width - 4));
+    const ny = Math.max(0, Math.min(top0 + dy, rect.height - 4));
+    caja.style.left = nx + "px";
+    caja.style.top = ny + "px";
+  }
+  function soltar(): void {
+    document.removeEventListener("mousemove", mover);
+    document.removeEventListener("mouseup", soltar);
+  }
+  document.addEventListener("mousemove", mover);
+  document.addEventListener("mouseup", soltar);
+}
+
+async function guardarEditorTextoPdf(): Promise<void> {
+  if (!_pdfEditorRuta) return;
+  const cont = document.getElementById("editor-pdf-paginas");
+  if (!cont) return;
+
+  const anotaciones: { pagina: number; x: number; y: number; tamano: number; texto: string }[] = [];
+  cont.querySelectorAll<HTMLElement>(".editor-pdf-pagina").forEach((wrap) => {
+    const pagina = parseInt(wrap.dataset.pagina || "1", 10);
+    const escala = parseFloat(wrap.dataset.escala || "1");
+    const vp = _pdfEditorVps.get(wrap);
+    wrap.querySelectorAll<HTMLElement>(".editor-pdf-caja").forEach((caja) => {
+      const texto = (caja.innerText || "").replace(/ /g, " ").replace(/\r/g, "").replace(/\s+$/g, "");
+      if (!texto.trim()) return;
+      const tam = parseFloat(caja.dataset.tam || "14");
+      const left = parseFloat(caja.style.left) || 0;
+      const top = parseFloat(caja.style.top) || 0;
+      // Línea base de la 1ª línea en px CSS (≈ borde sup + ascendente de Helvetica).
+      const baselineCssY = top + tam * escala * 0.80;
+      let xPts: number, yPts: number;
+      if (vp && typeof vp.convertToPdfPoint === "function") {
+        [xPts, yPts] = vp.convertToPdfPoint(left, baselineCssY); // maneja rotación
+      } else {
+        xPts = left / escala;
+        yPts = 0;
+      }
+      anotaciones.push({ pagina, x: xPts, y: yPts, tamano: tam, texto });
+    });
+  });
+
+  if (anotaciones.length === 0) {
+    mostrarToast("No has añadido texto.", true);
+    return;
+  }
+
+  try {
+    await invoke("anadir_texto_pdf", { ruta: _pdfEditorRuta, anotaciones });
+    mostrarToast("Texto añadido al PDF.", false);
+    cerrarEditorTextoPdf();
+    cerrarVisor();
+    await cargarArchivosGuardados();
+  } catch (e) {
+    mostrarToast("No se pudo guardar: " + String(e), true);
+  }
+}
+
+function cerrarEditorTextoPdf(): void {
+  const modal = document.getElementById("modal-editor-pdf");
+  const cont = document.getElementById("editor-pdf-paginas");
+  if (cont) cont.innerHTML = "";
+  _pdfEditorVps.clear();
+  if (_pdfEditorDoc) { try { _pdfEditorDoc.destroy(); } catch { /* noop */ } _pdfEditorDoc = null; }
   modal?.classList.add("hidden");
 }
 

@@ -16,6 +16,7 @@ mod pdf_reducir;
 mod conexion_directa;
 mod buzon_b2;
 mod pdf_union;
+mod pdf_texto;
 mod rat_detector;
 mod registro_diario;
 mod seguridad;
@@ -3350,6 +3351,9 @@ struct PdfUnionInfo {
     nombre: String,
     paginas: usize,
     error: Option<String>,
+    // true si el .babel vive en la colección de traducidos (archivos_dir): el
+    // frontend lo usa para avisar en el modal de que se unirá la versión traducida.
+    es_traduccion: bool,
 }
 
 // COMANDO — Prepara el panel de unión: por cada .babel seleccionado, descifra
@@ -3376,6 +3380,8 @@ async fn preparar_union_pdfs(
 
         for ruta in &rutas {
             let nombre = nombre_exportacion_idx(ruta, "pdf", &nomindex);
+            // Las traducciones viven en archivos_dir(); los guardados en guardados_dir().
+            let es_traduccion = validar_ruta_en(ruta, archivos_dir()).is_ok();
             let res = validar_ruta_en(ruta, guardados_dir())
                 .or_else(|_| validar_ruta_en(ruta, archivos_dir()))
                 .and_then(|_| descifrar_a_bytes(ruta, &subclave_hex));
@@ -3395,7 +3401,7 @@ async fn preparar_union_pdfs(
                     (0, Some("No se pudo leer el archivo".to_string()))
                 }
             };
-            infos.push(PdfUnionInfo { ruta: ruta.clone(), nombre, paginas, error });
+            infos.push(PdfUnionInfo { ruta: ruta.clone(), nombre, paginas, error, es_traduccion });
         }
 
         Ok(infos)
@@ -7124,6 +7130,77 @@ async fn titular_del_cert(
     .map_err(|e| format!("Error interno: {}", e))?
 }
 
+/// Estampa texto permanente sobre un PDF cifrado del vault (modo «AÑADIR TEXTO» del
+/// visor) y reemplaza el archivo en sitio, conservando su nombre visible. Las
+/// coordenadas llegan ya en puntos PDF (origen abajo-izquierda) desde el frontend.
+#[tauri::command]
+async fn anadir_texto_pdf(
+    ruta:         String,
+    anotaciones:  Vec<pdf_texto::AnotacionTexto>,
+    sesion:       tauri::State<'_, SesionActiva>,
+) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+    if !integridad::integridad_ok() {
+        return Err(
+            "Esta copia de Babel parece haber sido modificada y podría no ser segura.".into(),
+        );
+    }
+    if anotaciones.is_empty() {
+        return Err("No hay texto que añadir.".into());
+    }
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    let id_usuario = sesion
+        .usuario
+        .lock()
+        .map_err(|_| "Error".to_string())?
+        .clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let en_guardados = validar_ruta_en(&ruta, guardados_dir()).is_ok();
+        validar_ruta_en(&ruta, guardados_dir())
+            .or_else(|_| validar_ruta_en(&ruta, archivos_dir()))?;
+
+        // 1. Nombre visible desde el nomindex (reutilizado al re-guardar).
+        let nombre_disco = std::path::Path::new(&ruta)
+            .file_name().unwrap_or_default().to_string_lossy().to_string();
+        let nomindex = if en_guardados { ruta_nomindex_guardados() } else { ruta_nomindex_archivos() };
+        let nombre_visible = nom_cifrado::leer(&nomindex, &subclave_hex)
+            .get(&nombre_disco)
+            .map(|e| e.nombre.clone())
+            .unwrap_or_else(|| "documento.pdf".to_string());
+
+        // 2. Descifrar PDF a RAM.
+        let pdf_bytes = Zeroizing::new(
+            descifrar_a_bytes(&ruta, &subclave_hex)
+                .map_err(|_| "No se pudo descifrar el PDF.".to_string())?,
+        );
+        if detectar_ext(&pdf_bytes) != "pdf" {
+            return Err("Solo se puede añadir texto a archivos PDF.".into());
+        }
+
+        // 3. Estampar el texto.
+        let pdf_editado = Zeroizing::new(
+            pdf_texto::estampar_textos(&pdf_bytes, &anotaciones)?,
+        );
+
+        // 4. Guardar el PDF editado con el MISMO nombre visible y borrar el original
+        //    (reemplazo en sitio: el archivo "editado" ocupa el lugar del anterior).
+        cifrar_y_guardar_desde_bytes(&nombre_visible, &pdf_editado, &subclave_hex, &id_usuario)?;
+        nom_cifrado::eliminar(&nombre_disco, &nomindex, &subclave_hex);
+        let _ = std::fs::remove_file(&ruta);
+
+        // Si venía de una carpeta concreta en "guardados", conservar su ubicación
+        // no es necesario aquí porque cifrar_y_guardar lo deja en la bandeja por
+        // defecto; el frontend refresca la vista tras la operación.
+        Ok(nombre_visible)
+    })
+    .await
+    .map_err(|e| format!("Error interno: {}", e))?
+}
+
 /// Firma un PDF cifrado del vault y guarda el resultado como nuevo archivo cifrado.
 /// El certificado .p12 se lee desde disco, nunca se guarda en el vault.
 #[tauri::command]
@@ -7622,6 +7699,7 @@ fn main() {
             seleccionar_cert_p12,
             titular_del_cert,
             firmar_pdf_cifrado,
+            anadir_texto_pdf,
         ]);
     if let Err(e) = app.run(tauri::generate_context!()) {
         eprintln!("[!] Error crítico al iniciar Babel: {}", e);
