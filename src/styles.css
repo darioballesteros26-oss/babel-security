@@ -2758,6 +2758,49 @@ body {
   outline: none;
   min-height: 420px;
 }
+
+/* Página blanca: se escribe sobre una hoja blanca con texto negro (como Word),
+   en vez del tema oscuro. Anula los tonos dorados heredados dentro del editor
+   para que el documento se vea igual que al imprimirlo/guardarlo. */
+.editor-pagina-blanca {
+  background: #ffffff;
+  color: #1a1a1a;
+  padding: 56px 64px;
+  border-radius: 2px;
+  box-shadow: 0 2px 28px rgba(0,0,0,0.45);
+}
+.editor-pagina-blanca .tiptap { color: #1a1a1a; }
+.editor-pagina-blanca .tiptap h1,
+.editor-pagina-blanca .tiptap h2,
+.editor-pagina-blanca .tiptap h3,
+.editor-pagina-blanca .tiptap h4,
+.editor-pagina-blanca .tiptap h5,
+.editor-pagina-blanca .tiptap h6 { color: #111111; }
+.editor-pagina-blanca .tiptap strong { color: inherit; }
+.editor-pagina-blanca .tiptap em { opacity: 1; }
+.editor-pagina-blanca .tiptap u { text-decoration-color: currentColor; }
+.editor-pagina-blanca .tiptap s { opacity: 1; }
+.editor-pagina-blanca .tiptap blockquote {
+  border-left-color: #c9a84c;
+  opacity: 1;
+  color: #333333;
+}
+.editor-pagina-blanca .tiptap code {
+  background: #f3f0e6;
+  border-color: #d9cfa8;
+  color: #7a5c00;
+}
+.editor-pagina-blanca .tiptap pre {
+  background: #f5f5f5;
+  border-color: #e0e0e0;
+}
+.editor-pagina-blanca .tiptap hr { border-top-color: #cccccc; }
+.editor-pagina-blanca .tiptap th,
+.editor-pagina-blanca .tiptap td { border-color: #cccccc; }
+.editor-pagina-blanca .tiptap th { background: #f0f0f0; color: #333333; }
+.editor-pagina-blanca .tiptap p.is-editor-empty:first-child::before {
+  color: rgba(0,0,0,0.3);
+}
 .tiptap p { margin: 0 0 0.75em; }
 .tiptap p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);

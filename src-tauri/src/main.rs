@@ -4530,6 +4530,27 @@ fn nivel_heading_docx(style_val: &str) -> Option<u8> {
     None
 }
 
+// docx_rs serializa Bold/Italic/Strike como un bool (su campo privado `val`). Un escritor
+// puede emitir <w:i w:val="false"/> / <w:strike w:val="false"/> EXPLÍCITO para runs que no
+// son cursiva/tachado (la librería `docx` del editor lo hacía): con `.is_some()` se tomaban
+// como activos y una palabra en negrita salía además en cursiva y tachada al reeditar.
+// Leemos el bool real: None → false; Some(false) → false; Some(true) → true.
+fn flag_bool<T: serde::Serialize>(prop: &Option<T>) -> bool {
+    prop.as_ref()
+        .and_then(|v| serde_json::to_value(v).ok())
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+// Underline serializa a String (p.ej. "single"); activo salvo vacío o "none".
+fn subrayado_activo<T: serde::Serialize>(prop: &Option<T>) -> bool {
+    prop.as_ref()
+        .and_then(|v| serde_json::to_value(v).ok())
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .map(|s| !s.is_empty() && s.to_lowercase() != "none")
+        .unwrap_or(false)
+}
+
 // Justificación DOCX → CSS text-align (que la extensión TextAlign de Tiptap lee al
 // cargar el HTML). None → alineación por defecto (izquierda), no se emite atributo.
 fn css_align_docx(just_val: &str) -> Option<&'static str> {
@@ -4636,8 +4657,8 @@ fn docx_a_html_impl(raw_bytes: &[u8], editable: bool) -> Result<String, String> 
 
     let texto_run = |run: &docx_rs::Run| -> String {
         let rp = &run.run_property;
-        let (bold, italic) = (rp.bold.is_some(), rp.italic.is_some());
-        let (underline, strike) = (rp.underline.is_some(), rp.strike.is_some());
+        let (bold, italic) = (flag_bool(&rp.bold), flag_bool(&rp.italic));
+        let (underline, strike) = (subrayado_activo(&rp.underline), flag_bool(&rp.strike));
         // Color y tamaño: los campos `val` son privados, pero su Serialize expone el
         // valor (Color → cadena hex, Sz → número en half-points), así que lo leemos
         // vía serde_json sin depender de campos privados de docx_rs.

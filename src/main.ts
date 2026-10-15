@@ -5084,10 +5084,13 @@ function tiptapRunsFromNode(node: TiptapNode): TextRun[] {
     const sizeHalfPt = fontSizePx ? Math.round(parseFloat(fontSizePx) * 0.75 * 2) : undefined;
     return [new TextRun({
       text: node.text ?? "",
-      bold:      marks.some(m => m.type === "bold"),
-      italics:   marks.some(m => m.type === "italic"),
+      // `|| undefined`: solo emitir la propiedad cuando está ACTIVA. Si mandamos `false`,
+      // la librería docx escribe <w:i w:val="false"/> / <w:strike w:val="false"/> explícito
+      // y al reabrir se interpretaban como activos (negrita salía en cursiva y tachada).
+      bold:      marks.some(m => m.type === "bold") || undefined,
+      italics:   marks.some(m => m.type === "italic") || undefined,
       underline: marks.some(m => m.type === "underline") ? {} : undefined,
-      strike:    marks.some(m => m.type === "strike"),
+      strike:    marks.some(m => m.type === "strike") || undefined,
       font:      marks.some(m => m.type === "code") ? "Courier New" : undefined,
       color:     colorHex,
       size:      sizeHalfPt,
