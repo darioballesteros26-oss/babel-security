@@ -1,7 +1,7 @@
 {
   "name": "babel-interfaz",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.12",
   "type": "module",
   "scripts": {
     "dev": "vite",
