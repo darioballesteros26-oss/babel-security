@@ -591,6 +591,9 @@ document.addEventListener("click", (e: MouseEvent) => {
     case "eliminar-seleccionados": eliminarSeleccionados(); break;
     // Archivos guardados
     case "ver-archivo-guardado": verArchivoGuardado(); break;
+    case "imprimir-pdf-guardado": void imprimirPdfGuardado(); break;
+    case "editar-ver-paralelo": void editarVerParalelo(); break;
+    case "cerrar-vista-lateral": cerrarVistaLateralEditor(); break;
     case "abrir-union-pdfs":             void abrirPanelUnion(); break;
     case "cerrar-union-pdfs":            cerrarPanelUnion(); break;
     case "confirmar-union-pdfs":         void confirmarUnion(); break;
@@ -2340,6 +2343,11 @@ function actualizarSeleccionGuardados(): void {
   });
   const todasImagenes = hay && bases.every(b => /\.(png|jpe?g|webp|bmp|tiff?|heic)$/i.test(b));
   const unicoPdf = unico && bases[0]?.endsWith(".pdf");
+  // EDITAR + VER: exactamente 2 archivos, al menos uno DOCX (el que se edita);
+  // el otro se muestra al lado como referencia.
+  const editarVer = seleccionados.length === 2 && bases.some(b => b.endsWith(".docx"));
+  document.getElementById("btn-imprimir-g")?.classList.toggle("hidden", !unicoPdf);
+  document.getElementById("btn-editar-ver-g")?.classList.toggle("hidden", !editarVer);
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.toggle("hidden", !hay);
   document.getElementById("wrap-compartir-g")?.classList.toggle("hidden", !unico);
@@ -3051,6 +3059,8 @@ async function eliminarSeleccionadosGuardados(): Promise<void> {
   });
   const errores = await borrarRutas(rutas);
   document.getElementById("btn-ver-sel-g")?.classList.add("hidden");
+  document.getElementById("btn-imprimir-g")?.classList.add("hidden");
+  document.getElementById("btn-editar-ver-g")?.classList.add("hidden");
   document.getElementById("btn-eliminar-sel-g")?.classList.add("hidden");
   document.getElementById("btn-compartir-sel-g")?.classList.add("hidden");
   document.getElementById("btn-mail-sel-g")?.classList.add("hidden");
@@ -3547,7 +3557,10 @@ async function abrirFinderSistema(): Promise<void> {
 
 // Abre el editor Tiptap. Sin argumento → documento nuevo. Con `edit` → carga un DOCX
 // guardado (HTML de docx_a_html) para modificarlo y sobrescribirlo en sitio.
-function abrirEditorTiptap(edit?: { ruta: string; titulo: string; html: string }): void {
+function abrirEditorTiptap(
+  edit?: { ruta: string; titulo: string; html: string },
+  acompanante?: { ruta: string; nombre: string },
+): void {
   const pantalla = document.getElementById("editor-tiptap");
   const tituloInput = document.getElementById("editor-titulo") as HTMLInputElement | null;
   const contenedor = document.getElementById("editor-contenido");
@@ -3592,8 +3605,42 @@ function abrirEditorTiptap(edit?: { ruta: string; titulo: string; html: string }
   actualizarToolbarEditor();
   actualizarContadorEditor();
 
+  // Documento de referencia al lado (editar junto a otro): se carga si procede,
+  // si no, el panel queda oculto.
+  if (acompanante) void mostrarVistaLateralEditor(acompanante.ruta, acompanante.nombre);
+  else cerrarVistaLateralEditor();
+
   document.removeEventListener("click", _cerrarPaletasEditor, true);
   document.addEventListener("click", _cerrarPaletasEditor, { capture: true, once: false });
+}
+
+// Muestra el documento de referencia (PDF/DOCX/imagen/texto) en el panel lateral del
+// editor, descifrándolo con «ver_archivo» y reutilizando el renderizador del visor.
+async function mostrarVistaLateralEditor(ruta: string, nombre: string): Promise<void> {
+  const panel = document.getElementById("editor-vista-lateral");
+  const cont = document.getElementById("editor-vista-contenido");
+  const nombreEl = document.getElementById("editor-vista-nombre");
+  if (!panel || !cont) return;
+  if (nombreEl) nombreEl.textContent = nombre;
+  panel.classList.remove("hidden");
+  try {
+    const texto = await invoke<string>("ver_archivo", { ruta });
+    renderizarEnContenedor(texto, cont, "100%");
+  } catch (e) {
+    cont.textContent = "No se pudo abrir la referencia: " + String(e);
+  }
+}
+
+function cerrarVistaLateralEditor(): void {
+  const panel = document.getElementById("editor-vista-lateral");
+  const cont = document.getElementById("editor-vista-contenido");
+  if (cont) {
+    const prev = (cont as any)._blobUrl as string | undefined;
+    if (prev) URL.revokeObjectURL(prev);
+    (cont as any)._blobUrl = undefined;
+    cont.innerHTML = "";
+  }
+  panel?.classList.add("hidden");
 }
 
 function toggleColorPaletteEditor(): void {
@@ -3621,12 +3668,17 @@ function cerrarEditorTiptap(): void {
   document.getElementById("editor-tiptap")?.classList.add("hidden");
   document.removeEventListener("click", _cerrarPaletasEditor, true);
   if (_tiptapEditor) { _tiptapEditor.destroy(); _tiptapEditor = null; }
+  cerrarVistaLateralEditor();
   _editorRutaEdicion = null;
 }
 
 // Abre un DOCX guardado en el editor para modificarlo. Descifra → HTML (docx_a_html en
 // Rust vía «ver_archivo») → carga en Tiptap. Al guardar, sobrescribe el mismo archivo.
-async function editarDocxGuardado(ruta: string, base: string): Promise<void> {
+async function editarDocxGuardado(
+  ruta: string,
+  base: string,
+  acompanante?: { ruta: string; nombre: string },
+): Promise<void> {
   try {
     // leer_docx_editable devuelve SOLO el cuerpo del DOCX como «html:<markup>»
     // (sin cabecera/pie/imágenes sueltas) conservando encabezados, listas, alineación,
@@ -3638,9 +3690,63 @@ async function editarDocxGuardado(ruta: string, base: string): Promise<void> {
     }
     const html = contenido.slice(5);
     const titulo = base.replace(/\.docx$/i, "");
-    abrirEditorTiptap({ ruta, titulo, html });
+    abrirEditorTiptap({ ruta, titulo, html }, acompanante);
   } catch (e) {
     mostrarToast("No se pudo abrir para editar: " + String(e), true);
+  }
+}
+
+// EDITAR + VER: con 2 archivos seleccionados (uno DOCX), abre el DOCX en el editor y
+// muestra el otro documento al lado como referencia. Si ambos son DOCX, se edita el
+// primero marcado y se usa el segundo como referencia.
+async function editarVerParalelo(): Promise<void> {
+  const seleccionados = Array.from(
+    document.querySelectorAll<HTMLInputElement>(".archivo-checkbox-g:checked")
+  ).slice(0, 2);
+  if (seleccionados.length !== 2) return;
+
+  const items = seleccionados.map(cb => {
+    const card = cb.closest(".archivo-card") as HTMLElement | null;
+    return {
+      ruta: card?.dataset.ruta ?? "",
+      base: card?.dataset.base ?? "",
+    };
+  }).filter(it => it.ruta);
+  if (items.length !== 2) return;
+
+  // El que se edita es un DOCX; el otro es la referencia.
+  const idxDocx = items.findIndex(it => it.base.toLowerCase().endsWith(".docx"));
+  if (idxDocx === -1) {
+    mostrarToast("Selecciona al menos un documento DOCX para editar.", true);
+    return;
+  }
+  const editar = items[idxDocx];
+  const ref = items[idxDocx === 0 ? 1 : 0];
+  await editarDocxGuardado(editar.ruta, editar.base, { ruta: ref.ruta, nombre: ref.base });
+}
+
+// IMPRIMIR un PDF guardado: Rust lo descifra a un temporal 0600, el sistema (Vista Previa)
+// lo abre para imprimir con Cmd+P, y se borra a los pocos segundos. El plaintext solo vive
+// en un temporal efímero (mismo patrón que la impresión de la frase de recuperación).
+async function imprimirPdfGuardado(): Promise<void> {
+  const cb = document.querySelector<HTMLInputElement>(".archivo-checkbox-g:checked");
+  const card = cb?.closest(".archivo-card") as HTMLElement | null;
+  const ruta = card?.dataset.ruta;
+  const base = card?.dataset.base ?? "";
+  if (!ruta) return;
+  if (!base.toLowerCase().endsWith(".pdf")) {
+    mostrarToast("Solo se pueden imprimir archivos PDF.", true);
+    return;
+  }
+  try {
+    mostrarToast("Preparando impresión…", false);
+    const rutaTmp = await invoke<string>("preparar_pdf_impresion", { ruta });
+    await openPath(rutaTmp);
+    // Borrar el temporal tras dar tiempo a que Vista Previa lo cargue.
+    setTimeout(() => invoke("borrar_pdf_impresion", { ruta: rutaTmp }).catch(() => {}), 12000);
+    invoke("registrar_evento_diario", { tipo: "ver_archivo", detalle: base.replace(/\.babel$/, "").replace(/^\d+_/, "") }).catch(() => {});
+  } catch (e) {
+    mostrarToast("No se pudo imprimir: " + String(e), true);
   }
 }
 

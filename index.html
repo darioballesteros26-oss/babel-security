@@ -378,6 +378,16 @@
             style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
             onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
             onmouseleave="this.style.background='transparent'">◫ VER ARCHIVO</button>
+          <!-- IMPRIMIR — aparece al seleccionar un único PDF -->
+          <button type="button" id="btn-imprimir-g" data-action="imprimir-pdf-guardado" class="hidden"
+            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+            onmouseleave="this.style.background='transparent'">⎙ IMPRIMIR</button>
+          <!-- EDITAR + VER — aparece al seleccionar 2 archivos (uno DOCX) -->
+          <button type="button" id="btn-editar-ver-g" data-action="editar-ver-paralelo" class="hidden"
+            style="font-family:'Times New Roman', Times, serif,sans-serif;font-size:0.68rem;letter-spacing:2px;padding:6px 14px;background:transparent;border:1px solid var(--dorado);color:var(--dorado);cursor:pointer;border-radius:2px;transition:background 0.2s;"
+            onmouseenter="this.style.background='rgba(197,160,89,0.12)'"
+            onmouseleave="this.style.background='transparent'">✎ EDITAR + VER</button>
           <!-- COMPARTIR — fusiona "Compartir" y "Enviar por email" -->
           <div id="wrap-compartir-g" class="hidden" style="position:relative;display:inline-block;">
             <button type="button" id="btn-compartir-sel-g" data-action="toggle-menu-compartir"
@@ -2670,10 +2680,28 @@
       letter-spacing:0.5px;white-space:nowrap;">0 palabras · 0 caracteres</span>
   </div>
 
-  <!-- Cuerpo: sidebar izquierda + área de edición -->
+  <!-- Cuerpo: referencia (izquierda) + barra herramientas + área de edición (derecha) -->
   <div style="flex:1;display:flex;overflow:hidden;">
 
-    <!-- Barra de herramientas vertical (izquierda) -->
+    <!-- PANEL LATERAL: visor del documento de referencia (a la IZQUIERDA; p.ej. el PDF) -->
+    <div id="editor-vista-lateral" class="hidden" style="flex-basis:45%;min-width:260px;
+      display:flex;flex-direction:column;border-right:1px solid rgba(212,175,55,0.2);
+      background:rgba(255,255,255,0.015);overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;flex-shrink:0;
+        border-bottom:1px solid rgba(212,175,55,0.12);">
+        <span style="color:var(--dorado);font-size:0.5rem;letter-spacing:2px;font-weight:700;flex-shrink:0;">REFERENCIA</span>
+        <span id="editor-vista-nombre" style="font-family:'Times New Roman',Times,serif;font-size:0.68rem;
+          color:var(--texto-secundario);opacity:0.7;overflow:hidden;text-overflow:ellipsis;
+          white-space:nowrap;flex:1;min-width:0;"></span>
+        <button type="button" data-action="cerrar-vista-lateral" title="Ocultar referencia"
+          style="background:transparent;border:1px solid rgba(255,255,255,0.1);color:#777;
+          padding:2px 8px;border-radius:4px;font-size:0.75rem;cursor:pointer;flex-shrink:0;">✕</button>
+      </div>
+      <div id="editor-vista-contenido" style="flex:1;overflow:auto;padding:16px;
+        scrollbar-width:thin;scrollbar-color:rgba(212,175,55,0.3) transparent;"></div>
+    </div>
+
+    <!-- Barra de herramientas vertical -->
     <div id="editor-toolbar" style="position:relative;display:flex;flex-direction:column;
       align-items:center;gap:4px;padding:14px 6px;
       border-right:1px solid rgba(255,255,255,0.06);
@@ -2734,7 +2762,7 @@
     </div>
 
     <!-- Área de edición -->
-    <div style="flex:1;overflow-y:auto;padding:40px 32px;
+    <div id="editor-area-edicion" style="flex:1;min-width:0;overflow-y:auto;padding:40px 32px;
       scrollbar-width:thin;scrollbar-color:rgba(212,175,55,0.3) transparent;">
       <div style="max-width:760px;margin:0 auto;">
         <div id="editor-contenido"></div>

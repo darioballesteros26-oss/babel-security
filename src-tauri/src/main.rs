@@ -6539,6 +6539,72 @@ fn borrar_html_frase() {
     borrar_seguro(&tmp_path("frase_recuperacion.html"));
 }
 
+// COMANDO — Preparar un PDF guardado para IMPRIMIR.
+// Descifra el .babel en memoria, verifica que es un PDF y lo escribe en un temporal
+// gestionado (0600) dentro de ~/Babel/tmp/impresion/ para que el sistema (Vista Previa)
+// lo abra y el usuario pueda imprimirlo con Cmd+P. El frontend borra el temporal a los
+// pocos segundos (mismo patrón que la impresión de la frase BIP39). Es la única vía para
+// llevar el documento al subsistema de impresión del SO; el plaintext solo vive en un
+// temporal 0600 efímero, nunca en una ubicación persistente.
+#[tauri::command]
+fn preparar_pdf_impresion(
+    ruta: String,
+    app: tauri::AppHandle,
+    sesion: tauri::State<SesionActiva>,
+) -> Result<String, String> {
+    crate::rat_detector::verificar_no_bloqueado_rat()?;
+    if !integridad::integridad_ok() {
+        return Err(
+            "Esta copia de Babel parece haber sido modificada y podría no ser segura.".into(),
+        );
+    }
+    validar_ruta_en(&ruta, archivos_dir()).or_else(|_| validar_ruta_en(&ruta, guardados_dir()))?;
+
+    let subclave_hex = sesion.subclave_hex()?;
+    if subclave_hex.is_empty() {
+        return Err("No hay sesión activa.".into());
+    }
+    crate::acceso_masivo::registrar_descifrado(&app, &subclave_hex)?;
+
+    let bytes = Zeroizing::new(descifrar_a_bytes(&ruta, &subclave_hex)?);
+    if !bytes.starts_with(b"%PDF") {
+        return Err("Solo se pueden imprimir archivos PDF desde aquí.".into());
+    }
+
+    // Nombre de archivo saneado a partir del original (solo para que Vista Previa muestre
+    // un título reconocible); se fuerza la extensión .pdf.
+    let base = std::path::Path::new(&ruta)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("documento");
+    let seguro: String = base
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .take(60)
+        .collect();
+    let nombre = if seguro.is_empty() { "documento".to_string() } else { seguro };
+    let dir = tmp_dir().join("impresion");
+    let _ = std::fs::create_dir_all(&dir);
+    let destino = dir.join(format!("{}.pdf", nombre));
+    escribir_privado(&destino, &*bytes)
+        .map_err(|e| format!("Error preparando la impresión: {}", e))?;
+    Ok(destino.to_string_lossy().to_string())
+}
+
+// Borra el PDF temporal de impresión tras abrirlo. Solo acepta rutas dentro de
+// ~/Babel/tmp/impresion/ (no puede usarse para borrar nada fuera de ahí).
+#[tauri::command]
+fn borrar_pdf_impresion(ruta: String) {
+    let base = tmp_dir().join("impresion");
+    if let (Ok(c_ruta), Ok(c_base)) =
+        (std::path::Path::new(&ruta).canonicalize(), base.canonicalize())
+    {
+        if c_ruta.starts_with(&c_base) {
+            borrar_seguro(&ruta);
+        }
+    }
+}
+
 // ============================================================
 // COMANDOS — COMPARTIR ARCHIVO CIFRADO (HTML autónomo)
 // ============================================================
@@ -7663,6 +7729,8 @@ fn main() {
             revocar_oauth_gmail_tauri,
             guardar_html_frase,
             borrar_html_frase,
+            preparar_pdf_impresion,
+            borrar_pdf_impresion,
             compartir_directo,
             generar_archivo_compartir,
             compartir_archivo_nativo,
