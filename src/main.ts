@@ -3610,8 +3610,64 @@ function abrirEditorTiptap(
   if (acompanante) void mostrarVistaLateralEditor(acompanante.ruta, acompanante.nombre);
   else cerrarVistaLateralEditor();
 
+  iniciarAutoguardado();
+
   document.removeEventListener("click", _cerrarPaletasEditor, true);
   document.addEventListener("click", _cerrarPaletasEditor, { capture: true, once: false });
+}
+
+// ── AUTOGUARDADO ──────────────────────────────────────────────────────────────
+// Cada 2 minutos guarda el documento del editor por si hay un corte de luz / batería.
+// · Editando un DOCX existente (o un documento nuevo ya autoguardado) → sobrescribe en
+//   su sitio, en silencio (sin cerrar el editor ni navegar).
+// · Documento NUEVO con título → lo crea cifrado en «Todos» la primera vez y a partir de
+//   ahí lo va actualizando (se puede mover/renombrar luego). Sin título no puede nombrarlo.
+let _autoguardadoTimer: number | null = null;
+let _autoguardadoUltimo = "";
+
+function iniciarAutoguardado(): void {
+  detenerAutoguardado();
+  _autoguardadoUltimo = _tiptapEditor ? JSON.stringify(_tiptapEditor.getJSON()) : "";
+  mostrarIndicadorAutoguardado("");
+  _autoguardadoTimer = window.setInterval(() => { void autoguardarEditor(); }, 120000);
+}
+
+function detenerAutoguardado(): void {
+  if (_autoguardadoTimer !== null) { clearInterval(_autoguardadoTimer); _autoguardadoTimer = null; }
+}
+
+function mostrarIndicadorAutoguardado(txt: string): void {
+  const el = document.getElementById("editor-autosave-estado");
+  if (el) el.textContent = txt;
+}
+
+async function autoguardarEditor(): Promise<void> {
+  if (!_tiptapEditor) return;
+  const json = _tiptapEditor.getJSON();
+  const serial = JSON.stringify(json);
+  if (serial === _autoguardadoUltimo) return; // sin cambios desde el último autoguardado
+  const texto = (_tiptapEditor.getText() ?? "").trim();
+  const titulo = (document.getElementById("editor-titulo") as HTMLInputElement | null)?.value.trim() ?? "";
+  if (!texto && !titulo) return; // documento vacío: nada que guardar
+  try {
+    const bytes = await tiptapADocx(json);
+    const b64 = bytesABase64(bytes);
+    if (_editorRutaEdicion) {
+      const base = titulo || "Documento";
+      const nombreDocx = base.toLowerCase().endsWith(".docx") ? base : base + ".docx";
+      await invoke("actualizar_documento_guardado", { ruta: _editorRutaEdicion, nombreArchivo: nombreDocx, contenidoB64: b64 });
+    } else {
+      if (!titulo) { mostrarIndicadorAutoguardado("✎ Ponle un título para autoguardar"); return; }
+      const nombreDocx = titulo.toLowerCase().endsWith(".docx") ? titulo : titulo + ".docx";
+      const ruta = await invoke<string>("guardar_documento_desde_bytes", { nombreArchivo: nombreDocx, contenidoB64: b64 });
+      _editorRutaEdicion = ruta; // a partir de aquí se actualiza en su sitio
+    }
+    _autoguardadoUltimo = serial;
+    const hora = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    mostrarIndicadorAutoguardado("✓ Autoguardado · " + hora);
+  } catch {
+    mostrarIndicadorAutoguardado("⚠ No se pudo autoguardar");
+  }
 }
 
 // Muestra el documento de referencia (PDF/DOCX/imagen/texto) en el panel lateral del
@@ -3665,6 +3721,7 @@ function _cerrarPaletasEditor(e: Event): void {
 }
 
 function cerrarEditorTiptap(): void {
+  detenerAutoguardado();
   document.getElementById("editor-tiptap")?.classList.add("hidden");
   document.removeEventListener("click", _cerrarPaletasEditor, true);
   if (_tiptapEditor) { _tiptapEditor.destroy(); _tiptapEditor = null; }

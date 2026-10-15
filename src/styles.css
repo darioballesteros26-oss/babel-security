@@ -2754,7 +2754,7 @@ body {
   color: #DCDCDC;
   font-family: 'Times New Roman', Times, serif;
   font-size: 1rem;
-  line-height: 1.85;
+  line-height: 1.5;
   outline: none;
   min-height: 420px;
 }
@@ -2801,7 +2801,7 @@ body {
 .editor-pagina-blanca .tiptap p.is-editor-empty:first-child::before {
   color: rgba(0,0,0,0.3);
 }
-.tiptap p { margin: 0 0 0.75em; }
+.tiptap p { margin: 0 0 0.55em; }
 .tiptap p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: rgba(255,255,255,0.18);
@@ -2855,6 +2855,9 @@ body {
 }
 .tiptap pre code { background: none; border: none; padding: 0; font-size: 0.87em; }
 .tiptap hr { border: none; border-top: 1px solid rgba(212,175,55,0.25); margin: 1.8em 0; }
+/* Las imágenes grandes se ajustan al ancho del documento (Tiptap descarta el style inline
+   del DOCX al cargarlas, así que una foto grande saldría a tamaño real y se desbordaría). */
+.tiptap img { max-width: 100%; height: auto; display: block; margin: 0.6em 0; border-radius: 4px; }
 
 /* Tablas */
 .tiptap table { border-collapse: collapse; width: 100%; margin: 1em 0; }

@@ -4722,6 +4722,10 @@ fn docx_a_html_impl(raw_bytes: &[u8], editable: bool) -> Result<String, String> 
     // es recuperable, así que unificamos en viñetas — los documentos creados en Babel
     // usan prefijos literales «• »/«1. » y vuelven como párrafos normales).
     let mut lista_abierta = false;
+    // Colapsa líneas en blanco CONSECUTIVAS a una sola. Muchos DOCX ajenos (Word) traen
+    // varios párrafos vacíos seguidos que inflaban el espaciado («muy separado») al editar.
+    // Un único salto entre bloques sí se conserva.
+    let mut ultimo_vacio = false;
     for child in &docx.document.children {
         match child {
             docx_rs::DocumentChild::Paragraph(para) => {
@@ -4735,8 +4739,18 @@ fn docx_a_html_impl(raw_bytes: &[u8], editable: bool) -> Result<String, String> 
                 }
                 if es_item {
                     html.push_str(&format!("<li>{}</li>", parrafo_inner(para)));
+                    ultimo_vacio = false;
                 } else {
-                    html.push_str(&envolver_parrafo_docx(para, &parrafo_inner(para)));
+                    let inner = parrafo_inner(para);
+                    if inner.trim().is_empty() {
+                        if !ultimo_vacio {
+                            html.push_str(&envolver_parrafo_docx(para, ""));
+                            ultimo_vacio = true;
+                        }
+                    } else {
+                        html.push_str(&envolver_parrafo_docx(para, &inner));
+                        ultimo_vacio = false;
+                    }
                 }
             }
             docx_rs::DocumentChild::Table(table) => {
@@ -4744,6 +4758,7 @@ fn docx_a_html_impl(raw_bytes: &[u8], editable: bool) -> Result<String, String> 
                     html.push_str("</ul>");
                     lista_abierta = false;
                 }
+                ultimo_vacio = false;
                 html.push_str("<table style='border-collapse:collapse;width:100%;margin:10px 0;'>");
                 for row in &table.rows {
                     let docx_rs::TableChild::TableRow(tr) = row;
@@ -8052,5 +8067,49 @@ mod tests_docx_editable {
         let html = docx_a_html_impl(&construir_docx(), false).expect("html visor");
         assert!(html.contains("font-family:Georgia"), "visor con wrapper — {html}");
         assert!(html.contains("<h1"), "visor conserva encabezado — {html}");
+    }
+
+    // FIDELIDAD «fuera = dentro»: un DOCX creado por otro programa (Word, la librería
+    // `docx` del editor…) emite a menudo <w:i w:val="false"/> / <w:strike w:val="false"/>
+    // EXPLÍCITO en runs que solo son negrita. Antes, al leerlo con `.is_some()`, la negrita
+    // salía además en cursiva y tachada dentro de Babel (distinta de como se ve fuera).
+    // Este test construye ese caso y comprueba que se lee fiel.
+    #[test]
+    fn test_docx_negrita_con_cursiva_tachado_desactivados() {
+        use docx_rs::*;
+        let docx = Docx::new().add_paragraph(
+            Paragraph::new().add_run(
+                Run::new()
+                    .add_text("solo negrita")
+                    .bold()
+                    .disable_italic(), // <w:i w:val="false"/> explícito, como los docs de fuera
+            ),
+        );
+        let mut cur = std::io::Cursor::new(Vec::new());
+        docx.build().pack(&mut cur).expect("empaquetar docx");
+        let html = docx_a_html_impl(&cur.into_inner(), true).expect("html editable");
+        assert!(html.contains("<strong>solo negrita</strong>"), "negrita fiel — {html}");
+        assert!(!html.contains("<em>"), "NO debe salir cursiva — {html}");
+        assert!(!html.contains("<s>"), "NO debe salir tachado — {html}");
+    }
+
+    // FIDELIDAD de espaciado: varias líneas en blanco consecutivas (típico de docs ajenos)
+    // se colapsan a UNA sola para no salir «muy separado» dentro de Babel.
+    #[test]
+    fn test_docx_colapsa_lineas_en_blanco() {
+        use docx_rs::*;
+        let docx = Docx::new()
+            .add_paragraph(Paragraph::new().add_run(Run::new().add_text("uno")))
+            .add_paragraph(Paragraph::new()) // vacío
+            .add_paragraph(Paragraph::new()) // vacío
+            .add_paragraph(Paragraph::new()) // vacío
+            .add_paragraph(Paragraph::new().add_run(Run::new().add_text("dos")));
+        let mut cur = std::io::Cursor::new(Vec::new());
+        docx.build().pack(&mut cur).expect("empaquetar docx");
+        let html = docx_a_html_impl(&cur.into_inner(), true).expect("html editable");
+        // Solo debe quedar UN párrafo vacío entre «uno» y «dos» (no tres).
+        let vacios = html.matches("<p style='margin:0 0 6px;'></p>").count();
+        assert_eq!(vacios, 1, "3 líneas en blanco → 1 — {html}");
+        assert!(html.contains("uno") && html.contains("dos"), "conserva el texto — {html}");
     }
 }
