@@ -29,6 +29,14 @@ jobs:
           tar xzf /tmp/pdfium.tgz -C /tmp lib/libpdfium.dylib
           cp /tmp/lib/libpdfium.dylib src-tauri/binaries/pdfium/
 
+      # Los modelos de traducción (modelos_usb/) NO están en git: solo los añade
+      # crear_dmg_bundle.sh al DMG completo local. El .app.tar.gz de auto-update no los
+      # lleva (persisten en ~/Babel). Si se dejan en "resources", el build de CI falla con
+      # «glob pattern modelos_usb/... path not found». Se eliminan de resources aquí.
+      - name: Quitar modelos de resources (no están en git)
+        run: |
+          node -e "const f='src-tauri/tauri.conf.json';const c=require('./'+f);c.bundle.resources=(c.bundle.resources||[]).filter(r=>!r.includes('modelos_usb'));require('fs').writeFileSync(f,JSON.stringify(c,null,2));console.log('resources:',c.bundle.resources)"
+
       # El sidecar (binaries/servidor_babel) NO está en git (.gitignore) → hay que
       # construirlo aquí, o `tauri build` falla por el externalBin. Así el firma.py
       # actual (sello emisor/CA, etc.) viaja dentro del .app.tar.gz del update.
@@ -117,11 +125,13 @@ jobs:
 
       # El sidecar servidor_babel es un binario macOS — en Windows se omite.
       # La app Windows usa el servidor Python externo lanzado por LANZAR_BABEL.bat.
-      - name: Parchear tauri.conf.json — quitar externalBin en Windows
+      - name: Parchear tauri.conf.json — quitar externalBin y modelos en Windows
         shell: pwsh
         run: |
           $conf = Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json
           $conf.bundle.PSObject.Properties.Remove('externalBin')
+          # Los modelos (modelos_usb/) no están en git → quitarlos de resources o el build falla.
+          $conf.bundle.resources = @($conf.bundle.resources | Where-Object { $_ -notlike '*modelos_usb*' })
           $conf | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
 
       - name: Descargar PDFium (Windows x64)
